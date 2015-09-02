@@ -6,3 +6,6 @@ authors = ["Jamie Brandon <jamie@scattered-thoughts.net>"]
 [dependencies]
 rand = "*"
 time = "*"
+
+[profile.release]
+debug = true

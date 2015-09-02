@@ -21,7 +21,7 @@ pub type Id = u32;
 
 fn main() {
     fn ids(seed: usize) -> Vec<u32> {
-        let n = 1<<27;
+        let n = 1<<29;
         let mut rng = StdRng::new().unwrap();
         rng.reseed(&[seed+0, seed+1, seed+2, seed+3]);
         (0..n)
@@ -116,7 +116,7 @@ mod tests {
     }
 
     #[bench]
-    fn bench_copy(bencher: &mut Bencher) {
+    fn bench_copy_sequential(bencher: &mut Bencher) {
         let ids = black_box(ids(7));
         let mut buffer = ids.clone();
         bencher.iter(|| {
@@ -128,8 +128,44 @@ mod tests {
     }
 
     #[bench]
+    fn bench_copy_small_random(bencher: &mut Bencher) {
+        let ids = black_box(ids(7));
+        let mut buffer = ids.clone();
+        bencher.iter(|| {
+            for ix in (0..ids.len()) {
+                let id = unsafe{ *ids.get_unchecked(ix) };
+                unsafe{ *buffer.get_unchecked_mut(id as usize % 256) = id; }
+            }
+            black_box(&buffer);
+        });
+    }
+
+    #[bench]
+    fn bench_copy_random(bencher: &mut Bencher) {
+        let ids = black_box(ids(7));
+        let mut buffer = ids.clone();
+        bencher.iter(|| {
+            for ix in (0..ids.len()) {
+                let id = unsafe{ *ids.get_unchecked(ix) };
+                unsafe{ *buffer.get_unchecked_mut(id as usize) = id; }
+            }
+            black_box(&buffer);
+        });
+    }
+
+    #[bench]
     fn bench_radix_sort(bencher: &mut Bencher) {
         let ids = black_box(ids(7));
+        bencher.iter(|| {
+            let mut ids = ids.clone();
+            radix_sort(&mut ids);
+            black_box(&ids);
+        });
+    }
+
+    #[bench]
+    fn bench_radix_sort_presorted(bencher: &mut Bencher) {
+        let ids = black_box((1..100_000).collect::<Vec<_>>());
         bencher.iter(|| {
             let mut ids = ids.clone();
             radix_sort(&mut ids);

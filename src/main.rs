@@ -33,7 +33,7 @@ fn main() {
         radix_sort(&mut ids);
     });
     test::black_box(&ids);
-    let mut ids = test::black_box((1..(1<<27)).collect());
+    let mut ids = test::black_box((1..(1<<29)).collect());
     time!("radix sort on sorted", {
         radix_sort(&mut ids);
     });
@@ -48,24 +48,18 @@ pub fn radix_sort(ids: &mut Vec<Id>) {
     let mut buffer = ids.clone();
     for offset in (0..4) {
         {
-            let ids_inner = &mut ids[..];
             let mut counts = [0; 256];
-            for ix in (0..ids_inner.len()) {
-                let id = unsafe{ *ids_inner.get_unchecked(ix) };
-                let byte = get_byte(id, offset);
-                let count = unsafe { counts.get_unchecked_mut(byte) };
-                *count = *count + 1;
+            for id in ids.iter() {
+                counts[get_byte(*id, offset)] += 1;
             }
             let mut buckets = [0; 256];
             for ix in (1..256) {
-                unsafe { *buckets.get_unchecked_mut(ix) = *buckets.get_unchecked(ix-1) + *counts.get_unchecked(ix-1) };
+                buckets[ix] = buckets[ix-1] + counts[ix-1];
             }
-            for ix in (0..ids_inner.len()) {
-                let id = unsafe{ *ids_inner.get_unchecked(ix) };
-                let byte = get_byte(id, offset);
-                let bucket = unsafe{ *buckets.get_unchecked(byte) };
-                unsafe{ *buffer.get_unchecked_mut(bucket) = id; }
-                unsafe{ *buckets.get_unchecked_mut(byte) = bucket + 1; }
+            for id in ids.iter() {
+                let byte = get_byte(*id, offset);
+                buffer[buckets[byte]] = *id;
+                buckets[byte] += 1;
             }
         }
         ::std::mem::swap(&mut buffer, ids);

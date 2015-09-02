@@ -24,7 +24,7 @@ pub fn ids(seed: usize) -> Vec<Id> {
     (0..100_000).map(|_| rng.gen_range(0, 100_000)).collect()
 }
 
-pub type Id = u32;
+pub type Id = u64;
 
 fn main() {
     let mut ids = test::black_box(ids(4));
@@ -44,18 +44,20 @@ fn get_byte(id: Id, offset: usize) -> usize {
 }
 
 pub fn radix_sort(ids: &mut Vec<Id>) {
+    let ids: &mut Vec<[u8; 8]> = unsafe{ ::std::mem::transmute(ids) };
     let mut buffer = ids.clone();
-    for offset in (0..4) {
+    for offset in (0..8) {
         let mut counts = [0; 256];
         for id in ids.iter() {
-            counts[get_byte(*id, offset)] += 1;
+            let byte = id[offset] as usize;
+            counts[byte] += 1;
         }
         let mut buckets = [0; 256];
         for ix in (1..256) {
             buckets[ix] = buckets[ix-1] + counts[ix-1];
         }
         for id in ids.iter() {
-            let byte = get_byte(*id, offset);
+            let byte = id[offset] as usize;
             buffer[buckets[byte]] = *id;
             buckets[byte] += 1;
         }

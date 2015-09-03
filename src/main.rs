@@ -1,5 +1,4 @@
 #![feature(test)]
-#![feature(btree_b)]
 
 extern crate rand;
 extern crate test;
@@ -37,10 +36,6 @@ fn main() {
         radix_sort(&mut ids);
     });
     test::black_box(&ids);
-}
-
-fn get_byte(id: Id, offset: usize) -> usize {
-    ((id >> (offset * 8)) & 0b1111_1111) as usize
 }
 
 pub fn radix_sort(ids: &mut Vec<Id>) {
@@ -221,46 +216,6 @@ mod tests {
             black_box(results);
         });
     }
-
-    // #[bench]
-    // fn bench_small_btree_intersect(bencher: &mut Bencher) {
-    //     let ids_a = black_box(ids(7));
-    //     let ids_b = black_box(ids(42));
-    //     let max_size = max(ids_a.len(), ids_b.len());
-    //     bencher.iter(|| {
-    //         let mut results = Vec::with_capacity(max_size);
-    //         let mut index = BTreeSet::with_b(10);
-    //         for id in ids_a.iter() {
-    //             index.insert(*id);
-    //         }
-    //         for id in ids_b.iter() {
-    //             if index.contains(id) {
-    //                 results.push(*id);
-    //             }
-    //         }
-    //         black_box(results);
-    //     });
-    // }
-
-    // #[bench]
-    // fn bench_large_btree_intersect(bencher: &mut Bencher) {
-    //     let ids_a = black_box(ids(7));
-    //     let ids_b = black_box(ids(42));
-    //     let max_size = max(ids_a.len(), ids_b.len());
-    //     bencher.iter(|| {
-    //         let mut results = Vec::with_capacity(max_size);
-    //         let mut index = BTreeSet::with_b(100);
-    //         for id in ids_a.iter() {
-    //             index.insert(*id);
-    //         }
-    //         for id in ids_b.iter() {
-    //             if index.contains(id) {
-    //                 results.push(*id);
-    //             }
-    //         }
-    //         black_box(results);
-    //     });
-    // }
 
     #[bench]
     fn bench_std_sort_intersect(bencher: &mut Bencher) {

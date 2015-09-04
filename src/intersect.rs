@@ -1,20 +1,10 @@
 use rand::{Rng, SeedableRng, StdRng};
 use std::cmp::{max, Ordering};
 
-macro_rules! time {
-    ($name:expr, $expr:expr) => {{
-        let start = ::time::precise_time_s();
-        let result = $expr;
-        let end = ::time::precise_time_s();
-        println!("{} took {}s", $name, end - start);
-        result
-    }};
-}
-
 pub fn ids(seed: usize) -> Vec<Id> {
     let mut rng = StdRng::new().unwrap();
     rng.reseed(&[seed+0, seed+1, seed+2, seed+3]);
-    let n = 100_000;
+    let n = 1_000_000;
     (0..n).map(|_| rng.gen_range(0, n)).collect()
 }
 
@@ -57,10 +47,17 @@ pub fn intersect_sorted(ids_a: &Vec<Id>, ids_b: &Vec<Id>) -> Vec<Id> {
                         ix_a += 1;
                     }
                     Ordering::Equal => {
-                        // a real join would have to have a nested loop here to deal with dupes
-                        results.push(a);
-                        ix_a += 1;
-                        ix_b += 1;
+                        let mut end_ix_a = ix_a;
+                        while ids_a.get(end_ix_a) == Some(&a) { end_ix_a += 1; }
+                        let mut end_ix_b = ix_b;
+                        while ids_b.get(end_ix_b) == Some(&b) { end_ix_b += 1; }
+                        for ix in (ix_a..end_ix_a) {
+                            for _ in (ix_b..end_ix_b) {
+                                results.push(ids_a[ix]);
+                            }
+                        }
+                        ix_a = end_ix_a;
+                        ix_b = end_ix_b;
                     }
                     Ordering::Greater => {
                         ix_b += 1;
@@ -71,13 +68,6 @@ pub fn intersect_sorted(ids_a: &Vec<Id>, ids_b: &Vec<Id>) -> Vec<Id> {
         }
     }
     results
-}
-
-enum Type {
-    Id,
-    Boolean,
-    Number,
-    Text,
 }
 
 #[cfg(test)]
@@ -171,7 +161,8 @@ mod tests {
 
     #[bench]
     fn bench_radix_sort_presorted(bencher: &mut Bencher) {
-        let ids = black_box((1..100_000).collect::<Vec<_>>());
+        let mut ids = black_box(ids(7));
+        radix_sort(&mut ids);
         bencher.iter(|| {
             let mut ids = ids.clone();
             radix_sort(&mut ids);

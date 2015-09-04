@@ -20,5 +20,5 @@ mod intersect;
 mod join;
 
 fn main() {
-
+    intersect::main();
 }

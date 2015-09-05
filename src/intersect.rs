@@ -255,6 +255,27 @@ mod tests {
     }
 
     #[bench]
+    fn bench_radix_count(bencher: &mut Bencher) {
+        let ids = black_box(ids(7));
+        bencher.iter(|| {
+            let ids: &Vec<[u8; 8]> = unsafe{ ::std::mem::transmute(&ids) };
+            let mut counts = [[0; 256]; 8];
+            for id in ids.iter() {
+                for offset in (0..8) {
+                    counts[offset][id[offset] as usize] += 1
+                }
+            }
+            let mut buckets = [[0; 256]; 8];
+            for offset in (0..8) {
+                for ix in (1..256) {
+                    buckets[offset][ix] = buckets[offset][ix-1] + counts[offset][ix-1];
+                }
+            }
+            black_box(&ids);
+        });
+    }
+
+    #[bench]
     fn bench_radix_partition(bencher: &mut Bencher) {
         let ids = black_box(ids(7));
         bencher.iter(|| {

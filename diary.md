@@ -204,7 +204,9 @@ enum Value {
 
 I could store views as a `Vec<Value>` but this works out to be pretty wasteful. An enum always takes enough space to store the largest possible value - in this case a Value::Text(Hash, Text). Thats 1 byte for the enum tag, 8 for the hash and 8 for the text pointer. After alignment we end up with a brutal 24 bytes per value. I almost want to do it anyway just to keep things simple, but good memory locality is pretty much the only trick I have up my sleeve here.
 
-Instead I'm going to enforce that each column has a fixed type and then manage my own data packing. The underlying layer just treats every row as a sequence of bytes and has no idea where each column starts and ends or what type it is.
+Instead I'm going to enforce that each column has a fixed type and then manage my own data packing. This saves me a ton of memory and will also cut down on dynamic type checks when I add functions later on.
+
+The underlying layer just treats every row as a sequence of bytes and has no idea where each column starts and ends or what type it is.
 
 ``` rust
 #[derive(Clone, Debug)]

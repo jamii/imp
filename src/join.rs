@@ -22,12 +22,16 @@ enum Value {
 }
 
 #[derive(Clone, Debug)]
+struct Chunk {
+    data: Vec<u64>,
+    row_width: usize,
+}
+
+#[derive(Clone, Debug)]
 struct Relation {
     fields: Vec<Id>,
     kinds: Vec<Kind>,
-    data: Vec<u64>,
-    sort_key: Vec<usize>,
-    row_width: usize,
+    chunk: Chunk,
 }
 
 impl Kind {

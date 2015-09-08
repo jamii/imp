@@ -234,4 +234,153 @@ struct Relation {
 }
 ```
 
-Next week: join, semijoin, project, union, difference. Maybe starting on query plans.
+I'm not sure yet what I want the external interface for Relation to look like, so I'll move on to the internals instead.
+
+## Operators
+
+We need a whole army of relational operations.
+
+``` rust
+impl Chunk {
+    fn sort(&self, key: &[usize]) -> Chunk
+    fn groups<'a>(&'a self) -> Groups<'a>
+    fn project(&self) -> Chunk
+    fn diffs<'a>(&'a self, other: &'a Chunk) -> Diffs<'a>
+    fn semijoin(&self, other: &Chunk) -> (Chunk, Chunk)
+    fn join(&self, other: &Chunk) -> Chunk
+    fn union(&self, other: &Chunk) -> Chunk
+    fn difference(&self, other: &Chunk) -> Chunk
+}
+```
+
+All of them are going to rely on their inputs being sorted in the correct order. Rather than passing in a key for each operation I'm instead storing the sort key in the chunk and using that for any subsequent operations, so you would write eg `a.sort(&[0, 1]).join(b.sort(&[3, 2]))` for the query `where a.0=b.3 and a.1=b.2`.
+
+There are two iterators: `groups` yields slices of consecutive rows which are equal on the sort key and `diffs` runs through two sorted chunks and matches up groups which are equal on the corresponding sort keys.
+
+``` rust
+#[derive(Clone, Debug)]
+pub struct Groups<'a> {
+    pub chunk: &'a Chunk,
+    pub ix: usize,
+}
+
+impl<'a> Iterator for Groups<'a> {
+    type Item = &'a [u64];
+
+    fn next(&mut self) -> Option<&'a [u64]> {
+        let data = &self.chunk.data;
+        let row_width = self.chunk.row_width;
+        let key = &self.chunk.sort_key[..];
+        if self.ix >= data.len() {
+            None
+        } else {
+            let start = self.ix;
+            let mut end = start;
+            loop {
+                end += row_width;
+                if end >= data.len()
+                || compare_by_key(&data[start..start+row_width], key, &data[end..end+row_width], key) != Ordering::Equal {
+                    break;
+                }
+            }
+            self.ix = end;
+            Some(&data[start..end])
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Diffs<'a> {
+    pub left_key: &'a [usize],
+    pub left_groups: Groups<'a>,
+    pub left_group: Option<&'a [u64]>,
+    pub right_key: &'a [usize],
+    pub right_groups: Groups<'a>,
+    pub right_group: Option<&'a [u64]>,
+}
+
+impl<'a> Iterator for Diffs<'a> {
+    type Item = Diff<'a>;
+
+    fn next(&mut self) -> Option<Diff<'a>> {
+        match (self.left_group, self.right_group) {
+            (Some(left_words), Some(right_words)) => {
+                match compare_by_key(left_words, self.left_key, right_words, self.right_key) {
+                    Ordering::Less => {
+                        let result = Some(Diff::Left(left_words));
+                        self.left_group = self.left_groups.next();
+                        result
+                    }
+                    Ordering::Equal => {
+                        let result = Some(Diff::Both(left_words, right_words));
+                        self.left_group = self.left_groups.next();
+                        self.right_group = self.right_groups.next();
+                        result
+                    }
+                    Ordering::Greater => {
+                        let result = Some(Diff::Right(right_words));
+                        self.right_group = self.right_groups.next();
+                        result
+                    }
+                }
+            }
+            _ => None,
+        }
+    }
+}
+```
+
+All of the relational operators are then pretty straightforward eg:
+
+``` rust
+fn join(&self, other: &Chunk) -> Chunk {
+    let mut data = vec![];
+    for diff in self.diffs(other) {
+        match diff {
+            Diff::Both(self_words, other_words) => {
+                for self_row in self_words.chunks(self.row_width) {
+                    for other_row in other_words.chunks(other.row_width) {
+                        data.extend(self_row);
+                        data.extend(other_row);
+                    }
+                }
+            }
+            _ => ()
+        }
+    }
+    let row_width = self.row_width + other.row_width;
+    let mut sort_key = self.sort_key.clone();
+    for word_ix in other.sort_key.iter() {
+        sort_key.push(self.row_width + word_ix);
+    }
+    Chunk{data: data, row_width: row_width, sort_key: sort_key}
+}
+```
+
+We can compare the performance to our previous tests to see how much overhead has been added:
+
+``` rust
+let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 1, sort_key: vec![] };
+let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 1, sort_key: vec![] };
+chunk_a = chunk_a.sort(&[0]);
+chunk_b = chunk_b.sort(&[0]);
+black_box(chunk_a.join(&chunk_b));
+// 84ms to sort A and B + 46ms to join
+```
+
+The sort time has gone up by 30%, which is bearable, but the join time has more than doubled. I originally wrote the join directly before pulling out the nice iterators, so I know that those didn't affect the performance. I've tried cutting parts out, removing abstractions, disabling bounds checks etc with no significant effect. As best as I can tell, the culprit is:
+
+``` rust
+pub fn compare_by_key(left_words: &[u64], left_key: &[usize], right_words: &[u64], right_key: &[usize]) -> Ordering {
+    for ix in 0..min(left_key.len(), right_key.len()) {
+        match left_words[left_key[ix]].cmp(&right_words[right_key[ix]]) {
+            Ordering::Less => return Ordering::Less,
+            Ordering::Equal => (),
+            Ordering::Greater => return Ordering::Greater,
+        }
+    }
+    return Ordering::Equal;
+}
+```
+
+Where we used to have a single comparison, we now have a bunch of array reads and branches bloating up the inner join loop, even though in this particular benchmark the actual effect is exactly the same. This is a good example of why code generation is such a big deal in database research at the moment - you can get huge improvements from specialising functions like this to the exact data layout and parameters being used. I would love to have something like [Terra](http://terralang.org/) or [LMS](http://scala-lms.github.io/) with the same level of polish and community support as Rust.

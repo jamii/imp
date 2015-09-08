@@ -94,8 +94,8 @@ impl Chunk {
     fn join(&self, self_key: &[usize], other: &Chunk, other_key: &[usize]) -> Chunk {
         let row_width = self.row_width + other.row_width;
         let mut data = vec![];
-        let mut self_groups = self.group(self_key).peekable();
-        let mut other_groups = other.group(other_key).peekable();
+        let mut self_groups = self.group(self_key);
+        let mut other_groups = other.group(other_key);
         let mut self_group = self_groups.next();
         let mut other_group = other_groups.next();
         loop {
@@ -106,14 +106,10 @@ impl Chunk {
                             self_group = self_groups.next();
                         }
                         Ordering::Equal => {
-                            for self_row_ix in (0..self_words.len()).step_by(self.row_width) {
-                                for other_row_ix in (0..other_words.len()).step_by(other.row_width) {
-                                    for ix in (0..self.row_width) {
-                                        data.push(self_words[self_row_ix + ix]);
-                                    }
-                                    for ix in (0..other.row_width) {
-                                        data.push(other_words[other_row_ix + ix]);
-                                    }
+                            for self_row in self_words.chunks(self.row_width) {
+                                for other_row in other_words.chunks(self.row_width) {
+                                    data.extend(self_row);
+                                    data.extend(other_row);
                                 }
                             }
                             self_group = self_groups.next();

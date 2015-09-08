@@ -153,7 +153,7 @@ impl Chunk {
             match diff {
                 Diff::Both(self_words, other_words) => {
                     for self_row in self_words.chunks(self.row_width) {
-                        for other_row in other_words.chunks(self.row_width) {
+                        for other_row in other_words.chunks(other.row_width) {
                             data.extend(self_row);
                             data.extend(other_row);
                         }
@@ -331,12 +331,8 @@ mod tests{
         for row_a in ids_a.chunks(2) {
             for row_b in ids_b.chunks(5) {
                 if compare_by_key(row_a, key_a, row_b, key_b) == Ordering::Equal {
-                    for &id_a in row_a {
-                        result_ids.push(id_a);
-                    }
-                    for &id_b in row_b {
-                        result_ids.push(id_b);
-                    }
+                    result_ids.extend(row_a);
+                    result_ids.extend(row_b);
                 }
             }
         }

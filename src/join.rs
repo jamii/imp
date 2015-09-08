@@ -327,6 +327,22 @@ mod tests{
             black_box(result_chunk);
         })
     }
+
+    #[bench]
+    pub fn bench_chunk_wide_join(bencher: &mut Bencher) {
+        let ids_a = black_box(ids(7)).into_iter().flat_map(|id| vec![id, 0, 0].into_iter()).collect::<Vec<_>>();
+        let ids_b = black_box(ids(42)).into_iter().flat_map(|id| vec![id, 0, 0].into_iter()).collect::<Vec<_>>();
+        let key_a = &[0];
+        let key_b = &[0];
+        bencher.iter(|| {
+            let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 3 };
+            let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 3 };
+            chunk_a.sort(key_a);
+            chunk_b.sort(key_b);
+            let result_chunk = chunk_a.join(key_a, &chunk_b, key_b);
+            black_box(result_chunk);
+        })
+    }
 }
 
 // impl Kind {

@@ -1,4 +1,4 @@
-
+use chunk::*;
 
 pub type Id = u64;
 pub type Hash = u64;
@@ -25,3 +25,13 @@ pub struct Relation {
     pub kinds: Vec<Kind>,
     pub chunk: Chunk,
 }
+
+// impl Kind {
+//     fn width(&self) -> usize {
+//         let bytes = match *self {
+//             Kind::Id => size_of::<Id>(),
+//             Kind::Number => size_of::<Number>(),
+//             Kind::Text => size_of::<(Hash, Text)>(),
+//         };
+//         bytes / 8
+//     }

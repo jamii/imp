@@ -1,6 +1,6 @@
 use ::std::mem::size_of;
 use ::std::slice::bytes::copy_memory;
-use ::std::cmp::Ordering;
+use ::std::cmp::{Ordering, min};
 
 #[derive(Clone, Debug)]
 pub struct Chunk {
@@ -32,8 +32,8 @@ pub enum Diff<'a> {
 }
 
 pub fn compare_by_key(left_words: &[u64], left_key: &[usize], right_words: &[u64], right_key: &[usize]) -> Ordering {
-    for (&left_ix, &right_ix) in left_key.iter().zip(right_key.iter()) {
-        match left_words[left_ix].cmp(&right_words[right_ix]) {
+    for ix in 0..min(left_key.len(), right_key.len()) {
+        match left_words[left_key[ix]].cmp(&right_words[right_key[ix]]) {
             Ordering::Less => return Ordering::Less,
             Ordering::Equal => (),
             Ordering::Greater => return Ordering::Greater,
@@ -104,7 +104,7 @@ impl Chunk {
         Diffs{left_key: &self.sort_key[..], left_groups: left_groups, left_group: left_group, right_key: &other.sort_key[..], right_groups: right_groups, right_group: right_group}
     }
 
-    fn semijoin(&mut self, other: &mut Chunk) -> (Chunk, Chunk) {
+    fn semijoin(&self, other: &Chunk) -> (Chunk, Chunk) {
         let mut self_data = Vec::with_capacity(self.data.len());
         let mut other_data = Vec::with_capacity(other.data.len());
         for diff in self.diffs(other) {
@@ -245,7 +245,7 @@ mod tests{
     use test::{Bencher, black_box};
     use std::collections::HashSet;
 
-    pub fn ids(seed: usize, n: usize) -> Vec<Id> {
+    pub fn ids(seed: usize, n: usize) -> Vec<u64> {
         let mut rng = StdRng::new().unwrap();
         rng.reseed(&[seed+0, seed+1, seed+2, seed+3]);
         (0..n).map(|_| rng.gen_range(0, n as u64)).collect()
@@ -416,13 +416,3 @@ mod tests{
         })
     }
 }
-
-// impl Kind {
-//     fn width(&self) -> usize {
-//         let bytes = match *self {
-//             Kind::Id => size_of::<Id>(),
-//             Kind::Number => size_of::<Number>(),
-//             Kind::Text => size_of::<(Hash, Text)>(),
-//         };
-//         bytes / 8
-//     }

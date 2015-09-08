@@ -18,9 +18,8 @@ macro_rules! time {
     }};
 }
 
-mod intersect;
-mod join;
+mod chunk;
+mod relation;
 
 fn main() {
-    intersect::main();
 }

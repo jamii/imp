@@ -41,44 +41,30 @@ fn get_byte(word: u64, ix: usize) -> u8 {
 impl Chunk {
     fn sort(&mut self, key: &[usize]) {
         let row_width = self.row_width;
-        let mut counts = (0..key.len()).map(|_| [[0; 256]; 8]).collect::<Vec<_>>();
-        for row in self.data.chunks(row_width) {
-            for (key_ix, &word_ix) in key.iter().enumerate() {
-                let word = row[word_ix];
-                let bytes = unsafe{ ::std::mem::transmute::<u64, [u8; 8]>(word) };
-                counts[key_ix][0][bytes[0] as usize] += 1;
-                counts[key_ix][1][bytes[1] as usize] += 1;
-                counts[key_ix][2][bytes[2] as usize] += 1;
-                counts[key_ix][3][bytes[3] as usize] += 1;
-                counts[key_ix][4][bytes[4] as usize] += 1;
-                counts[key_ix][5][bytes[5] as usize] += 1;
-                counts[key_ix][6][bytes[6] as usize] += 1;
-                counts[key_ix][7][bytes[7] as usize] += 1;
-            }
-        }
-        let mut buckets = (0..key.len()*8).map(|_| [[0; 256]; 8]).collect::<Vec<_>>();
-        for key_ix in 0..key.len() {
-            for byte in (0..255) {
-                buckets[key_ix][0][byte+1] = buckets[key_ix][0][byte] + row_width*counts[key_ix][0][byte];
-                buckets[key_ix][1][byte+1] = buckets[key_ix][1][byte] + row_width*counts[key_ix][1][byte];
-                buckets[key_ix][2][byte+1] = buckets[key_ix][2][byte] + row_width*counts[key_ix][2][byte];
-                buckets[key_ix][3][byte+1] = buckets[key_ix][3][byte] + row_width*counts[key_ix][3][byte];
-                buckets[key_ix][4][byte+1] = buckets[key_ix][4][byte] + row_width*counts[key_ix][4][byte];
-                buckets[key_ix][5][byte+1] = buckets[key_ix][5][byte] + row_width*counts[key_ix][5][byte];
-                buckets[key_ix][6][byte+1] = buckets[key_ix][6][byte] + row_width*counts[key_ix][6][byte];
-                buckets[key_ix][7][byte+1] = buckets[key_ix][7][byte] + row_width*counts[key_ix][7][byte];
-            }
-        }
         let mut buffer = self.data.clone();
-        for (key_ix, &word_ix) in key.iter().enumerate().rev() {
+        for &word_ix in key.iter() {
+            let mut counts = [[0; 256]; 8];
+            for row_ix in (0..self.data.len()).step_by(row_width) {
+                let word = self.data[row_ix + word_ix];
+                let bytes = unsafe{ ::std::mem::transmute::<u64, [u8; 8]>(word) };
+                for byte_ix in (0..8) {
+                    counts[byte_ix][bytes[byte_ix] as usize] += 1;
+                }
+            }
+            let mut buckets = [[0; 256]; 8];
+            for byte_ix in (0..8){
+                for byte in (0..255) {
+                    buckets[byte_ix][byte+1] = buckets[byte_ix][byte] + (row_width * counts[byte_ix][byte]);
+                }
+            }
             for byte_ix in (0..8) {
                 for row_ix in (0..self.data.len()).step_by(row_width) {
                     let byte = get_byte(self.data[row_ix + word_ix], byte_ix) as usize;
-                    let bucket = buckets[key_ix][byte_ix][byte];
+                    let bucket = buckets[byte_ix][byte];
                     for ix in (0..row_width) {
                         buffer[bucket + ix] = self.data[row_ix + ix];
                     }
-                    buckets[key_ix][byte_ix][byte] += row_width;
+                    buckets[byte_ix][byte] += row_width;
                 }
                 ::std::mem::swap(&mut buffer, &mut self.data);
             }

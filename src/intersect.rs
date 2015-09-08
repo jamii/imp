@@ -146,7 +146,6 @@ mod tests {
     use super::*;
 
     use std::collections::HashSet;
-    use std::collections::BTreeSet;
     use std::cmp::max;
 
     use test::{Bencher, black_box};

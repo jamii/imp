@@ -6,6 +6,7 @@ use ::std::cmp::Ordering;
 pub struct Chunk {
     pub data: Vec<u64>,
     pub row_width: usize,
+    pub sort_key: Vec<usize>,
 }
 
 pub type Id = u64;
@@ -37,8 +38,23 @@ pub struct Relation {
 #[derive(Clone, Debug)]
 pub struct Groups<'a> {
     pub chunk: &'a Chunk,
-    pub key: &'a [usize],
     pub ix: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct Diffs<'a> {
+    pub left_key: &'a [usize],
+    pub left_groups: Groups<'a>,
+    pub left_group: Option<&'a [u64]>,
+    pub right_key: &'a [usize],
+    pub right_groups: Groups<'a>,
+    pub right_group: Option<&'a [u64]>,
+}
+
+pub enum Diff<'a> {
+    Left(&'a [u64]),
+    Both(&'a [u64], &'a [u64]),
+    Right(&'a [u64]),
 }
 
 pub fn compare_by_key(left_words: &[u64], left_key: &[usize], right_words: &[u64], right_key: &[usize]) -> Ordering {
@@ -85,45 +101,108 @@ impl Chunk {
                 ::std::mem::swap(&mut buffer, &mut self.data);
             }
         }
+        self.sort_key = key.to_vec();
     }
 
-    fn group<'a>(&'a self, key: &'a [usize]) -> Groups<'a> {
-        Groups{chunk: &self, key: key, ix: 0}
+    fn groups<'a>(&'a self) -> Groups<'a> {
+        Groups{chunk: &self, ix: 0}
     }
 
-    fn join(&self, self_key: &[usize], other: &Chunk, other_key: &[usize]) -> Chunk {
-        let row_width = self.row_width + other.row_width;
+    fn project(&self) -> Chunk {
         let mut data = vec![];
-        let mut self_groups = self.group(self_key);
-        let mut other_groups = other.group(other_key);
-        let mut self_group = self_groups.next();
-        let mut other_group = other_groups.next();
-        loop {
-            match (self_group, other_group) {
-                (Some(self_words), Some(other_words)) => {
-                    match compare_by_key(self_words, self_key, other_words, other_key) {
-                        Ordering::Less => {
-                            self_group = self_groups.next();
-                        }
-                        Ordering::Equal => {
-                            for self_row in self_words.chunks(self.row_width) {
-                                for other_row in other_words.chunks(self.row_width) {
-                                    data.extend(self_row);
-                                    data.extend(other_row);
-                                }
-                            }
-                            self_group = self_groups.next();
-                            other_group = other_groups.next();
-                        }
-                        Ordering::Greater => {
-                            other_group = other_groups.next();
+        for group in self.groups() {
+            for &word_ix in self.sort_key.iter() {
+                data.push(group[word_ix]);
+            }
+        }
+        let row_width = self.sort_key.len();
+        let sort_key = (0..self.sort_key.len()).collect();
+        Chunk{data: data, row_width: row_width, sort_key: sort_key}
+    }
+
+    fn diffs<'a>(&'a self, other: &'a Chunk) -> Diffs<'a> {
+        assert_eq!(self.sort_key.len(), other.sort_key.len());
+        let mut left_groups = self.groups();
+        let mut right_groups = other.groups();
+        let left_group = left_groups.next();
+        let right_group = right_groups.next();
+        Diffs{left_key: &self.sort_key[..], left_groups: left_groups, left_group: left_group, right_key: &other.sort_key[..], right_groups: right_groups, right_group: right_group}
+    }
+
+    fn semijoin(&mut self, other: &mut Chunk) -> (Chunk, Chunk) {
+        let mut self_data = Vec::with_capacity(self.data.len());
+        let mut other_data = Vec::with_capacity(other.data.len());
+        for diff in self.diffs(other) {
+            match diff {
+                Diff::Both(self_words, other_words) => {
+                    self_data.extend(self_words);
+                    other_data.extend(other_words);
+                }
+                _ => ()
+            }
+        }
+        (
+            Chunk{ data: self_data, row_width: self.row_width, sort_key: self.sort_key.clone()},
+            Chunk{ data: other_data, row_width: other.row_width, sort_key: other.sort_key.clone()},
+        )
+    }
+
+    fn join(&self, other: &Chunk) -> Chunk {
+        let mut data = vec![];
+        for diff in self.diffs(other) {
+            match diff {
+                Diff::Both(self_words, other_words) => {
+                    for self_row in self_words.chunks(self.row_width) {
+                        for other_row in other_words.chunks(self.row_width) {
+                            data.extend(self_row);
+                            data.extend(other_row);
                         }
                     }
                 }
-                _ => break,
+                _ => ()
             }
         }
-        Chunk{ data: data, row_width: row_width }
+        let row_width = self.row_width + other.row_width;
+        let mut sort_key = self.sort_key.clone();
+        for word_ix in other.sort_key.iter() {
+            sort_key.push(self.row_width + word_ix);
+        }
+        Chunk{data: data, row_width: row_width, sort_key: sort_key}
+    }
+
+    fn union(&self, other: &Chunk) -> Chunk {
+        assert_eq!(self.row_width, other.row_width);
+        assert_eq!(self.sort_key, other.sort_key);
+        let mut data = vec![];
+        for diff in self.diffs(other) {
+            match diff {
+                Diff::Left(self_words) => {
+                    data.extend(self_words);
+                }
+                Diff::Both(self_words, _) => {
+                    data.extend(self_words);
+                }
+                Diff::Right(other_words) => {
+                    data.extend(other_words);
+                }
+            }
+        }
+        Chunk{data: data, row_width: self.row_width, sort_key: self.sort_key.clone()}
+    }
+
+    fn difference(&self, other: &Chunk) -> Chunk {
+        assert_eq!(self.row_width, other.row_width);
+        assert_eq!(self.sort_key, other.sort_key);
+        let mut data = vec![];
+        for diff in self.diffs(other) {
+            match diff {
+                Diff::Left(self_words) => {
+                    data.extend(self_words);
+                }
+                _ => ()
+            }
+        }
+        Chunk{data: data, row_width: self.row_width, sort_key: self.sort_key.clone()}
     }
 }
 
@@ -133,6 +212,7 @@ impl<'a> Iterator for Groups<'a> {
     fn next(&mut self) -> Option<&'a [u64]> {
         let data = &self.chunk.data;
         let row_width = self.chunk.row_width;
+        let key = &self.chunk.sort_key[..];
         if self.ix >= data.len() {
             None
         } else {
@@ -141,7 +221,7 @@ impl<'a> Iterator for Groups<'a> {
             loop {
                 end += row_width;
                 if end >= data.len()
-                || compare_by_key(&data[start..start+row_width], self.key, &data[end..end+row_width], self.key) != Ordering::Equal {
+                || compare_by_key(&data[start..start+row_width], key, &data[end..end+row_width], key) != Ordering::Equal {
                     break;
                 }
             }
@@ -149,9 +229,35 @@ impl<'a> Iterator for Groups<'a> {
             Some(&data[start..end])
         }
     }
+}
 
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, Some(self.chunk.data.len()))
+impl<'a> Iterator for Diffs<'a> {
+    type Item = Diff<'a>;
+
+    fn next(&mut self) -> Option<Diff<'a>> {
+        match (self.left_group, self.right_group) {
+            (Some(left_words), Some(right_words)) => {
+                match compare_by_key(left_words, self.left_key, right_words, self.right_key) {
+                    Ordering::Less => {
+                        let result = Some(Diff::Left(left_words));
+                        self.left_group = self.left_groups.next();
+                        result
+                    }
+                    Ordering::Equal => {
+                        let result = Some(Diff::Both(left_words, right_words));
+                        self.left_group = self.left_groups.next();
+                        self.right_group = self.right_groups.next();
+                        result
+                    }
+                    Ordering::Greater => {
+                        let result = Some(Diff::Right(right_words));
+                        self.right_group = self.right_groups.next();
+                        result
+                    }
+                }
+            }
+            _ => None,
+        }
     }
 }
 
@@ -164,17 +270,16 @@ mod tests{
     use test::{Bencher, black_box};
     use std::collections::HashSet;
 
-    pub fn ids(seed: usize) -> Vec<Id> {
+    pub fn ids(seed: usize, n: usize) -> Vec<Id> {
         let mut rng = StdRng::new().unwrap();
         rng.reseed(&[seed+0, seed+1, seed+2, seed+3]);
-        let n = 1_000_000;
-        (0..n).map(|_| rng.gen_range(0, n)).collect()
+        (0..n).map(|_| rng.gen_range(0, n as u64)).collect()
     }
 
     #[test]
     pub fn test_chunk_sort() {
-        let ids_a = black_box(ids(7));
-        let ids_b = black_box(ids(42));
+        let ids_a = black_box(ids(7, 1000));
+        let ids_b = black_box(ids(42, 1000));
         let mut ids = vec![];
         for (&id_a, &id_b) in ids_a.iter().zip(ids_b.iter()) {
             ids.push(id_a);
@@ -185,15 +290,15 @@ mod tests{
             id_pairs.sort();
             id_pairs.into_iter().flat_map(|pair| pair).map(|&id| id).collect::<Vec<_>>()
         };
-        let mut chunk = Chunk{data: ids.clone(), row_width: 2};
+        let mut chunk = Chunk{data: ids.clone(), row_width: 2, sort_key: vec![]};
         chunk.sort(&[0, 1]);
         assert_eq!(result_ids, chunk.data);
     }
 
     #[test]
     pub fn test_chunk_simple_join() {
-        let ids_a = black_box(ids(7));
-        let ids_b = black_box(ids(42));
+        let ids_a = black_box(ids(7, 1000));
+        let ids_b = black_box(ids(42, 1000));
         let key_a = &[0];
         let key_b = &[0];
         let mut result_ids = vec![];
@@ -205,11 +310,11 @@ mod tests{
                 }
             }
         }
-        let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 1 };
-        let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 1 };
+        let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 1, sort_key: vec![] };
+        let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 1, sort_key: vec![] };
         chunk_a.sort(key_a);
         chunk_b.sort(key_b);
-        let result_chunk = chunk_a.join(key_a, &chunk_b, key_b);
+        let result_chunk = chunk_a.join(&chunk_b);
         assert_eq!(
             result_ids.chunks(2).collect::<HashSet<_>>(),
             result_chunk.data.chunks(2).collect::<HashSet<_>>()
@@ -218,7 +323,7 @@ mod tests{
 
     #[test]
     pub fn test_chunk_complex_join() {
-        let ids_a = black_box(ids(7));
+        let ids_a = black_box(ids(7, 1_000));
         let ids_b = ids_a.clone(); // to ensure that at least every 1/10 ids will produce a join
         let key_a = &[0, 1];
         let key_b = &[0, 1];
@@ -235,11 +340,11 @@ mod tests{
                 }
             }
         }
-        let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 2 };
-        let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 5 };
+        let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 2, sort_key: vec![] };
+        let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 5, sort_key: vec![] };
         chunk_a.sort(key_a);
         chunk_b.sort(key_b);
-        let result_chunk = chunk_a.join(key_a, &chunk_b, key_b);
+        let result_chunk = chunk_a.join(&chunk_b);
         assert_eq!(
             result_ids.chunks(7).collect::<HashSet<_>>(),
             result_chunk.data.chunks(7).collect::<HashSet<_>>()
@@ -248,9 +353,9 @@ mod tests{
 
     #[bench]
     pub fn bench_chunk_sort_1(bencher: &mut Bencher) {
-        let ids = black_box(ids(7));
+        let ids = black_box(ids(7, 1_000_000));
         bencher.iter(|| {
-            let mut chunk = Chunk{data: ids.clone(), row_width: 1};
+            let mut chunk = Chunk{data: ids.clone(), row_width: 1, sort_key: vec![]};
             chunk.sort(&[0]);
             black_box(&chunk);
         });
@@ -258,15 +363,15 @@ mod tests{
 
     #[bench]
     pub fn bench_chunk_sort_2(bencher: &mut Bencher) {
-        let ids_a = black_box(ids(7));
-        let ids_b = black_box(ids(42));
+        let ids_a = black_box(ids(7, 1_000_000));
+        let ids_b = black_box(ids(42, 1_000_000));
         let mut ids = vec![];
         for (id_a, id_b) in ids_a.into_iter().zip(ids_b.into_iter()) {
             ids.push(id_a);
             ids.push(id_b);
         }
         bencher.iter(|| {
-            let mut chunk = Chunk{data: ids.clone(), row_width: 2};
+            let mut chunk = Chunk{data: ids.clone(), row_width: 2, sort_key: vec![]};
             chunk.sort(&[0, 1]);
             black_box(&chunk);
         });
@@ -274,9 +379,9 @@ mod tests{
 
     #[bench]
     pub fn bench_chunk_sort_3(bencher: &mut Bencher) {
-        let ids_a = black_box(ids(7));
-        let ids_b = black_box(ids(42));
-        let ids_c = black_box(ids(75));
+        let ids_a = black_box(ids(7, 1_000_000));
+        let ids_b = black_box(ids(42, 1_000_000));
+        let ids_c = black_box(ids(75, 1_000_000));
         let mut ids = vec![];
         for ((id_a, id_b), id_c) in ids_a.into_iter().zip(ids_b.into_iter()).zip(ids_c.into_iter()) {
             ids.push(id_a);
@@ -284,7 +389,7 @@ mod tests{
             ids.push(id_c);
         }
         bencher.iter(|| {
-            let mut chunk = Chunk{data: ids.clone(), row_width: 3};
+            let mut chunk = Chunk{data: ids.clone(), row_width: 3, sort_key: vec![]};
             chunk.sort(&[0, 1, 2]);
             black_box(&chunk);
         });
@@ -292,9 +397,9 @@ mod tests{
 
     #[bench]
     pub fn bench_chunk_sort_column(bencher: &mut Bencher) {
-        let ids_a = black_box(ids(7));
-        let ids_b = black_box(ids(42));
-        let ids_c = black_box(ids(75));
+        let ids_a = black_box(ids(7, 1_000_000));
+        let ids_b = black_box(ids(42, 1_000_000));
+        let ids_c = black_box(ids(75, 1_000_000));
         let mut ids = vec![];
         for ((id_a, id_b), id_c) in ids_a.into_iter().zip(ids_b.into_iter()).zip(ids_c.into_iter()) {
             ids.push(id_a);
@@ -302,7 +407,7 @@ mod tests{
             ids.push(id_c);
         }
         bencher.iter(|| {
-            let mut chunk = Chunk{data: ids.clone(), row_width: 3};
+            let mut chunk = Chunk{data: ids.clone(), row_width: 3, sort_key: vec![]};
             chunk.sort(&[0]);
             black_box(&chunk);
         });
@@ -310,32 +415,32 @@ mod tests{
 
     #[bench]
     pub fn bench_chunk_simple_join(bencher: &mut Bencher) {
-        let ids_a = black_box(ids(7));
-        let ids_b = black_box(ids(42));
+        let ids_a = black_box(ids(7, 1_000_000));
+        let ids_b = black_box(ids(42, 1_000_000));
         let key_a = &[0];
         let key_b = &[0];
         bencher.iter(|| {
-            let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 1 };
-            let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 1 };
+            let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 1, sort_key: vec![] };
+            let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 1, sort_key: vec![] };
             chunk_a.sort(key_a);
             chunk_b.sort(key_b);
-            let result_chunk = chunk_a.join(key_a, &chunk_b, key_b);
+            let result_chunk = chunk_a.join(&chunk_b);
             black_box(result_chunk);
         })
     }
 
     #[bench]
     pub fn bench_chunk_wide_join(bencher: &mut Bencher) {
-        let ids_a = black_box(ids(7)).into_iter().flat_map(|id| vec![id, 0, 0].into_iter()).collect::<Vec<_>>();
-        let ids_b = black_box(ids(42)).into_iter().flat_map(|id| vec![id, 0, 0].into_iter()).collect::<Vec<_>>();
+        let ids_a = black_box(ids(7, 1_000_000)).into_iter().flat_map(|id| vec![id, 0, 0].into_iter()).collect::<Vec<_>>();
+        let ids_b = black_box(ids(42, 1_000_000)).into_iter().flat_map(|id| vec![id, 0, 0].into_iter()).collect::<Vec<_>>();
         let key_a = &[0];
         let key_b = &[0];
         bencher.iter(|| {
-            let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 3 };
-            let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 3 };
+            let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 3, sort_key: vec![] };
+            let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 3, sort_key: vec![] };
             chunk_a.sort(key_a);
             chunk_b.sort(key_b);
-            let result_chunk = chunk_a.join(key_a, &chunk_b, key_b);
+            let result_chunk = chunk_a.join(&chunk_b);
             black_box(result_chunk);
         })
     }

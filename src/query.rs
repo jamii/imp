@@ -18,8 +18,6 @@ pub struct Plan {
 impl Plan {
     pub fn execute(&self, mut chunks: Vec<Chunk>) -> Chunk {
         for action in self.actions.iter() {
-            println!("{:?}", chunks.iter().map(|chunk| chunk.data.len()).collect::<Vec<_>>());
-            println!("{:?}", action);
             match action {
                 &Action::Sort(ix, ref key) => {
                     let chunk = chunks[ix].sort(&key[..]);
@@ -107,16 +105,12 @@ mod tests{
         chinook();
     }
 
-    fn chinook_metal() -> Vec<String> {
+    fn chinook_metal(mut strings: Vec<String>, mut chunks: Vec<Chunk>) -> Vec<String> {
         use query::Action::*;
-        let (mut strings, mut chunks) = chinook();
         let metal = "Heavy Metal Classic".to_owned();
         let query = Chunk{ data: vec![hash(&metal), strings.len() as u64], row_width: 2, sort_key: vec![]};
         strings.push(metal);
         chunks.push(query);
-        println!("{:?}", chunks[4]);
-        println!("{:?}", chunks[5]);
-        println!("{:?}", &strings[..100]);
         let plan = Plan{
             actions: vec![
             // semijoin Query and Playlist on Name
@@ -166,8 +160,6 @@ mod tests{
             // join Artist*Album*Track*PlaylistTrack and Playlist on PlaylistId
             Sort(3, vec![2]),
             Sort(4, vec![0]),
-            Debug(3),
-            Debug(4),
             Join(3, 4),
             // project Artist.Name and Name
             Sort(4, vec![0,1,4]),
@@ -180,8 +172,6 @@ mod tests{
             // project Artist.Name (without hash)
             Sort(5, vec![1]),
             Project(5),
-
-            Debug(5),
             ],
 
             result: 5
@@ -192,8 +182,19 @@ mod tests{
 
     #[test]
     fn test_chinook_metal() {
+        let (strings, chunks) = chinook();
+        let results = chinook_metal(strings, chunks);
         assert_eq!(
-            chinook_metal().iter().collect::<Vec<_>>(),
-            vec!["AC/DC", "Accept", "Black Sabbath", "Metallica", "Iron Maiden", "Mot\u{f6}rhead", "M\u{f6}tley Cr\u{fc}e", "Ozzy Osbourne", "Scorpions"]);
+            results.iter().collect::<Vec<_>>(),
+            vec!["AC/DC", "Accept", "Black Sabbath", "Metallica", "Iron Maiden", "Mot\u{f6}rhead", "M\u{f6}tley Cr\u{fc}e", "Ozzy Osbourne", "Scorpions"]
+            );
+    }
+
+    #[bench]
+    pub fn bench_chinook_metal(bencher: &mut Bencher) {
+        let (strings, chunks) = chinook();
+        bencher.iter(|| {
+            black_box(chinook_metal(strings.clone(), chunks.clone()));
+        });
     }
 }

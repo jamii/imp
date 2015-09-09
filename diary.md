@@ -408,7 +408,7 @@ pub struct Plan {
 
 The query engine just directly interprets these plans.
 
-```
+``` rust
 impl Plan {
     pub fn execute(&self, mut chunks: Vec<Chunk>) -> Chunk {
         for action in self.actions.iter() {

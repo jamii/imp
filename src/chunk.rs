@@ -25,6 +25,7 @@ pub struct Diffs<'a> {
     pub right_group: Option<&'a [u64]>,
 }
 
+#[derive(Clone, Debug)]
 pub enum Diff<'a> {
     Left(&'a [u64]),
     Both(&'a [u64], &'a [u64]),
@@ -43,7 +44,11 @@ pub fn compare_by_key(left_words: &[u64], left_key: &[usize], right_words: &[u64
 }
 
 impl Chunk {
-    fn sort(&self, key: &[usize]) -> Chunk {
+    pub fn empty() -> Chunk {
+        Chunk{ data: vec![], row_width: 0, sort_key: vec![] }
+    }
+
+    pub fn sort(&self, key: &[usize]) -> Chunk {
         let row_width = self.row_width;
         let mut data = self.data.clone();
         let mut buffer = self.data.clone();
@@ -79,11 +84,11 @@ impl Chunk {
         Chunk{data: data, row_width: self.row_width, sort_key: key.to_vec()}
     }
 
-    fn groups<'a>(&'a self) -> Groups<'a> {
+    pub fn groups<'a>(&'a self) -> Groups<'a> {
         Groups{chunk: &self, ix: 0}
     }
 
-    fn project(&self) -> Chunk {
+    pub fn project(&self) -> Chunk {
         let mut data = vec![];
         for group in self.groups() {
             for &word_ix in self.sort_key.iter() {
@@ -95,7 +100,7 @@ impl Chunk {
         Chunk{data: data, row_width: row_width, sort_key: sort_key}
     }
 
-    fn diffs<'a>(&'a self, other: &'a Chunk) -> Diffs<'a> {
+    pub fn diffs<'a>(&'a self, other: &'a Chunk) -> Diffs<'a> {
         assert_eq!(self.sort_key.len(), other.sort_key.len());
         let mut left_groups = self.groups();
         let mut right_groups = other.groups();
@@ -104,7 +109,7 @@ impl Chunk {
         Diffs{left_key: &self.sort_key[..], left_groups: left_groups, left_group: left_group, right_key: &other.sort_key[..], right_groups: right_groups, right_group: right_group}
     }
 
-    fn semijoin(&self, other: &Chunk) -> (Chunk, Chunk) {
+    pub fn semijoin(&self, other: &Chunk) -> (Chunk, Chunk) {
         let mut self_data = Vec::with_capacity(self.data.len());
         let mut other_data = Vec::with_capacity(other.data.len());
         for diff in self.diffs(other) {
@@ -122,7 +127,7 @@ impl Chunk {
         )
     }
 
-    fn join(&self, other: &Chunk) -> Chunk {
+    pub fn join(&self, other: &Chunk) -> Chunk {
         let mut data = vec![];
         for diff in self.diffs(other) {
             match diff {
@@ -145,7 +150,7 @@ impl Chunk {
         Chunk{data: data, row_width: row_width, sort_key: sort_key}
     }
 
-    fn union(&self, other: &Chunk) -> Chunk {
+    pub fn union(&self, other: &Chunk) -> Chunk {
         assert_eq!(self.row_width, other.row_width);
         assert_eq!(self.sort_key, other.sort_key);
         let mut data = vec![];
@@ -165,7 +170,7 @@ impl Chunk {
         Chunk{data: data, row_width: self.row_width, sort_key: self.sort_key.clone()}
     }
 
-    fn difference(&self, other: &Chunk) -> Chunk {
+    pub fn difference(&self, other: &Chunk) -> Chunk {
         assert_eq!(self.row_width, other.row_width);
         assert_eq!(self.sort_key, other.sort_key);
         let mut data = vec![];

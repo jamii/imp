@@ -3,6 +3,7 @@
 #![feature(iter_arith)]
 #![feature(clone_from_slice)]
 #![feature(step_by)]
+#![feature(hash_default)]
 
 extern crate rand;
 extern crate test;
@@ -20,6 +21,7 @@ macro_rules! time {
 
 mod chunk;
 mod relation;
+mod query;
 
 fn main() {
 }

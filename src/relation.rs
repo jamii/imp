@@ -1,3 +1,5 @@
+use std::mem::size_of;
+
 use chunk::*;
 
 pub type Id = u64;
@@ -26,12 +28,13 @@ pub struct Relation {
     pub chunk: Chunk,
 }
 
-// impl Kind {
-//     fn width(&self) -> usize {
-//         let bytes = match *self {
-//             Kind::Id => size_of::<Id>(),
-//             Kind::Number => size_of::<Number>(),
-//             Kind::Text => size_of::<(Hash, Text)>(),
-//         };
-//         bytes / 8
-//     }
+impl Kind {
+    pub fn width(&self) -> usize {
+        let bytes = match *self {
+            Kind::Id => size_of::<Id>(),
+            Kind::Number => size_of::<Number>(),
+            Kind::Text => size_of::<(Hash, Text)>(),
+        };
+        bytes / 8
+    }
+}

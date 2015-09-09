@@ -105,7 +105,7 @@ mod tests{
         chinook();
     }
 
-    fn chinook_metal(mut strings: Vec<String>, mut chunks: Vec<Chunk>) -> Vec<String> {
+    fn chinook_metal(mut strings: Vec<String>, mut chunks: Vec<Chunk>) -> Chunk {
         use query::Action::*;
         let metal = "Heavy Metal Classic".to_owned();
         let query = Chunk{ data: vec![hash(&metal), strings.len() as u64], row_width: 2, sort_key: vec![]};
@@ -176,16 +176,15 @@ mod tests{
 
             result: 5
         };
-        let results = plan.execute(chunks);
-        results.data.iter().map(|ix| strings[*ix as usize].to_owned()).collect()
+        plan.execute(chunks)
     }
 
     #[test]
     fn test_chinook_metal() {
         let (strings, chunks) = chinook();
-        let results = chinook_metal(strings, chunks);
+        let results = chinook_metal(strings.clone(), chunks);
         assert_eq!(
-            results.iter().collect::<Vec<_>>(),
+            results.data.iter().map(|ix| &strings[*ix as usize]).collect::<Vec<_>>(),
             vec!["AC/DC", "Accept", "Black Sabbath", "Metallica", "Iron Maiden", "Mot\u{f6}rhead", "M\u{f6}tley Cr\u{fc}e", "Ozzy Osbourne", "Scorpions"]
             );
     }

@@ -384,3 +384,173 @@ pub fn compare_by_key(left_words: &[u64], left_key: &[usize], right_words: &[u64
 ```
 
 Where we used to have a single comparison, we now have a bunch of array reads and branches bloating up the inner join loop, even though in this particular benchmark the actual effect is exactly the same. This is a good example of why code generation is such a big deal in database research at the moment - you can get huge improvements from specialising functions like this to the exact data layout and parameters being used. I would love to have something like [Terra](http://terralang.org/) or [LMS](http://scala-lms.github.io/) with the same level of polish and community support as Rust.
+
+## Plans
+
+The compiler is going to output query plans, which for Imp are just a list of actions to run.
+
+``` rust
+#[derive(Clone, Debug)]
+pub enum Action {
+    Sort(usize, Vec<usize>),
+    Project(usize),
+    SemiJoin(usize, usize),
+    Join(usize, usize),
+    Debug(usize),
+}
+
+#[derive(Clone, Debug)]
+pub struct Plan {
+    pub actions: Vec<Action>,
+    pub result: usize,
+}
+```
+
+The query engine is just directly interprets these plans.
+
+```
+impl Plan {
+    pub fn execute(&self, mut chunks: Vec<Chunk>) -> Chunk {
+        for action in self.actions.iter() {
+            match action {
+                &Action::Sort(ix, ref key) => {
+                    let chunk = chunks[ix].sort(&key[..]);
+                    chunks[ix] = chunk;
+                },
+                &Action::Project(ix) => {
+                    let chunk = chunks[ix].project();
+                    chunks[ix] = chunk;
+                }
+                &Action::SemiJoin(left_ix, right_ix) => {
+                    let (left_chunk, right_chunk) = chunks[left_ix].semijoin(&chunks[right_ix]);
+                    chunks[left_ix] = left_chunk;
+                    chunks[right_ix] = right_chunk;
+                },
+                &Action::Join(left_ix, right_ix) => {
+                    let chunk = chunks[left_ix].join(&chunks[right_ix]);
+                    chunks[left_ix] = Chunk::empty();
+                    chunks[right_ix] = chunk;
+                }
+                &Action::Debug(ix) => {
+                    println!("{:?}", chunks[ix]);
+                }
+            }
+        }
+        ::std::mem::replace(&mut chunks[self.result], Chunk::empty())
+    }
+}
+```
+
+I wrote some quick and hacky csv import code so I can play with the [Chinook dataset](http://chinookdatabase.codeplex.com/).
+
+```
+sqlite> SELECT count(*) FROM Artist;
+275
+sqlite> SELECT count(*) FROM Album;
+347
+sqlite> SELECT count(*) FROM Track;
+3503
+sqlite> SELECT count(*) FROM PlaylistTrack;
+8715
+sqlite> SELECT count(*) FROM Playlist;
+18
+```
+
+Let's compare a simple query - finding all the artists on the "Heavy Metal Classic" playlist:
+
+```
+In [9]: def test():
+    for _ in range(0,10000):
+        cur.execute('SELECT DISTINCT Artist.Name FROM Playlist JOIN PlaylistTrack ON Playlist.PlaylistId=PlaylistTrack.PlaylistId JOIN Track ON PlaylistTrack.TrackId=Track.TrackId JOIN Album ON Track.AlbumId=Album.AlbumId JOIN Artist ON Album.ArtistId = Artist.ArtistId WHERE Playlist.Name="Heavy Metal Classic"')
+        cur.fetchall()
+   ...:
+
+In [10]: time test()
+CPU times: user 12.6 s, sys: 48.1 ms, total: 12.7 s
+Wall time: 12.7 s
+
+In [11]: time test()
+CPU times: user 12.7 s, sys: 48 ms, total: 12.7 s
+Wall time: 12.7 s
+
+```
+
+So thats 1.27 ms per query for sqlite, running from disk and with the indexes chosen by Chinnok. The python sqlite library uses a statement cache so I *believe* this does not include compile time.
+
+I hand-compiled the same query into an Imp plan:
+
+``` rust
+let plan = Plan{
+    actions: vec![
+    // semijoin Query and Playlist on Name
+    Sort(5, vec![0]),
+    Sort(4, vec![1]),
+    SemiJoin(5,4),
+
+    // semijoin Playlist and PlaylistTrack on PlaylistId
+    Sort(4, vec![0]),
+    Sort(3, vec![0]),
+    SemiJoin(4,3),
+
+    // semijoin PlaylistTrack and Track on TrackId
+    Sort(3, vec![1]),
+    Sort(2, vec![0]),
+    SemiJoin(3,2),
+
+    // semijoin Track and Album on AlbumId
+    Sort(2, vec![3]),
+    Sort(1, vec![0]),
+    SemiJoin(2,1),
+
+    // join Artist and Album on ArtistId
+    Sort(0, vec![0]),
+    Sort(1, vec![3]),
+    Join(0, 1),
+    // project Artist.Name and AlbumId
+    Sort(1, vec![1, 2, 3]),
+    Project(1),
+
+    // join Artist*Album and Track on AlbumId
+    Sort(1, vec![2]),
+    Sort(2, vec![3]),
+    Join(1, 2),
+    // project Artist.Name and TrackId
+    Sort(2, vec![0,1,3]),
+    Project(2),
+
+    // join Artist*Album*Track and PlaylistTrack on TrackId
+    Sort(2, vec![2]),
+    Sort(3, vec![1]),
+    Join(2, 3),
+    // project Artist.Name and PlaylistId
+    Sort(3, vec![0,1,3]),
+    Project(3),
+
+    // join Artist*Album*Track*PlaylistTrack and Playlist on PlaylistId
+    Sort(3, vec![2]),
+    Sort(4, vec![0]),
+    Join(3, 4),
+    // project Artist.Name and Name
+    Sort(4, vec![0,1,4]),
+    Project(4),
+
+    // join Artist*Album*Track*PlaylistTrack*Playlist and Query on Name
+    Sort(4, vec![2]),
+    Sort(5, vec![0]),
+    Join(4, 5),
+    // project Artist.Name (without hash)
+    Sort(5, vec![1]),
+    Project(5),
+    ],
+
+    result: 5
+};
+```
+
+I'll go into more detail on where this plan came from when we get to the compiler section, but an important note is that the planning algorithm doesn't use any information about the actual data, just the query and the schema.
+
+```
+test query::tests::bench_chinook_metal     ... bench:   1,976,232 ns/iter (+/- 43,442)
+```
+
+So close! And without any indexes or statistics. The urge to optimise is huge, but I'm going to focus and get the compiler working first.

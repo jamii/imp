@@ -406,7 +406,7 @@ pub struct Plan {
 }
 ```
 
-The query engine is just directly interprets these plans.
+The query engine just directly interprets these plans.
 
 ```
 impl Plan {

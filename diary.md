@@ -456,9 +456,9 @@ sqlite> SELECT count(*) FROM Playlist;
 18
 ```
 
-Let's compare a simple query - finding all the artists on the "Heavy Metal Classic" playlist:
+Let's level the playing field somewhat and use a nice OLTP-style query - finding all the artists on the "Heavy Metal Classic" playlist. The Chinook db comes with prebuilt indexes and this query only touches a small subset of the data - exactly the use case sqlite is intended for.
 
-```
+``` python
 In [9]: def test():
     for _ in range(0,10000):
         cur.execute('SELECT DISTINCT Artist.Name FROM Playlist JOIN PlaylistTrack ON Playlist.PlaylistId=PlaylistTrack.PlaylistId JOIN Track ON PlaylistTrack.TrackId=Track.TrackId JOIN Album ON Track.AlbumId=Album.AlbumId JOIN Artist ON Album.ArtistId = Artist.ArtistId WHERE Playlist.Name="Heavy Metal Classic"')
@@ -475,9 +475,7 @@ Wall time: 12.7 s
 
 ```
 
-So thats 1.27 ms per query for sqlite, running from disk and with the indexes chosen by Chinnok. The python sqlite library uses a statement cache so I *believe* this does not include compile time.
-
-I hand-compiled the same query into an Imp plan:
+So thats 1.27 ms per query for sqlite. I hand-compiled the same query into an Imp plan:
 
 ``` rust
 let plan = Plan{

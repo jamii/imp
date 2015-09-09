@@ -6,12 +6,12 @@ use ::std::cmp::{Ordering, min};
 pub struct Chunk {
     pub data: Vec<u64>,
     pub row_width: usize,
-    pub sort_key: Vec<usize>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Groups<'a> {
     pub chunk: &'a Chunk,
+    pub key: &'a [usize],
     pub ix: usize,
 }
 
@@ -32,7 +32,7 @@ pub enum Diff<'a> {
     Right(&'a [u64]),
 }
 
-pub fn compare_by_key(left_words: &[u64], left_key: &[usize], right_words: &[u64], right_key: &[usize]) -> Ordering {
+pub fn compare_by_key(left_words: &[u64], right_words: &[u64], left_key: &[usize], right_key: &[usize]) -> Ordering {
     for ix in 0..min(left_key.len(), right_key.len()) {
         match left_words[left_key[ix]].cmp(&right_words[right_key[ix]]) {
             Ordering::Less => return Ordering::Less,
@@ -45,7 +45,11 @@ pub fn compare_by_key(left_words: &[u64], left_key: &[usize], right_words: &[u64
 
 impl Chunk {
     pub fn empty() -> Chunk {
-        Chunk{ data: vec![], row_width: 0, sort_key: vec![] }
+        Chunk{ data: vec![], row_width: 1 }
+    }
+
+    pub fn len(&self) -> usize {
+        self.data.len() / self.row_width
     }
 
     pub fn sort(&self, key: &[usize]) -> Chunk {
@@ -62,7 +66,7 @@ impl Chunk {
                 }
             }
             let mut buckets = [[0; 256]; 8];
-            for byte_ix in (0..8){
+            for byte_ix in (0..8) {
                 for byte in (0..255) {
                     buckets[byte_ix][byte+1] = buckets[byte_ix][byte] + (row_width * counts[byte_ix][byte]);
                 }
@@ -81,38 +85,48 @@ impl Chunk {
                 ::std::mem::swap(&mut buffer, &mut data);
             }
         }
-        Chunk{data: data, row_width: self.row_width, sort_key: key.to_vec()}
+        Chunk{data: data, row_width: self.row_width}
     }
 
-    pub fn groups<'a>(&'a self) -> Groups<'a> {
-        Groups{chunk: &self, ix: 0}
+    pub fn groups<'a>(&'a self, key: &'a [usize]) -> Groups<'a> {
+        Groups{chunk: &self, key: key, ix: 0}
     }
 
-    pub fn project(&self) -> Chunk {
+    pub fn project(&self, key: &[usize]) -> Chunk {
+        // project
         let mut data = vec![];
-        for group in self.groups() {
-            for &word_ix in self.sort_key.iter() {
-                data.push(group[word_ix]);
+        for row in self.data.chunks(self.row_width) {
+            for &word_ix in key.iter() {
+                data.push(row[word_ix]);
             }
         }
-        let row_width = self.sort_key.len();
-        let sort_key = (0..self.sort_key.len()).collect();
-        Chunk{data: data, row_width: row_width, sort_key: sort_key}
+        let mut result = Chunk{data: data, row_width: key.len()};
+
+        // sort
+        let key = (0..key.len()).collect::<Vec<_>>();
+        result = result.sort(&key[..]);
+
+        // dedup
+        let mut data = vec![];
+        for group in result.groups(&key[..]) {
+            data.extend(&group[..key.len()]);
+        }
+        result.data = data;
+        result
     }
 
-    pub fn diffs<'a>(&'a self, other: &'a Chunk) -> Diffs<'a> {
-        assert_eq!(self.sort_key.len(), other.sort_key.len());
-        let mut left_groups = self.groups();
-        let mut right_groups = other.groups();
+    pub fn diffs<'a>(&'a self, other: &'a Chunk, self_key: &'a [usize], other_key: &'a [usize]) -> Diffs<'a> {
+        let mut left_groups = self.groups(self_key);
+        let mut right_groups = other.groups(other_key);
         let left_group = left_groups.next();
         let right_group = right_groups.next();
-        Diffs{left_key: &self.sort_key[..], left_groups: left_groups, left_group: left_group, right_key: &other.sort_key[..], right_groups: right_groups, right_group: right_group}
+        Diffs{left_key: self_key, left_groups: left_groups, left_group: left_group, right_key: other_key, right_groups: right_groups, right_group: right_group}
     }
 
-    pub fn semijoin(&self, other: &Chunk) -> (Chunk, Chunk) {
+    pub fn semijoin(&self, other: &Chunk, self_key: &[usize], other_key: &[usize]) -> (Chunk, Chunk) {
         let mut self_data = Vec::with_capacity(self.data.len());
         let mut other_data = Vec::with_capacity(other.data.len());
-        for diff in self.diffs(other) {
+        for diff in self.diffs(other, self_key, other_key) {
             match diff {
                 Diff::Both(self_words, other_words) => {
                     self_data.extend(self_words);
@@ -122,14 +136,14 @@ impl Chunk {
             }
         }
         (
-            Chunk{ data: self_data, row_width: self.row_width, sort_key: self.sort_key.clone()},
-            Chunk{ data: other_data, row_width: other.row_width, sort_key: other.sort_key.clone()},
+            Chunk{ data: self_data, row_width: self.row_width},
+            Chunk{ data: other_data, row_width: other.row_width},
         )
     }
 
-    pub fn join(&self, other: &Chunk) -> Chunk {
+    pub fn join(&self, other: &Chunk, self_key: &[usize], other_key: &[usize]) -> Chunk {
         let mut data = vec![];
-        for diff in self.diffs(other) {
+        for diff in self.diffs(other, self_key, other_key) {
             match diff {
                 Diff::Both(self_words, other_words) => {
                     for self_row in self_words.chunks(self.row_width) {
@@ -143,18 +157,13 @@ impl Chunk {
             }
         }
         let row_width = self.row_width + other.row_width;
-        let mut sort_key = self.sort_key.clone();
-        for word_ix in other.sort_key.iter() {
-            sort_key.push(self.row_width + word_ix);
-        }
-        Chunk{data: data, row_width: row_width, sort_key: sort_key}
+        Chunk{data: data, row_width: row_width}
     }
 
     pub fn union(&self, other: &Chunk) -> Chunk {
-        assert_eq!(self.row_width, other.row_width);
-        assert_eq!(self.sort_key, other.sort_key);
+        let key = (0..self.row_width).collect::<Vec<_>>();
         let mut data = vec![];
-        for diff in self.diffs(other) {
+        for diff in self.diffs(other, &key[..], &key[..]) {
             match diff {
                 Diff::Left(self_words) => {
                     data.extend(self_words);
@@ -167,14 +176,13 @@ impl Chunk {
                 }
             }
         }
-        Chunk{data: data, row_width: self.row_width, sort_key: self.sort_key.clone()}
+        Chunk{data: data, row_width: self.row_width}
     }
 
     pub fn difference(&self, other: &Chunk) -> Chunk {
-        assert_eq!(self.row_width, other.row_width);
-        assert_eq!(self.sort_key, other.sort_key);
+        let key = (0..self.row_width).collect::<Vec<_>>();
         let mut data = vec![];
-        for diff in self.diffs(other) {
+        for diff in self.diffs(other, &key[..], &key[..]) {
             match diff {
                 Diff::Left(self_words) => {
                     data.extend(self_words);
@@ -182,7 +190,7 @@ impl Chunk {
                 _ => ()
             }
         }
-        Chunk{data: data, row_width: self.row_width, sort_key: self.sort_key.clone()}
+        Chunk{data: data, row_width: self.row_width}
     }
 }
 
@@ -192,7 +200,6 @@ impl<'a> Iterator for Groups<'a> {
     fn next(&mut self) -> Option<&'a [u64]> {
         let data = &self.chunk.data;
         let row_width = self.chunk.row_width;
-        let key = &self.chunk.sort_key[..];
         if self.ix >= data.len() {
             None
         } else {
@@ -201,7 +208,7 @@ impl<'a> Iterator for Groups<'a> {
             loop {
                 end += row_width;
                 if end >= data.len()
-                || compare_by_key(&data[start..start+row_width], key, &data[end..end+row_width], key) != Ordering::Equal {
+                || compare_by_key(&data[start..start+row_width], &data[end..end+row_width], self.key, self.key) != Ordering::Equal {
                     break;
                 }
             }
@@ -217,7 +224,7 @@ impl<'a> Iterator for Diffs<'a> {
     fn next(&mut self) -> Option<Diff<'a>> {
         match (self.left_group, self.right_group) {
             (Some(left_words), Some(right_words)) => {
-                match compare_by_key(left_words, self.left_key, right_words, self.right_key) {
+                match compare_by_key(left_words, right_words, self.left_key, self.right_key) {
                     Ordering::Less => {
                         let result = Some(Diff::Left(left_words));
                         self.left_group = self.left_groups.next();
@@ -270,7 +277,7 @@ mod tests{
             id_pairs.sort();
             id_pairs.into_iter().flat_map(|pair| pair).map(|&id| id).collect::<Vec<_>>()
         };
-        let mut chunk = Chunk{data: ids.clone(), row_width: 2, sort_key: vec![]};
+        let mut chunk = Chunk{data: ids.clone(), row_width: 2};
         chunk = chunk.sort(&[0, 1]);
         assert_eq!(result_ids, chunk.data);
     }
@@ -290,11 +297,11 @@ mod tests{
                 }
             }
         }
-        let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 1, sort_key: vec![] };
-        let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 1, sort_key: vec![] };
+        let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 1 };
+        let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 1 };
         chunk_a = chunk_a.sort(key_a);
         chunk_b = chunk_b.sort(key_b);
-        let result_chunk = chunk_a.join(&chunk_b);
+        let result_chunk = chunk_a.join(&chunk_b, key_a, key_b);
         assert_eq!(
             result_ids.chunks(2).collect::<HashSet<_>>(),
             result_chunk.data.chunks(2).collect::<HashSet<_>>()
@@ -310,17 +317,17 @@ mod tests{
         let mut result_ids = vec![];
         for row_a in ids_a.chunks(2) {
             for row_b in ids_b.chunks(5) {
-                if compare_by_key(row_a, key_a, row_b, key_b) == Ordering::Equal {
+                if compare_by_key(row_a, row_b, key_a, key_b) == Ordering::Equal {
                     result_ids.extend(row_a);
                     result_ids.extend(row_b);
                 }
             }
         }
-        let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 2, sort_key: vec![] };
-        let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 5, sort_key: vec![] };
+        let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 2 };
+        let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 5 };
         chunk_a = chunk_a.sort(key_a);
         chunk_b = chunk_b.sort(key_b);
-        let result_chunk = chunk_a.join(&chunk_b);
+        let result_chunk = chunk_a.join(&chunk_b, key_a, key_b);
         assert_eq!(
             result_ids.chunks(7).collect::<HashSet<_>>(),
             result_chunk.data.chunks(7).collect::<HashSet<_>>()
@@ -331,7 +338,7 @@ mod tests{
     pub fn bench_chunk_sort_1(bencher: &mut Bencher) {
         let ids = black_box(ids(7, 1_000_000));
         bencher.iter(|| {
-            let mut chunk = Chunk{data: ids.clone(), row_width: 1, sort_key: vec![]};
+            let mut chunk = Chunk{data: ids.clone(), row_width: 1};
             chunk = chunk.sort(&[0]);
             black_box(&chunk);
         });
@@ -347,7 +354,7 @@ mod tests{
             ids.push(id_b);
         }
         bencher.iter(|| {
-            let mut chunk = Chunk{data: ids.clone(), row_width: 2, sort_key: vec![]};
+            let mut chunk = Chunk{data: ids.clone(), row_width: 2};
             chunk = chunk.sort(&[0, 1]);
             black_box(&chunk);
         });
@@ -365,7 +372,7 @@ mod tests{
             ids.push(id_c);
         }
         bencher.iter(|| {
-            let mut chunk = Chunk{data: ids.clone(), row_width: 3, sort_key: vec![]};
+            let mut chunk = Chunk{data: ids.clone(), row_width: 3};
             chunk = chunk.sort(&[0, 1, 2]);
             black_box(&chunk);
         });
@@ -383,7 +390,17 @@ mod tests{
             ids.push(id_c);
         }
         bencher.iter(|| {
-            let mut chunk = Chunk{data: ids.clone(), row_width: 3, sort_key: vec![]};
+            let mut chunk = Chunk{data: ids.clone(), row_width: 3};
+            chunk = chunk.sort(&[0]);
+            black_box(&chunk);
+        });
+    }
+
+    #[bench]
+    pub fn bench_chunk_sort_range(bencher: &mut Bencher) {
+        let ids = black_box((1..10_000).collect::<Vec<_>>());
+        bencher.iter(|| {
+            let mut chunk = Chunk{data: ids.clone(), row_width: 1};
             chunk = chunk.sort(&[0]);
             black_box(&chunk);
         });
@@ -396,11 +413,11 @@ mod tests{
         let key_a = &[0];
         let key_b = &[0];
         bencher.iter(|| {
-            let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 1, sort_key: vec![] };
-            let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 1, sort_key: vec![] };
+            let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 1 };
+            let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 1 };
             chunk_a = chunk_a.sort(key_a);
             chunk_b = chunk_b.sort(key_b);
-            let result_chunk = chunk_a.join(&chunk_b);
+            let result_chunk = chunk_a.join(&chunk_b, key_a, key_b);
             black_box(result_chunk);
         })
     }
@@ -412,11 +429,11 @@ mod tests{
         let key_a = &[0];
         let key_b = &[0];
         bencher.iter(|| {
-            let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 3, sort_key: vec![] };
-            let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 3, sort_key: vec![] };
+            let mut chunk_a = Chunk{ data: ids_a.clone(), row_width: 3 };
+            let mut chunk_b = Chunk{ data: ids_b.clone(), row_width: 3 };
             chunk_a = chunk_a.sort(key_a);
             chunk_b = chunk_b.sort(key_b);
-            let result_chunk = chunk_a.join(&chunk_b);
+            let result_chunk = chunk_a.join(&chunk_b, key_a, key_b);
             black_box(result_chunk);
         })
     }

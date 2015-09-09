@@ -3,10 +3,11 @@ use chunk::*;
 #[derive(Clone, Debug)]
 pub enum Action {
     Sort(usize, Vec<usize>),
-    Project(usize),
-    SemiJoin(usize, usize),
-    Join(usize, usize),
-    Debug(usize),
+    Project(usize, Vec<usize>),
+    SemiJoin(usize, usize, Vec<usize>, Vec<usize>),
+    Join(usize, usize, Vec<usize>, Vec<usize>),
+    DebugChunk(usize),
+    DebugText(usize, usize),
 }
 
 #[derive(Clone, Debug)]
@@ -16,31 +17,41 @@ pub struct Plan {
 }
 
 impl Plan {
-    pub fn execute(&self, mut chunks: Vec<Chunk>) -> Chunk {
+    pub fn execute(&self, strings: &Vec<String>, mut chunks: Vec<Chunk>) -> Chunk {
         for action in self.actions.iter() {
+            // println!("");
+            // println!("{:?}", chunks.iter().map(|chunk| chunk.len()).collect::<Vec<_>>());
+            // println!("{:?}", action);
+            // time!(format!("{:?}", action), {
             match action {
                 &Action::Sort(ix, ref key) => {
                     let chunk = chunks[ix].sort(&key[..]);
                     chunks[ix] = chunk;
                 },
-                &Action::Project(ix) => {
-                    let chunk = chunks[ix].project();
+                &Action::Project(ix, ref key) => {
+                    let chunk = chunks[ix].project(&key[..]);
                     chunks[ix] = chunk;
                 }
-                &Action::SemiJoin(left_ix, right_ix) => {
-                    let (left_chunk, right_chunk) = chunks[left_ix].semijoin(&chunks[right_ix]);
+                &Action::SemiJoin(left_ix, right_ix, ref left_key, ref right_key) => {
+                    let (left_chunk, right_chunk) = chunks[left_ix].semijoin(&chunks[right_ix], &left_key[..], &right_key[..]);
                     chunks[left_ix] = left_chunk;
                     chunks[right_ix] = right_chunk;
                 },
-                &Action::Join(left_ix, right_ix) => {
-                    let chunk = chunks[left_ix].join(&chunks[right_ix]);
+                &Action::Join(left_ix, right_ix, ref left_key, ref right_key) => {
+                    let chunk = chunks[left_ix].join(&chunks[right_ix], &left_key[..], &right_key[..]);
                     chunks[left_ix] = Chunk::empty();
                     chunks[right_ix] = chunk;
                 }
-                &Action::Debug(ix) => {
-                    println!("{:?}", chunks[ix]);
+                &Action::DebugChunk(ix) => {
+                    let chunk = &chunks[ix];
+                    println!("{:?}", chunk.data.chunks(chunk.row_width).collect::<Vec<_>>());
+                }
+                &Action::DebugText(ix, field) => {
+                    let chunk = &chunks[ix];
+                    println!("{:?}", chunk.data.chunks(chunk.row_width).map(|row| &strings[row[field] as usize]).collect::<Vec<_>>());
                 }
             }
+            // });
         }
         ::std::mem::replace(&mut chunks[self.result], Chunk::empty())
     }
@@ -84,7 +95,7 @@ mod tests{
             }
         }
         let row_width = kinds.iter().map(|kind| kind.width()).sum();
-        Chunk{data: data, row_width: row_width, sort_key: vec![]}
+        Chunk{data: data, row_width: row_width}
     }
 
     fn chinook() -> (Vec<String>, Vec<Chunk>) {
@@ -108,7 +119,7 @@ mod tests{
     fn chinook_metal(mut strings: Vec<String>, mut chunks: Vec<Chunk>) -> Chunk {
         use query::Action::*;
         let metal = "Heavy Metal Classic".to_owned();
-        let query = Chunk{ data: vec![hash(&metal), strings.len() as u64], row_width: 2, sort_key: vec![]};
+        let query = Chunk{ data: vec![hash(&metal), strings.len() as u64], row_width: 2};
         strings.push(metal);
         chunks.push(query);
         let plan = Plan{
@@ -116,67 +127,51 @@ mod tests{
             // semijoin Query and Playlist on Name
             Sort(5, vec![0]),
             Sort(4, vec![1]),
-            SemiJoin(5,4),
+            SemiJoin(5, 4, vec![0], vec![1]),
 
             // semijoin Playlist and PlaylistTrack on PlaylistId
             Sort(4, vec![0]),
             Sort(3, vec![0]),
-            SemiJoin(4,3),
+            SemiJoin(4, 3, vec![0], vec![0]),
 
             // semijoin PlaylistTrack and Track on TrackId
             Sort(3, vec![1]),
-            Sort(2, vec![0]),
-            SemiJoin(3,2),
+            Project(2, vec![0, 3]),
+            SemiJoin(3, 2, vec![1], vec![0]),
 
             // semijoin Track and Album on AlbumId
-            Sort(2, vec![3]),
-            Sort(1, vec![0]),
-            SemiJoin(2,1),
+            Sort(2, vec![1]),
+            Project(1, vec![0, 3]),
+            SemiJoin(2, 1, vec![1], vec![0]),
 
             // join Artist and Album on ArtistId
             Sort(0, vec![0]),
-            Sort(1, vec![3]),
-            Join(0, 1),
-            // project Artist.Name and AlbumId
-            Sort(1, vec![1, 2, 3]),
-            Project(1),
+            Sort(1, vec![1]),
+            Join(0, 1, vec![0], vec![1]),
 
-            // join Artist*Album and Track on AlbumId
-            Sort(1, vec![2]),
-            Sort(2, vec![3]),
-            Join(1, 2),
-            // project Artist.Name and TrackId
-            Sort(2, vec![0,1,3]),
-            Project(2),
+            // join AlbumId/Name and Track on AlbumId
+            Project(1, vec![3, 1, 2]),
+            Join(1, 2, vec![0], vec![1]),
 
-            // join Artist*Album*Track and PlaylistTrack on TrackId
-            Sort(2, vec![2]),
-            Sort(3, vec![1]),
-            Join(2, 3),
-            // project Artist.Name and PlaylistId
-            Sort(3, vec![0,1,3]),
-            Project(3),
+            // join TrackId/Name and PlaylistTrack on TrackId
+            Project(2, vec![3, 1, 2]),
+            Join(2, 3, vec![0], vec![1]),
 
-            // join Artist*Album*Track*PlaylistTrack and Playlist on PlaylistId
-            Sort(3, vec![2]),
-            Sort(4, vec![0]),
-            Join(3, 4),
-            // project Artist.Name and Name
-            Sort(4, vec![0,1,4]),
-            Project(4),
+            // join PlaylistId/Name and Playlist on PlaylistId
+            Project(3, vec![3, 1, 2]),
+            Join(3, 4, vec![0], vec![0]),
 
-            // join Artist*Album*Track*PlaylistTrack*Playlist and Query on Name
-            Sort(4, vec![2]),
-            Sort(5, vec![0]),
-            Join(4, 5),
-            // project Artist.Name (without hash)
-            Sort(5, vec![1]),
-            Project(5),
+            // join Name/Name and Query on Name
+            Project(4, vec![4, 5, 1, 2]),
+            Join(4, 5, vec![0], vec![0]),
+
+            // project Name without hash
+            Project(5, vec![3]),
             ],
 
             result: 5
         };
-        plan.execute(chunks)
+        plan.execute(&strings, chunks)
     }
 
     #[test]

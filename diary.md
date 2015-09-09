@@ -387,7 +387,7 @@ Where we used to have a single comparison, we now have a bunch of array reads an
 
 ## Plans
 
-The compiler is going to output query plans, which for Imp are just a list of actions to run.
+The compiler is going to output query plans, which in Imp are just a list of actions to run.
 
 ``` rust
 #[derive(Clone, Debug)]

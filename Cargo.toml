@@ -11,4 +11,5 @@ time = "*"
 debug = true
 
 [profile.bench]
-debug = true
+debug = false
+debug-assertions = false

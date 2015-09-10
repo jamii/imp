@@ -1,5 +1,3 @@
-use ::std::mem::size_of;
-use ::std::slice::bytes::copy_memory;
 use ::std::cmp::{Ordering, min};
 
 #[derive(Clone, Debug)]
@@ -43,6 +41,14 @@ pub fn compare_by_key(left_words: &[u64], right_words: &[u64], left_key: &[usize
     return Ordering::Equal;
 }
 
+const PIECE_SIZE: usize = 8;
+const NUM_PIECES: usize = 8;
+const MAX_PIECE: usize = 256;
+
+pub fn get_piece(word: u64, ix: usize) -> usize {
+    ((word >> ((ix * PIECE_SIZE) as u64)) & 0b1111_1111) as usize
+}
+
 impl Chunk {
     pub fn empty() -> Chunk {
         Chunk{ data: vec![], row_width: 1 }
@@ -57,30 +63,28 @@ impl Chunk {
         let mut data = self.data.clone();
         let mut buffer = self.data.clone();
         for &word_ix in key.iter().rev() {
-            let mut counts = [[0; 256]; 8];
+            let mut counts = [[0; MAX_PIECE]; NUM_PIECES];
             for row_ix in (0..data.len()).step_by(row_width) {
                 let word = data[row_ix + word_ix];
-                let bytes = unsafe{ ::std::mem::transmute::<u64, [u8; 8]>(word) };
-                for byte_ix in (0..8) {
-                    counts[byte_ix][bytes[byte_ix] as usize] += 1;
+                for piece_ix in (0..NUM_PIECES) {
+                    counts[piece_ix][get_piece(word,piece_ix)] += 1;
                 }
             }
-            let mut buckets = [[0; 256]; 8];
-            for byte_ix in (0..8) {
-                for byte in (0..255) {
-                    buckets[byte_ix][byte+1] = buckets[byte_ix][byte] + (row_width * counts[byte_ix][byte]);
+            let mut buckets = [[0; MAX_PIECE]; NUM_PIECES];
+            for piece_ix in (0..NUM_PIECES) {
+                for piece in (0..255) {
+                    buckets[piece_ix][piece+1] = buckets[piece_ix][piece] + (row_width * counts[piece_ix][piece]);
                 }
             }
-            for byte_ix in (0..8) {
+            for piece_ix in (0..NUM_PIECES) {
                 for row_ix in (0..data.len()).step_by(row_width) {
                     let word = data[row_ix + word_ix];
-                    let bytes = unsafe{ ::std::mem::transmute::<u64, [u8; 8]>(word) };
-                    let byte = bytes[byte_ix] as usize;
-                    let bucket = buckets[byte_ix][byte];
+                    let piece = get_piece(word, piece_ix);
+                    let bucket = buckets[piece_ix][piece];
                     for ix in (0..row_width) {
                         buffer[bucket + ix] = data[row_ix + ix];
                     }
-                    buckets[byte_ix][byte] += row_width;
+                    buckets[piece_ix][piece] += row_width;
                 }
                 ::std::mem::swap(&mut buffer, &mut data);
             }

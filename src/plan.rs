@@ -117,7 +117,7 @@ mod tests{
     }
 
     fn chinook_metal(mut strings: Vec<String>, mut chunks: Vec<Chunk>) -> Chunk {
-        use query::Action::*;
+        use super::Action::*;
         let metal = "Heavy Metal Classic".to_owned();
         let query = Chunk{ data: vec![hash(&metal), strings.len() as u64], row_width: 2};
         strings.push(metal);

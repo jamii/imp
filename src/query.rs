@@ -157,10 +157,10 @@ impl Query {
 mod tests{
     use super::{Clause, Query};
     use chunk::Chunk;
-    use plan::hash;
+    use plan::{hash, Plan};
     use test::{Bencher, black_box};
 
-    fn plan_metal(mut strings: Vec<String>, mut chunks: Vec<Chunk>) -> Chunk {
+    fn plan_metal() -> Plan {
         let artist_name = 0;
         let artist_id = 1;
         let album_id = 2;
@@ -196,18 +196,18 @@ mod tests{
             ],
             select: vec![artist_name],
         };
-        let plan = query.plan();
+        query.plan()
+    }
+
+    #[test]
+    fn test_metal_plan() {
+        let plan = plan_metal();
+        let (mut strings, mut chunks) = ::plan::tests::chinook();
         let metal = "Heavy Metal Classic".to_owned();
         let query = Chunk{ data: vec![hash(&metal), strings.len() as u64], row_width: 2};
         strings.push(metal);
         chunks.push(query);
-        plan.execute(&strings, chunks)
-    }
-
-    #[test]
-    fn test_plan_metal() {
-        let (strings, chunks) = ::plan::tests::chinook();
-        let results = plan_metal(strings.clone(), chunks);
+        let results = plan.execute(&strings, chunks);
         assert_eq!(
             results.data.iter().map(|ix| &strings[*ix as usize]).collect::<Vec<_>>(),
             vec!["AC/DC", "Accept", "Black Sabbath", "Metallica", "Iron Maiden", "Mot\u{f6}rhead", "M\u{f6}tley Cr\u{fc}e", "Ozzy Osbourne", "Scorpions"]
@@ -215,10 +215,15 @@ mod tests{
     }
 
     #[bench]
-    pub fn bench_plan_metal(bencher: &mut Bencher) {
-        let (strings, chunks) = ::plan::tests::chinook();
+    pub fn bench_metal_plan(bencher: &mut Bencher) {
+        let plan = plan_metal();
+        let (mut strings, mut chunks) = ::plan::tests::chinook();
+        let metal = "Heavy Metal Classic".to_owned();
+        let query = Chunk{ data: vec![hash(&metal), strings.len() as u64], row_width: 2};
+        strings.push(metal);
+        chunks.push(query);
         bencher.iter(|| {
-            black_box(plan_metal(strings.clone(), chunks.clone()));
+            black_box(plan.execute(&strings, chunks.clone()));
         });
     }
 }

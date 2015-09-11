@@ -22,6 +22,7 @@ macro_rules! time {
 mod chunk;
 mod relation;
 mod plan;
+mod query;
 
 fn main() {
 }

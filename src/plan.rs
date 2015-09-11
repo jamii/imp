@@ -1,5 +1,13 @@
 use chunk::*;
 
+use std::hash::{Hash, Hasher, SipHasher};
+
+pub fn hash<T: Hash>(t: &T) -> u64 {
+    let mut s = SipHasher::new();
+    t.hash(&mut s);
+    s.finish()
+}
+
 #[derive(Clone, Debug)]
 pub enum Action {
     Sort(usize, Vec<usize>),
@@ -58,7 +66,7 @@ impl Plan {
 }
 
 #[cfg(test)]
-mod tests{
+pub mod tests{
     use super::*;
     use chunk::Chunk;
     use relation::Kind;
@@ -66,13 +74,6 @@ mod tests{
     use test::{Bencher, black_box};
     use std::io::prelude::*;
     use std::fs::File;
-    use std::hash::{Hash, Hasher, SipHasher};
-
-    fn hash<T: Hash>(t: &T) -> u64 {
-        let mut s = SipHasher::new();
-        t.hash(&mut s);
-        s.finish()
-    }
 
     fn from_tsv(filename: &'static str, kinds: Vec<Kind>, strings: &mut Vec<String>) -> Chunk {
         let mut tsv = String::new();
@@ -98,7 +99,7 @@ mod tests{
         Chunk{data: data, row_width: row_width}
     }
 
-    fn chinook() -> (Vec<String>, Vec<Chunk>) {
+    pub fn chinook() -> (Vec<String>, Vec<Chunk>) {
         use relation::Kind::*;
         let mut strings = vec![];
         let chunks = vec![

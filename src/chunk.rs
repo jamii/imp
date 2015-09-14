@@ -1,6 +1,6 @@
 use ::std::cmp::{Ordering, min};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Chunk {
     pub data: Vec<u64>,
     pub row_width: usize,

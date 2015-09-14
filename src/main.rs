@@ -23,6 +23,7 @@ mod chunk;
 mod relation;
 mod plan;
 mod query;
+mod flow;
 
 fn main() {
 }

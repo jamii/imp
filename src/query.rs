@@ -2,6 +2,7 @@ use relation::*;
 use plan::{hash, Action, Plan};
 
 use std::collections::HashSet;
+use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
 pub struct Query {
@@ -25,6 +26,7 @@ pub struct State {
 
 #[derive(Clone, Debug)]
 pub struct Chunk {
+    pub kinds: Vec<Kind>,
     pub bindings: Vec<Option<VariableId>>,
 }
 
@@ -43,14 +45,34 @@ impl Chunk {
         self.bindings.iter().flat_map(|binding| binding.iter()).cloned().collect()
     }
 
-    fn key(&self, vars: &Vec<VariableId>) -> Vec<usize> {
+    fn project_key(&self, vars: &Vec<VariableId>) -> (Vec<usize>, Vec<Kind>, Vec<Option<VariableId>>) {
+        let mut key = vec![];
+        let mut kinds = vec![];
+        let mut bindings = vec![];
+        for &var in vars.iter() {
+            match self.bindings.iter().position(|&binding| binding == Some(var)) {
+                Some(ix) => {
+                    let column: usize = self.kinds.iter().take(ix).map(|kind| kind.width()).sum();
+                    for offset in 0..self.kinds[ix].width() {
+                        key.push(column + offset);
+                    }
+                    kinds.push(self.kinds[ix]);
+                    bindings.push(Some(var));
+                },
+                None => (), // this var isn't here to project
+            }
+        }
+        (key, kinds, bindings)
+    }
+
+    fn join_key(&self, vars: &Vec<VariableId>) -> Vec<usize> {
         let mut key = vec![];
         for &var in vars.iter() {
-            let column = self.bindings.iter().position(|&binding| {
-                binding == Some(var)
-            });
-            match column {
-                Some(ix) => key.push(ix),
+            match self.bindings.iter().position(|&binding| binding == Some(var)) {
+                Some(ix) => {
+                    let column = self.kinds.iter().take(ix).map(|kind| kind.width()).sum();
+                    key.push(column);
+                },
                 None => (), // this var isn't here to project
             }
         }
@@ -83,27 +105,30 @@ impl State {
     }
 
     pub fn project(&mut self, chunk_ix: usize, vars: &Vec<VariableId>) {
-        let key = self.chunks[chunk_ix].key(vars);
-        let bindings = key.iter().map(|&ix| self.chunks[chunk_ix].bindings[ix]).collect();
+        let (key, kinds, bindings) = self.chunks[chunk_ix].project_key(vars);
         self.actions.push(Action::Project(chunk_ix, key));
-        self.chunks[chunk_ix] = Chunk{bindings: bindings};
+        self.chunks[chunk_ix] = Chunk{kinds: kinds, bindings: bindings};
     }
 
     pub fn semijoin(&mut self, left_chunk_ix: usize, right_chunk_ix: usize, vars: &Vec<VariableId>) {
-        let left_key = self.chunks[left_chunk_ix].key(vars);
-        let right_key = self.chunks[right_chunk_ix].key(vars);
+        let left_key = self.chunks[left_chunk_ix].join_key(vars);
+        let right_key = self.chunks[right_chunk_ix].join_key(vars);
         assert_eq!(left_key.len(), right_key.len());
         self.actions.push(Action::SemiJoin(left_chunk_ix, right_chunk_ix, left_key, right_key));
     }
 
     pub fn join(&mut self, left_chunk_ix: usize, right_chunk_ix: usize, vars: &Vec<VariableId>) {
-        let left_key = self.chunks[left_chunk_ix].key(vars);
-        let right_key = self.chunks[right_chunk_ix].key(vars);
+        let left_key = self.chunks[left_chunk_ix].join_key(vars);
+        let right_key = self.chunks[right_chunk_ix].join_key(vars);
         assert_eq!(left_key.len(), right_key.len());
         self.actions.push(Action::Join(left_chunk_ix, right_chunk_ix, left_key, right_key));
+        let mut left_kinds = ::std::mem::replace(&mut self.chunks[left_chunk_ix].kinds, vec![]);
+        let right_kinds = ::std::mem::replace(&mut self.chunks[right_chunk_ix].kinds, vec![]);
+        left_kinds.extend(right_kinds);
         let mut left_bindings = ::std::mem::replace(&mut self.chunks[left_chunk_ix].bindings, vec![]);
         let right_bindings = ::std::mem::replace(&mut self.chunks[right_chunk_ix].bindings, vec![]);
         left_bindings.extend(right_bindings);
+        self.chunks[right_chunk_ix].kinds = left_kinds;
         self.chunks[right_chunk_ix].bindings = left_bindings;
     }
 
@@ -139,11 +164,14 @@ impl State {
 }
 
 impl Query {
-    pub fn plan(&self) -> Plan {
+    pub fn plan(&self, schema: HashMap<ViewId, Vec<Kind>>) -> Plan {
         let mut state = State{
             actions: vec![],
             chunks: self.clauses.iter().map(|clause| {
-                Chunk{bindings: clause.bindings.clone()}
+                Chunk{
+                    kinds: schema[&clause.view].clone(),
+                    bindings: clause.bindings.clone(),
+                }
             }).collect(),
             to_join: (0..self.clauses.len()).collect(),
             to_select: self.select.clone(),
@@ -161,25 +189,37 @@ mod tests{
     use test::{Bencher, black_box};
 
     fn plan_metal() -> Plan {
+        use relation::Kind::*;
+
+        // variable ids
         let artist_name = 0;
         let artist_id = 1;
         let album_id = 2;
         let track_id = 3;
         let playlist_id = 4;
-        let playlist_hash = 5;
+        let playlist_name = 5;
+
+        let schema = vec![
+            (0, vec![Id, Text]),
+            (1, vec![Id, Text, Id]),
+            (2, vec![Id, Text, Id]),
+            (3, vec![Id, Id]),
+            (4, vec![Id, Text]),
+            (5, vec![Text]),
+        ].into_iter().collect();
         let query = Query{
             clauses: vec![
             Clause{
                 view: 0,
-                bindings: vec![Some(artist_id), None, Some(artist_name)],
+                bindings: vec![Some(artist_id), Some(artist_name)],
             },
             Clause{
                 view: 1,
-                bindings: vec![Some(album_id), None, None, Some(artist_id)],
+                bindings: vec![Some(album_id), None, Some(artist_id)],
             },
             Clause{
                 view: 2,
-                bindings: vec![Some(track_id), None, None, Some(album_id)],
+                bindings: vec![Some(track_id), None, Some(album_id)],
             },
             Clause{
                 view: 3,
@@ -187,16 +227,16 @@ mod tests{
             },
             Clause{
                 view: 4,
-                bindings: vec![Some(playlist_id), Some(playlist_hash), None],
+                bindings: vec![Some(playlist_id), Some(playlist_name)],
             },
             Clause{
                 view: 5,
-                bindings: vec![Some(playlist_hash), None]
+                bindings: vec![Some(playlist_name)]
             }
             ],
             select: vec![artist_name],
         };
-        query.plan()
+        query.plan(schema)
     }
 
     #[test]
@@ -208,8 +248,8 @@ mod tests{
         strings.push(metal);
         chunks.push(query);
         let results = plan.execute(&strings, chunks);
-        assert_eq!(
-            results.data.iter().map(|ix| &strings[*ix as usize]).collect::<Vec<_>>(),
+        assert_set_eq!(
+            results.data.chunks(2).map(|chunk| &strings[chunk[1] as usize][..]),
             vec!["AC/DC", "Accept", "Black Sabbath", "Metallica", "Iron Maiden", "Mot\u{f6}rhead", "M\u{f6}tley Cr\u{fc}e", "Ozzy Osbourne", "Scorpions"]
             );
     }

@@ -19,6 +19,15 @@ macro_rules! time {
     }};
 }
 
+macro_rules! assert_set_eq {
+    ($left:expr, $right:expr) => {
+        assert_eq!(
+            $left.collect::<::std::collections::HashSet<_>>(),
+            $right.into_iter().collect::<::std::collections::HashSet<_>>()
+            )
+    }
+}
+
 mod chunk;
 mod relation;
 mod plan;

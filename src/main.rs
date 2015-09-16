@@ -8,6 +8,7 @@
 extern crate rand;
 extern crate test;
 extern crate time;
+extern crate regex;
 
 macro_rules! time {
     ($name:expr, $expr:expr) => {{
@@ -33,6 +34,7 @@ mod relation;
 mod plan;
 mod query;
 mod flow;
+mod program;
 
 fn main() {
 }

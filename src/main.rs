@@ -29,12 +29,8 @@ macro_rules! assert_set_eq {
     }
 }
 
-mod chunk;
-mod relation;
-mod plan;
-mod query;
-mod flow;
-mod program;
+mod runtime;
+mod bootstrap;
 
 fn main() {
 }

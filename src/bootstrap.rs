@@ -1,6 +1,4 @@
-use relation::*;
-use plan::{hash, Action, Plan};
-
+use runtime::{self, hash, Id, ViewId, VariableId, Kind};
 use std::collections::HashSet;
 use std::collections::HashMap;
 
@@ -18,7 +16,7 @@ pub struct Clause {
 
 #[derive(Clone, Debug)]
 pub struct State {
-    pub actions: Vec<Action>,
+    pub actions: Vec<runtime::Action>,
     pub chunks: Vec<Chunk>,
     pub to_join: Vec<usize>,
     pub to_select: Vec<VariableId>,
@@ -106,7 +104,7 @@ impl State {
 
     pub fn project(&mut self, chunk_ix: usize, vars: &Vec<VariableId>) {
         let (key, kinds, bindings) = self.chunks[chunk_ix].project_key(vars);
-        self.actions.push(Action::Project(chunk_ix, key));
+        self.actions.push(runtime::Action::Project(chunk_ix, key));
         self.chunks[chunk_ix] = Chunk{kinds: kinds, bindings: bindings};
     }
 
@@ -114,14 +112,14 @@ impl State {
         let left_key = self.chunks[left_chunk_ix].join_key(vars);
         let right_key = self.chunks[right_chunk_ix].join_key(vars);
         assert_eq!(left_key.len(), right_key.len());
-        self.actions.push(Action::SemiJoin(left_chunk_ix, right_chunk_ix, left_key, right_key));
+        self.actions.push(runtime::Action::SemiJoin(left_chunk_ix, right_chunk_ix, left_key, right_key));
     }
 
     pub fn join(&mut self, left_chunk_ix: usize, right_chunk_ix: usize, vars: &Vec<VariableId>) {
         let left_key = self.chunks[left_chunk_ix].join_key(vars);
         let right_key = self.chunks[right_chunk_ix].join_key(vars);
         assert_eq!(left_key.len(), right_key.len());
-        self.actions.push(Action::Join(left_chunk_ix, right_chunk_ix, left_key, right_key));
+        self.actions.push(runtime::Action::Join(left_chunk_ix, right_chunk_ix, left_key, right_key));
         let mut left_kinds = ::std::mem::replace(&mut self.chunks[left_chunk_ix].kinds, vec![]);
         let right_kinds = ::std::mem::replace(&mut self.chunks[right_chunk_ix].kinds, vec![]);
         left_kinds.extend(right_kinds);
@@ -132,7 +130,7 @@ impl State {
         self.chunks[right_chunk_ix].bindings = left_bindings;
     }
 
-    pub fn plan(&mut self) -> usize {
+    pub fn compile(&mut self) -> usize {
         let to_select = self.to_select.clone();
         if self.to_join.len() == 2 {
             let left_ix = self.to_join[0];
@@ -155,7 +153,7 @@ impl State {
             self.semijoin(ear_ix, parent_ix, &join_vars);
             self.to_join.retain(|&ix| ix != ear_ix);
             self.to_select = ordered_union(&join_vars, &to_select);
-            let result_ix = self.plan();
+            let result_ix = self.compile();
             self.join(ear_ix, result_ix, &join_vars);
             self.project(result_ix, &to_select);
             result_ix
@@ -164,32 +162,112 @@ impl State {
 }
 
 impl Query {
-    pub fn plan(&self, schema: HashMap<ViewId, Vec<Kind>>) -> Plan {
+    pub fn compile(&self, program: &Program) -> runtime::Query {
+        let upstream = self.clauses.iter().map(|clause| {
+            program.ids.iter().position(|&id| id == clause.view).unwrap()
+        }).collect();
         let mut state = State{
             actions: vec![],
             chunks: self.clauses.iter().map(|clause| {
+                let ix = program.ids.iter().position(|&id| id == clause.view).unwrap();
                 Chunk{
-                    kinds: schema[&clause.view].clone(),
+                    kinds: program.schemas[ix].clone(),
                     bindings: clause.bindings.clone(),
                 }
             }).collect(),
             to_join: (0..self.clauses.len()).collect(),
             to_select: self.select.clone(),
         };
-        let result = state.plan();
-        Plan{actions: state.actions, result: result}
+        let result = state.compile();
+        runtime::Query{upstream: upstream, actions: state.actions, result: result}
     }
 }
 
-#[cfg(test)]
-mod tests{
-    use super::{Clause, Query};
-    use chunk::Chunk;
-    use plan::{hash, Plan};
-    use test::{Bencher, black_box};
+pub struct Program{
+    pub ids: Vec<ViewId>,
+    pub schemas: Vec<Vec<Kind>>,
+    pub views: Vec<View>,
+}
 
-    fn plan_metal() -> Plan {
-        use relation::Kind::*;
+pub enum View {
+    Input,
+    Query(Query),
+}
+
+// fn parse_clause(text: &str) -> (ViewId, Vec<Option<VariableId>>, Vec<Option<Kind>>) {
+//     let var_re = Regex::new("\?[:alpha:]*")
+//     let kind_re = Regex::new(":[:alpha:]*")
+//     let bindings = text.matches(var_re).map(|var_text| {
+//         match var_text {
+//             "_" => None,
+//             _ => Some(hash(var_text.replace(kind_re, "")))
+//         }
+//     }).collect();
+//     let kinds = text.matches(var_re).map(|var_text| {
+//         var_text.find(kind_re).map(|kind_text| {
+//             match kind_text[1..] {
+//                     "id" => Kind::Id,
+//                     "text" => Kind::Text,
+//                     "number" => Kind::Number,
+//                     other => panic!("Unknown kind: {:?}", other),
+//                 }
+//             })
+//     }).collect();
+//     let view_id = hash(text.replace(var_re, "?"));
+//     (view_id, bindings, kinds)
+// }
+
+// fn parse_view(text: &str) -> View {
+//     let mut lines = text.split("\n").collect::<Vec<_>>;
+//     let (view_id, bindings, kinds) = parse_clause(lines[0]);
+//     let select = bindings.into_iter().map(|binding| binding.unwrap()).collect();
+//     let schema = kinds.into_iter().map(|kind| kind.unwrap());
+//     let node = match lines[1].char_at(0) {
+//         "=" => {
+//             // TODO handle inputs
+//         }
+//         "+" => {
+//             // TODO handle query
+//             let clauses = lines[2..].iter().map(|line| {
+//                 let (view_id, bindings, kinds) = parse_clause(line);
+//                 for kind in kinds.into_iter() {
+//                     assert_eq!(kind, None);
+//                 }
+//                 Clause{view: view_id, bindings: bindings}
+//             }).collect();
+//             Node::Query(Query{
+//                 clauses: clauses,
+//                 select: select,
+//             })
+//         }
+//     };
+//     View{
+//         id: view_id,
+//         schema: schema,
+//         node: node,
+//     }
+// }
+
+// fn parse(text: &str) -> Program {
+//     let mut errors = vec![];
+//     let views = text.split("\n\n").map(|view_text| parse_view(view_text)).collect();
+//     Program{views: view}
+// }
+
+// // TODO
+// // check schemas match bindings
+// // check types
+// // check selects are bound
+
+#[cfg(test)]
+pub mod tests{
+    use super::*;
+    use runtime::{self, hash};
+    use test::{Bencher, black_box};
+    use std::rc::Rc;
+
+    fn compile_metal() -> runtime::Query {
+        use runtime::Kind::*;
 
         // variable ids
         let artist_name = 0;
@@ -199,14 +277,16 @@ mod tests{
         let playlist_id = 4;
         let playlist_name = 5;
 
-        let schema = vec![
-            (0, vec![Id, Text]),
-            (1, vec![Id, Text, Id]),
-            (2, vec![Id, Text, Id]),
-            (3, vec![Id, Id]),
-            (4, vec![Id, Text]),
-            (5, vec![Text]),
-        ].into_iter().collect();
+
+        let ids = vec![0,1,2,3,4,5];
+        let schemas = vec![
+            vec![Id, Text],
+            vec![Id, Text, Id],
+            vec![Id, Text, Id],
+            vec![Id, Id],
+            vec![Id, Text],
+            vec![Text],
+        ];
         let query = Query{
             clauses: vec![
             Clause{
@@ -236,18 +316,19 @@ mod tests{
             ],
             select: vec![artist_name],
         };
-        query.plan(schema)
+        let program = Program{ids: ids, schemas: schemas, views: vec![]};
+        query.compile(&program)
     }
 
     #[test]
-    fn test_metal_plan() {
-        let plan = plan_metal();
-        let (mut strings, mut chunks) = ::plan::tests::chinook();
+    fn test_metal_compile() {
+        let query = compile_metal();
+        let (mut strings, mut states) = runtime::tests::chinook();
         let metal = "Heavy Metal Classic".to_owned();
-        let query = Chunk{ data: vec![hash(&metal), strings.len() as u64], row_width: 2};
+        let query_state = runtime::Chunk{ data: vec![hash(&metal), strings.len() as u64], row_width: 2};
         strings.push(metal);
-        chunks.push(query);
-        let results = plan.execute(&strings, chunks);
+        states.push(Rc::new(query_state));
+        let results = query.execute(&strings, &states[..]);
         assert_set_eq!(
             results.data.chunks(2).map(|chunk| &strings[chunk[1] as usize][..]),
             vec!["AC/DC", "Accept", "Black Sabbath", "Metallica", "Iron Maiden", "Mot\u{f6}rhead", "M\u{f6}tley Cr\u{fc}e", "Ozzy Osbourne", "Scorpions"]
@@ -255,15 +336,15 @@ mod tests{
     }
 
     #[bench]
-    pub fn bench_metal_plan(bencher: &mut Bencher) {
-        let plan = plan_metal();
-        let (mut strings, mut chunks) = ::plan::tests::chinook();
+    pub fn bench_metal_compile(bencher: &mut Bencher) {
+        let query = compile_metal();
+        let (mut strings, mut states) = runtime::tests::chinook();
         let metal = "Heavy Metal Classic".to_owned();
-        let query = Chunk{ data: vec![hash(&metal), strings.len() as u64], row_width: 2};
+        let query_state = runtime::Chunk{ data: vec![hash(&metal), strings.len() as u64], row_width: 2};
         strings.push(metal);
-        chunks.push(query);
+        states.push(Rc::new(query_state));
         bencher.iter(|| {
-            black_box(plan.execute(&strings, chunks.clone()));
+            black_box(query.execute(&strings, &states[..]));
         });
     }
 }

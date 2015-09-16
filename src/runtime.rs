@@ -1,4 +1,7 @@
-use ::std::cmp::{Ordering, min};
+use std::cmp::{Ordering, min};
+use std::hash;
+use std::rc::Rc;
+use std::mem::size_of;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Chunk {
@@ -252,14 +255,175 @@ impl<'a> Iterator for Diffs<'a> {
     }
 }
 
+pub type Id = u64;
+pub type Hash = u64;
+pub type Number = f64;
+pub type Text = &'static String;
+
+// these just make type signatures easier to read
+pub type ColumnId = usize;
+pub type FieldId = Id;
+pub type ClauseId = Id;
+pub type ViewId = Id;
+pub type VariableId = Id;
+
+#[derive(Copy, Clone, Debug)]
+pub enum Kind {
+    Id,
+    Number,
+    Text,
+}
+
+#[derive(Clone, Debug)]
+pub enum Value {
+    Id(Id),
+    Number(Number),
+    Text(Hash, Text),
+}
+
+impl Kind {
+    pub fn width(&self) -> usize {
+        let bytes = match *self {
+            Kind::Id => size_of::<Id>(),
+            Kind::Number => size_of::<Number>(),
+            Kind::Text => size_of::<(Hash, Text)>(),
+        };
+        bytes / 8
+    }
+}
+
+pub fn hash<T: hash::Hash>(t: &T) -> u64 {
+    let mut s = hash::SipHasher::new();
+    hash::Hash::hash(t, &mut s);
+    hash::Hasher::finish(&s)
+}
+
+#[derive(Clone, Debug)]
+pub enum Action {
+    Sort(usize, Vec<usize>),
+    Project(usize, Vec<usize>),
+    SemiJoin(usize, usize, Vec<usize>, Vec<usize>),
+    Join(usize, usize, Vec<usize>, Vec<usize>),
+    DebugChunk(usize),
+    DebugText(usize, usize),
+}
+
+#[derive(Clone, Debug)]
+pub struct Query {
+    pub upstream: Vec<usize>,
+    pub actions: Vec<Action>,
+    pub result: usize,
+}
+
+impl Query {
+    pub fn execute(&self, strings: &Vec<String>, mut states: &[Rc<Chunk>]) -> Chunk {
+        // TODO use COW chunks
+        let mut chunks = self.upstream.iter().map(|&ix| (*states[ix]).clone()).collect::<Vec<_>>();
+        for action in self.actions.iter() {
+            // println!("");
+            // println!("{:?}", chunks.iter().map(|chunk| chunk.len()).collect::<Vec<_>>());
+            // println!("{:?}", action);
+            // time!(format!("{:?}", action), {
+            match action {
+                &Action::Sort(ix, ref key) => {
+                    let chunk = chunks[ix].sort(&key[..]);
+                    chunks[ix] = chunk;
+                },
+                &Action::Project(ix, ref key) => {
+                    let chunk = chunks[ix].project(&key[..]);
+                    chunks[ix] = chunk;
+                }
+                &Action::SemiJoin(left_ix, right_ix, ref left_key, ref right_key) => {
+                    let (left_chunk, right_chunk) = chunks[left_ix].semijoin(&chunks[right_ix], &left_key[..], &right_key[..]);
+                    chunks[left_ix] = left_chunk;
+                    chunks[right_ix] = right_chunk;
+                },
+                &Action::Join(left_ix, right_ix, ref left_key, ref right_key) => {
+                    let chunk = chunks[left_ix].join(&chunks[right_ix], &left_key[..], &right_key[..]);
+                    chunks[left_ix] = Chunk::empty();
+                    chunks[right_ix] = chunk;
+                }
+                &Action::DebugChunk(ix) => {
+                    let chunk = &chunks[ix];
+                    println!("{:?}", chunk.data.chunks(chunk.row_width).collect::<Vec<_>>());
+                }
+                &Action::DebugText(ix, field) => {
+                    let chunk = &chunks[ix];
+                    println!("{:?}", chunk.data.chunks(chunk.row_width).map(|row| &strings[row[field] as usize]).collect::<Vec<_>>());
+                }
+            }
+            // });
+        }
+        ::std::mem::replace(&mut chunks[self.result], Chunk::empty())
+    }
+}
+
+pub struct Flow {
+    pub ids: Vec<ViewId>,
+    pub fields: Vec<Vec<FieldId>>,
+    pub kinds: Vec<Vec<Kind>>,
+    pub states: Vec<Rc<Chunk>>,
+    pub views: Vec<View>,
+    pub downstreams: Vec<Vec<usize>>,
+    pub dirty: Vec<bool>, // should be BitSet but that has been removed from std :(
+
+    pub strings: Vec<String>, // to be replaced by gc
+}
+
+pub enum View {
+    Input,
+    Query(Query),
+}
+
+impl Flow {
+    pub fn get_state(&self, id: ViewId) -> &Chunk {
+        let &Flow{ref ids, ref states, ..} = self;
+        let ix = ids.iter().position(|&other_id| other_id == id).unwrap();
+        &states[ix]
+    }
+
+    // TODO require Relation?
+    pub fn set_state(&mut self, id: ViewId, state: Chunk) {
+        let &mut Flow{ref ids, ref mut states, ref downstreams, ref mut dirty, ..} = self;
+        let ix = ids.iter().position(|&other_id| other_id == id).unwrap();
+        states[ix] = Rc::new(state);
+        for &downstream_ix in downstreams[ix].iter() {
+            dirty[downstream_ix] = true;
+        }
+    }
+
+    pub fn clean(&mut self) {
+        let &mut Flow{ref mut states, ref views, ref downstreams, ref mut dirty, ref strings, ..} = self;
+        while let Some(ix) = dirty.iter().position(|&is_dirty| is_dirty) {
+            match views[ix] {
+                View::Input => panic!("How did an input get dirtied?"),
+                View::Query(ref query) => {
+                    let new_chunk = query.execute(strings, &states[..]);
+                    // TODO using != assumes both will have the same sort order. is that safe?
+                    if *states[ix] != new_chunk {
+                        states[ix] = Rc::new(new_chunk);
+                        for &downstream_ix in downstreams[ix].iter() {
+                            dirty[downstream_ix] = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 #[cfg(test)]
-mod tests{
+pub mod tests{
     use super::*;
 
     use std::cmp::Ordering;
     use rand::{Rng, SeedableRng, StdRng};
     use test::{Bencher, black_box};
     use std::collections::HashSet;
+    use std::io::prelude::*;
+    use std::fs::File;
+    use std::rc::Rc;
 
     pub fn ids(seed: usize, n: usize) -> Vec<u64> {
         let mut rng = StdRng::new().unwrap();
@@ -440,5 +604,124 @@ mod tests{
             let result_chunk = chunk_a.join(&chunk_b, key_a, key_b);
             black_box(result_chunk);
         })
+    }
+
+       fn from_tsv(filename: &'static str, kinds: Vec<Kind>, strings: &mut Vec<String>) -> Chunk {
+        let mut tsv = String::new();
+        File::open(filename).unwrap().read_to_string(&mut tsv);
+        let mut lines = tsv.lines();
+        lines.next(); // drop header
+        let mut data = vec![];
+        for line in lines {
+            for (kind, field) in kinds.iter().zip(line.split("\t")) {
+                match *kind {
+                    Kind::Id => data.push(field.parse::<u64>().unwrap()),
+                    Kind::Number => data.push(field.parse::<f64>().unwrap() as u64),
+                    Kind::Text => {
+                        let field = field.to_owned();
+                        data.push(hash(&field));
+                        data.push(strings.len() as u64);
+                        strings.push(field);
+                    }
+                }
+            }
+        }
+        let row_width = kinds.iter().map(|kind| kind.width()).sum();
+        Chunk{data: data, row_width: row_width}
+    }
+
+    pub fn chinook() -> (Vec<String>, Vec<Rc<Chunk>>) {
+        use super::Kind::*;
+        let mut strings = vec![];
+        let states = vec![
+            Rc::new(from_tsv("data/Artist.csv", vec![Id, Text], &mut strings)),
+            Rc::new(from_tsv("data/Album.csv", vec![Id, Text, Id], &mut strings)),
+            Rc::new(from_tsv("data/Track.csv", vec![Id, Text, Id, Id, Id, Text, Number, Number, Number], &mut strings)),
+            Rc::new(from_tsv("data/PlaylistTrack.csv", vec![Id, Id], &mut strings)),
+            Rc::new(from_tsv("data/Playlist.csv", vec![Id, Text], &mut strings)),
+        ];
+        (strings, states)
+    }
+
+    #[test]
+    fn test_chinook() {
+        chinook();
+    }
+
+    fn chinook_metal(mut strings: Vec<String>, mut states: Vec<Rc<Chunk>>) -> Chunk {
+        use super::Action::*;
+        let metal = "Heavy Metal Classic".to_owned();
+        let query_state = Chunk{ data: vec![hash(&metal), strings.len() as u64], row_width: 2};
+        strings.push(metal);
+        states.push(Rc::new(query_state));
+        let query = Query{
+            upstream: vec![0,1,2,3,4,5],
+            actions: vec![
+            // semijoin Query and Playlist on Name
+            Sort(5, vec![0]),
+            Sort(4, vec![1]),
+            SemiJoin(5, 4, vec![0], vec![1]),
+
+            // semijoin Playlist and PlaylistTrack on PlaylistId
+            Sort(4, vec![0]),
+            Sort(3, vec![0]),
+            SemiJoin(4, 3, vec![0], vec![0]),
+
+            // semijoin PlaylistTrack and Track on TrackId
+            Sort(3, vec![1]),
+            Project(2, vec![0, 3]),
+            SemiJoin(3, 2, vec![1], vec![0]),
+
+            // semijoin Track and Album on AlbumId
+            Sort(2, vec![1]),
+            Project(1, vec![0, 3]),
+            SemiJoin(2, 1, vec![1], vec![0]),
+
+            // join Artist and Album on ArtistId
+            Sort(0, vec![0]),
+            Sort(1, vec![1]),
+            Join(0, 1, vec![0], vec![1]),
+
+            // join AlbumId/Name and Track on AlbumId
+            Project(1, vec![3, 1, 2]),
+            Join(1, 2, vec![0], vec![1]),
+
+            // join TrackId/Name and PlaylistTrack on TrackId
+            Project(2, vec![3, 1, 2]),
+            Join(2, 3, vec![0], vec![1]),
+
+            // join PlaylistId/Name and Playlist on PlaylistId
+            Project(3, vec![3, 1, 2]),
+            Join(3, 4, vec![0], vec![0]),
+
+            // join Name/Name and Query on Name
+            Project(4, vec![4, 5, 1, 2]),
+            Join(4, 5, vec![0], vec![0]),
+
+            // project Name without hash
+            Project(5, vec![3]),
+            ],
+
+            result: 5
+        };
+        query.execute(&strings, &states[..])
+    }
+
+    #[test]
+    fn test_chinook_metal() {
+        let (strings, states) = chinook();
+        let results = chinook_metal(strings.clone(), states);
+        assert_eq!(
+            results.data.iter().map(|ix| &strings[*ix as usize]).collect::<Vec<_>>(),
+            vec!["AC/DC", "Accept", "Black Sabbath", "Metallica", "Iron Maiden", "Mot\u{f6}rhead", "M\u{f6}tley Cr\u{fc}e", "Ozzy Osbourne", "Scorpions"]
+            );
+    }
+
+    #[bench]
+    pub fn bench_chinook_metal(bencher: &mut Bencher) {
+        let (strings, states) = chinook();
+        bencher.iter(|| {
+            black_box(chinook_metal(strings.clone(), states.clone()));
+        });
     }
 }

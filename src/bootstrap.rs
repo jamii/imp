@@ -1,13 +1,34 @@
-use runtime::{self, Kind};
+use runtime::{self, hash, Kind};
 use std::collections::HashSet;
 use std::collections::HashMap;
 use regex::Regex;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::io::prelude::*;
 use std::fs::File;
+use std::rc::Rc;
 
 pub type ViewId = String;
 pub type VariableId = String;
+
+#[derive(Clone, Debug)]
+pub struct Program {
+    pub ids: Vec<ViewId>,
+    pub schedule: Vec<usize>,
+    pub schemas: Vec<Vec<Kind>>,
+    pub views: Vec<View>,
+}
+
+#[derive(Clone, Debug)]
+pub enum View {
+    Input(Input),
+    Query(Query),
+}
+
+#[derive(Clone, Debug)]
+pub struct Input {
+    pub filename: String,
+    pub columns: Vec<usize>,
+}
 
 #[derive(Clone, Debug)]
 pub struct Query {
@@ -168,6 +189,33 @@ impl State {
     }
 }
 
+impl Input {
+    pub fn compile(&self, schema: &[Kind], strings: &mut Vec<String>) -> runtime::Chunk {
+        let mut tsv = String::new();
+        File::open(&self.filename).unwrap().read_to_string(&mut tsv).unwrap();
+        let mut lines = tsv.lines();
+        lines.next(); // drop header
+        let mut data = vec![];
+        for line in lines {
+            let fields = line.split("\t").collect::<Vec<_>>();
+            for (kind, column) in schema.iter().zip(self.columns.iter()) {
+                match *kind {
+                    Kind::Id => data.push(fields[*column].parse::<u64>().unwrap()),
+                    Kind::Number => data.push(fields[*column].parse::<f64>().unwrap() as u64),
+                    Kind::Text => {
+                        let field = fields[*column].to_owned();
+                        data.push(hash(&field));
+                        data.push(strings.len() as u64);
+                        strings.push(field);
+                    }
+                }
+            }
+        }
+        let row_width = schema.iter().map(|kind| kind.width()).sum();
+        runtime::Chunk{data: data, row_width: row_width}
+    }
+}
+
 impl Query {
     pub fn compile(&self, program: &Program) -> runtime::Query {
         let upstream = self.clauses.iter().map(|clause| {
@@ -189,20 +237,6 @@ impl Query {
         let result = state.compile();
         runtime::Query{upstream: upstream, actions: state.actions, result: result}
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct Program {
-    pub ids: Vec<ViewId>,
-    pub schedule: Vec<usize>,
-    pub schemas: Vec<Vec<Kind>>,
-    pub views: Vec<View>,
-}
-
-#[derive(Clone, Debug)]
-pub enum View {
-    Input,
-    Query(Query),
 }
 
 fn parse_clause(text: &str) -> (ViewId, Vec<Option<VariableId>>, Vec<Option<Kind>>) {
@@ -228,16 +262,65 @@ fn parse_clause(text: &str) -> (ViewId, Vec<Option<VariableId>>, Vec<Option<Kind
     (view_id, bindings, kinds)
 }
 
+impl Program {
+    pub fn compile(&self) -> runtime::Program {
+        let mut ids = vec![];
+        let mut schemas = vec![];
+        let mut states = vec![];
+        let mut views = vec![];
+        let mut downstreams = vec![];
+        let mut dirty = vec![];
+        let mut strings = vec![];
+
+        let mut scheduled_ixes = self.schedule.iter().zip(0..self.ids.len()).collect::<Vec<_>>();
+        scheduled_ixes.sort();
+        for (_, program_ix) in scheduled_ixes {
+            ids.push(hash(&self.ids[program_ix]));
+            let schema = self.schemas[program_ix].clone();
+            match self.views[program_ix] {
+                View::Input(ref input) => {
+                    let state = input.compile(&schema[..], &mut strings);
+                    states.push(Rc::new(state));
+                    views.push(runtime::View::Input);
+                    dirty.push(false);
+                }
+                View::Query(ref query) => {
+                    let runtime_query = query.compile(self);
+                    let row_width = schema.iter().map(|kind| kind.width()).sum();
+                    states.push(Rc::new(runtime::Chunk{data: vec![], row_width: row_width}));
+                    views.push(runtime::View::Query(runtime_query));
+                    dirty.push(true);
+                }
+            }
+            schemas.push(schema);
+            downstreams.push(vec![]);
+        }
+
+        for (schedule_ix, view) in views.iter().enumerate() {
+            if let runtime::View::Query(ref query) = *view {
+                for upstream_ix in query.upstream.iter() {
+                    downstreams[*upstream_ix].push(schedule_ix);
+                }
+            }
+        }
+
+        runtime::Program{ids: ids, schemas: schemas, states: states, views: views, downstreams: downstreams, dirty: dirty, strings: strings}
+    }
+}
+
 fn parse_view(text: &str) -> (ViewId, Vec<Kind>, View) {
     let lines = text.split("\n").collect::<Vec<_>>();
-    println!("{:?}", parse_clause(lines[0]));
     let (view_id, bindings, kinds) = parse_clause(lines[0]);
     let select = bindings.into_iter().map(|binding| binding.unwrap()).collect();
     let schema = kinds.into_iter().map(|kind| kind.unwrap()).collect();
     let view = match lines[1].chars().next().unwrap() {
         '=' => {
-            // TODO handle manual input or csv
-            View::Input
+            // TODO handle manual input
+            let mut words = lines[1].split(" ");
+            words.next().unwrap(); // drop "="
+            let filename = words.next().unwrap().to_owned();
+            let columns = words.map(|word| word.parse::<usize>().unwrap()).collect();
+            View::Input(Input{filename: filename, columns: columns})
         }
         '+' => {
             let clauses = lines[2..].iter().map(|line| {
@@ -247,10 +330,7 @@ fn parse_view(text: &str) -> (ViewId, Vec<Kind>, View) {
                 }
                 Clause{view: view_id, bindings: bindings}
             }).collect();
-            View::Query(Query{
-                clauses: clauses,
-                select: select,
-            })
+            View::Query(Query{clauses: clauses, select: select})
         }
         _ => panic!("What are this? {:?}", lines[1]),
     };
@@ -264,18 +344,23 @@ impl Program {
         let mut schemas = vec![];
         let mut views = vec![];
         for (ix, view_text) in text.split("\n\n").enumerate() {
-            let (id, schema, view) = parse_view(view_text);
-            ids.push(id);
-            schedule.push(ix); // ie just scheduling in textual order for now
-            schemas.push(schema);
-            views.push(view);
+            if view_text != "" {
+                let (id, schema, view) = parse_view(view_text);
+                ids.push(id);
+                schedule.push(ix); // ie just scheduling in textual order for now
+                schemas.push(schema);
+                views.push(view);
+            }
         }
         Program{ids: ids, schedule: schedule, schemas: schemas, views: views}
     }
 
-    pub fn load<P: AsRef<Path>>(filename: P) -> Program {
+    pub fn load<P: AsRef<Path>>(filenames: &[P]) -> Program {
         let mut text = String::new();
-        File::open(filename).unwrap().read_to_string(&mut text);
+        for filename in filenames.iter() {
+            File::open(filename).unwrap().read_to_string(&mut text);
+            text.push_str("\n\n");
+        }
         Program::parse(&text[..])
     }
 }
@@ -374,8 +459,9 @@ pub mod tests{
 
     #[test]
     pub fn test_metal_parse() {
-        let program = Program::load("data/metal.imp");
-        println!("{:?}", program);
+        let bootstrap_program = Program::load(&["data/chinook.imp", "data/metal.imp"]);
+        let runtime_program = bootstrap_program.compile();
+        println!("{:?}", runtime_program);
         assert!(false);
     }
 }

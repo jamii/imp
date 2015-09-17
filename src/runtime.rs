@@ -358,10 +358,11 @@ impl Query {
     }
 }
 
-pub struct Flow {
+#[derive(Clone, Debug)]
+pub struct Program {
     pub ids: Vec<ViewId>,
-    pub fields: Vec<Vec<FieldId>>,
-    pub kinds: Vec<Vec<Kind>>,
+    // TODO store field ids too
+    pub schemas: Vec<Vec<Kind>>,
     pub states: Vec<Rc<Chunk>>,
     pub views: Vec<View>,
     pub downstreams: Vec<Vec<usize>>,
@@ -370,21 +371,22 @@ pub struct Flow {
     pub strings: Vec<String>, // to be replaced by gc
 }
 
+#[derive(Clone, Debug)]
 pub enum View {
     Input,
     Query(Query),
 }
 
-impl Flow {
+impl Program {
     pub fn get_state(&self, id: ViewId) -> &Chunk {
-        let &Flow{ref ids, ref states, ..} = self;
+        let &Program{ref ids, ref states, ..} = self;
         let ix = ids.iter().position(|&other_id| other_id == id).unwrap();
         &states[ix]
     }
 
     // TODO require Relation?
     pub fn set_state(&mut self, id: ViewId, state: Chunk) {
-        let &mut Flow{ref ids, ref mut states, ref downstreams, ref mut dirty, ..} = self;
+        let &mut Program{ref ids, ref mut states, ref downstreams, ref mut dirty, ..} = self;
         let ix = ids.iter().position(|&other_id| other_id == id).unwrap();
         states[ix] = Rc::new(state);
         for &downstream_ix in downstreams[ix].iter() {
@@ -393,7 +395,7 @@ impl Flow {
     }
 
     pub fn clean(&mut self) {
-        let &mut Flow{ref mut states, ref views, ref downstreams, ref mut dirty, ref strings, ..} = self;
+        let &mut Program{ref mut states, ref views, ref downstreams, ref mut dirty, ref strings, ..} = self;
         while let Some(ix) = dirty.iter().position(|&is_dirty| is_dirty) {
             match views[ix] {
                 View::Input => panic!("How did an input get dirtied?"),
@@ -606,7 +608,7 @@ pub mod tests{
         })
     }
 
-       fn from_tsv(filename: &'static str, kinds: Vec<Kind>, strings: &mut Vec<String>) -> Chunk {
+    fn from_tsv(filename: &'static str, kinds: Vec<Kind>, strings: &mut Vec<String>) -> Chunk {
         let mut tsv = String::new();
         File::open(filename).unwrap().read_to_string(&mut tsv);
         let mut lines = tsv.lines();

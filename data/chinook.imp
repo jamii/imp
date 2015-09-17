@@ -1,0 +1,14 @@
+playlist ?p:id is named ?pn:text
+= Playlist.csv 0 1
+
+track ?t:id is on playlist ?p:id
+= PlaylistTrack.csv 1 0
+
+track ?t:id is on album ?al:id
+= Track.csv 0 2
+
+?al:id is by artist ?a:id
+= Album.csv 0 2
+
+artist ?a:id is named ?an:text
+= Artist.csv 0 1

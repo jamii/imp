@@ -91,7 +91,7 @@ impl Chunk {
         (key, kinds, bindings)
     }
 
-    fn join_key(&self, vars: &Vec<VariableId>) -> Vec<usize> {
+    fn sort_key(&self, vars: &Vec<VariableId>) -> Vec<usize> {
         let mut key = vec![];
         for var in vars.iter() {
             match self.bindings.iter().position(|binding| match *binding { Some(ref bound) => bound == var, None => false }) {
@@ -130,22 +130,31 @@ impl State {
         panic!("Cant find an ear in:\n {:#?}", self);
     }
 
-    pub fn project(&mut self, chunk_ix: usize, vars: &Vec<VariableId>) {
-        let (key, kinds, bindings) = self.chunks[chunk_ix].project_key(vars);
-        self.actions.push(runtime::Action::Project(chunk_ix, key));
-        self.chunks[chunk_ix] = Chunk{kinds: kinds, bindings: bindings};
+    pub fn project(&mut self, chunk_ix: usize, sort_vars: &Vec<VariableId>, select_vars: &Vec<VariableId>) {
+        let vars = ordered_union(sort_vars, select_vars);
+        let num_fields = self.chunks[chunk_ix].bindings.len();
+        let num_projected_vars = self.chunks[chunk_ix].vars().intersection(&vars.iter().cloned().collect()).count();
+        if num_projected_vars == num_fields {
+            // would project everything, might as well just sort
+            let key = self.chunks[chunk_ix].sort_key(sort_vars);
+            self.actions.push(runtime::Action::Sort(chunk_ix, key));
+        } else {
+            let (key, kinds, bindings) = self.chunks[chunk_ix].project_key(&vars);
+            self.actions.push(runtime::Action::Project(chunk_ix, key));
+            self.chunks[chunk_ix] = Chunk{kinds: kinds, bindings: bindings};
+        }
     }
 
     pub fn semijoin(&mut self, left_chunk_ix: usize, right_chunk_ix: usize, vars: &Vec<VariableId>) {
-        let left_key = self.chunks[left_chunk_ix].join_key(vars);
-        let right_key = self.chunks[right_chunk_ix].join_key(vars);
+        let left_key = self.chunks[left_chunk_ix].sort_key(vars);
+        let right_key = self.chunks[right_chunk_ix].sort_key(vars);
         assert_eq!(left_key.len(), right_key.len());
         self.actions.push(runtime::Action::SemiJoin(left_chunk_ix, right_chunk_ix, left_key, right_key));
     }
 
     pub fn join(&mut self, left_chunk_ix: usize, right_chunk_ix: usize, vars: &Vec<VariableId>) {
-        let left_key = self.chunks[left_chunk_ix].join_key(vars);
-        let right_key = self.chunks[right_chunk_ix].join_key(vars);
+        let left_key = self.chunks[left_chunk_ix].sort_key(vars);
+        let right_key = self.chunks[right_chunk_ix].sort_key(vars);
         assert_eq!(left_key.len(), right_key.len());
         self.actions.push(runtime::Action::Join(left_chunk_ix, right_chunk_ix, left_key, right_key));
         let mut left_kinds = ::std::mem::replace(&mut self.chunks[left_chunk_ix].kinds, vec![]);
@@ -166,24 +175,24 @@ impl State {
             let left_vars = self.chunks[left_ix].vars();
             let right_vars = self.chunks[right_ix].vars();
             let join_vars = left_vars.intersection(&right_vars).cloned().collect();
-            self.project(left_ix, &ordered_union(&join_vars, &to_select));
-            self.project(right_ix, &ordered_union(&join_vars, &to_select));
+            self.project(left_ix, &join_vars, &to_select);
+            self.project(right_ix, &join_vars, &to_select);
             self.join(left_ix, right_ix, &join_vars);
-            self.project(right_ix, &to_select);
+            self.project(right_ix, &vec![], &to_select);
             right_ix
         } else {
             let (ear_ix, parent_ix) = self.find_ear();
             let ear_vars = self.chunks[ear_ix].vars();
             let parent_vars = self.chunks[parent_ix].vars();
             let join_vars = ear_vars.intersection(&parent_vars).cloned().collect();
-            self.project(ear_ix, &ordered_union(&join_vars, &to_select));
-            self.project(parent_ix, &ordered_union(&join_vars, &parent_vars.iter().cloned().collect()));
+            self.project(ear_ix, &join_vars, &to_select);
+            self.project(parent_ix, &join_vars, &parent_vars.iter().cloned().collect());
             self.semijoin(ear_ix, parent_ix, &join_vars);
             self.to_join.retain(|&ix| ix != ear_ix);
             self.to_select = ordered_union(&join_vars, &to_select);
             let result_ix = self.compile();
             self.join(ear_ix, result_ix, &join_vars);
-            self.project(result_ix, &to_select);
+            self.project(result_ix, &vec![], &to_select);
             result_ix
         }
     }
@@ -466,7 +475,7 @@ pub mod tests{
     #[bench]
     pub fn bench_metal_run(bencher: &mut Bencher) {
         let bootstrap_program = Program::load(&["data/chinook.imp", "data/metal.imp"]);
-        let mut runtime_program = bootstrap_program.compile();
+        let runtime_program = bootstrap_program.compile();
         bencher.iter(|| {
             let mut runtime_program = runtime_program.clone();
             runtime_program.run();

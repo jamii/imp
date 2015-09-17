@@ -317,7 +317,7 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn run(&self, strings: &Vec<String>, mut states: &[Rc<Chunk>]) -> Chunk {
+    pub fn run(&self, strings: &Vec<String>, states: &[Rc<Chunk>]) -> Chunk {
         // TODO use COW chunks
         let mut chunks = self.upstream.iter().map(|&ix| Cow::Borrowed(&*states[ix])).collect::<Vec<_>>();
         for action in self.actions.iter() {

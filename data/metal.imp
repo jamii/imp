@@ -1,5 +1,5 @@
 ?pn:text is the name of a metal playlist
-= Metal.csv 0
+= data/Metal.csv 0
 
 ?an:text is on a metal playlist
 +

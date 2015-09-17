@@ -316,7 +316,7 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn execute(&self, strings: &Vec<String>, mut states: &[Rc<Chunk>]) -> Chunk {
+    pub fn run(&self, strings: &Vec<String>, mut states: &[Rc<Chunk>]) -> Chunk {
         // TODO use COW chunks
         let mut chunks = self.upstream.iter().map(|&ix| (*states[ix]).clone()).collect::<Vec<_>>();
         for action in self.actions.iter() {
@@ -394,13 +394,14 @@ impl Program {
         }
     }
 
-    pub fn clean(&mut self) {
+    pub fn run(&mut self) {
         let &mut Program{ref mut states, ref views, ref downstreams, ref mut dirty, ref strings, ..} = self;
         while let Some(ix) = dirty.iter().position(|&is_dirty| is_dirty) {
             match views[ix] {
                 View::Input => panic!("How did an input get dirtied?"),
                 View::Query(ref query) => {
-                    let new_chunk = query.execute(strings, &states[..]);
+                    dirty[ix] = false;
+                    let new_chunk = query.run(strings, &states[..]);
                     // TODO using != assumes both will have the same sort order. is that safe?
                     if *states[ix] != new_chunk {
                         states[ix] = Rc::new(new_chunk);
@@ -610,7 +611,7 @@ pub mod tests{
 
     fn from_tsv(filename: &'static str, kinds: Vec<Kind>, strings: &mut Vec<String>) -> Chunk {
         let mut tsv = String::new();
-        File::open(filename).unwrap().read_to_string(&mut tsv);
+        File::open(filename).unwrap().read_to_string(&mut tsv).unwrap();
         let mut lines = tsv.lines();
         lines.next(); // drop header
         let mut data = vec![];
@@ -706,7 +707,7 @@ pub mod tests{
 
             result: 5
         };
-        query.execute(&strings, &states[..])
+        query.run(&strings, &states[..])
     }
 
     #[test]

@@ -358,7 +358,7 @@ impl Program {
     pub fn load<P: AsRef<Path>>(filenames: &[P]) -> Program {
         let mut text = String::new();
         for filename in filenames.iter() {
-            File::open(filename).unwrap().read_to_string(&mut text);
+            File::open(filename).unwrap().read_to_string(&mut text).unwrap();
             text.push_str("\n\n");
         }
         Program::parse(&text[..])
@@ -437,7 +437,7 @@ pub mod tests{
         let query_state = runtime::Chunk{ data: vec![hash(&metal), strings.len() as u64], row_width: 2};
         strings.push(metal);
         states.push(Rc::new(query_state));
-        let results = query.execute(&strings, &states[..]);
+        let results = query.run(&strings, &states[..]);
         assert_set_eq!(
             results.data.chunks(2).map(|chunk| &strings[chunk[1] as usize][..]),
             vec!["AC/DC", "Accept", "Black Sabbath", "Metallica", "Iron Maiden", "Mot\u{f6}rhead", "M\u{f6}tley Cr\u{fc}e", "Ozzy Osbourne", "Scorpions"]
@@ -453,15 +453,18 @@ pub mod tests{
         strings.push(metal);
         states.push(Rc::new(query_state));
         bencher.iter(|| {
-            black_box(query.execute(&strings, &states[..]));
+            black_box(query.run(&strings, &states[..]));
         });
     }
 
     #[test]
     pub fn test_metal_parse() {
         let bootstrap_program = Program::load(&["data/chinook.imp", "data/metal.imp"]);
-        let runtime_program = bootstrap_program.compile();
-        println!("{:?}", runtime_program);
-        assert!(false);
+        let mut runtime_program = bootstrap_program.compile();
+        runtime_program.run();
+        assert_set_eq!(
+            runtime_program.states[6].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
+            vec!["AC/DC", "Accept", "Black Sabbath", "Metallica", "Iron Maiden", "Mot\u{f6}rhead", "M\u{f6}tley Cr\u{fc}e", "Ozzy Osbourne", "Scorpions"]
+            );
     }
 }

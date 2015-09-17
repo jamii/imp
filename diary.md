@@ -552,3 +552,378 @@ test query::tests::bench_chinook_metal     ... bench:   1,976,232 ns/iter (+/- 4
 ```
 
 So close! And without any indexes or statistics. The urge to optimise is huge, but I'm going to focus and get the compiler working first.
+
+## Planning
+
+[OLTP](https://en.wikipedia.org/wiki/Online_transaction_processing) databases are built for small, frequent changes to data and join-heavy queries which touch a small part of the dataset. They typically rely on indexes and use infrequently gathered statistics about the data to estimate how fast various query plans will run. When these statistics are incorrect, old or just [misused]() the query planner can make disastrously bad decisions.
+
+[OLAP](https://en.wikipedia.org/wiki/Online_analytical_processing) databases are built for infrequently changing data and aggregation-heavy queries which touch a large part of the dataset. They typically rely on compact data layout and compression rather than indexes. They also on gathered statistics but, in my experience, are less sensitive to mistakes because most queries already involve table scans and aggregation is less susceptible than joining to blowing up and producing huge intermediate results.
+
+Imp doesn't fit nicely into either of these categories. Inputs and views may change entirely on each execution. Queries might be join-heavy or aggregation-heavy and might touch any amount of data. On the other hand, a typical OLTP application might issue the same query hundreds of times with different parameters (eg get the friend count for user X) where an Imp program would build a single view over all the parameters (eg get the friend count for all active users). I also want to have predictable and stable performance so I can build interactive programs without suffering mysterious and unpredictable pauses, so I would prefer to have a planner that always produces mediocre plans over one that mostly produces amazing plans but occasionally explodes.
+
+I've started with Yannakikis' algorithm, which provides tight guarantees for a large class of joins and does not require indexes or statistics. Unfortunately the original paper doesn't seem to be openly available, but the lecture notes [here](http://infolab.stanford.edu/~ullman/cs345notes/slides01-3.pdf) and [here](http://infolab.stanford.edu/~ullman/cs345notes/slides01-5.pdf) give a good overview and I'll try to explain it informally here too.
+
+Let's start with a simple query:
+
+``` sql
+-- Find all companies with employees who are banned
+SELECT * FROM
+Companies
+JOIN Users WHERE User.Employer = Company.Id
+JOIN Logins WHERE Logins.UserId = Users.Id
+JOIN Bans WHERE Bans.IP = Logins.IP
+```
+
+There are no filters or constants and we are selecting everything. We don't have indexes so we have to read all of the inputs to the query. We also have to produce all the outputs, obviously. So that gives us a lower bound on the runtime of O(IN + OUT).
+
+Suppose we just walked through the input tables one by one and joined them together. What could go wrong? Imagine we have 1,000,000 companies and they each have one 10,000 employees, so joining Companies with Users would produce 10,000,000,000 rows. We then have to join each of those rows with, say, 100 logins per user. But we might not have banned anyone at all, so the final result is empty and we have done a ton of unnecessary work.
+
+The core problem here is that if we naively join tables together we may end up with intermediate results that are much larger than the final result. How much extra work this causes depends on what order the tables are joined in and how the data is distributed, both of which are hard to predict when writing the query. Traditional query planners try to estimate the size of intermediate results based on the statistics they gather about the currrent dataset.
+
+Yannakikis algorithm is much simpler. It works like this:
+
+1. If there is only one table, you are finished!
+2. Otherwise, pick an __ear__ table and it's __parent__ table where all the joined columns in the ear are joined on the parent
+3. [Semijoin](https://en.wikipedia.org/wiki/Relational_algebra#Semijoin_.28.E2.8B.89.29.28.E2.8B.8A.29) the ear with it's parent ie remove all the rows in each table that do not join with any row in the other table
+4. Recursively solve the rest of the query without the ear table
+5. Join the results with the ear table
+
+The crucial part is step 2 which removes any rows that do not contribute to the output (the proof of this is in the notes linked earlier). This guarantees that results at step 3 contain at most IN + OUT rows. Each recursion step removes one table, so the whole algorithm runs O(IN + OUT) time which is the best we can do in this situation. It's also simple to implement and easy to predict.
+
+Our example query is a little too simplistic though. Most realistic queries only want a few columns:
+
+``` sql
+-- Find all companies with employees who are banned
+SELECT DISTINCT(Companies.Id) FROM
+Companies
+JOIN Users WHERE User.Employer = Company.Id
+JOIN Logins WHERE Logins.UserId = Users.Id
+JOIN Bans WHERE Bans.IP = Logins.IP
+```
+
+Let's modify the algorithm to handle this:
+
+1. If there is only one table, remove all unwanted columns (ie those that are not needed for the output or for later joins)
+2. Otherwise, pick an __ear__ table and it's __parent__ table where all the joined columns in the ear are joined on the parent
+3. [Semijoin](https://en.wikipedia.org/wiki/Relational_algebra#Semijoin_.28.E2.8B.89.29.28.E2.8B.8A.29) the ear with it's parent ie remove all the rows in each table that do not join with any row in the other table
+4. Recursively solve the rest of the query without the ear table
+5. Join the results with the ear table and remove all unwanted columns (ie those that are not needed for the output or for later joins)
+
+This messes with our runtime guarantees. Even if we only return one company for the above query they might have 1000 banned employees. To predict the runtime cost we now have to think about how many redundant results we get in the output. It still works out pretty well though.
+
+There is a much worse problem - step 2 might fail. We can't always find an ear table. An example of a query with no ears is:
+
+``` sql
+-- Count triangles in graph
+SELECT COUNT(*) FROM
+Edges AS A
+JOIN Edges AS B WHERE A.To = B.From
+JOIN Edges AS C WHERE B.To = C.From AND C.To = A.From
+```
+
+A is joined on both A.From and A.To, but B only covers A.To and C only covers A.From so A is not an ear. Similarly for B and C.
+
+When working with cylic queries like this it's really hard to prevent large intermediate results. For example, it is possible to [construct a dataset](http://arxiv.org/abs/1310.3314) for the above query where joining any two tables produces O(n^2) results but the whole query only produces O(n) results. Traditional query optimisers can't handle this well and only in the last few years has there been any progress on general purpose algorithms for cyclic queries. I'm hoping to bring in some of that work later but for now I'll just ban cyclic queries entirely.
+
+The code that implements the query planner in Imp is mostly plumbing. There is a data-structure that tracks the current state of the plan:
+
+``` rust
+#[derive(Clone, Debug)]
+pub struct State {
+    pub actions: Vec<runtime::Action>,
+    pub chunks: Vec<Chunk>,
+    pub to_join: Vec<usize>,
+    pub to_select: Vec<VariableId>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Chunk {
+    pub kinds: Vec<Kind>,
+    pub bindings: Vec<Option<VariableId>>,
+}
+```
+
+A few helper functions:
+
+``` rust
+impl Chunk {
+    fn vars(&self) -> HashSet<VariableId>
+    fn project_key(&self, vars: &Vec<VariableId>) -> (Vec<usize>, Vec<Kind>, Vec<Option<VariableId>>)
+    fn sort_key(&self, vars: &Vec<VariableId>) -> Vec<usize>
+}
+
+impl State {
+    pub fn project(&mut self, chunk_ix: usize, sort_vars: &Vec<VariableId>, select_vars: &Vec<VariableId>)
+    pub fn semijoin(&mut self, left_chunk_ix: usize, right_chunk_ix: usize, vars: &Vec<VariableId>)
+    pub fn join(&mut self, left_chunk_ix: usize, right_chunk_ix: usize, vars: &Vec<VariableId>)
+```
+
+And finally the core planner:
+
+``` rust
+impl State {
+    pub fn find_ear(&self) -> (usize, usize) {
+        for &chunk_ix in self.to_join.iter() {
+            let chunk = &self.chunks[chunk_ix];
+            let vars = chunk.vars();
+            let mut joined_vars = HashSet::new();
+            for &other_chunk_ix in self.to_join.iter() {
+                if chunk_ix != other_chunk_ix {
+                    let other_vars = self.chunks[other_chunk_ix].vars();
+                    joined_vars.extend(vars.intersection(&other_vars).cloned());
+                }
+            }
+            for &other_chunk_ix in self.to_join.iter() {
+                if chunk_ix != other_chunk_ix {
+                    let other_vars = self.chunks[other_chunk_ix].vars();
+                    if joined_vars.is_subset(&other_vars) {
+                        return (chunk_ix, other_chunk_ix);
+                    }
+                }
+            }
+        }
+        panic!("Cant find an ear in:\n {:#?}", self);
+    }
+
+    pub fn compile(&mut self) -> usize {
+        let to_select = self.to_select.clone();
+        if self.to_join.len() == 2 {
+            let left_ix = self.to_join[0];
+            let right_ix = self.to_join[1];
+            let left_vars = self.chunks[left_ix].vars();
+            let right_vars = self.chunks[right_ix].vars();
+            let join_vars = left_vars.intersection(&right_vars).cloned().collect();
+            self.project(left_ix, &join_vars, &to_select);
+            self.project(right_ix, &join_vars, &to_select);
+            self.join(left_ix, right_ix, &join_vars);
+            self.project(right_ix, &vec![], &to_select);
+            right_ix
+        } else {
+            let (ear_ix, parent_ix) = self.find_ear();
+            let ear_vars = self.chunks[ear_ix].vars();
+            let parent_vars = self.chunks[parent_ix].vars();
+            let join_vars = ear_vars.intersection(&parent_vars).cloned().collect();
+            self.project(ear_ix, &join_vars, &to_select);
+            self.project(parent_ix, &join_vars, &parent_vars.iter().cloned().collect());
+            self.semijoin(ear_ix, parent_ix, &join_vars);
+            self.to_join.retain(|&ix| ix != ear_ix);
+            self.to_select = ordered_union(&join_vars, &to_select);
+            let result_ix = self.compile();
+            self.join(ear_ix, result_ix, &join_vars);
+            self.project(result_ix, &vec![], &to_select);
+            result_ix
+        }
+    }
+}
+```
+
+Note the panic on not finding an ear. Also, note the base case in the planner is for two tables, saving an unnecessary semijoin.
+
+Finally, the whole process is kicked off from:
+
+``` rust
+impl Query {
+    pub fn compile(&self, program: &Program) -> runtime::Query {
+        let upstream = self.clauses.iter().map(|clause| {
+            let ix = program.ids.iter().position(|id| *id == clause.view).unwrap();
+            program.schedule[ix]
+        }).collect();
+        let mut state = State{
+            actions: vec![],
+            chunks: self.clauses.iter().map(|clause| {
+                let ix = program.ids.iter().position(|id| *id == clause.view).unwrap();
+                Chunk{
+                    kinds: program.schemas[ix].clone(),
+                    bindings: clause.bindings.clone(),
+                }
+            }).collect(),
+            to_join: (0..self.clauses.len()).collect(),
+            to_select: self.select.clone(),
+        };
+        let result = state.compile();
+        runtime::Query{upstream: upstream, actions: state.actions, result: result}
+    }
+}
+```
+
+I've already written the dataflow compiler and a crude parser, so let's look at those quickly before seeing some benchmark numbers.
+
+## Flow
+
+The main job of the rest of the Imp runtime is to keep all the views up to date as the inputs change. The state of the runtime is tracked in:
+
+``` rust
+#[derive(Clone, Debug)]
+pub struct Program {
+    pub ids: Vec<ViewId>,
+    // TODO store field ids too
+    pub schemas: Vec<Vec<Kind>>,
+    pub states: Vec<Rc<Chunk>>,
+    pub views: Vec<View>,
+    pub downstreams: Vec<Vec<usize>>,
+    pub dirty: Vec<bool>, // should be BitSet but that has been removed from std :(
+
+    pub strings: Vec<String>, // to be replaced by gc
+}
+
+#[derive(Clone, Debug)]
+pub enum View {
+    Input,
+    Query(Query),
+}
+
+#[derive(Clone, Debug)]
+pub struct Query {
+    pub upstream: Vec<usize>,
+    pub actions: Vec<Action>,
+    pub result: usize,
+}
+```
+
+The views are all stored in some order decided by the compiler. The upstream and downstream fields track the positions of dependencies between the views. Whenever we change an input we have to dirty all the downstream views.
+
+``` rust
+impl Program {
+    pub fn set_state(&mut self, id: ViewId, state: Chunk) {
+        let &mut Program{ref ids, ref mut states, ref views, ref downstreams, ref mut dirty, ..} = self;
+        let ix = ids.iter().position(|&other_id| other_id == id).unwrap();
+        match views[ix] {
+            View::Input => {
+                states[ix] = Rc::new(state);
+                for &downstream_ix in downstreams[ix].iter() {
+                    dirty[downstream_ix] = true;
+                }
+            }
+            View::Query(_) => {
+                panic!("Can't set view {:?} - it's a query!", id);
+            }
+        }
+    }
+}
+```
+
+Then to run the program we just keep updating views until nothing is dirty.
+
+``` rust
+impl Program {
+    pub fn run(&mut self) {
+        let &mut Program{ref mut states, ref views, ref downstreams, ref mut dirty, ref strings, ..} = self;
+        while let Some(ix) = dirty.iter().position(|&is_dirty| is_dirty) {
+            match views[ix] {
+                View::Input => panic!("How did an input get dirtied?"),
+                View::Query(ref query) => {
+                    dirty[ix] = false;
+                    let new_chunk = query.run(strings, &states[..]);
+                    if *states[ix] != new_chunk {
+                        states[ix] = Rc::new(new_chunk);
+                        for &downstream_ix in downstreams[ix].iter() {
+                            dirty[downstream_ix] = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+If there are cycles in the graph of views then the order in which they are run could potentially affect the result. I'll cover that problem in more detail when I get to implementing [stratification](https://en.wikipedia.org/wiki/Stratification_%28mathematics%29).
+
+## Syntax
+
+My parser is a thing of shame so let's just talk about the syntax itself. I'm aiming for the madlib style that was used in [earlier Eve demos](http://incidentalcomplexity.com/images/5.png). I like this style because the table names become self-documenting and because it (mildly) encourages normalization and writing [facts rather than state](https://github.com/matthiasn/talk-transcripts/blob/master/Hickey_Rich/ValueOfValues.md).
+
+Here is a snippet of Imp:
+
+```
+artist ?a:id is named ?an:text
+= data/Artist.csv 0 1
+
+?an:text is on a metal playlist
++
+playlist ?p is named "Heavy Metal Classic"
+track ?t is on playlist ?p
+track ?t is on album ?al
+album ?al is by artist ?a
+artist ?a is named ?an
+```
+
+There are two views here. The first defines an input view called `artist _ is named _` and loads data from Artist.csv, parsing ids from column 0 and text from 1. The second defines are query view called `_ is on a metal playlist`. The body of the query joins pulls data from five other views, joining them wherever the same variable is used in more than one place.
+
+I'm deliberately using short variables to keep the focus on the rest of the sentence and make it easier to quickly scan for joins.
+
+The reason that queries are indicated by a `+` is that I want to introduce non-monotonic reasoning later on so I can write queries like:
+
+```
+?an:id can fly
++
+?an is a bird
+-
+?an is a penguin
++
+?an is Harry the Rocket Penguin
+```
+
+This reads as "birds can fly, but penguins can't, but Harry the Rocket Penguin can". This sort of reasoning is clumsy in traditional datalog and it often comes up when setting defaults or when updating values (all the values, minus the one I'm changing, plus it's new value).
+
+Functions can be treated as infinite relations:
+
+```
+?a + ?b = ?c
+```
+
+There are some simple static checks we can use to ensure that the resulting query doesn't produce infinite results. More on that when I actually implement functions.
+
+I haven't decided how I want to handle aggregation yet, so there is no syntax for it.
+
+## First steps
+
+I'm excited to show Imp's first whole program:
+
+```
+playlist ?p:id is named ?pn:text
+= data/Playlist.csv 0 1
+
+track ?t:id is on playlist ?p:id
+= data/PlaylistTrack.csv 1 0
+
+track ?t:id is on album ?al:id
+= data/Track.csv 0 2
+
+album ?al:id is by artist ?a:id
+= data/Album.csv 0 2
+
+artist ?a:id is named ?an:text
+= data/Artist.csv 0 1
+
+?pn:text is the name of a metal playlist
+= data/Metal.csv 0
+
+?an:text is on a metal playlist
++
+?pn is the name of a metal playlist
+playlist ?p is named ?pn
+track ?t is on playlist ?p
+track ?t is on album ?al
+album ?al is by artist ?a
+artist ?a is named ?an
+```
+
+This is the same example query I've been using all along but now it's running through the whole compiler. I haven't implemented constants yet so I'm loading the playlist name from Metal.csv instead.
+
+So how does it stack up against sqlite?
+
+```
+let bootstrap_program = Program::load(&["data/chinook.imp", "data/metal.imp"]);
+let runtime_program = bootstrap_program.compile();
+bencher.iter(|| {
+    let mut runtime_program = runtime_program.clone();
+    runtime_program.run();
+    black_box(&runtime_program.states[6]);
+});
+// test bootstrap::tests::bench_metal_run       ... bench:     864,801 ns/iter (+/- 45,810)
+```
+
+A beautiful 0.86 ms vs SQLites 1.2ms. I'm gaining some advantage from normalizing the database and I got lucky with the clause ordering and it's not much of a benchmark to begin with, but I'm still feeling pretty good :)
+
+What was that about the clause ordering? The planner picks the first ear it can find and it searches the clauses in the order they are given in the program. If we reverse the ordering we get a plan that takes 1.7ms, because it runs the filtering phase from artist to playlist instead of the other direction, resulting in absolutely no filtering. No matter what order is chosen, every plan has to sort all of the inputs once and then all of the intermediate results once. The size of the intermediate results are still bounded, so we can expect the difference between the best and worst plans to at most 2x.

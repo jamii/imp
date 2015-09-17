@@ -248,29 +248,6 @@ impl Query {
     }
 }
 
-fn parse_clause(text: &str) -> (ViewId, Vec<Option<VariableId>>, Vec<Option<Kind>>) {
-    let var_re = Regex::new(r"_|\?[:alpha:]*(:[:alpha:]*)?").unwrap();
-    let kind_re = Regex::new(r":[:alpha:]*").unwrap();
-    let bindings = text.matches(&var_re).map(|var_text| {
-        match var_text {
-            "_" => None,
-            _ => Some(kind_re.replace(var_text, ""))
-        }
-    }).collect();
-    let kinds = text.matches(&var_re).map(|var_text| {
-        var_text.matches(&kind_re).next().map(|kind_text| {
-            match kind_text {
-                    ":id" => Kind::Id,
-                    ":text" => Kind::Text,
-                    ":number" => Kind::Number,
-                    other => panic!("Unknown kind: {:?}", other),
-                }
-            })
-    }).collect();
-    let view_id = var_re.replace_all(text, "_");
-    (view_id, bindings, kinds)
-}
-
 impl Program {
     pub fn compile(&self) -> runtime::Program {
         let mut ids = vec![];
@@ -315,6 +292,29 @@ impl Program {
 
         runtime::Program{ids: ids, schemas: schemas, states: states, views: views, downstreams: downstreams, dirty: dirty, strings: strings}
     }
+}
+
+fn parse_clause(text: &str) -> (ViewId, Vec<Option<VariableId>>, Vec<Option<Kind>>) {
+    let var_re = Regex::new(r"_|\?[:alpha:]*(:[:alpha:]*)?").unwrap();
+    let kind_re = Regex::new(r":[:alpha:]*").unwrap();
+    let bindings = text.matches(&var_re).map(|var_text| {
+        match var_text {
+            "_" => None,
+            _ => Some(kind_re.replace(var_text, ""))
+        }
+    }).collect();
+    let kinds = text.matches(&var_re).map(|var_text| {
+        var_text.matches(&kind_re).next().map(|kind_text| {
+            match kind_text {
+                    ":id" => Kind::Id,
+                    ":text" => Kind::Text,
+                    ":number" => Kind::Number,
+                    other => panic!("Unknown kind: {:?}", other),
+                }
+            })
+    }).collect();
+    let view_id = var_re.replace_all(text, "_");
+    (view_id, bindings, kinds)
 }
 
 fn parse_view(text: &str) -> (ViewId, Vec<Kind>, View) {

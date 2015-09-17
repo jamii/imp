@@ -387,11 +387,18 @@ impl Program {
 
     // TODO require Relation?
     pub fn set_state(&mut self, id: ViewId, state: Chunk) {
-        let &mut Program{ref ids, ref mut states, ref downstreams, ref mut dirty, ..} = self;
+        let &mut Program{ref ids, ref mut states, ref views, ref downstreams, ref mut dirty, ..} = self;
         let ix = ids.iter().position(|&other_id| other_id == id).unwrap();
-        states[ix] = Rc::new(state);
-        for &downstream_ix in downstreams[ix].iter() {
-            dirty[downstream_ix] = true;
+        match views[ix] {
+            View::Input => {
+                states[ix] = Rc::new(state);
+                for &downstream_ix in downstreams[ix].iter() {
+                    dirty[downstream_ix] = true;
+                }
+            }
+            View::Query(_) => {
+                panic!("Can't set view {:?} - it's a query!", id);
+            }
         }
     }
 

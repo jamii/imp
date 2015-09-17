@@ -7,7 +7,7 @@ track ?t:id is on playlist ?p:id
 track ?t:id is on album ?al:id
 = data/Track.csv 0 2
 
-?al:id is by artist ?a:id
+album ?al:id is by artist ?a:id
 = data/Album.csv 0 2
 
 artist ?a:id is named ?an:text

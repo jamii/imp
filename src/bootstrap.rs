@@ -365,11 +365,6 @@ impl Program {
     }
 }
 
-// TODO
-// check schemas match bindings
-// check types
-// check selects are bound
-
 #[cfg(test)]
 pub mod tests{
     use super::*;
@@ -458,7 +453,7 @@ pub mod tests{
     }
 
     #[test]
-    pub fn test_metal_parse() {
+    pub fn test_metal() {
         let bootstrap_program = Program::load(&["data/chinook.imp", "data/metal.imp"]);
         let mut runtime_program = bootstrap_program.compile();
         runtime_program.run();
@@ -466,5 +461,26 @@ pub mod tests{
             runtime_program.states[6].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
             vec!["AC/DC", "Accept", "Black Sabbath", "Metallica", "Iron Maiden", "Mot\u{f6}rhead", "M\u{f6}tley Cr\u{fc}e", "Ozzy Osbourne", "Scorpions"]
             );
+    }
+
+    #[bench]
+    pub fn bench_metal_run(bencher: &mut Bencher) {
+        let bootstrap_program = Program::load(&["data/chinook.imp", "data/metal.imp"]);
+        let mut runtime_program = bootstrap_program.compile();
+        bencher.iter(|| {
+            let mut runtime_program = runtime_program.clone();
+            runtime_program.run();
+            black_box(&runtime_program.states[6]);
+        });
+    }
+
+    #[bench]
+    pub fn bench_metal_all(bencher: &mut Bencher) {
+        bencher.iter(|| {
+            let bootstrap_program = Program::load(&["data/chinook.imp", "data/metal.imp"]);
+            let mut runtime_program = bootstrap_program.compile();
+            runtime_program.run();
+            black_box(&runtime_program.states[6]);
+        });
     }
 }

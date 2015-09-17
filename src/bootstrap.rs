@@ -1,6 +1,9 @@
-use runtime::{self, hash, Id, ViewId, VariableId, Kind};
+use runtime::{self, hash, Kind};
 use std::collections::HashSet;
 use std::collections::HashMap;
+
+pub type ViewId = String;
+pub type VariableId = String;
 
 #[derive(Clone, Debug)]
 pub struct Query {
@@ -28,11 +31,11 @@ pub struct Chunk {
     pub bindings: Vec<Option<VariableId>>,
 }
 
-fn ordered_union(xs: &Vec<Id>, ys: &Vec<Id>) -> Vec<Id> {
+fn ordered_union(xs: &Vec<VariableId>, ys: &Vec<VariableId>) -> Vec<VariableId> {
     let mut results = xs.clone();
-    for &y in ys {
-        if xs.iter().find(|&&x| x == y).is_none() {
-            results.push(y);
+    for y in ys {
+        if xs.iter().find(|x| *x == y).is_none() {
+            results.push(y.clone());
         }
     }
     results
@@ -47,15 +50,15 @@ impl Chunk {
         let mut key = vec![];
         let mut kinds = vec![];
         let mut bindings = vec![];
-        for &var in vars.iter() {
-            match self.bindings.iter().position(|&binding| binding == Some(var)) {
+        for var in vars.iter() {
+            match self.bindings.iter().position(|binding| match *binding { Some(ref bound) => bound == var, None => false }) {
                 Some(ix) => {
                     let column: usize = self.kinds.iter().take(ix).map(|kind| kind.width()).sum();
                     for offset in 0..self.kinds[ix].width() {
                         key.push(column + offset);
                     }
                     kinds.push(self.kinds[ix]);
-                    bindings.push(Some(var));
+                    bindings.push(Some(var.clone()));
                 },
                 None => (), // this var isn't here to project
             }
@@ -65,8 +68,8 @@ impl Chunk {
 
     fn join_key(&self, vars: &Vec<VariableId>) -> Vec<usize> {
         let mut key = vec![];
-        for &var in vars.iter() {
-            match self.bindings.iter().position(|&binding| binding == Some(var)) {
+        for var in vars.iter() {
+            match self.bindings.iter().position(|binding| match *binding { Some(ref bound) => bound == var, None => false }) {
                 Some(ix) => {
                     let column = self.kinds.iter().take(ix).map(|kind| kind.width()).sum();
                     key.push(column);
@@ -87,7 +90,7 @@ impl State {
             for &other_chunk_ix in self.to_join.iter() {
                 if chunk_ix != other_chunk_ix {
                     let other_vars = self.chunks[other_chunk_ix].vars();
-                    joined_vars.extend(vars.intersection(&other_vars));
+                    joined_vars.extend(vars.intersection(&other_vars).cloned());
                 }
             }
             for &other_chunk_ix in self.to_join.iter() {
@@ -164,12 +167,12 @@ impl State {
 impl Query {
     pub fn compile(&self, program: &Program) -> runtime::Query {
         let upstream = self.clauses.iter().map(|clause| {
-            program.ids.iter().position(|&id| id == clause.view).unwrap()
+            program.ids.iter().position(|id| *id == clause.view).unwrap()
         }).collect();
         let mut state = State{
             actions: vec![],
             chunks: self.clauses.iter().map(|clause| {
-                let ix = program.ids.iter().position(|&id| id == clause.view).unwrap();
+                let ix = program.ids.iter().position(|id| *id == clause.view).unwrap();
                 Chunk{
                     kinds: program.schemas[ix].clone(),
                     bindings: clause.bindings.clone(),
@@ -268,17 +271,14 @@ pub mod tests{
 
     fn compile_metal() -> runtime::Query {
         use runtime::Kind::*;
-
-        // variable ids
-        let artist_name = 0;
-        let artist_id = 1;
-        let album_id = 2;
-        let track_id = 3;
-        let playlist_id = 4;
-        let playlist_name = 5;
-
-
-        let ids = vec![0,1,2,3,4,5];
+        let ids = vec![
+           "artist".to_owned(),
+           "album".to_owned(),
+           "track".to_owned(),
+           "playlist_track".to_owned(),
+           "playlist".to_owned(),
+           "query".to_owned(),
+        ];
         let schemas = vec![
             vec![Id, Text],
             vec![Id, Text, Id],
@@ -290,31 +290,31 @@ pub mod tests{
         let query = Query{
             clauses: vec![
             Clause{
-                view: 0,
-                bindings: vec![Some(artist_id), Some(artist_name)],
+                view: "artist".to_owned(),
+                bindings: vec![Some("artist_id".to_owned()), Some("artist_name".to_owned())],
             },
             Clause{
-                view: 1,
-                bindings: vec![Some(album_id), None, Some(artist_id)],
+                view: "album".to_owned(),
+                bindings: vec![Some("album_id".to_owned()), None, Some("artist_id".to_owned())],
             },
             Clause{
-                view: 2,
-                bindings: vec![Some(track_id), None, Some(album_id)],
+                view: "track".to_owned(),
+                bindings: vec![Some("track_id".to_owned()), None, Some("album_id".to_owned())],
             },
             Clause{
-                view: 3,
-                bindings: vec![Some(playlist_id), Some(track_id)],
+                view: "playlist_track".to_owned(),
+                bindings: vec![Some("playlist_id".to_owned()), Some("track_id".to_owned())],
             },
             Clause{
-                view: 4,
-                bindings: vec![Some(playlist_id), Some(playlist_name)],
+                view: "playlist".to_owned(),
+                bindings: vec![Some("playlist_id".to_owned()), Some("playlist_name".to_owned())],
             },
             Clause{
-                view: 5,
-                bindings: vec![Some(playlist_name)]
+                view: "query".to_owned(),
+                bindings: vec![Some("playlist_name".to_owned())],
             }
             ],
-            select: vec![artist_name],
+            select: vec!["artist_name".to_owned()],
         };
         let program = Program{ids: ids, schemas: schemas, views: vec![]};
         query.compile(&program)

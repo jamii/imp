@@ -2,6 +2,7 @@ use std::cmp::{Ordering, min};
 use std::hash;
 use std::rc::Rc;
 use std::mem::size_of;
+use std::borrow::Cow;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Chunk {
@@ -318,7 +319,7 @@ pub struct Query {
 impl Query {
     pub fn run(&self, strings: &Vec<String>, mut states: &[Rc<Chunk>]) -> Chunk {
         // TODO use COW chunks
-        let mut chunks = self.upstream.iter().map(|&ix| (*states[ix]).clone()).collect::<Vec<_>>();
+        let mut chunks = self.upstream.iter().map(|&ix| Cow::Borrowed(&*states[ix])).collect::<Vec<_>>();
         for action in self.actions.iter() {
             // println!("");
             // println!("{:?}", chunks.iter().map(|chunk| chunk.len()).collect::<Vec<_>>());
@@ -327,21 +328,21 @@ impl Query {
             match action {
                 &Action::Sort(ix, ref key) => {
                     let chunk = chunks[ix].sort(&key[..]);
-                    chunks[ix] = chunk;
+                    chunks[ix] = Cow::Owned(chunk);
                 },
                 &Action::Project(ix, ref key) => {
                     let chunk = chunks[ix].project(&key[..]);
-                    chunks[ix] = chunk;
+                    chunks[ix] = Cow::Owned(chunk);
                 }
                 &Action::SemiJoin(left_ix, right_ix, ref left_key, ref right_key) => {
                     let (left_chunk, right_chunk) = chunks[left_ix].semijoin(&chunks[right_ix], &left_key[..], &right_key[..]);
-                    chunks[left_ix] = left_chunk;
-                    chunks[right_ix] = right_chunk;
+                    chunks[left_ix] = Cow::Owned(left_chunk);
+                    chunks[right_ix] = Cow::Owned(right_chunk);
                 },
                 &Action::Join(left_ix, right_ix, ref left_key, ref right_key) => {
                     let chunk = chunks[left_ix].join(&chunks[right_ix], &left_key[..], &right_key[..]);
-                    chunks[left_ix] = Chunk::empty();
-                    chunks[right_ix] = chunk;
+                    chunks[left_ix] = Cow::Owned(Chunk::empty());
+                    chunks[right_ix] = Cow::Owned(chunk);
                 }
                 &Action::DebugChunk(ix) => {
                     let chunk = &chunks[ix];
@@ -354,7 +355,7 @@ impl Query {
             }
             // });
         }
-        ::std::mem::replace(&mut chunks[self.result], Chunk::empty())
+        ::std::mem::replace(&mut chunks[self.result], Cow::Owned(Chunk::empty())).into_owned()
     }
 }
 

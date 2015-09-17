@@ -1,6 +1,10 @@
-use runtime::{self, hash, Kind};
+use runtime::{self, Kind};
 use std::collections::HashSet;
 use std::collections::HashMap;
+use regex::Regex;
+use std::path::{Path, PathBuf};
+use std::io::prelude::*;
+use std::fs::File;
 
 pub type ViewId = String;
 pub type VariableId = String;
@@ -167,7 +171,8 @@ impl State {
 impl Query {
     pub fn compile(&self, program: &Program) -> runtime::Query {
         let upstream = self.clauses.iter().map(|clause| {
-            program.ids.iter().position(|id| *id == clause.view).unwrap()
+            let ix = program.ids.iter().position(|id| *id == clause.view).unwrap();
+            program.schedule[ix]
         }).collect();
         let mut state = State{
             actions: vec![],
@@ -186,81 +191,99 @@ impl Query {
     }
 }
 
-pub struct Program{
+#[derive(Clone, Debug)]
+pub struct Program {
     pub ids: Vec<ViewId>,
+    pub schedule: Vec<usize>,
     pub schemas: Vec<Vec<Kind>>,
     pub views: Vec<View>,
 }
 
+#[derive(Clone, Debug)]
 pub enum View {
     Input,
     Query(Query),
 }
 
-// fn parse_clause(text: &str) -> (ViewId, Vec<Option<VariableId>>, Vec<Option<Kind>>) {
-//     let var_re = Regex::new("\?[:alpha:]*")
-//     let kind_re = Regex::new(":[:alpha:]*")
-//     let bindings = text.matches(var_re).map(|var_text| {
-//         match var_text {
-//             "_" => None,
-//             _ => Some(hash(var_text.replace(kind_re, "")))
-//         }
-//     }).collect();
-//     let kinds = text.matches(var_re).map(|var_text| {
-//         var_text.find(kind_re).map(|kind_text| {
-//             match kind_text[1..] {
-//                     "id" => Kind::Id,
-//                     "text" => Kind::Text,
-//                     "number" => Kind::Number,
-//                     other => panic!("Unknown kind: {:?}", other),
-//                 }
-//             })
-//     }).collect();
-//     let view_id = hash(text.replace(var_re, "?"));
-//     (view_id, bindings, kinds)
-// }
+fn parse_clause(text: &str) -> (ViewId, Vec<Option<VariableId>>, Vec<Option<Kind>>) {
+    let var_re = Regex::new(r"_|\?[:alpha:]*(:[:alpha:]*)?").unwrap();
+    let kind_re = Regex::new(r":[:alpha:]*").unwrap();
+    let bindings = text.matches(&var_re).map(|var_text| {
+        match var_text {
+            "_" => None,
+            _ => Some(kind_re.replace(var_text, ""))
+        }
+    }).collect();
+    let kinds = text.matches(&var_re).map(|var_text| {
+        var_text.matches(&kind_re).next().map(|kind_text| {
+            match kind_text {
+                    ":id" => Kind::Id,
+                    ":text" => Kind::Text,
+                    ":number" => Kind::Number,
+                    other => panic!("Unknown kind: {:?}", other),
+                }
+            })
+    }).collect();
+    let view_id = var_re.replace_all(text, "_");
+    (view_id, bindings, kinds)
+}
 
-// fn parse_view(text: &str) -> View {
-//     let mut lines = text.split("\n").collect::<Vec<_>>;
-//     let (view_id, bindings, kinds) = parse_clause(lines[0]);
-//     let select = bindings.into_iter().map(|binding| binding.unwrap()).collect();
-//     let schema = kinds.into_iter().map(|kind| kind.unwrap());
-//     let node = match lines[1].char_at(0) {
-//         "=" => {
-//             // TODO handle inputs
-//         }
-//         "+" => {
-//             // TODO handle query
-//             let clauses = lines[2..].iter().map(|line| {
-//                 let (view_id, bindings, kinds) = parse_clause(line);
-//                 for kind in kinds.into_iter() {
-//                     assert_eq!(kind, None);
-//                 }
-//                 Clause{view: view_id, bindings: bindings}
-//             }).collect();
-//             Node::Query(Query{
-//                 clauses: clauses,
-//                 select: select,
-//             })
-//         }
-//     };
-//     View{
-//         id: view_id,
-//         schema: schema,
-//         node: node,
-//     }
-// }
+fn parse_view(text: &str) -> (ViewId, Vec<Kind>, View) {
+    let lines = text.split("\n").collect::<Vec<_>>();
+    println!("{:?}", parse_clause(lines[0]));
+    let (view_id, bindings, kinds) = parse_clause(lines[0]);
+    let select = bindings.into_iter().map(|binding| binding.unwrap()).collect();
+    let schema = kinds.into_iter().map(|kind| kind.unwrap()).collect();
+    let view = match lines[1].chars().next().unwrap() {
+        '=' => {
+            // TODO handle manual input or csv
+            View::Input
+        }
+        '+' => {
+            let clauses = lines[2..].iter().map(|line| {
+                let (view_id, bindings, kinds) = parse_clause(line);
+                for kind in kinds.into_iter() {
+                    assert_eq!(kind, None);
+                }
+                Clause{view: view_id, bindings: bindings}
+            }).collect();
+            View::Query(Query{
+                clauses: clauses,
+                select: select,
+            })
+        }
+        _ => panic!("What are this? {:?}", lines[1]),
+    };
+    (view_id, schema, view)
+}
 
-// fn parse(text: &str) -> Program {
-//     let mut errors = vec![];
-//     let views = text.split("\n\n").map(|view_text| parse_view(view_text)).collect();
-//     Program{views: view}
-// }
+impl Program {
+    pub fn parse(text: &str) -> Program {
+        let mut ids = vec![];
+        let mut schedule = vec![];
+        let mut schemas = vec![];
+        let mut views = vec![];
+        for (ix, view_text) in text.split("\n\n").enumerate() {
+            let (id, schema, view) = parse_view(view_text);
+            ids.push(id);
+            schedule.push(ix); // ie just scheduling in textual order for now
+            schemas.push(schema);
+            views.push(view);
+        }
+        Program{ids: ids, schedule: schedule, schemas: schemas, views: views}
+    }
 
-// // TODO
-// // check schemas match bindings
-// // check types
-// // check selects are bound
+    pub fn load<P: AsRef<Path>>(filename: P) -> Program {
+        let mut text = String::new();
+        File::open(filename).unwrap().read_to_string(&mut text);
+        Program::parse(&text[..])
+    }
+}
+
+// TODO
+// check schemas match bindings
+// check types
+// check selects are bound
 
 #[cfg(test)]
 pub mod tests{
@@ -279,6 +302,7 @@ pub mod tests{
            "playlist".to_owned(),
            "query".to_owned(),
         ];
+        let schedule = vec![0,1,2,3,4,5];
         let schemas = vec![
             vec![Id, Text],
             vec![Id, Text, Id],
@@ -316,7 +340,7 @@ pub mod tests{
             ],
             select: vec!["artist_name".to_owned()],
         };
-        let program = Program{ids: ids, schemas: schemas, views: vec![]};
+        let program = Program{ids: ids, schedule: schedule, schemas: schemas, views: vec![]};
         query.compile(&program)
     }
 
@@ -346,5 +370,12 @@ pub mod tests{
         bencher.iter(|| {
             black_box(query.execute(&strings, &states[..]));
         });
+    }
+
+    #[test]
+    pub fn test_metal_parse() {
+        let program = Program::load("data/metal.imp");
+        println!("{:?}", program);
+        assert!(false);
     }
 }

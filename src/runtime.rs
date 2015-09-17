@@ -267,7 +267,7 @@ pub type ClauseId = Id;
 pub type ViewId = Id;
 pub type VariableId = Id;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, PartialEq, Eq, Clone, Debug)]
 pub enum Kind {
     Id,
     Number,

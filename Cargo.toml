@@ -6,7 +6,10 @@ authors = ["Jamie Brandon <jamie@scattered-thoughts.net>"]
 [dependencies]
 rand = "*"
 time = "*"
-regex = "*"
+
+[dependencies.regex]
+version = "*"
+features = ["pattern"]
 
 [profile.release]
 debug = true

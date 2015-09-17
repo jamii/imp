@@ -1,0 +1,8 @@
+?an:text is on the metal playlist
++
+?pn is the name of a metal playlist
+playlist ?p is named ?pn
+track ?t is on playlist ?p
+track ?t is on album ?al
+?al is by artist ?a
+artist ?a is named ?an

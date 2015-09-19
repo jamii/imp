@@ -169,7 +169,7 @@ impl State {
     pub fn selfjoin(&mut self, chunk_ix: usize) {
         let bindings = &self.chunks[chunk_ix].bindings;
         for left_column in 0..bindings.len() {
-            for right_column in left_column..bindings.len() {
+            for right_column in left_column+1..bindings.len() {
                 if bindings[left_column].is_some()
                 && (bindings[left_column] == bindings[right_column]) {
                     self.actions.push(runtime::Action::SelfJoin(chunk_ix, left_column, right_column));

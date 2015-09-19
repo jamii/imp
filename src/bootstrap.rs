@@ -166,33 +166,53 @@ impl State {
         self.chunks[right_chunk_ix].bindings = left_bindings;
     }
 
+    pub fn selfjoin(&mut self, chunk_ix: usize) {
+        let bindings = &self.chunks[chunk_ix].bindings;
+        for left_column in 0..bindings.len() {
+            for right_column in left_column..bindings.len() {
+                if bindings[left_column].is_some()
+                && (bindings[left_column] == bindings[right_column]) {
+                    self.actions.push(runtime::Action::SelfJoin(chunk_ix, left_column, right_column));
+                }
+            }
+        }
+    }
+
     pub fn compile(&mut self) -> usize {
         let to_select = self.to_select.clone();
-        if self.to_join.len() == 2 {
-            let left_ix = self.to_join[0];
-            let right_ix = self.to_join[1];
-            let left_vars = self.chunks[left_ix].vars();
-            let right_vars = self.chunks[right_ix].vars();
-            let join_vars = left_vars.intersection(&right_vars).cloned().collect();
-            self.project(left_ix, &join_vars, &to_select);
-            self.project(right_ix, &join_vars, &to_select);
-            self.join(left_ix, right_ix, &join_vars);
-            self.project(right_ix, &vec![], &to_select);
-            right_ix
-        } else {
-            let (ear_ix, parent_ix) = self.find_ear();
-            let ear_vars = self.chunks[ear_ix].vars();
-            let parent_vars = self.chunks[parent_ix].vars();
-            let join_vars = ear_vars.intersection(&parent_vars).cloned().collect();
-            self.project(ear_ix, &join_vars, &to_select);
-            self.project(parent_ix, &join_vars, &parent_vars.iter().cloned().collect());
-            self.semijoin(ear_ix, parent_ix, &join_vars);
-            self.to_join.retain(|&ix| ix != ear_ix);
-            self.to_select = ordered_union(&join_vars, &to_select);
-            let result_ix = self.compile();
-            self.join(ear_ix, result_ix, &join_vars);
-            self.project(result_ix, &vec![], &to_select);
-            result_ix
+        match self.to_join.len() {
+            1 => {
+                let ix = self.to_join[0];
+                self.project(ix, &vec![], &to_select);
+                ix
+            }
+            2 => {
+                let left_ix = self.to_join[0];
+                let right_ix = self.to_join[1];
+                let left_vars = self.chunks[left_ix].vars();
+                let right_vars = self.chunks[right_ix].vars();
+                let join_vars = left_vars.intersection(&right_vars).cloned().collect();
+                self.project(left_ix, &join_vars, &to_select);
+                self.project(right_ix, &join_vars, &to_select);
+                self.join(left_ix, right_ix, &join_vars);
+                self.project(right_ix, &vec![], &to_select);
+                right_ix
+            }
+            _ => {
+                let (ear_ix, parent_ix) = self.find_ear();
+                let ear_vars = self.chunks[ear_ix].vars();
+                let parent_vars = self.chunks[parent_ix].vars();
+                let join_vars = ear_vars.intersection(&parent_vars).cloned().collect();
+                self.project(ear_ix, &join_vars, &to_select);
+                self.project(parent_ix, &join_vars, &parent_vars.iter().cloned().collect());
+                self.semijoin(ear_ix, parent_ix, &join_vars);
+                self.to_join.retain(|&ix| ix != ear_ix);
+                self.to_select = ordered_union(&join_vars, &to_select);
+                let result_ix = self.compile();
+                self.join(ear_ix, result_ix, &join_vars);
+                self.project(result_ix, &vec![], &to_select);
+                result_ix
+            }
         }
     }
 }
@@ -242,6 +262,9 @@ impl Query {
             to_join: (0..self.clauses.len()).collect(),
             to_select: self.select.clone(),
         };
+        for chunk_ix in 0..state.chunks.len() {
+            state.selfjoin(chunk_ix);
+        }
         let result = state.compile();
         runtime::Query{upstream: upstream, actions: state.actions, result: result}
     }
@@ -490,5 +513,16 @@ pub mod tests{
             runtime_program.run();
             black_box(&runtime_program.states[6]);
         });
+    }
+
+    #[test]
+    pub fn test_selfjoin() {
+        let bootstrap_program = Program::load(&["data/chinook.imp", "data/selfjoin.imp"]);
+        let mut runtime_program = bootstrap_program.compile();
+        runtime_program.run();
+        assert_set_eq!(
+            runtime_program.states[5].data.iter().cloned(),
+            vec![1,5,8]
+            );
     }
 }

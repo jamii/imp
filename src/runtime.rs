@@ -200,6 +200,16 @@ impl Chunk {
         }
         Chunk{data: data, row_width: self.row_width}
     }
+
+    pub fn selfjoin(&self, left_ix: usize, right_ix: usize) -> Chunk {
+        let mut data = vec![];
+        for row in self.data.chunks(self.row_width) {
+            if row[left_ix] == row[right_ix] {
+                data.extend(row);
+            }
+        }
+        Chunk{ data: data, row_width: self.row_width}
+    }
 }
 
 impl<'a> Iterator for Groups<'a> {
@@ -305,6 +315,7 @@ pub enum Action {
     Project(usize, Vec<usize>),
     SemiJoin(usize, usize, Vec<usize>, Vec<usize>),
     Join(usize, usize, Vec<usize>, Vec<usize>),
+    SelfJoin(usize, usize, usize),
     DebugChunk(usize),
     DebugText(usize, usize),
 }
@@ -343,6 +354,10 @@ impl Query {
                     let chunk = chunks[left_ix].join(&chunks[right_ix], &left_key[..], &right_key[..]);
                     chunks[left_ix] = Cow::Owned(Chunk::empty());
                     chunks[right_ix] = Cow::Owned(chunk);
+                }
+                &Action::SelfJoin(ix, left_column, right_column) => {
+                    let chunk = chunks[ix].selfjoin(left_column, right_column);
+                    chunks[ix] = Cow::Owned(chunk);
                 }
                 &Action::DebugChunk(ix) => {
                     let chunk = &chunks[ix];

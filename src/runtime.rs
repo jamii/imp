@@ -210,6 +210,16 @@ impl Chunk {
         }
         Chunk{ data: data, row_width: self.row_width}
     }
+
+    pub fn filter(&self, ix: usize, value: u64) -> Chunk {
+        let mut data = vec![];
+        for row in self.data.chunks(self.row_width) {
+            if row[ix] == value {
+                data.extend(row);
+            }
+        }
+        Chunk{ data: data, row_width: self.row_width}
+    }
 }
 
 impl<'a> Iterator for Groups<'a> {
@@ -285,13 +295,6 @@ pub enum Kind {
     Text,
 }
 
-#[derive(Clone, Debug)]
-pub enum Value {
-    Id(Id),
-    Number(Number),
-    Text(Hash, Text),
-}
-
 impl Kind {
     pub fn width(&self) -> usize {
         let bytes = match *self {
@@ -316,6 +319,7 @@ pub enum Action {
     SemiJoin(usize, usize, Vec<usize>, Vec<usize>),
     Join(usize, usize, Vec<usize>, Vec<usize>),
     SelfJoin(usize, usize, usize),
+    Filter(usize, usize, u64),
     DebugChunk(usize),
     DebugText(usize, usize),
 }
@@ -357,6 +361,10 @@ impl Query {
                 }
                 &Action::SelfJoin(ix, left_column, right_column) => {
                     let chunk = chunks[ix].selfjoin(left_column, right_column);
+                    chunks[ix] = Cow::Owned(chunk);
+                }
+                &Action::Filter(ix, column, value) => {
+                    let chunk = chunks[ix].filter(column, value);
                     chunks[ix] = Cow::Owned(chunk);
                 }
                 &Action::DebugChunk(ix) => {

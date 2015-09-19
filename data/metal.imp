@@ -1,10 +1,6 @@
-?pn:text is the name of a metal playlist
-= data/Metal.csv 0
-
 ?an:text is on a metal playlist
 +
-?pn is the name of a metal playlist
-playlist ?p is named ?pn
+playlist ?p is named "Heavy Metal Classic"
 track ?t is on playlist ?p
 track ?t is on album ?al
 album ?al is by artist ?a

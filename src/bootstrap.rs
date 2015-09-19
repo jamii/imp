@@ -38,7 +38,7 @@ pub struct Query {
 #[derive(Clone, Debug)]
 pub struct Clause {
     pub view: ViewId,
-    pub bindings: Vec<Option<VariableId>>,
+    pub bindings: Vec<Binding>,
 }
 
 #[derive(Clone, Debug)]
@@ -52,7 +52,21 @@ pub struct State {
 #[derive(Clone, Debug)]
 pub struct Chunk {
     pub kinds: Vec<Kind>,
-    pub bindings: Vec<Option<VariableId>>,
+    pub bindings: Vec<Binding>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Binding {
+    Unbound,
+    Constant(Value),
+    Variable(VariableId),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Value {
+    Id(u64),
+    Number(f64),
+    Text(String),
 }
 
 fn ordered_union(xs: &Vec<VariableId>, ys: &Vec<VariableId>) -> Vec<VariableId> {
@@ -67,22 +81,29 @@ fn ordered_union(xs: &Vec<VariableId>, ys: &Vec<VariableId>) -> Vec<VariableId> 
 
 impl Chunk {
     fn vars(&self) -> HashSet<VariableId> {
-        self.bindings.iter().flat_map(|binding| binding.iter()).cloned().collect()
+        let mut vars = HashSet::new();
+        for binding in self.bindings.iter() {
+            match *binding {
+                Binding::Variable(ref var) => vars.insert(var.clone()),
+                _ => false,
+            };
+        }
+        vars
     }
 
-    fn project_key(&self, vars: &Vec<VariableId>) -> (Vec<usize>, Vec<Kind>, Vec<Option<VariableId>>) {
+    fn project_key(&self, vars: &Vec<VariableId>) -> (Vec<usize>, Vec<Kind>, Vec<Binding>) {
         let mut key = vec![];
         let mut kinds = vec![];
         let mut bindings = vec![];
         for var in vars.iter() {
-            match self.bindings.iter().position(|binding| match *binding { Some(ref bound) => bound == var, None => false }) {
+            match self.bindings.iter().position(|binding| match *binding { Binding::Variable(ref bound) => bound == var, _ => false }) {
                 Some(ix) => {
                     let column: usize = self.kinds.iter().take(ix).map(|kind| kind.width()).sum();
                     for offset in 0..self.kinds[ix].width() {
                         key.push(column + offset);
                     }
                     kinds.push(self.kinds[ix]);
-                    bindings.push(Some(var.clone()));
+                    bindings.push(Binding::Variable(var.clone()));
                 },
                 None => (), // this var isn't here to project
             }
@@ -93,7 +114,7 @@ impl Chunk {
     fn sort_key(&self, vars: &Vec<VariableId>) -> Vec<usize> {
         let mut key = vec![];
         for var in vars.iter() {
-            match self.bindings.iter().position(|binding| match *binding { Some(ref bound) => bound == var, None => false }) {
+            match self.bindings.iter().position(|binding| match *binding { Binding::Variable(ref bound) => bound == var, _ => false }) {
                 Some(ix) => {
                     let column = self.kinds.iter().take(ix).map(|kind| kind.width()).sum();
                     key.push(column);
@@ -166,13 +187,28 @@ impl State {
         self.chunks[right_chunk_ix].bindings = left_bindings;
     }
 
-    pub fn selfjoin(&mut self, chunk_ix: usize) {
+    pub fn filter_and_selfjoin(&mut self, chunk_ix: usize) {
         let bindings = &self.chunks[chunk_ix].bindings;
-        for left_column in 0..bindings.len() {
-            for right_column in left_column+1..bindings.len() {
-                if bindings[left_column].is_some()
-                && (bindings[left_column] == bindings[right_column]) {
-                    self.actions.push(runtime::Action::SelfJoin(chunk_ix, left_column, right_column));
+        let kinds = &self.chunks[chunk_ix].kinds;
+        for field in 0..bindings.len() {
+            if let Binding::Constant(ref value) = bindings[field] {
+                let column = kinds[0..field].iter().map(|kind| kind.width()).sum();
+                let raw_value = match *value {
+                    Value::Id(id) => id,
+                    Value::Number(number) => number as u64,
+                    Value::Text(ref text) => hash(text),
+                };
+                self.actions.push(runtime::Action::Filter(chunk_ix, column, raw_value));
+            }
+        }
+        for left_field in 0..bindings.len() {
+            for right_field in left_field+1..bindings.len() {
+                if let Binding::Variable(_) = bindings[left_field] {
+                    if bindings[left_field] == bindings[right_field] {
+                        let left_column = kinds[0..left_field].iter().map(|kind| kind.width()).sum();
+                        let right_column = kinds[0..right_field].iter().map(|kind| kind.width()).sum();
+                        self.actions.push(runtime::Action::SelfJoin(chunk_ix, left_column, right_column));
+                    }
                 }
             }
         }
@@ -263,7 +299,7 @@ impl Query {
             to_select: self.select.clone(),
         };
         for chunk_ix in 0..state.chunks.len() {
-            state.selfjoin(chunk_ix);
+            state.filter_and_selfjoin(chunk_ix);
         }
         let result = state.compile();
         runtime::Query{upstream: upstream, actions: state.actions, result: result}
@@ -316,13 +352,17 @@ impl Program {
     }
 }
 
-fn parse_clause(text: &str) -> (ViewId, Vec<Option<VariableId>>, Vec<Option<Kind>>) {
-    let var_re = Regex::new(r"_|\?[:alpha:]*(:[:alpha:]*)?").unwrap();
-    let kind_re = Regex::new(r":[:alpha:]*").unwrap();
+// We shall see that at which dogs howl in the dark, and that at which cats prick up their ears after midnight
+fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>) {
+    let var_re = Regex::new(r#"_|\?[:alnum:]*(:[:alnum:]*)?|"[^"]*"|([:digit:]|\.)+"#).unwrap();
+    let kind_re = Regex::new(r":[:alnum:]*").unwrap();
     let bindings = text.matches(&var_re).map(|var_text| {
-        match var_text {
-            "_" => None,
-            _ => Some(kind_re.replace(var_text, ""))
+        match var_text.chars().next().unwrap() {
+            '_' => Binding::Unbound,
+            '?' => Binding::Variable(kind_re.replace(var_text, "")),
+            '#' => Binding::Constant(Value::Id(var_text[1..].parse::<u64>().unwrap())),
+            '"' => Binding::Constant(Value::Text(var_text[1..var_text.len()-1].to_owned())),
+            _ => Binding::Constant(Value::Number(var_text.parse::<f64>().unwrap())),
         }
     }).collect();
     let kinds = text.matches(&var_re).map(|var_text| {
@@ -339,10 +379,11 @@ fn parse_clause(text: &str) -> (ViewId, Vec<Option<VariableId>>, Vec<Option<Kind
     (view_id, bindings, kinds)
 }
 
+// If I am mad, it is mercy!
 fn parse_view(text: &str) -> (ViewId, Vec<Kind>, View) {
     let lines = text.split("\n").collect::<Vec<_>>();
     let (view_id, bindings, kinds) = parse_clause(lines[0]);
-    let select = bindings.into_iter().map(|binding| binding.unwrap()).collect();
+    let select = bindings.into_iter().map(|binding| match binding { Binding::Variable(var) => var, _ => panic!() }).collect();
     let schema = kinds.into_iter().map(|kind| kind.unwrap()).collect();
     let view = match lines[1].chars().next().unwrap() {
         '=' => {
@@ -399,89 +440,7 @@ impl Program {
 #[cfg(test)]
 pub mod tests{
     use super::*;
-    use runtime::{self, hash};
     use test::{Bencher, black_box};
-    use std::rc::Rc;
-
-    fn compile_metal() -> runtime::Query {
-        use runtime::Kind::*;
-        let ids = vec![
-           "artist".to_owned(),
-           "album".to_owned(),
-           "track".to_owned(),
-           "playlist_track".to_owned(),
-           "playlist".to_owned(),
-           "query".to_owned(),
-        ];
-        let schedule = vec![0,1,2,3,4,5];
-        let schemas = vec![
-            vec![Id, Text],
-            vec![Id, Text, Id],
-            vec![Id, Text, Id],
-            vec![Id, Id],
-            vec![Id, Text],
-            vec![Text],
-        ];
-        let query = Query{
-            clauses: vec![
-            Clause{
-                view: "artist".to_owned(),
-                bindings: vec![Some("artist_id".to_owned()), Some("artist_name".to_owned())],
-            },
-            Clause{
-                view: "album".to_owned(),
-                bindings: vec![Some("album_id".to_owned()), None, Some("artist_id".to_owned())],
-            },
-            Clause{
-                view: "track".to_owned(),
-                bindings: vec![Some("track_id".to_owned()), None, Some("album_id".to_owned())],
-            },
-            Clause{
-                view: "playlist_track".to_owned(),
-                bindings: vec![Some("playlist_id".to_owned()), Some("track_id".to_owned())],
-            },
-            Clause{
-                view: "playlist".to_owned(),
-                bindings: vec![Some("playlist_id".to_owned()), Some("playlist_name".to_owned())],
-            },
-            Clause{
-                view: "query".to_owned(),
-                bindings: vec![Some("playlist_name".to_owned())],
-            }
-            ],
-            select: vec!["artist_name".to_owned()],
-        };
-        let program = Program{ids: ids, schedule: schedule, schemas: schemas, views: vec![]};
-        query.compile(&program)
-    }
-
-    #[test]
-    fn test_metal_compile() {
-        let query = compile_metal();
-        let (mut strings, mut states) = runtime::tests::chinook();
-        let metal = "Heavy Metal Classic".to_owned();
-        let query_state = runtime::Chunk{ data: vec![hash(&metal), strings.len() as u64], row_width: 2};
-        strings.push(metal);
-        states.push(Rc::new(query_state));
-        let results = query.run(&strings, &states[..]);
-        assert_set_eq!(
-            results.data.chunks(2).map(|chunk| &strings[chunk[1] as usize][..]),
-            vec!["AC/DC", "Accept", "Black Sabbath", "Metallica", "Iron Maiden", "Mot\u{f6}rhead", "M\u{f6}tley Cr\u{fc}e", "Ozzy Osbourne", "Scorpions"]
-            );
-    }
-
-    #[bench]
-    pub fn bench_metal_compile(bencher: &mut Bencher) {
-        let query = compile_metal();
-        let (mut strings, mut states) = runtime::tests::chinook();
-        let metal = "Heavy Metal Classic".to_owned();
-        let query_state = runtime::Chunk{ data: vec![hash(&metal), strings.len() as u64], row_width: 2};
-        strings.push(metal);
-        states.push(Rc::new(query_state));
-        bencher.iter(|| {
-            black_box(query.run(&strings, &states[..]));
-        });
-    }
 
     #[test]
     pub fn test_metal() {
@@ -489,7 +448,7 @@ pub mod tests{
         let mut runtime_program = bootstrap_program.compile();
         runtime_program.run();
         assert_set_eq!(
-            runtime_program.states[6].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
+            runtime_program.states[5].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
             vec!["AC/DC", "Accept", "Black Sabbath", "Metallica", "Iron Maiden", "Mot\u{f6}rhead", "M\u{f6}tley Cr\u{fc}e", "Ozzy Osbourne", "Scorpions"]
             );
     }
@@ -501,7 +460,7 @@ pub mod tests{
         bencher.iter(|| {
             let mut runtime_program = runtime_program.clone();
             runtime_program.run();
-            black_box(&runtime_program.states[6]);
+            black_box(&runtime_program.states[5]);
         });
     }
 
@@ -511,7 +470,7 @@ pub mod tests{
             let bootstrap_program = Program::load(&["data/chinook.imp", "data/metal.imp"]);
             let mut runtime_program = bootstrap_program.compile();
             runtime_program.run();
-            black_box(&runtime_program.states[6]);
+            black_box(&runtime_program.states[5]);
         });
     }
 

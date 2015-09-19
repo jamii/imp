@@ -937,7 +937,7 @@ I added a filtering phase at the start of each query to handle self-joins and co
 ?x is friends with ?x
 ```
 
-Whenever a constant on self-join is spotted, the planner adds an action that calls one of:
+Whenever a self-join or a constant is spotted, the planner adds an action that calls one of:
 
 ``` rust
 impl Chunk {

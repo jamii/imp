@@ -1,6 +1,5 @@
 use runtime::{self, hash, Kind};
 use std::collections::HashSet;
-use std::collections::HashMap;
 use regex::Regex;
 use std::path::Path;
 use std::io::prelude::*;

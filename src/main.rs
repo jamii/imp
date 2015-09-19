@@ -1,9 +1,7 @@
 #![feature(test)]
-#![feature(slice_bytes)]
 #![feature(iter_arith)]
-#![feature(clone_from_slice)]
 #![feature(step_by)]
-#![feature(hash_default)]
+#![allow(dead_code)]
 
 extern crate rand;
 extern crate test;

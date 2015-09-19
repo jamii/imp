@@ -927,3 +927,38 @@ bencher.iter(|| {
 A beautiful 0.86 ms vs SQLites 1.2ms. I'm gaining some advantage from normalizing the database and I got lucky with the clause ordering and it's not much of a benchmark to begin with, but I'm still feeling pretty good :)
 
 What was that about the clause ordering? The planner picks the first ear it can find and it searches the clauses in the order they are given in the program. If we reverse the ordering we get a plan that takes 1.7ms, because it runs the filtering phase from artist to playlist instead of the other direction, resulting in absolutely no filtering. No matter what order is chosen, every plan has to sort all of the inputs once and then all of the intermediate results once. The size of the intermediate results are still bounded, so we can expect the difference between the best and worst plans to at most 2x.
+
+## Filtering
+
+I added a filtering phase at the start of each query to handle self-joins and constants, so we can now write queries like:
+
+```
+?x is from "England"
+?x is friends with ?x
+```
+
+Whenever a constant on self-join is spotted, the planner adds an action that calls one of:
+
+``` rust
+impl Chunk {
+    pub fn selfjoin(&self, left_ix: usize, right_ix: usize) -> Chunk {
+        let mut data = vec![];
+        for row in self.data.chunks(self.row_width) {
+            if row[left_ix] == row[right_ix] {
+                data.extend(row);
+            }
+        }
+        Chunk{ data: data, row_width: self.row_width}
+    }
+
+    pub fn filter(&self, ix: usize, value: u64) -> Chunk {
+        let mut data = vec![];
+        for row in self.data.chunks(self.row_width) {
+            if row[ix] == value {
+                data.extend(row);
+            }
+        }
+        Chunk{ data: data, row_width: self.row_width}
+    }
+}
+```

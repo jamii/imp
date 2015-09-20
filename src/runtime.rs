@@ -168,8 +168,7 @@ impl Chunk {
         Chunk{data: data, row_width: row_width}
     }
 
-    pub fn union(&self, other: &Chunk) -> Chunk {
-        let key = (0..self.row_width).collect::<Vec<_>>();
+    pub fn union(&self, other: &Chunk, key: &[usize]) -> Chunk {
         let mut data = vec![];
         for diff in self.diffs(other, &key[..], &key[..]) {
             match diff {
@@ -187,8 +186,7 @@ impl Chunk {
         Chunk{data: data, row_width: self.row_width}
     }
 
-    pub fn difference(&self, other: &Chunk) -> Chunk {
-        let key = (0..self.row_width).collect::<Vec<_>>();
+    pub fn difference(&self, other: &Chunk, key: &[usize]) -> Chunk {
         let mut data = vec![];
         for diff in self.diffs(other, &key[..], &key[..]) {
             match diff {
@@ -396,6 +394,7 @@ impl Query {
 pub struct Union {
     pub upstream: Vec<usize>,
     pub members: Vec<Member>,
+    pub key: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -410,8 +409,8 @@ impl Union {
         let mut result = Cow::Borrowed(&*states[self.upstream[0]]);
         for ix in 1..self.upstream.len() {
             result = Cow::Owned(match self.members[ix] {
-                Member::Insert => result.union(&*states[self.upstream[ix]]),
-                Member::Remove => result.difference(&*states[self.upstream[ix]]),
+                Member::Insert => result.union(&*states[self.upstream[ix]], &self.key[..]),
+                Member::Remove => result.difference(&*states[self.upstream[ix]], &self.key[..]),
             });
         }
         result.into_owned()

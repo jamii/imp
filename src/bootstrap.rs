@@ -337,7 +337,7 @@ impl Query {
 }
 
 impl Union {
-    pub fn compile(&self, program: &Program) -> runtime::Union {
+    pub fn compile(&self, schema: &[Kind], program: &Program) -> runtime::Union {
         let upstream = self.members.iter().map(|member| {
             match *member {
                 Member::Insert(ref member_id) => program.ids.iter().position(|id| id == member_id).unwrap(),
@@ -350,7 +350,10 @@ impl Union {
                 Member::Remove(_) => runtime::Member::Remove,
             }
         }).collect();
-        runtime::Union{upstream: upstream, members: members}
+        let key = (0..schema.len()).map(|ix| {
+            schema[0..ix].iter().map(|kind| kind.width()).sum()
+        }).collect();
+        runtime::Union{upstream: upstream, members: members, key: key}
     }
 }
 
@@ -385,7 +388,7 @@ impl Program {
                     dirty.push(true);
                 }
                 View::Union(ref union) => {
-                    let runtime_union = union.compile(self);
+                    let runtime_union = union.compile(&schema[..], self);
                     let row_width = schema.iter().map(|kind| kind.width()).sum();
                     states.push(Rc::new(runtime::Chunk{data: vec![], row_width: row_width}));
                     views.push(runtime::View::Union(runtime_union));
@@ -605,11 +608,22 @@ pub mod tests{
         let bootstrap_program = Program::load(&["data/paths.imp"]);
         let mut runtime_program = bootstrap_program.compile();
         runtime_program.run();
-        println!("{:?}", runtime_program.states[3]);
         assert_eq!(
             runtime_program.states[3].data,
             vec![0, 1, 0, 2, 0, 3, 0, 4, 1, 1, 1, 2, 1, 3, 1, 4, 2, 1, 2, 2, 2, 3, 2, 4, 3, 1, 3, 2,
  3, 3, 3, 4]
+            );
+    }
+
+    #[test]
+
+    pub fn test_flying() {
+        let bootstrap_program = Program::load(&["data/flying.imp"]);
+        let mut runtime_program = bootstrap_program.compile();
+        runtime_program.run();
+        assert_set_eq!(
+            runtime_program.states[6].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
+            vec!["Sally the sparrow", "Ellen the eagle", "Harry the penguin"]
             );
     }
 }

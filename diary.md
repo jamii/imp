@@ -933,6 +933,8 @@ What was that about the clause ordering? The planner picks the first ear it can 
 I added a filtering phase at the start of each query to handle self-joins and constants, so we can now write queries like:
 
 ```
+?x is friends with #42
+?x has 7 friends
 ?x is from "England"
 ?x is friends with ?x
 ```

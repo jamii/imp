@@ -397,6 +397,7 @@ fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>) {
     (view_id, bindings, kinds)
 }
 
+// I have seen beyond the bounds of infinity and drawn down daemons from the stars
 fn parse_input(lines: Vec<&str>, schema: &[Kind]) -> Input {
     let mut words = lines[1].split(" ");
     words.next().unwrap(); // drop "="
@@ -418,7 +419,7 @@ fn parse_input(lines: Vec<&str>, schema: &[Kind]) -> Input {
     }).collect();
     Input{tsv: tsv, rows: rows}
 }
-
+// I have harnessed the shadows that stride from world to world to sow death and madness
 fn parse_query(lines: Vec<&str>, select: &[VariableId]) -> Query {
     let clauses = lines[2..].iter().map(|line| {
         let (view_id, bindings, kinds) = parse_clause(line);

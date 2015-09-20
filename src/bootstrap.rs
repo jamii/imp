@@ -25,8 +25,7 @@ pub enum View {
 
 #[derive(Clone, Debug)]
 pub struct Input {
-    pub filename: String,
-    pub columns: Vec<usize>,
+    pub tsv: Option<(String, Vec<usize>)>,
 }
 
 #[derive(Clone, Debug)]
@@ -255,22 +254,24 @@ impl State {
 
 impl Input {
     pub fn compile(&self, schema: &[Kind], strings: &mut Vec<String>) -> runtime::Chunk {
-        let mut tsv = String::new();
-        File::open(&self.filename).unwrap().read_to_string(&mut tsv).unwrap();
-        let mut lines = tsv.lines();
-        lines.next(); // drop header
         let mut data = vec![];
-        for line in lines {
-            let fields = line.split("\t").collect::<Vec<_>>();
-            for (kind, column) in schema.iter().zip(self.columns.iter()) {
-                match *kind {
-                    Kind::Id => data.push(fields[*column].parse::<u64>().unwrap()),
-                    Kind::Number => data.push(fields[*column].parse::<f64>().unwrap() as u64),
-                    Kind::Text => {
-                        let field = fields[*column].to_owned();
-                        data.push(hash(&field));
-                        data.push(strings.len() as u64);
-                        strings.push(field);
+        if let Some((ref filename, ref columns)) = self.tsv {
+            let mut contents = String::new();
+            File::open(filename).unwrap().read_to_string(&mut contents).unwrap();
+            let mut lines = contents.lines();
+            lines.next(); // drop header
+            for line in lines {
+                let fields = line.split("\t").collect::<Vec<_>>();
+                for (kind, column) in schema.iter().zip(columns.iter()) {
+                    match *kind {
+                        Kind::Id => data.push(fields[*column].parse::<u64>().unwrap()),
+                        Kind::Number => data.push(fields[*column].parse::<f64>().unwrap() as u64),
+                        Kind::Text => {
+                            let field = fields[*column].to_owned();
+                            data.push(hash(&field));
+                            data.push(strings.len() as u64);
+                            strings.push(field);
+                        }
                     }
                 }
             }
@@ -390,9 +391,11 @@ fn parse_view(text: &str) -> (ViewId, Vec<Kind>, View) {
             // TODO handle manual input
             let mut words = lines[1].split(" ");
             words.next().unwrap(); // drop "="
-            let filename = words.next().unwrap().to_owned();
-            let columns = words.map(|word| word.parse::<usize>().unwrap()).collect();
-            View::Input(Input{filename: filename, columns: columns})
+            let tsv = words.next().map(|filename| {
+                let columns = words.map(|word| word.parse::<usize>().unwrap()).collect();
+                (filename.to_owned(), columns)
+            });
+            View::Input(Input{tsv: tsv})
         }
         '+' => {
             let clauses = lines[2..].iter().map(|line| {

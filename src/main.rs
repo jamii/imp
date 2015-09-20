@@ -33,12 +33,14 @@ mod runtime;
 mod bootstrap;
 
 fn main() {
-    let rex = Regex::new(r#"_|\?[:alnum:]*(:[:alnum:]*)?|"[^"]*"|([:digit:]|\.)+"#).unwrap();
+    let rex = Regex::new(r#"_|\?[:alnum:]*(:[:alnum:]*)?|"[^"]*"|([:digit:]|\.)+|#[:digit:]+"#).unwrap();
     println!("{:?}", &[
         rex.find("has ?cat bar"),
         rex.find("has \"foo\" bar"),
         rex.find("has 1 bar"),
         rex.find("has 1.92 bar"),
+        rex.find("has # bar"),
+        rex.find("has #32 bar"),
         rex.find("has no bar"),
         rex.find("has a bar"),
         ]);

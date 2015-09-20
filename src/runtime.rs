@@ -271,7 +271,17 @@ impl<'a> Iterator for Diffs<'a> {
                     }
                 }
             }
-            _ => None,
+            (Some(left_words), None) => {
+                let result = Some(Diff::Left(left_words));
+                self.left_group = self.left_groups.next();
+                result
+            }
+            (None, Some(right_words)) => {
+                let result = Some(Diff::Right(right_words));
+                self.right_group = self.right_groups.next();
+                result
+            }
+            (None, None) => None,
         }
     }
 }
@@ -382,6 +392,32 @@ impl Query {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Union {
+    pub upstream: Vec<usize>,
+    pub members: Vec<Member>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Member {
+    Insert,
+    Remove,
+}
+
+impl Union {
+    fn run(&self, states: &[Rc<Chunk>]) -> Chunk {
+        assert_eq!(self.members[0], Member::Insert);
+        let mut result = Cow::Borrowed(&*states[self.upstream[0]]);
+        for ix in 1..self.upstream.len() {
+            result = Cow::Owned(match self.members[ix] {
+                Member::Insert => result.union(&*states[self.upstream[ix]]),
+                Member::Remove => result.difference(&*states[self.upstream[ix]]),
+            });
+        }
+        result.into_owned()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Program {
     pub ids: Vec<ViewId>,
@@ -399,6 +435,7 @@ pub struct Program {
 pub enum View {
     Input,
     Query(Query),
+    Union(Union),
 }
 
 impl Program {
@@ -419,8 +456,8 @@ impl Program {
                     dirty[downstream_ix] = true;
                 }
             }
-            View::Query(_) => {
-                panic!("Can't set view {:?} - it's a query!", id);
+            _ => {
+                panic!("Can't set view {:?} - it isn't an input!", id);
             }
         }
     }
@@ -428,24 +465,22 @@ impl Program {
     pub fn run(&mut self) {
         let &mut Program{ref mut states, ref views, ref downstreams, ref mut dirty, ref strings, ..} = self;
         while let Some(ix) = dirty.iter().position(|&is_dirty| is_dirty) {
-            match views[ix] {
+            dirty[ix] = false;
+            let new_chunk = match views[ix] {
                 View::Input => panic!("How did an input get dirtied?"),
-                View::Query(ref query) => {
-                    dirty[ix] = false;
-                    let new_chunk = query.run(strings, &states[..]);
-                    // TODO using != assumes both will have the same sort order. is that safe?
-                    if *states[ix] != new_chunk {
-                        states[ix] = Rc::new(new_chunk);
-                        for &downstream_ix in downstreams[ix].iter() {
-                            dirty[downstream_ix] = true;
-                        }
-                    }
+                View::Query(ref query) => query.run(strings, &states[..]),
+                View::Union(ref union) => union.run(&states[..])
+            };
+            // TODO using != assumes both will have the same sort order. is that safe?
+            if *states[ix] != new_chunk {
+                states[ix] = Rc::new(new_chunk);
+                for &downstream_ix in downstreams[ix].iter() {
+                    dirty[downstream_ix] = true;
                 }
             }
         }
     }
 }
-
 
 #[cfg(test)]
 pub mod tests{

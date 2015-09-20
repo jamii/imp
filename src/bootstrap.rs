@@ -21,6 +21,7 @@ pub struct Program {
 pub enum View {
     Input(Input),
     Query(Query),
+    Union(Union),
 }
 
 #[derive(Clone, Debug)]
@@ -33,6 +34,17 @@ pub struct Input {
 pub struct Query {
     pub clauses: Vec<Clause>,
     pub select: Vec<VariableId>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Union {
+    pub members: Vec<Member>,
+}
+
+#[derive(Clone, Debug)]
+pub enum Member {
+    Insert(ViewId),
+    Remove(ViewId),
 }
 
 #[derive(Clone, Debug)]
@@ -219,7 +231,7 @@ impl State {
         match self.to_join.len() {
             1 => {
                 let ix = self.to_join[0];
-                self.project(ix, &vec![], &to_select);
+                self.project(ix, &to_select, &vec![]);
                 ix
             }
             2 => {
@@ -231,7 +243,7 @@ impl State {
                 self.project(left_ix, &join_vars, &to_select);
                 self.project(right_ix, &join_vars, &to_select);
                 self.join(left_ix, right_ix, &join_vars);
-                self.project(right_ix, &vec![], &to_select);
+                self.project(right_ix, &to_select, &vec![]);
                 right_ix
             }
             _ => {
@@ -246,7 +258,7 @@ impl State {
                 self.to_select = ordered_union(&join_vars, &to_select);
                 let result_ix = self.compile();
                 self.join(ear_ix, result_ix, &join_vars);
-                self.project(result_ix, &vec![], &to_select);
+                self.project(result_ix, &to_select, &vec![]);
                 result_ix
             }
         }
@@ -324,6 +336,25 @@ impl Query {
     }
 }
 
+impl Union {
+    pub fn compile(&self, program: &Program) -> runtime::Union {
+        let upstream = self.members.iter().map(|member| {
+            match *member {
+                Member::Insert(ref member_id) => program.ids.iter().position(|id| id == member_id).unwrap(),
+                Member::Remove(ref member_id) => program.ids.iter().position(|id| id == member_id).unwrap(),
+            }
+        }).collect();
+        let members = self.members.iter().map(|member| {
+            match *member {
+                Member::Insert(_) => runtime::Member::Insert,
+                Member::Remove(_) => runtime::Member::Remove,
+            }
+        }).collect();
+        runtime::Union{upstream: upstream, members: members}
+    }
+}
+
+
 impl Program {
     pub fn compile(&self) -> runtime::Program {
         let mut ids = vec![];
@@ -353,16 +384,31 @@ impl Program {
                     views.push(runtime::View::Query(runtime_query));
                     dirty.push(true);
                 }
+                View::Union(ref union) => {
+                    let runtime_union = union.compile(self);
+                    let row_width = schema.iter().map(|kind| kind.width()).sum();
+                    states.push(Rc::new(runtime::Chunk{data: vec![], row_width: row_width}));
+                    views.push(runtime::View::Union(runtime_union));
+                    dirty.push(true);
+                }
             }
             schemas.push(schema);
             downstreams.push(vec![]);
         }
 
         for (schedule_ix, view) in views.iter().enumerate() {
-            if let runtime::View::Query(ref query) = *view {
-                for upstream_ix in query.upstream.iter() {
-                    downstreams[*upstream_ix].push(schedule_ix);
+            match *view {
+                runtime::View::Query(ref query) => {
+                    for upstream_ix in query.upstream.iter() {
+                        downstreams[*upstream_ix].push(schedule_ix);
+                    }
                 }
+                runtime::View::Union(ref union) => {
+                    for upstream_ix in union.upstream.iter() {
+                        downstreams[*upstream_ix].push(schedule_ix);
+                    }
+                }
+                runtime::View::Input => (),
             }
         }
 
@@ -372,7 +418,7 @@ impl Program {
 
 // We shall see that at which dogs howl in the dark, and that at which cats prick up their ears after midnight
 fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>) {
-    let var_re = Regex::new(r#"_|\?[:alnum:]*(:[:alnum:]*)?|"[^"]*"|([:digit:]|\.)+"#).unwrap();
+    let var_re = Regex::new(r#"_|\?[:alnum:]*(:[:alnum:]*)?|"[^"]*"|([:digit:]|\.)+|#[:digit:]+"#).unwrap();
     let kind_re = Regex::new(r":[:alnum:]*").unwrap();
     let bindings = text.matches(&var_re).map(|var_text| {
         match var_text.chars().next().unwrap() {
@@ -398,14 +444,14 @@ fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>) {
 }
 
 // I have seen beyond the bounds of infinity and drawn down daemons from the stars
-fn parse_input(lines: Vec<&str>, schema: &[Kind]) -> Input {
+fn parse_input(lines: Vec<&str>, view_id: ViewId, schema: Vec<Kind>) -> Vec<(ViewId, Vec<Kind>, View)> {
     let mut words = lines[1].split(" ");
     words.next().unwrap(); // drop "="
     let tsv = words.next().map(|filename| {
         let columns = words.map(|word| word.parse::<usize>().unwrap()).collect();
         (filename.to_owned(), columns)
     });
-    let value_re = Regex::new(r#""[^"]*"|([:digit:]|\.)+"#).unwrap();
+    let value_re = Regex::new(r#""[^"]*"|([:digit:]|\.)+|#[:digit:]+"#).unwrap();
     let rows = lines[2..].iter().map(|line| {
         let values = line.matches(&value_re).map(|value_text| {
             match value_text.chars().next().unwrap() {
@@ -417,32 +463,62 @@ fn parse_input(lines: Vec<&str>, schema: &[Kind]) -> Input {
         assert_eq!(values.len(), schema.len());
         values
     }).collect();
-    Input{tsv: tsv, rows: rows}
+    vec![(view_id, schema, View::Input(Input{tsv: tsv, rows: rows}))]
 }
+
 // I have harnessed the shadows that stride from world to world to sow death and madness
-fn parse_query(lines: Vec<&str>, select: &[VariableId]) -> Query {
-    let clauses = lines[2..].iter().map(|line| {
-        let (view_id, bindings, kinds) = parse_clause(line);
-        for kind in kinds.into_iter() {
-            assert_eq!(kind, None);
+fn parse_query(mut lines: Vec<&str>, view_id: ViewId, schema: Vec<Kind>, select: Vec<VariableId>) -> Vec<(ViewId, Vec<Kind>, View)> {
+    let mut members = vec![];
+    let mut views = vec![];
+    let mut clauses = vec![];
+    lines.remove(0); // drop header
+    for line in lines.iter() {
+        match *line {
+            "+" => {
+                let member_id = format!("{} | member {}", view_id, members.len());
+                let query_id = format!("{} | member {}", view_id, (members.len() as isize) - 1);
+                members.push(Member::Insert(member_id));
+                let query = View::Query(Query{clauses: clauses, select: select.clone()});
+                views.push((query_id, schema.clone(), query));
+                clauses = vec![];
+            }
+            "-" => {
+                let member_id = format!("{} | member {}", view_id, members.len());
+                let query_id = format!("{} | member {}", view_id, (members.len() as isize) - 1);
+                members.push(Member::Remove(member_id));
+                let query = View::Query(Query{clauses: clauses, select: select.clone()});
+                views.push((query_id, schema.clone(), query));
+                clauses = vec![];
+            }
+            _ => {
+                let (view_id, bindings, kinds) = parse_clause(line);
+                for kind in kinds.into_iter() {
+                    assert_eq!(kind, None);
+                }
+                clauses.push(Clause{view: view_id, bindings: bindings})
+            }
         }
-        Clause{view: view_id, bindings: bindings}
-    }).collect();
-    Query{clauses: clauses, select: select.to_vec()}
+    }
+    let query_id = format!("{} | member {}", view_id, members.len() - 1);
+    let query = View::Query(Query{clauses: clauses, select: select.clone()});
+    views.push((query_id, schema.clone(), query));
+    views.remove(0);
+    views.push((view_id, schema.clone(), View::Union(Union{members: members})));
+    views
 }
 
 // If I am mad, it is mercy!
-fn parse_view(text: &str) -> (ViewId, Vec<Kind>, View) {
+fn parse_view(text: &str) -> Vec<(ViewId, Vec<Kind>, View)> {
     let lines = text.split("\n").collect::<Vec<_>>();
     let (view_id, bindings, kinds) = parse_clause(lines[0]);
     let select = bindings.into_iter().map(|binding| match binding { Binding::Variable(var) => var, _ => panic!() }).collect::<Vec<_>>();
     let schema = kinds.into_iter().map(|kind| kind.unwrap()).collect::<Vec<_>>();
-    let view = match lines[1].chars().next().unwrap() {
-        '=' => View::Input(parse_input(lines, &schema[..])),
-        '+' => View::Query(parse_query(lines, &select[..])),
+    match lines[1].chars().next().unwrap() {
+        '=' => parse_input(lines, view_id, schema),
+        '+' => parse_query(lines, view_id, schema, select),
+        '-' => parse_query(lines, view_id, schema, select),
         _ => panic!("What are this? {:?}", lines[1]),
-    };
-    (view_id, schema, view)
+    }
 }
 
 impl Program {
@@ -451,13 +527,16 @@ impl Program {
         let mut schedule = vec![];
         let mut schemas = vec![];
         let mut views = vec![];
-        for (ix, view_text) in text.split("\n\n").enumerate() {
+        let mut ix = 0;
+        for view_text in text.split("\n\n") {
             if view_text != "" {
-                let (id, schema, view) = parse_view(view_text);
-                ids.push(id);
-                schedule.push(ix); // ie just scheduling in textual order for now
-                schemas.push(schema);
-                views.push(view);
+                for (id, schema, view) in parse_view(view_text) {
+                    ids.push(id);
+                    schemas.push(schema);
+                    views.push(view);
+                    schedule.push(ix); // ie just scheduling in textual order for now
+                    ix += 1;
+                }
             }
         }
         Program{ids: ids, schedule: schedule, schemas: schemas, views: views}
@@ -518,6 +597,19 @@ pub mod tests{
         assert_set_eq!(
             runtime_program.states[5].data.iter().cloned(),
             vec![1,5,8]
+            );
+    }
+
+    #[test]
+    pub fn test_paths() {
+        let bootstrap_program = Program::load(&["data/paths.imp"]);
+        let mut runtime_program = bootstrap_program.compile();
+        runtime_program.run();
+        println!("{:?}", runtime_program.states[3]);
+        assert_eq!(
+            runtime_program.states[3].data,
+            vec![0, 1, 0, 2, 0, 3, 0, 4, 1, 1, 1, 2, 1, 3, 1, 4, 2, 1, 2, 2, 2, 3, 2, 4, 3, 1, 3, 2,
+ 3, 3, 3, 4]
             );
     }
 }

@@ -26,6 +26,7 @@ pub enum View {
 #[derive(Clone, Debug)]
 pub struct Input {
     pub tsv: Option<(String, Vec<usize>)>,
+    pub rows: Vec<Vec<Value>>,
 }
 
 #[derive(Clone, Debug)]
@@ -276,6 +277,22 @@ impl Input {
                 }
             }
         }
+        for row in self.rows.iter() {
+            assert_eq!(row.len(), schema.len());
+            for (value, kind) in row.iter().zip(schema.iter()) {
+                match (value, *kind) {
+                    (&Value::Id(id), Kind::Id) => data.push(id),
+                    (&Value::Number(number), Kind::Number) => data.push(number as u64),
+                    (&Value::Text(ref text), Kind::Text) => {
+                        let text = text.to_owned();
+                        data.push(hash(&text));
+                        data.push(strings.len() as u64);
+                        strings.push(text);
+                    }
+                    _ => panic!("Kind mismatch: {:?} {:?}", kind, value),
+                }
+            }
+        }
         let row_width = schema.iter().map(|kind| kind.width()).sum();
         runtime::Chunk{data: data, row_width: row_width}
     }
@@ -380,33 +397,48 @@ fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>) {
     (view_id, bindings, kinds)
 }
 
+fn parse_input(lines: Vec<&str>, schema: &[Kind]) -> Input {
+    let mut words = lines[1].split(" ");
+    words.next().unwrap(); // drop "="
+    let tsv = words.next().map(|filename| {
+        let columns = words.map(|word| word.parse::<usize>().unwrap()).collect();
+        (filename.to_owned(), columns)
+    });
+    let value_re = Regex::new(r#""[^"]*"|([:digit:]|\.)+"#).unwrap();
+    let rows = lines[2..].iter().map(|line| {
+        let values = line.matches(&value_re).map(|value_text| {
+            match value_text.chars().next().unwrap() {
+                '#' => Value::Id(value_text[1..].parse::<u64>().unwrap()),
+                '"' => Value::Text(value_text[1..value_text.len()-1].to_owned()),
+                _ => Value::Number(value_text.parse::<f64>().unwrap()),
+            }
+        }).collect::<Vec<_>>();
+        assert_eq!(values.len(), schema.len());
+        values
+    }).collect();
+    Input{tsv: tsv, rows: rows}
+}
+
+fn parse_query(lines: Vec<&str>, select: &[VariableId]) -> Query {
+    let clauses = lines[2..].iter().map(|line| {
+        let (view_id, bindings, kinds) = parse_clause(line);
+        for kind in kinds.into_iter() {
+            assert_eq!(kind, None);
+        }
+        Clause{view: view_id, bindings: bindings}
+    }).collect();
+    Query{clauses: clauses, select: select.to_vec()}
+}
+
 // If I am mad, it is mercy!
 fn parse_view(text: &str) -> (ViewId, Vec<Kind>, View) {
     let lines = text.split("\n").collect::<Vec<_>>();
     let (view_id, bindings, kinds) = parse_clause(lines[0]);
-    let select = bindings.into_iter().map(|binding| match binding { Binding::Variable(var) => var, _ => panic!() }).collect();
-    let schema = kinds.into_iter().map(|kind| kind.unwrap()).collect();
+    let select = bindings.into_iter().map(|binding| match binding { Binding::Variable(var) => var, _ => panic!() }).collect::<Vec<_>>();
+    let schema = kinds.into_iter().map(|kind| kind.unwrap()).collect::<Vec<_>>();
     let view = match lines[1].chars().next().unwrap() {
-        '=' => {
-            // TODO handle manual input
-            let mut words = lines[1].split(" ");
-            words.next().unwrap(); // drop "="
-            let tsv = words.next().map(|filename| {
-                let columns = words.map(|word| word.parse::<usize>().unwrap()).collect();
-                (filename.to_owned(), columns)
-            });
-            View::Input(Input{tsv: tsv})
-        }
-        '+' => {
-            let clauses = lines[2..].iter().map(|line| {
-                let (view_id, bindings, kinds) = parse_clause(line);
-                for kind in kinds.into_iter() {
-                    assert_eq!(kind, None);
-                }
-                Clause{view: view_id, bindings: bindings}
-            }).collect();
-            View::Query(Query{clauses: clauses, select: select})
-        }
+        '=' => View::Input(parse_input(lines, &schema[..])),
+        '+' => View::Query(parse_query(lines, &select[..])),
         _ => panic!("What are this? {:?}", lines[1]),
     };
     (view_id, schema, view)

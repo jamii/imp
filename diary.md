@@ -964,3 +964,73 @@ impl Chunk {
     }
 }
 ```
+
+## Data entry
+
+Now that the parser can handle constants, I can add tables of constants:
+
+```
+there is an edge from ?a:id to ?b:id
+=
+#0 #1
+#1 #2
+#2 #3
+#3 #4
+#3 #1
+```
+
+## Unions
+
+Finally, the reason for the weird "+" syntax. Queries can be made up of multiple stages which can each add or remove results:
+
+```
+?a:text can fly
++
+?a is a bird
+-
+?a is a penguin
++
+?a is Harry the Rocket Penguin
+```
+
+This starts to enable the use of recursive views too, so we can write:
+
+```
+there is a path from ?a:id to ?b:id
++
+there is an edge from ?a to ?b
++
+there is an edge from ?a to ?c
+there is a path from ?c to ?b
+```
+
+Most of the work was in the monstrous parser. The final runtime structure is very simple:
+
+``` rust
+#[derive(Debug, Clone)]
+pub struct Union {
+    pub upstream: Vec<usize>,
+    pub members: Vec<Member>,
+    pub key: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Member {
+    Insert,
+    Remove,
+}
+
+impl Union {
+    fn run(&self, states: &[Rc<Chunk>]) -> Chunk {
+        assert_eq!(self.members[0], Member::Insert);
+        let mut result = Cow::Borrowed(&*states[self.upstream[0]]);
+        for ix in 1..self.upstream.len() {
+            result = Cow::Owned(match self.members[ix] {
+                Member::Insert => result.union(&*states[self.upstream[ix]], &self.key[..]),
+                Member::Remove => result.difference(&*states[self.upstream[ix]], &self.key[..]),
+            });
+        }
+        result.into_owned()
+    }
+}
+```

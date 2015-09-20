@@ -1,0 +1,23 @@
+?a:text is a bird
+=
+"Sally the sparrow"
+"Ellen the eagle"
+"Harry the penguin"
+"Percy the penguin"
+
+?a:text is a penguin
+=
+"Harry the penguin"
+"Percy the penguin"
+
+?a:text is Harry the Rocket Penguin
+=
+"Harry the penguin"
+
+?a:text can fly
++
+?a is a bird
+-
+?a is a penguin
++
+?a is Harry the Rocket Penguin

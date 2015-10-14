@@ -1059,6 +1059,6 @@ letter ?l is addressed to ?n
 
 Ignoring the concat, *a* valid join tree for Yannakakis would be "letter ?l is addressed to ?n" -> "person ?p has first name ?fn" -> "person ?p has last name ?ln". The concat can't be applied until after the last join so the first join is an expensive and unnecessary product.
 
-Intuitively though, it seems that for every query there some be *some* sensible join tree. I'm currently trying to figure out if there is a way to bound the costs of a given tree containing primitives. Then the compiler could just generate every valid tree and choose the tree with the lowest bounds.
+Intuitively though, it seems that for every query there should be *some* sensible join tree. I'm currently trying to figure out if there is a way to bound the costs of a given tree containing primitives. Then the compiler could just generate every valid tree and choose the tree with the lowest bounds.
 
 Today I'm rereading http://arxiv.org/pdf/1508.07532.pdf and http://arxiv.org/pdf/1508.01239.pdf, both of which calculate bounds for related problems. Hopefully something in there will inspire me. I've been stalled on this for a week or so, so I would be happy to find a crude solution for now and come back to it later.

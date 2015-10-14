@@ -1034,3 +1034,31 @@ impl Union {
     }
 }
 ```
+
+## Interlude
+
+I've been trying to extend Yannakiki's algorithm to handle primitives (ie infinite relations such as addition). I initially thought I could just treat them as normal relations during planning and then replace them by finite relations during the semijoin phase. The trouble is that many uses of primitives create cyclic queries, which I was hoping to punt on for a while longer eg
+
+```
+?bid is the max buy in market ?m with price ?bp and quant ?bq
+?sid is the min sell in market ?m with price ?sp and quant ?sq
+?bp >= ?sp
+?q = min(?bq, ?sq)
+```
+
+In a query like this you really don't want to replace >= or min by finite relations until after joining the buys and sells on ?m, otherwise you end up with O(n**2) rows in the replacements. In general it looks like primitives shouldn't be applied until all their inputs have been joined together, but that means that they can't take part in the semijoin phase which breaks the guarantees of Yannakaki's algorithm.
+
+An alternative is to ignore primitives while planning the join tree and then insert them as extra nodes afterwards. This can blow up in queries like:
+
+```
+person ?p has first name ?fn
+person ?p has last name ?ln
+?n = concat(?fn, ?ln)
+letter ?l is addressed to ?n
+```
+
+Ignoring the concat, *a* valid join tree for Yannakakis would be "letter ?l is addressed to ?n" -> "person ?p has first name ?fn" -> "person ?p has last name ?ln". The concat can't be applied until after the last join so the first join is an expensive and unnecessary product.
+
+Intuitively though, it seems that for every query there some be *some* sensible join tree. I'm currently trying to figure out if there is a way to bound the costs of a given tree containing primitives. Then the compiler could just generate every valid tree and choose the tree with the lowest bounds.
+
+Today I'm rereading http://arxiv.org/pdf/1508.07532.pdf and http://arxiv.org/pdf/1508.01239.pdf, both of which calculate bounds for related problems. Hopefully something in there will inspire me. I've been stalled on this for a week or so, so I would be happy to find a crude solution for now and come back to it later.

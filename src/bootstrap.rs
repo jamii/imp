@@ -273,12 +273,15 @@ pub fn compile_query(query: &Query, program: &Program) -> runtime::Query {
         sort_and_project(&mut chunks, &mut actions, parent_ix, &join_vars, &parent_vars);
         semijoin(&mut chunks, &mut actions, child_ix, parent_ix, &join_vars);
     }
-    for &(child_ix, _) in join_tree.iter().rev() {
+    let mut project_vars = vec![query.select.iter().cloned().collect::<HashSet<_>>()];
+    for &(child_ix, _) in join_tree.iter() {
+        let vars = project_vars[project_vars.len()-1].union(&chunks[child_ix].bound_vars).cloned().collect();
+        project_vars.push(vars);
+    }
+    for (join_ix, &(child_ix, _)) in join_tree.iter().enumerate().rev() {
         let join_vars = chunks[child_ix].bound_vars.intersection(&chunks[root_ix].bound_vars).cloned().collect();
-        let root_vars = chunks[root_ix].bound_vars.iter().cloned().collect();
         // child is already sorted from semijoin phase
-        // TODO project only needed vars
-        sort_and_project(&mut chunks, &mut actions, root_ix, &join_vars, &root_vars);
+        sort_and_project(&mut chunks, &mut actions, root_ix, &join_vars, &project_vars[join_ix].iter().cloned().collect());
         join(&mut chunks, &mut actions, child_ix, root_ix, &join_vars);
     }
     sort_and_project(&mut chunks, &mut actions, root_ix, &query.select, &vec![]);

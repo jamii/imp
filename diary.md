@@ -561,7 +561,7 @@ So close! And without any indexes or statistics. The urge to optimise is huge, b
 
 Imp doesn't fit nicely into either of these categories. Inputs and views may change entirely on each execution. Queries might be join-heavy or aggregation-heavy and might touch any amount of data. On the other hand, a typical OLTP application might issue the same query hundreds of times with different parameters (eg get the friend count for user X) where an Imp program would build a single view over all the parameters (eg get the friend count for all active users). I also want to have predictable and stable performance so I can build interactive programs without suffering mysterious and unpredictable pauses, so I would prefer to have a planner that always produces mediocre plans over one that mostly produces amazing plans but occasionally explodes.
 
-I've started with Yannakikis' algorithm, which provides tight guarantees for a large class of joins and does not require indexes or statistics. Unfortunately the original paper doesn't seem to be openly available, but the lecture notes [here](http://infolab.stanford.edu/~ullman/cs345notes/slides01-3.pdf) and [here](http://infolab.stanford.edu/~ullman/cs345notes/slides01-5.pdf) give a good overview and I'll try to explain it informally here too.
+I've started with Yannakakis' algorithm, which provides tight guarantees for a large class of joins and does not require indexes or statistics. Unfortunately the original paper doesn't seem to be openly available, but the lecture notes [here](http://infolab.stanford.edu/~ullman/cs345notes/slides01-3.pdf) and [here](http://infolab.stanford.edu/~ullman/cs345notes/slides01-5.pdf) give a good overview and I'll try to explain it informally here too.
 
 Let's start with a simple query:
 
@@ -580,7 +580,7 @@ Suppose we just walked through the input tables one by one and joined them toget
 
 The core problem here is that if we naively join tables together we may end up with intermediate results that are much larger than the final result. How much extra work this causes depends on what order the tables are joined in and how the data is distributed, both of which are hard to predict when writing the query. Traditional query planners try to estimate the size of intermediate results based on the statistics they gather about the currrent dataset.
 
-Yannakikis algorithm is much simpler. It works like this:
+Yannakakis algorithm is much simpler. It works like this:
 
 1. If there is only one table, you are finished!
 2. Otherwise, pick an __ear__ table and it's __parent__ table where all the joined columns in the ear are joined on the parent
@@ -1037,7 +1037,7 @@ impl Union {
 
 ## Interlude
 
-I've been trying to extend Yannakiki's algorithm to handle primitives (ie infinite relations such as addition). I initially thought I could just treat them as normal relations during planning and then replace them by finite relations during the semijoin phase. The trouble is that many uses of primitives create cyclic queries, which I was hoping to punt on for a while longer eg
+I've been trying to extend Yannakakis' algorithm to handle primitives (ie infinite relations such as addition). I initially thought I could just treat them as normal relations during planning and then replace them by finite relations during the semijoin phase. The trouble is that many uses of primitives create cyclic queries, which I was hoping to punt on for a while longer eg
 
 ```
 ?bid is the max buy in market ?m with price ?bp and quant ?bq
@@ -1046,7 +1046,7 @@ I've been trying to extend Yannakiki's algorithm to handle primitives (ie infini
 ?q = min(?bq, ?sq)
 ```
 
-In a query like this you really don't want to replace >= or min by finite relations until after joining the buys and sells on ?m, otherwise you end up with O(n**2) rows in the replacements. In general it looks like primitives shouldn't be applied until all their inputs have been joined together, but that means that they can't take part in the semijoin phase which breaks the guarantees of Yannakaki's algorithm.
+In a query like this you really don't want to replace >= or min by finite relations until after joining the buys and sells on ?m, otherwise you end up with O(n**2) rows in the replacements. In general it looks like primitives shouldn't be applied until all their inputs have been joined together, but that means that they can't take part in the semijoin phase which breaks the guarantees of Yannakakis' algorithm.
 
 An alternative is to ignore primitives while planning the join tree and then insert them as extra nodes afterwards. This can blow up in queries like:
 

@@ -34,9 +34,9 @@ mod bootstrap;
 fn watch(filenames: &[String]) -> () {
     loop {
         print!("Loading...");
-        let bootstrap_program = bootstrap::Program::load(filenames);
+        let bootstrap_program = bootstrap::load(filenames);
         print!("compiling...");
-        let mut runtime_program = bootstrap_program.compile();
+        let mut runtime_program = bootstrap::compile(&bootstrap_program);
         print!("running...");
         runtime_program.run();
         println!("done!");

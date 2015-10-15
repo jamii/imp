@@ -54,17 +54,16 @@ pub struct Clause {
 }
 
 #[derive(Clone, Debug)]
-pub struct State {
+pub struct QueryPlanner {
     pub actions: Vec<runtime::Action>,
     pub chunks: Vec<Chunk>,
-    pub to_join: Vec<usize>,
-    pub to_select: Vec<VariableId>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Chunk {
     pub kinds: Vec<Kind>,
     pub bindings: Vec<Binding>,
+    pub bound_vars: HashSet<VariableId>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -91,332 +90,320 @@ fn ordered_union(xs: &Vec<VariableId>, ys: &Vec<VariableId>) -> Vec<VariableId> 
     results
 }
 
-impl Chunk {
-    fn vars(&self) -> HashSet<VariableId> {
-        let mut vars = HashSet::new();
-        for binding in self.bindings.iter() {
-            match *binding {
-                Binding::Variable(ref var) => vars.insert(var.clone()),
-                _ => false,
+fn bound_vars(bindings: &Vec<Binding>) -> HashSet<VariableId> {
+    let mut vars = HashSet::new();
+    for binding in bindings.iter() {
+        match *binding {
+            Binding::Variable(ref var) => vars.insert(var.clone()),
+            _ => false,
+        };
+    }
+    vars
+}
+
+fn project_key(chunk: &Chunk, vars: &Vec<VariableId>) -> (Vec<usize>, Vec<Kind>, Vec<Binding>) {
+    let mut key = vec![];
+    let mut kinds = vec![];
+    let mut bindings = vec![];
+    for var in vars.iter() {
+        match chunk.bindings.iter().position(|binding| match *binding { Binding::Variable(ref bound) => bound == var, _ => false }) {
+            Some(ix) => {
+                let column: usize = chunk.kinds.iter().take(ix).map(|kind| kind.width()).sum();
+                for offset in 0..chunk.kinds[ix].width() {
+                    key.push(column + offset);
+                }
+                kinds.push(chunk.kinds[ix]);
+                bindings.push(Binding::Variable(var.clone()));
+            },
+            None => (), // can't project a var that isn't there
+        }
+    }
+    (key, kinds, bindings)
+}
+
+fn sort_key(chunk: &Chunk, vars: &Vec<VariableId>) -> Vec<usize> {
+    let mut key = vec![];
+    for var in vars.iter() {
+        match chunk.bindings.iter().position(|binding| match *binding { Binding::Variable(ref bound) => bound == var, _ => false }) {
+            Some(ix) => {
+                let column = chunk.kinds.iter().take(ix).map(|kind| kind.width()).sum();
+                key.push(column);
+            },
+            None => (), // can't sort a var that isn't there
+        }
+    }
+    key
+}
+
+fn find_join_ear(chunks: &Vec<Chunk>, unused: &Vec<usize>) -> (usize, usize) {
+    for &child_ix in unused.iter() {
+        let child_vars = &chunks[child_ix].bound_vars;
+        let mut joined_vars = HashSet::new();
+        for &other_ix in unused.iter() {
+            if child_ix != other_ix {
+                let other_vars = &chunks[other_ix].bound_vars;
+                joined_vars.extend(child_vars.intersection(other_vars).cloned());
+            }
+        }
+        for &parent_ix in unused.iter() {
+            if child_ix != parent_ix {
+                let parent_vars = &chunks[parent_ix].bound_vars;
+                if joined_vars.is_subset(parent_vars) {
+                    return (child_ix, parent_ix);
+                }
+            }
+        }
+    }
+    panic!("Cant find an ear in: {:#?}", (chunks, unused));
+}
+
+// join_tree is sorted from leaves upwards - later functions rely on this
+fn build_join_tree(chunks: &Vec<Chunk>) -> (Vec<(usize, usize)>, usize) {
+    let mut unused = (0..chunks.len()).collect::<Vec<_>>();
+    let mut edges = vec![];
+    while unused.len() > 1 { // one bag will be left behind as the root
+        let (child_ix, parent_ix) = find_join_ear(chunks, &unused);
+        unused.retain(|ix| *ix != child_ix);
+        edges.push((child_ix, parent_ix));
+    }
+    (edges, unused[0])
+}
+
+pub fn filter(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk_ix: usize) {
+    let bindings = &chunks[chunk_ix].bindings;
+    let kinds = &chunks[chunk_ix].kinds;
+    for field in 0..bindings.len() {
+        if let Binding::Constant(ref value) = bindings[field] {
+            let column = kinds[0..field].iter().map(|kind| kind.width()).sum();
+            let raw_value = match *value {
+                Value::Id(id) => id,
+                Value::Number(number) => number as u64,
+                Value::Text(ref text) => hash(text),
             };
+            actions.push(runtime::Action::Filter(chunk_ix, column, raw_value));
         }
-        vars
-    }
-
-    fn project_key(&self, vars: &Vec<VariableId>) -> (Vec<usize>, Vec<Kind>, Vec<Binding>) {
-        let mut key = vec![];
-        let mut kinds = vec![];
-        let mut bindings = vec![];
-        for var in vars.iter() {
-            match self.bindings.iter().position(|binding| match *binding { Binding::Variable(ref bound) => bound == var, _ => false }) {
-                Some(ix) => {
-                    let column: usize = self.kinds.iter().take(ix).map(|kind| kind.width()).sum();
-                    for offset in 0..self.kinds[ix].width() {
-                        key.push(column + offset);
-                    }
-                    kinds.push(self.kinds[ix]);
-                    bindings.push(Binding::Variable(var.clone()));
-                },
-                None => (), // this var isn't here to project
-            }
-        }
-        (key, kinds, bindings)
-    }
-
-    fn sort_key(&self, vars: &Vec<VariableId>) -> Vec<usize> {
-        let mut key = vec![];
-        for var in vars.iter() {
-            match self.bindings.iter().position(|binding| match *binding { Binding::Variable(ref bound) => bound == var, _ => false }) {
-                Some(ix) => {
-                    let column = self.kinds.iter().take(ix).map(|kind| kind.width()).sum();
-                    key.push(column);
-                },
-                None => (), // this var isn't here to project
-            }
-        }
-        key
     }
 }
 
-impl State {
-    pub fn find_ear(&self) -> (usize, usize) {
-        for &chunk_ix in self.to_join.iter() {
-            let chunk = &self.chunks[chunk_ix];
-            let vars = chunk.vars();
-            let mut joined_vars = HashSet::new();
-            for &other_chunk_ix in self.to_join.iter() {
-                if chunk_ix != other_chunk_ix {
-                    let other_vars = self.chunks[other_chunk_ix].vars();
-                    joined_vars.extend(vars.intersection(&other_vars).cloned());
+fn selfjoin(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk_ix: usize) {
+    let bindings = &chunks[chunk_ix].bindings;
+    let kinds = &chunks[chunk_ix].kinds;
+    for left_field in 0..bindings.len() {
+        for right_field in left_field+1..bindings.len() {
+            if let Binding::Variable(_) = bindings[left_field] {
+                if bindings[left_field] == bindings[right_field] {
+                    let left_column = kinds[0..left_field].iter().map(|kind| kind.width()).sum();
+                    let right_column = kinds[0..right_field].iter().map(|kind| kind.width()).sum();
+                    actions.push(runtime::Action::SelfJoin(chunk_ix, left_column, right_column));
                 }
-            }
-            for &other_chunk_ix in self.to_join.iter() {
-                if chunk_ix != other_chunk_ix {
-                    let other_vars = self.chunks[other_chunk_ix].vars();
-                    if joined_vars.is_subset(&other_vars) {
-                        return (chunk_ix, other_chunk_ix);
-                    }
-                }
-            }
-        }
-        panic!("Cant find an ear in:\n {:#?}", self);
-    }
-
-    pub fn project(&mut self, chunk_ix: usize, sort_vars: &Vec<VariableId>, select_vars: &Vec<VariableId>) {
-        let vars = ordered_union(sort_vars, select_vars);
-        let num_fields = self.chunks[chunk_ix].bindings.len();
-        let num_projected_vars = self.chunks[chunk_ix].vars().intersection(&vars.iter().cloned().collect()).count();
-        if num_projected_vars == num_fields {
-            // would project everything, might as well just sort
-            let key = self.chunks[chunk_ix].sort_key(sort_vars);
-            self.actions.push(runtime::Action::Sort(chunk_ix, key));
-        } else {
-            let (key, kinds, bindings) = self.chunks[chunk_ix].project_key(&vars);
-            self.actions.push(runtime::Action::Project(chunk_ix, key));
-            self.chunks[chunk_ix] = Chunk{kinds: kinds, bindings: bindings};
-        }
-    }
-
-    pub fn semijoin(&mut self, left_chunk_ix: usize, right_chunk_ix: usize, vars: &Vec<VariableId>) {
-        let left_key = self.chunks[left_chunk_ix].sort_key(vars);
-        let right_key = self.chunks[right_chunk_ix].sort_key(vars);
-        assert_eq!(left_key.len(), right_key.len());
-        self.actions.push(runtime::Action::SemiJoin(left_chunk_ix, right_chunk_ix, left_key, right_key));
-    }
-
-    pub fn join(&mut self, left_chunk_ix: usize, right_chunk_ix: usize, vars: &Vec<VariableId>) {
-        let left_key = self.chunks[left_chunk_ix].sort_key(vars);
-        let right_key = self.chunks[right_chunk_ix].sort_key(vars);
-        assert_eq!(left_key.len(), right_key.len());
-        self.actions.push(runtime::Action::Join(left_chunk_ix, right_chunk_ix, left_key, right_key));
-        let mut left_kinds = ::std::mem::replace(&mut self.chunks[left_chunk_ix].kinds, vec![]);
-        let right_kinds = ::std::mem::replace(&mut self.chunks[right_chunk_ix].kinds, vec![]);
-        left_kinds.extend(right_kinds);
-        let mut left_bindings = ::std::mem::replace(&mut self.chunks[left_chunk_ix].bindings, vec![]);
-        let right_bindings = ::std::mem::replace(&mut self.chunks[right_chunk_ix].bindings, vec![]);
-        left_bindings.extend(right_bindings);
-        self.chunks[right_chunk_ix].kinds = left_kinds;
-        self.chunks[right_chunk_ix].bindings = left_bindings;
-    }
-
-    pub fn filter_and_selfjoin(&mut self, chunk_ix: usize) {
-        let bindings = &self.chunks[chunk_ix].bindings;
-        let kinds = &self.chunks[chunk_ix].kinds;
-        for field in 0..bindings.len() {
-            if let Binding::Constant(ref value) = bindings[field] {
-                let column = kinds[0..field].iter().map(|kind| kind.width()).sum();
-                let raw_value = match *value {
-                    Value::Id(id) => id,
-                    Value::Number(number) => number as u64,
-                    Value::Text(ref text) => hash(text),
-                };
-                self.actions.push(runtime::Action::Filter(chunk_ix, column, raw_value));
-            }
-        }
-        for left_field in 0..bindings.len() {
-            for right_field in left_field+1..bindings.len() {
-                if let Binding::Variable(_) = bindings[left_field] {
-                    if bindings[left_field] == bindings[right_field] {
-                        let left_column = kinds[0..left_field].iter().map(|kind| kind.width()).sum();
-                        let right_column = kinds[0..right_field].iter().map(|kind| kind.width()).sum();
-                        self.actions.push(runtime::Action::SelfJoin(chunk_ix, left_column, right_column));
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn compile(&mut self) -> usize {
-        let to_select = self.to_select.clone();
-        match self.to_join.len() {
-            1 => {
-                let ix = self.to_join[0];
-                self.project(ix, &to_select, &vec![]);
-                ix
-            }
-            2 => {
-                let left_ix = self.to_join[0];
-                let right_ix = self.to_join[1];
-                let left_vars = self.chunks[left_ix].vars();
-                let right_vars = self.chunks[right_ix].vars();
-                let join_vars = left_vars.intersection(&right_vars).cloned().collect();
-                self.project(left_ix, &join_vars, &to_select);
-                self.project(right_ix, &join_vars, &to_select);
-                self.join(left_ix, right_ix, &join_vars);
-                self.project(right_ix, &to_select, &vec![]);
-                right_ix
-            }
-            _ => {
-                let (ear_ix, parent_ix) = self.find_ear();
-                let ear_vars = self.chunks[ear_ix].vars();
-                let parent_vars = self.chunks[parent_ix].vars();
-                let join_vars = ear_vars.intersection(&parent_vars).cloned().collect();
-                self.project(ear_ix, &join_vars, &to_select);
-                self.project(parent_ix, &join_vars, &parent_vars.iter().cloned().collect());
-                self.semijoin(ear_ix, parent_ix, &join_vars);
-                self.to_join.retain(|&ix| ix != ear_ix);
-                self.to_select = ordered_union(&join_vars, &to_select);
-                let result_ix = self.compile();
-                self.join(ear_ix, result_ix, &join_vars);
-                self.project(result_ix, &to_select, &vec![]);
-                result_ix
             }
         }
     }
 }
 
-impl Input {
-    pub fn compile(&self, schema: &[Kind], strings: &mut Vec<String>) -> runtime::Chunk {
-        let mut data = vec![];
-        if let Some((ref filename, ref columns)) = self.tsv {
-            let mut contents = String::new();
-            File::open(filename).unwrap().read_to_string(&mut contents).unwrap();
-            let mut lines = contents.lines();
-            lines.next(); // drop header
-            for line in lines {
-                let fields = line.split("\t").collect::<Vec<_>>();
-                for (kind, column) in schema.iter().zip(columns.iter()) {
-                    match *kind {
-                        Kind::Id => data.push(fields[*column].parse::<u64>().unwrap()),
-                        Kind::Number => data.push(fields[*column].parse::<f64>().unwrap() as u64),
-                        Kind::Text => {
-                            let field = fields[*column].to_owned();
-                            data.push(hash(&field));
-                            data.push(strings.len() as u64);
-                            strings.push(field);
-                        }
-                    }
-                }
-            }
-        }
-        for row in self.rows.iter() {
-            assert_eq!(row.len(), schema.len());
-            for (value, kind) in row.iter().zip(schema.iter()) {
-                match (value, *kind) {
-                    (&Value::Id(id), Kind::Id) => data.push(id),
-                    (&Value::Number(number), Kind::Number) => data.push(number as u64),
-                    (&Value::Text(ref text), Kind::Text) => {
-                        let text = text.to_owned();
-                        data.push(hash(&text));
-                        data.push(strings.len() as u64);
-                        strings.push(text);
-                    }
-                    _ => panic!("Kind mismatch: {:?} {:?}", kind, value),
-                }
-            }
-        }
-        let row_width = schema.iter().map(|kind| kind.width()).sum();
-        runtime::Chunk{data: data, row_width: row_width}
+pub fn sort_and_project(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk_ix: usize, sort_vars: &Vec<VariableId>, select_vars: &Vec<VariableId>) {
+    let vars = ordered_union(sort_vars, select_vars);
+    let num_fields = chunks[chunk_ix].bindings.len();
+    let num_projected_vars = bound_vars(&chunks[chunk_ix].bindings).intersection(&vars.iter().cloned().collect()).count();
+    if num_projected_vars == num_fields {
+        // would project everything, might as well just sort
+        let key = sort_key(&chunks[chunk_ix], sort_vars);
+        actions.push(runtime::Action::Sort(chunk_ix, key));
+    } else {
+        let (key, kinds, bindings) = project_key(&chunks[chunk_ix], &vars);
+        actions.push(runtime::Action::Project(chunk_ix, key));
+        let bound_vars = bound_vars(&bindings);
+        chunks[chunk_ix] = Chunk{kinds: kinds, bindings: bindings, bound_vars: bound_vars};
     }
 }
 
-impl Query {
-    pub fn compile(&self, program: &Program) -> runtime::Query {
-        let upstream = self.clauses.iter().map(|clause| {
-            let ix = program.ids.iter().position(|id| *id == clause.view).unwrap();
-            program.schedule[ix]
-        }).collect();
-        let mut state = State{
-            actions: vec![],
-            chunks: self.clauses.iter().map(|clause| {
-                let ix = program.ids.iter().position(|id| *id == clause.view).unwrap();
-                Chunk{
+pub fn semijoin(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, left_chunk_ix: usize, right_chunk_ix: usize, vars: &Vec<VariableId>) {
+    let left_key = sort_key(&chunks[left_chunk_ix], vars);
+    let right_key = sort_key(&chunks[right_chunk_ix], vars);
+    assert_eq!(left_key.len(), right_key.len());
+    actions.push(runtime::Action::SemiJoin(left_chunk_ix, right_chunk_ix, left_key, right_key));
+}
+
+pub fn join(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, left_chunk_ix: usize, right_chunk_ix: usize, vars: &Vec<VariableId>) {
+    let left_key = sort_key(&chunks[left_chunk_ix], vars);
+    let right_key = sort_key(&chunks[right_chunk_ix], vars);
+    assert_eq!(left_key.len(), right_key.len());
+    actions.push(runtime::Action::Join(left_chunk_ix, right_chunk_ix, left_key, right_key));
+    let mut left_kinds = ::std::mem::replace(&mut chunks[left_chunk_ix].kinds, vec![]);
+    let right_kinds = ::std::mem::replace(&mut chunks[right_chunk_ix].kinds, vec![]);
+    left_kinds.extend(right_kinds);
+    let mut left_bindings = ::std::mem::replace(&mut chunks[left_chunk_ix].bindings, vec![]);
+    let right_bindings = ::std::mem::replace(&mut chunks[right_chunk_ix].bindings, vec![]);
+    left_bindings.extend(right_bindings);
+    let mut left_bound_vars = ::std::mem::replace(&mut chunks[left_chunk_ix].bound_vars, HashSet::with_capacity(0));
+    let right_bound_vars = ::std::mem::replace(&mut chunks[right_chunk_ix].bound_vars, HashSet::with_capacity(0));
+    left_bound_vars.extend(right_bound_vars);
+    chunks[right_chunk_ix].kinds = left_kinds;
+    chunks[right_chunk_ix].bindings = left_bindings;
+    chunks[right_chunk_ix].bound_vars = left_bound_vars;
+}
+
+pub fn compile_query(query: &Query, program: &Program) -> runtime::Query {
+    let mut upstream = vec![];
+    let mut chunks = vec![];
+    for clause in query.clauses.iter() {
+        match program.ids.iter().position(|id| *id == clause.view) {
+            Some(ix) => {
+                upstream.push(ix);
+                chunks.push(Chunk{
                     kinds: program.schemas[ix].clone(),
                     bindings: clause.bindings.clone(),
-                }
-            }).collect(),
-            to_join: (0..self.clauses.len()).collect(),
-            to_select: self.select.clone(),
-        };
-        for chunk_ix in 0..state.chunks.len() {
-            state.filter_and_selfjoin(chunk_ix);
+                    bound_vars: bound_vars(&clause.bindings),
+                });
+            }
+            None => panic!("What are this: {:?}", clause),
         }
-        let result = state.compile();
-        runtime::Query{upstream: upstream, actions: state.actions, result: result}
     }
+    let (join_tree, root_ix) = build_join_tree(&chunks);
+    let mut actions = vec![];
+    for chunk_ix in (0..chunks.len()) {
+        filter(&mut chunks, &mut actions, chunk_ix);
+        selfjoin(&mut chunks, &mut actions, chunk_ix);
+    }
+    for &(child_ix, parent_ix) in join_tree.iter() {
+        let join_vars = chunks[child_ix].bound_vars.intersection(&chunks[parent_ix].bound_vars).cloned().collect();
+        let child_vars = chunks[child_ix].bound_vars.iter().cloned().collect();
+        let parent_vars = chunks[parent_ix].bound_vars.iter().cloned().collect();
+        sort_and_project(&mut chunks, &mut actions, child_ix, &join_vars, &child_vars);
+        sort_and_project(&mut chunks, &mut actions, parent_ix, &join_vars, &parent_vars);
+        semijoin(&mut chunks, &mut actions, child_ix, parent_ix, &join_vars);
+    }
+    for &(child_ix, _) in join_tree.iter().rev() {
+        let join_vars = chunks[child_ix].bound_vars.intersection(&chunks[root_ix].bound_vars).cloned().collect();
+        let root_vars = chunks[root_ix].bound_vars.iter().cloned().collect();
+        // child is already sorted from semijoin phase
+        // TODO project only needed vars
+        sort_and_project(&mut chunks, &mut actions, root_ix, &join_vars, &root_vars);
+        join(&mut chunks, &mut actions, child_ix, root_ix, &join_vars);
+    }
+    sort_and_project(&mut chunks, &mut actions, root_ix, &query.select, &vec![]);
+    runtime::Query{upstream: upstream, actions: actions, result_ix: root_ix}
 }
 
-impl Union {
-    pub fn compile(&self, schema: &[Kind], program: &Program) -> runtime::Union {
-        let upstream = self.members.iter().map(|member| {
-            match *member {
-                Member::Insert(ref member_id) => program.ids.iter().position(|id| id == member_id).unwrap(),
-                Member::Remove(ref member_id) => program.ids.iter().position(|id| id == member_id).unwrap(),
+pub fn compile_input(input: &Input, schema: &[Kind], strings: &mut Vec<String>) -> runtime::Chunk {
+    let mut data = vec![];
+    if let Some((ref filename, ref columns)) = input.tsv {
+        let mut contents = String::new();
+        File::open(filename).unwrap().read_to_string(&mut contents).unwrap();
+        let mut lines = contents.lines();
+        lines.next(); // drop header
+        for line in lines {
+            let fields = line.split("\t").collect::<Vec<_>>();
+            for (kind, column) in schema.iter().zip(columns.iter()) {
+                match *kind {
+                    Kind::Id => data.push(fields[*column].parse::<u64>().unwrap()),
+                    Kind::Number => data.push(fields[*column].parse::<f64>().unwrap() as u64),
+                    Kind::Text => {
+                        let field = fields[*column].to_owned();
+                        data.push(hash(&field));
+                        data.push(strings.len() as u64);
+                        strings.push(field);
+                    }
+                }
             }
-        }).collect();
-        let members = self.members.iter().map(|member| {
-            match *member {
-                Member::Insert(_) => runtime::Member::Insert,
-                Member::Remove(_) => runtime::Member::Remove,
-            }
-        }).collect();
-        let key = (0..schema.len()).map(|ix| {
-            schema[0..ix].iter().map(|kind| kind.width()).sum()
-        }).collect();
-        runtime::Union{upstream: upstream, members: members, key: key}
+        }
     }
+    for row in input.rows.iter() {
+        assert_eq!(row.len(), schema.len());
+        for (value, kind) in row.iter().zip(schema.iter()) {
+            match (value, *kind) {
+                (&Value::Id(id), Kind::Id) => data.push(id),
+                (&Value::Number(number), Kind::Number) => data.push(number as u64),
+                (&Value::Text(ref text), Kind::Text) => {
+                    let text = text.to_owned();
+                    data.push(hash(&text));
+                    data.push(strings.len() as u64);
+                    strings.push(text);
+                }
+                _ => panic!("Kind mismatch: {:?} {:?}", kind, value),
+            }
+        }
+    }
+    let row_width = schema.iter().map(|kind| kind.width()).sum();
+    runtime::Chunk{data: data, row_width: row_width}
 }
 
-
-impl Program {
-    pub fn compile(&self) -> runtime::Program {
-        let mut ids = vec![];
-        let mut schemas = vec![];
-        let mut states = vec![];
-        let mut views = vec![];
-        let mut downstreams = vec![];
-        let mut dirty = vec![];
-        let mut strings = vec![];
-
-        let mut scheduled_ixes = self.schedule.iter().zip(0..self.ids.len()).collect::<Vec<_>>();
-        scheduled_ixes.sort();
-        for (_, program_ix) in scheduled_ixes {
-            ids.push(hash(&self.ids[program_ix]));
-            let schema = self.schemas[program_ix].clone();
-            match self.views[program_ix] {
-                View::Input(ref input) => {
-                    let state = input.compile(&schema[..], &mut strings);
-                    states.push(Rc::new(state));
-                    views.push(runtime::View::Input);
-                    dirty.push(false);
-                }
-                View::Query(ref query) => {
-                    let runtime_query = query.compile(self);
-                    let row_width = schema.iter().map(|kind| kind.width()).sum();
-                    states.push(Rc::new(runtime::Chunk{data: vec![], row_width: row_width}));
-                    views.push(runtime::View::Query(runtime_query));
-                    dirty.push(true);
-                }
-                View::Union(ref union) => {
-                    let runtime_union = union.compile(&schema[..], self);
-                    let row_width = schema.iter().map(|kind| kind.width()).sum();
-                    states.push(Rc::new(runtime::Chunk{data: vec![], row_width: row_width}));
-                    views.push(runtime::View::Union(runtime_union));
-                    dirty.push(true);
-                }
-            }
-            schemas.push(schema);
-            downstreams.push(vec![]);
+pub fn compile_union(union: &Union, schema: &[Kind], program: &Program) -> runtime::Union {
+    let upstream = union.members.iter().map(|member| {
+        match *member {
+            Member::Insert(ref member_id) => program.ids.iter().position(|id| id == member_id).unwrap(),
+            Member::Remove(ref member_id) => program.ids.iter().position(|id| id == member_id).unwrap(),
         }
+    }).collect();
+    let members = union.members.iter().map(|member| {
+        match *member {
+            Member::Insert(_) => runtime::Member::Insert,
+            Member::Remove(_) => runtime::Member::Remove,
+        }
+    }).collect();
+    let key = (0..schema.len()).map(|ix| {
+        schema[0..ix].iter().map(|kind| kind.width()).sum()
+    }).collect();
+    runtime::Union{upstream: upstream, members: members, key: key}
+}
 
-        for (schedule_ix, view) in views.iter().enumerate() {
-            match *view {
-                runtime::View::Query(ref query) => {
-                    for upstream_ix in query.upstream.iter() {
-                        downstreams[*upstream_ix].push(schedule_ix);
-                    }
-                }
-                runtime::View::Union(ref union) => {
-                    for upstream_ix in union.upstream.iter() {
-                        downstreams[*upstream_ix].push(schedule_ix);
-                    }
-                }
-                runtime::View::Input => (),
+pub fn compile(program: &Program) -> runtime::Program {
+    let mut ids = vec![];
+    let mut schemas = vec![];
+    let mut states = vec![];
+    let mut views = vec![];
+    let mut downstreams = vec![];
+    let mut dirty = vec![];
+    let mut strings = vec![];
+
+    let mut scheduled_ixes = program.schedule.iter().zip(0..program.ids.len()).collect::<Vec<_>>();
+    scheduled_ixes.sort();
+    for (_, program_ix) in scheduled_ixes {
+        ids.push(hash(&program.ids[program_ix]));
+        let schema = program.schemas[program_ix].clone();
+        match program.views[program_ix] {
+            View::Input(ref input) => {
+                let state = compile_input(input, &schema[..], &mut strings);
+                states.push(Rc::new(state));
+                views.push(runtime::View::Input);
+                dirty.push(false);
+            }
+            View::Query(ref query) => {
+                let runtime_query = compile_query(query, program);
+                let row_width = schema.iter().map(|kind| kind.width()).sum();
+                states.push(Rc::new(runtime::Chunk{data: vec![], row_width: row_width}));
+                views.push(runtime::View::Query(runtime_query));
+                dirty.push(true);
+            }
+            View::Union(ref union) => {
+                let runtime_union = compile_union(union, &schema[..], program);
+                let row_width = schema.iter().map(|kind| kind.width()).sum();
+                states.push(Rc::new(runtime::Chunk{data: vec![], row_width: row_width}));
+                views.push(runtime::View::Union(runtime_union));
+                dirty.push(true);
             }
         }
-
-        runtime::Program{ids: ids, schemas: schemas, states: states, views: views, downstreams: downstreams, dirty: dirty, strings: strings}
+        schemas.push(schema);
+        downstreams.push(vec![]);
     }
+
+    for (schedule_ix, view) in views.iter().enumerate() {
+        match *view {
+            runtime::View::Query(ref query) => {
+                for upstream_ix in query.upstream.iter() {
+                    downstreams[*upstream_ix].push(schedule_ix);
+                }
+            }
+            runtime::View::Union(ref union) => {
+                for upstream_ix in union.upstream.iter() {
+                    downstreams[*upstream_ix].push(schedule_ix);
+                }
+            }
+            runtime::View::Input => (),
+        }
+    }
+
+    runtime::Program{ids: ids, schemas: schemas, states: states, views: views, downstreams: downstreams, dirty: dirty, strings: strings}
 }
 
 // We shall see that at which dogs howl in the dark, and that at which cats prick up their ears after midnight
@@ -524,35 +511,33 @@ fn parse_view(text: &str) -> Vec<(ViewId, Vec<Kind>, View)> {
     }
 }
 
-impl Program {
-    pub fn parse(text: &str) -> Program {
-        let mut ids = vec![];
-        let mut schedule = vec![];
-        let mut schemas = vec![];
-        let mut views = vec![];
-        let mut ix = 0;
-        for view_text in text.split("\n\n") {
-            if view_text != "" {
-                for (id, schema, view) in parse_view(view_text) {
-                    ids.push(id);
-                    schemas.push(schema);
-                    views.push(view);
-                    schedule.push(ix); // ie just scheduling in textual order for now
-                    ix += 1;
-                }
+pub fn parse(text: &str) -> Program {
+    let mut ids = vec![];
+    let mut schedule = vec![];
+    let mut schemas = vec![];
+    let mut views = vec![];
+    let mut ix = 0;
+    for view_text in text.split("\n\n") {
+        if view_text != "" {
+            for (id, schema, view) in parse_view(view_text) {
+                ids.push(id);
+                schemas.push(schema);
+                views.push(view);
+                schedule.push(ix); // ie just scheduling in textual order for now
+                ix += 1;
             }
         }
-        Program{ids: ids, schedule: schedule, schemas: schemas, views: views}
     }
+    Program{ids: ids, schedule: schedule, schemas: schemas, views: views}
+}
 
-    pub fn load<P: AsRef<Path>>(filenames: &[P]) -> Program {
-        let mut text = String::new();
-        for filename in filenames.iter() {
-            File::open(filename).unwrap().read_to_string(&mut text).unwrap();
-            text.push_str("\n\n");
-        }
-        Program::parse(&text[..])
+pub fn load<P: AsRef<Path>>(filenames: &[P]) -> Program {
+    let mut text = String::new();
+    for filename in filenames.iter() {
+        File::open(filename).unwrap().read_to_string(&mut text).unwrap();
+        text.push_str("\n\n");
     }
+    parse(&text[..])
 }
 
 #[cfg(test)]
@@ -562,8 +547,8 @@ pub mod tests{
 
     #[test]
     pub fn test_metal() {
-        let bootstrap_program = Program::load(&["data/chinook.imp", "data/metal.imp"]);
-        let mut runtime_program = bootstrap_program.compile();
+        let bootstrap_program = load(&["data/chinook.imp", "data/metal.imp"]);
+        let mut runtime_program = compile(&bootstrap_program);
         runtime_program.run();
         assert_set_eq!(
             runtime_program.states[5].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
@@ -573,8 +558,8 @@ pub mod tests{
 
     #[bench]
     pub fn bench_metal_run(bencher: &mut Bencher) {
-        let bootstrap_program = Program::load(&["data/chinook.imp", "data/metal.imp"]);
-        let runtime_program = bootstrap_program.compile();
+        let bootstrap_program = load(&["data/chinook.imp", "data/metal.imp"]);
+        let runtime_program = compile(&bootstrap_program);
         bencher.iter(|| {
             let mut runtime_program = runtime_program.clone();
             runtime_program.run();
@@ -585,8 +570,8 @@ pub mod tests{
     #[bench]
     pub fn bench_metal_all(bencher: &mut Bencher) {
         bencher.iter(|| {
-            let bootstrap_program = Program::load(&["data/chinook.imp", "data/metal.imp"]);
-            let mut runtime_program = bootstrap_program.compile();
+            let bootstrap_program = load(&["data/chinook.imp", "data/metal.imp"]);
+            let mut runtime_program = compile(&bootstrap_program);
             runtime_program.run();
             black_box(&runtime_program.states[5]);
         });
@@ -594,8 +579,8 @@ pub mod tests{
 
     #[test]
     pub fn test_selfjoin() {
-        let bootstrap_program = Program::load(&["data/chinook.imp", "data/selfjoin.imp"]);
-        let mut runtime_program = bootstrap_program.compile();
+        let bootstrap_program = load(&["data/chinook.imp", "data/selfjoin.imp"]);
+        let mut runtime_program = compile(&bootstrap_program);
         runtime_program.run();
         assert_set_eq!(
             runtime_program.states[5].data.iter().cloned(),
@@ -605,21 +590,20 @@ pub mod tests{
 
     #[test]
     pub fn test_paths() {
-        let bootstrap_program = Program::load(&["data/paths.imp"]);
-        let mut runtime_program = bootstrap_program.compile();
+        let bootstrap_program = load(&["data/paths.imp"]);
+        let mut runtime_program = compile(&bootstrap_program);
         runtime_program.run();
         assert_eq!(
             runtime_program.states[3].data,
-            vec![0, 1, 0, 2, 0, 3, 0, 4, 1, 1, 1, 2, 1, 3, 1, 4, 2, 1, 2, 2, 2, 3, 2, 4, 3, 1, 3, 2,
- 3, 3, 3, 4]
+            vec![0, 1, 0, 2, 0, 3, 0, 4, 1, 1, 1, 2, 1, 3, 1, 4, 2, 1, 2, 2, 2, 3, 2, 4, 3, 1, 3, 2, 3, 3, 3, 4]
             );
     }
 
     #[test]
 
     pub fn test_flying() {
-        let bootstrap_program = Program::load(&["data/flying.imp"]);
-        let mut runtime_program = bootstrap_program.compile();
+        let bootstrap_program = load(&["data/flying.imp"]);
+        let mut runtime_program = compile(&bootstrap_program);
         runtime_program.run();
         assert_set_eq!(
             runtime_program.states[6].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),

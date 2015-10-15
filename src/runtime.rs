@@ -320,6 +320,28 @@ pub fn hash<T: hash::Hash>(t: &T) -> u64 {
     hash::Hasher::finish(&s)
 }
 
+
+#[derive(Clone, Debug, Copy)]
+pub enum Primitive {
+    Add
+}
+
+impl Primitive {
+    fn apply(&self, chunk: &Chunk, args: &[usize]) -> Chunk {
+        let mut data = vec![];
+        match (*self, args) {
+            (Primitive::Add, [a, b]) => {
+                for row in chunk.data.chunks(chunk.row_width) {
+                    data.extend(row);
+                    data.push(((row[a] as f64) + (row[b] as f64)) as u64);
+                }
+                Chunk{data: data, row_width: chunk.row_width + 1}
+            }
+            _ => panic!("What are this: {:?} {:?}", self, args)
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Action {
     Sort(usize, Vec<usize>),
@@ -328,6 +350,7 @@ pub enum Action {
     Join(usize, usize, Vec<usize>, Vec<usize>),
     SelfJoin(usize, usize, usize),
     Filter(usize, usize, u64),
+    Apply(usize, Primitive, Vec<usize>),
     DebugChunk(usize),
     DebugText(usize, usize),
 }
@@ -336,7 +359,7 @@ pub enum Action {
 pub struct Query {
     pub upstream: Vec<usize>,
     pub actions: Vec<Action>,
-    pub result: usize,
+    pub result_ix: usize,
 }
 
 impl Query {
@@ -375,6 +398,10 @@ impl Query {
                     let chunk = chunks[ix].filter(column, value);
                     chunks[ix] = Cow::Owned(chunk);
                 }
+                &Action::Apply(ix, primitive, ref args) => {
+                    let chunk = primitive.apply(&chunks[ix], &*args);
+                    chunks[ix] = Cow::Owned(chunk);
+                }
                 &Action::DebugChunk(ix) => {
                     let chunk = &chunks[ix];
                     println!("{:?}", chunk.data.chunks(chunk.row_width).collect::<Vec<_>>());
@@ -386,7 +413,7 @@ impl Query {
             }
             // });
         }
-        ::std::mem::replace(&mut chunks[self.result], Cow::Owned(Chunk::empty())).into_owned()
+        ::std::mem::replace(&mut chunks[self.result_ix], Cow::Owned(Chunk::empty())).into_owned()
     }
 }
 
@@ -770,7 +797,7 @@ pub mod tests{
             Project(5, vec![3]),
             ],
 
-            result: 5
+            result_ix: 5
         };
         query.run(&strings, &states[..])
     }

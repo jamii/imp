@@ -46,11 +46,12 @@ pub fn compare_by_key(left_words: &[u64], right_words: &[u64], left_key: &[usize
 }
 
 const PIECE_SIZE: usize = 8;
+const PIECE_MASK: u64 = 0b1111_1111;
 const NUM_PIECES: usize = 8;
 const MAX_PIECE: usize = 256;
 
 pub fn get_piece(word: u64, ix: usize) -> usize {
-    ((word >> ((ix * PIECE_SIZE) as u64)) & 0b1111_1111) as usize
+    ((word >> ((ix * PIECE_SIZE) as u64)) & PIECE_MASK) as usize
 }
 
 impl Chunk {

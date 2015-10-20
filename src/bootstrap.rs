@@ -66,6 +66,15 @@ pub struct Chunk {
     pub bound_vars: HashSet<VariableId>,
 }
 
+#[derive(Clone, Debug)]
+pub struct Primitive {
+    pub primitive: runtime::Primitive,
+    pub input_kinds: Vec<Kind>,
+    pub output_kinds: Vec<Kind>,
+    pub input_bindings: Vec<Binding>,
+    pub output_bindings: Vec<Binding>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Binding {
     Unbound,
@@ -79,6 +88,9 @@ pub enum Value {
     Number(f64),
     Text(String),
 }
+
+// (child, parent) sorted from root downwards
+pub type Tree = Vec<(usize, Option<usize>)>;
 
 fn ordered_union(xs: &Vec<VariableId>, ys: &Vec<VariableId>) -> Vec<VariableId> {
     let mut results = xs.clone();
@@ -99,6 +111,83 @@ fn bound_vars(bindings: &Vec<Binding>) -> HashSet<VariableId> {
         };
     }
     vars
+}
+
+fn find_join_ear(chunks: &Vec<Chunk>, unused: &Vec<usize>) -> (usize, usize) {
+    for &child_ix in unused.iter() {
+        let child_vars = &chunks[child_ix].bound_vars;
+        let mut joined_vars = HashSet::new();
+        for &other_ix in unused.iter() {
+            if child_ix != other_ix {
+                let other_vars = &chunks[other_ix].bound_vars;
+                joined_vars.extend(child_vars.intersection(other_vars).cloned());
+            }
+        }
+        for &parent_ix in unused.iter() {
+            if child_ix != parent_ix {
+                let parent_vars = &chunks[parent_ix].bound_vars;
+                if joined_vars.is_subset(parent_vars) {
+                    return (child_ix, parent_ix);
+                }
+            }
+        }
+    }
+    panic!("Cant find an ear in: {:#?}", (chunks, unused));
+}
+
+fn build_join_tree(chunks: &Vec<Chunk>) -> Tree {
+    assert!(chunks.len() > 0);
+    let mut unused = (0..chunks.len()).collect::<Vec<_>>();
+    let mut tree = vec![];
+    while unused.len() > 1 { // one chunk will be left behind as the root
+        let (child_ix, parent_ix) = find_join_ear(chunks, &unused);
+        unused.retain(|ix| *ix != child_ix);
+        tree.push((child_ix, Some(parent_ix)));
+    }
+    tree.push((unused[0], None));
+    tree.reverse();
+    tree
+}
+
+// the list is sorted by size and each subtree is sorted from leaves upwards
+fn all_subtrees(tree: &Tree) -> Vec<Tree> {
+    let mut subtrees = vec![];
+    for &(child_ix, _) in tree.iter() {
+        subtrees.push(vec![(child_ix, None)]);
+    }
+    for &(child_ix, parent_ix) in tree.iter() {
+        let new_subtrees = vec![];
+        for subtree in subtrees.iter() {
+            if subtree.iter().any(|(existing_child_ix, _)| Some(existing_child_ix) == parent_ix) {
+                let new_subtree = subtree.clone();
+                new_subtree.edges.push((child_ix, parent_ix));
+                new_subtrees.push(new_subtree);
+            }
+        }
+        subtrees.extend(new_subtrees);
+    }
+    subtrees.sort_by(|subtree| -subtree.len());
+    subtrees
+}
+
+fn vars_in_tree(chunks: &Vec<Chunk>, tree: &Tree) -> HashSet<VariableId> {
+    let mut vars = HashSet::new();
+    for &(child_ix, _) in tree.edges.iter() {
+        vars.extend(&chunks[child_ix].bound_vars);
+    }
+    vars
+}
+
+fn cheapest_primitive_subtree(chunks: &Vec<Chunk>, join_tree: &Tree, primitives: &Vec<Primitive>) -> (usize, Tree) {
+    for subtree in all_subtrees(join_tree).into_iter() {
+        let vars = vars_in_tree(chunks, subtree);
+        for (primitive_ix, primitive) in primitives.iter().enumerate() {
+            if primitive.bound_input_vars.is_subset(&vars) {
+                return (primitive_ix, subtree);
+            }
+        }
+    }
+    panic!("Cannot schedule a primitive out of: {:#?}", (primitives, chunks, join_tree));
 }
 
 fn project_key(chunk: &Chunk, vars: &Vec<VariableId>) -> (Vec<usize>, Vec<Kind>, Vec<Binding>) {
@@ -133,40 +222,6 @@ fn sort_key(chunk: &Chunk, vars: &Vec<VariableId>) -> Vec<usize> {
         }
     }
     key
-}
-
-fn find_join_ear(chunks: &Vec<Chunk>, unused: &Vec<usize>) -> (usize, usize) {
-    for &child_ix in unused.iter() {
-        let child_vars = &chunks[child_ix].bound_vars;
-        let mut joined_vars = HashSet::new();
-        for &other_ix in unused.iter() {
-            if child_ix != other_ix {
-                let other_vars = &chunks[other_ix].bound_vars;
-                joined_vars.extend(child_vars.intersection(other_vars).cloned());
-            }
-        }
-        for &parent_ix in unused.iter() {
-            if child_ix != parent_ix {
-                let parent_vars = &chunks[parent_ix].bound_vars;
-                if joined_vars.is_subset(parent_vars) {
-                    return (child_ix, parent_ix);
-                }
-            }
-        }
-    }
-    panic!("Cant find an ear in: {:#?}", (chunks, unused));
-}
-
-// join_tree is sorted from leaves upwards - later functions rely on this
-fn build_join_tree(chunks: &Vec<Chunk>) -> (Vec<(usize, usize)>, usize) {
-    let mut unused = (0..chunks.len()).collect::<Vec<_>>();
-    let mut edges = vec![];
-    while unused.len() > 1 { // one bag will be left behind as the root
-        let (child_ix, parent_ix) = find_join_ear(chunks, &unused);
-        unused.retain(|ix| *ix != child_ix);
-        edges.push((child_ix, parent_ix));
-    }
-    (edges, unused[0])
 }
 
 pub fn filter(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk_ix: usize) {
@@ -217,16 +272,26 @@ pub fn sort_and_project(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Acti
     }
 }
 
-pub fn semijoin(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, left_chunk_ix: usize, right_chunk_ix: usize, vars: &Vec<VariableId>) {
-    let left_key = sort_key(&chunks[left_chunk_ix], vars);
-    let right_key = sort_key(&chunks[right_chunk_ix], vars);
+pub fn semijoin(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, left_chunk_ix: usize, right_chunk_ix: usize) {
+    let join_vars = chunks[left_chunk_ix].bound_vars.intersection(&chunks[right_chunk_ix].bound_vars).cloned().collect();
+    let left_vars = chunks[left_chunk_ix].bound_vars.iter().cloned().collect();
+    let right_vars = chunks[right_chunk_ix].bound_vars.iter().cloned().collect();
+    sort_and_project(&mut chunks, &mut actions, left_chunk_ix, &join_vars, &left_vars);
+    sort_and_project(&mut chunks, &mut actions, right_chunk_ix, &join_vars, &right_vars);
+    let left_key = sort_key(&chunks[left_chunk_ix], join_vars);
+    let right_key = sort_key(&chunks[right_chunk_ix], join_vars);
     assert_eq!(left_key.len(), right_key.len());
     actions.push(runtime::Action::SemiJoin(left_chunk_ix, right_chunk_ix, left_key, right_key));
 }
 
-pub fn join(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, left_chunk_ix: usize, right_chunk_ix: usize, vars: &Vec<VariableId>) {
-    let left_key = sort_key(&chunks[left_chunk_ix], vars);
-    let right_key = sort_key(&chunks[right_chunk_ix], vars);
+pub fn join(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, join_tree: &mut Tree, left_chunk_ix: usize, right_chunk_ix: usize) {
+    let join_vars = chunks[left_chunk_ix].bound_vars.intersection(&chunks[right_chunk_ix].bound_vars).cloned().collect();
+    let left_vars = chunks[left_chunk_ix].bound_vars.iter().cloned().collect();
+    let right_vars = chunks[right_chunk_ix].bound_vars.iter().cloned().collect();
+    sort_and_project(&mut chunks, &mut actions, left_chunk_ix, &join_vars, &left_vars);
+    sort_and_project(&mut chunks, &mut actions, right_chunk_ix, &join_vars, &right_vars);
+    let left_key = sort_key(&chunks[left_chunk_ix], join_vars);
+    let right_key = sort_key(&chunks[right_chunk_ix], join_vars);
     assert_eq!(left_key.len(), right_key.len());
     actions.push(runtime::Action::Join(left_chunk_ix, right_chunk_ix, left_key, right_key));
     let mut left_kinds = ::std::mem::replace(&mut chunks[left_chunk_ix].kinds, vec![]);
@@ -241,14 +306,73 @@ pub fn join(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, left_ch
     chunks[right_chunk_ix].kinds = left_kinds;
     chunks[right_chunk_ix].bindings = left_bindings;
     chunks[right_chunk_ix].bound_vars = left_bound_vars;
+    join_tree.retain(|(child_ix, parent_ix)| child_ix != left_chunk_ix);
+    join_tree.map_in_place(|(child_ix, parent_ix)| {
+        if parent_ix == Some(left_chunk_ix) {
+            Some(right_chunk_ix)
+        } else {
+            parent_ix
+        }
+    });
+    join_tree[0].1 = None;
+}
+
+pub fn collapse_subtree(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, join_tree: &mut Tree, subtree: &Tree) -> usize {
+    for edge in subtree.iter().rev() {
+        if let &(child_ix, Some(parent_ix)) = edge {
+            join(&mut chunks, &mut actions, &mut join_tree, child_ix, parent_ix)
+        }
+    }
+    subtree[0].0 // return the root ix
+}
+
+pub fn apply(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk_ix: usize, primitive: Primitive) {
+    // TODO handle constants in input vars
+    {
+        let chunk = &mut chunks[chunk_ix];
+        let input_ixes = primitive.input_bindings.iter().map(|binding| {
+            match binding {
+                Binding::None => panic!("Unbound input in: {:#?}", primitive),
+                Binding::Constant(_) => panic!("TODO handle constant inputs to primitives"),
+                Binding::Variable(_) => {
+                    let ix = chunk.bindings.iter().position(|chunk_binding| chunk_binding == binding).unwrap();
+                    chunk.kinds.iter().take(ix).map(|kind| kind.width()).sum()
+                }
+            }
+        }).collect();
+        actions.push(runtime::Action::Apply(chunk_ix, primitive.primitive, input_ixes));
+        chunk.kinds.extend(primitive.output_kinds);
+        chunk.bindings.extend(primitive.output_bindings);
+        chunk.bound_vars.extend(primitive.bound_output_vars);
+    }
+    filter(chunks, actions, chunk_ix); // handle any output vars that are constants
+    selfjoin(chunks, actions, chunk_ix); // handle any output vars that need joining
+}
+
+fn as_primitive(view_id: &str, bindings: &Vec<Binding>) -> Option<Primitive> {
+    use runtime::Primitive::*;
+    use runtime::Kind::*;
+    match (view_id, &bindings[..]) {
+        ("_ = _ + _", [ref c, ref a, ref b]) => Some(Primitive{
+            primitive: Add,
+            input_kinds: vec![Number, Number],
+            input_bindings: vec![a.clone(), b.clone()],
+            output_kinds: vec![Number],
+            output_bindings: vec![c.clone()],
+        }),
+        _ => None,
+    }
 }
 
 pub fn compile_query(query: &Query, program: &Program) -> runtime::Query {
     let mut upstream = vec![];
     let mut chunks = vec![];
+    let mut primitives = vec![];
     for clause in query.clauses.iter() {
-        match program.ids.iter().position(|id| *id == clause.view) {
-            Some(ix) => {
+        let view = program.ids.iter().position(|id| *id == clause.view);
+        let primitive = as_primitive(&clause.view, &clause.bindings);
+        match (view, primitive) {
+            (Some(ix), None) => {
                 upstream.push(ix);
                 chunks.push(Chunk{
                     kinds: program.schemas[ix].clone(),
@@ -256,34 +380,33 @@ pub fn compile_query(query: &Query, program: &Program) -> runtime::Query {
                     bound_vars: bound_vars(&clause.bindings),
                 });
             }
-            None => panic!("What are this: {:?}", clause),
+            (None, Some(primitive)) => {
+                primitives.push(primitive)
+            }
+            other => panic!("What are this: {:#?}", (clause, other)),
         }
     }
-    let (join_tree, root_ix) = build_join_tree(&chunks);
+    let mut join_tree = build_join_tree(&chunks);
     let mut actions = vec![];
     for chunk_ix in (0..chunks.len()) {
         filter(&mut chunks, &mut actions, chunk_ix);
         selfjoin(&mut chunks, &mut actions, chunk_ix);
     }
+    for &(child_ix, parent_ix) in join_tree.iter().rev() {
+        semijoin(&mut chunks, &mut actions, child_ix, parent_ix);
+    }
     for &(child_ix, parent_ix) in join_tree.iter() {
-        let join_vars = chunks[child_ix].bound_vars.intersection(&chunks[parent_ix].bound_vars).cloned().collect();
-        let child_vars = chunks[child_ix].bound_vars.iter().cloned().collect();
-        let parent_vars = chunks[parent_ix].bound_vars.iter().cloned().collect();
-        sort_and_project(&mut chunks, &mut actions, child_ix, &join_vars, &child_vars);
-        sort_and_project(&mut chunks, &mut actions, parent_ix, &join_vars, &parent_vars);
-        semijoin(&mut chunks, &mut actions, child_ix, parent_ix, &join_vars);
+        semijoin(&mut chunks, &mut actions, parent_ix, child_ix);
     }
-    let mut project_vars = vec![query.select.iter().cloned().collect::<HashSet<_>>()];
-    for &(child_ix, _) in join_tree.iter() {
-        let vars = project_vars[project_vars.len()-1].union(&chunks[child_ix].bound_vars).cloned().collect();
-        project_vars.push(vars);
+    // TODO when joining project away any vars that are not in other chunks, in other primitives or in the select
+    while primitives.len() > 0 {
+        let (primitive_ix, subtree) = cheapest_primitive_subtree(&chunks, &join_tree, &primitives);
+        let root_ix = collapse_subtree(&mut chunks, &mut actions, &mut join_tree, &subtree);
+        apply(&mut chunks, &mut actions, root_ix, &primitives[primitive_ix]);
+        primitives.remove(primitive_ix);
     }
-    for (join_ix, &(child_ix, _)) in join_tree.iter().enumerate().rev() {
-        let join_vars = chunks[child_ix].bound_vars.intersection(&chunks[root_ix].bound_vars).cloned().collect();
-        // child is already sorted from semijoin phase
-        sort_and_project(&mut chunks, &mut actions, root_ix, &join_vars, &project_vars[join_ix].iter().cloned().collect());
-        join(&mut chunks, &mut actions, child_ix, root_ix, &join_vars);
-    }
+    let remaining_tree = join_tree.clone();
+    let root_ix = collapse_subtree(&mut chunks, &mut actions, &mut join_tree, &remaining_tree);
     sort_and_project(&mut chunks, &mut actions, root_ix, &query.select, &vec![]);
     runtime::Query{upstream: upstream, actions: actions, result_ix: root_ix}
 }
@@ -519,15 +642,13 @@ pub fn parse(text: &str) -> Program {
     let mut schedule = vec![];
     let mut schemas = vec![];
     let mut views = vec![];
-    let mut ix = 0;
     for view_text in text.split("\n\n") {
         if view_text != "" {
             for (id, schema, view) in parse_view(view_text) {
+                schedule.push(ids.len()); // ie just scheduling in textual order for now
                 ids.push(id);
                 schemas.push(schema);
                 views.push(view);
-                schedule.push(ix); // ie just scheduling in textual order for now
-                ix += 1;
             }
         }
     }

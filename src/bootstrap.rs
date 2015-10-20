@@ -730,7 +730,6 @@ pub mod tests{
     }
 
     #[test]
-
     pub fn test_flying() {
         let bootstrap_program = load(&["data/flying.imp"]);
         let mut runtime_program = compile(&bootstrap_program);
@@ -738,6 +737,17 @@ pub mod tests{
         assert_set_eq!(
             runtime_program.states[6].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
             vec!["Sally the sparrow", "Ellen the eagle", "Harry the penguin"]
+            );
+    }
+
+    #[test]
+    pub fn test_math() {
+        let bootstrap_program = load(&["data/math.imp"]);
+        let mut runtime_program = compile(&bootstrap_program);
+        runtime_program.run();
+        assert_set_eq!(
+            runtime_program.states[2].data.iter().cloned(),
+            vec![3,4,6,8, 6,7,9,11, 11,12,14,16]
             );
     }
 }

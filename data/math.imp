@@ -1,0 +1,18 @@
+?a:number is a prime
+=
+2
+3
+5
+7
+
+?a:number is square
+=
+1
+4
+9
+
+?c:number is awesome
++
+?a is a prime
+?b is square
+?c = ?a + ?b

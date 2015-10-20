@@ -219,6 +219,15 @@ impl Chunk {
         }
         Chunk{ data: data, row_width: self.row_width}
     }
+
+    pub fn extend(&self, constants: &[u64]) -> Chunk {
+        let mut data = vec![];
+        for row in self.data.chunks(self.row_width) {
+            data.extend(row);
+            data.extend(constants);
+        }
+        Chunk{ data: data, row_width: self.row_width + constants.len() }
+    }
 }
 
 impl<'a> Iterator for Groups<'a> {
@@ -352,6 +361,7 @@ pub enum Action {
     SelfJoin(usize, usize, usize),
     Filter(usize, usize, u64),
     Apply(usize, Primitive, Vec<usize>),
+    Extend(usize, Vec<u64>),
     DebugChunk(usize),
     DebugText(usize, usize),
 }
@@ -401,6 +411,10 @@ impl Query {
                 }
                 &Action::Apply(ix, primitive, ref args) => {
                     let chunk = primitive.apply(&chunks[ix], &*args);
+                    chunks[ix] = Cow::Owned(chunk);
+                }
+                &Action::Extend(ix, ref constants) => {
+                    let chunk = chunks[ix].extend(&*constants);
                     chunks[ix] = Cow::Owned(chunk);
                 }
                 &Action::DebugChunk(ix) => {

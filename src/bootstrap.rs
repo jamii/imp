@@ -326,20 +326,42 @@ pub fn collapse_subtree(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Acti
     subtree[0].0 // return the root ix
 }
 
-pub fn apply(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk_ix: usize, primitive: &Primitive) {
+pub fn apply(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, strings: &mut Vec<String>, chunk_ix: usize, primitive: &Primitive) {
     // TODO handle constants in input vars
     {
         let chunk = &mut chunks[chunk_ix];
+        let num_columns: usize = chunk.kinds.iter().map(|kind| kind.width()).sum();
+        let mut constants = vec![];
         let input_ixes = primitive.input_bindings.iter().map(|binding| {
             match *binding {
                 Binding::Unbound => panic!("Unbound input in: {:#?}", primitive),
-                Binding::Constant(_) => panic!("TODO handle constant inputs to primitives"),
+                Binding::Constant(ref constant) => {
+                    let ix = constants.len();
+                    match *constant {
+                        Value::Id(id) => {
+                            constants.push(id)
+                        }
+                        Value::Number(number) => {
+                            constants.push(number as u64)
+                        }
+                        Value::Text(ref string) => {
+                            constants.push(hash(string));
+                            constants.push(strings.len() as u64);
+                            strings.push(string.clone());
+                        }
+                    }
+                    num_columns + ix
+                },
                 Binding::Variable(_) => {
                     let ix = chunk.bindings.iter().position(|chunk_binding| chunk_binding == binding).unwrap();
                     chunk.kinds.iter().take(ix).map(|kind| kind.width()).sum()
                 }
             }
         }).collect();
+        if constants.len() > 0 {
+            // TODO this seems like an expensive solution to constant bindings in the inputs
+            actions.push(runtime::Action::Extend(chunk_ix, constants));
+        }
         actions.push(runtime::Action::Apply(chunk_ix, primitive.primitive, input_ixes));
         chunk.kinds.extend(primitive.output_kinds.clone());
         chunk.bindings.extend(primitive.output_bindings.clone());
@@ -366,7 +388,7 @@ fn as_primitive(view_id: &str, bindings: &Vec<Binding>) -> Option<Primitive> {
     }
 }
 
-pub fn compile_query(query: &Query, program: &Program) -> runtime::Query {
+pub fn compile_query(query: &Query, program: &Program, strings: &mut Vec<String>) -> runtime::Query {
     let mut upstream = vec![];
     let mut chunks = vec![];
     let mut primitives = vec![];
@@ -408,7 +430,7 @@ pub fn compile_query(query: &Query, program: &Program) -> runtime::Query {
     while primitives.len() > 0 {
         let (primitive_ix, subtree) = cheapest_primitive_subtree(&chunks, &join_tree, &primitives);
         let root_ix = collapse_subtree(&mut chunks, &mut actions, &mut join_tree, &subtree);
-        apply(&mut chunks, &mut actions, root_ix, &primitives[primitive_ix]);
+        apply(&mut chunks, &mut actions, strings, root_ix, &primitives[primitive_ix]);
         primitives.remove(primitive_ix);
     }
     let remaining_tree = join_tree.clone();
@@ -501,7 +523,7 @@ pub fn compile(program: &Program) -> runtime::Program {
                 dirty.push(false);
             }
             View::Query(ref query) => {
-                let runtime_query = compile_query(query, program);
+                let runtime_query = compile_query(query, program, &mut strings);
                 let row_width = schema.iter().map(|kind| kind.width()).sum();
                 states.push(Rc::new(runtime::Chunk{data: vec![], row_width: row_width}));
                 views.push(runtime::View::Query(runtime_query));

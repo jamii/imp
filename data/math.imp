@@ -16,3 +16,8 @@
 ?a is a prime
 ?b is square
 ?c = ?a + ?b
+
+?b:number is more than prime
++
+?a is a prime
+?b = ?a + 1

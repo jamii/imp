@@ -71,22 +71,22 @@ impl Chunk {
             let mut counts = [[0; MAX_PIECE]; NUM_PIECES];
             for row_ix in (0..data.len()).step_by(row_width) {
                 let word = data[row_ix + word_ix];
-                for piece_ix in (0..NUM_PIECES) {
+                for piece_ix in 0..NUM_PIECES {
                     counts[piece_ix][get_piece(word,piece_ix)] += 1;
                 }
             }
             let mut buckets = [[0; MAX_PIECE]; NUM_PIECES];
-            for piece_ix in (0..NUM_PIECES) {
-                for piece in (0..255) {
+            for piece_ix in 0..NUM_PIECES {
+                for piece in 0..255 {
                     buckets[piece_ix][piece+1] = buckets[piece_ix][piece] + (row_width * counts[piece_ix][piece]);
                 }
             }
-            for piece_ix in (0..NUM_PIECES) {
+            for piece_ix in 0..NUM_PIECES {
                 for row_ix in (0..data.len()).step_by(row_width) {
                     let word = data[row_ix + word_ix];
                     let piece = get_piece(word, piece_ix);
                     let bucket = buckets[piece_ix][piece];
-                    for ix in (0..row_width) {
+                    for ix in 0..row_width {
                         buffer[bucket + ix] = data[row_ix + ix];
                     }
                     buckets[piece_ix][piece] += row_width;

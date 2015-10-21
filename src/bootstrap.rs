@@ -94,7 +94,7 @@ pub enum Value {
 // (child, parent) sorted from root downwards
 pub type Tree = Vec<(usize, Option<usize>)>;
 
-fn ordered_union(xs: &Vec<VariableId>, ys: &Vec<VariableId>) -> Vec<VariableId> {
+fn ordered_union(xs: &Vec<VariableId>, ys: &HashSet<VariableId>) -> Vec<VariableId> {
     let mut results = xs.clone();
     for y in ys {
         if xs.iter().find(|x| *x == y).is_none() {
@@ -259,7 +259,7 @@ fn selfjoin(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk_i
     }
 }
 
-pub fn sort_and_project(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk_ix: usize, sort_vars: &Vec<VariableId>, select_vars: &Vec<VariableId>) {
+pub fn sort_and_project(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk_ix: usize, sort_vars: &Vec<VariableId>, select_vars: &HashSet<VariableId>) {
     let vars = ordered_union(sort_vars, select_vars);
     let num_fields = chunks[chunk_ix].bindings.len();
     let num_projected_vars = bound_vars(&chunks[chunk_ix].bindings).intersection(&vars.iter().cloned().collect()).count();
@@ -277,8 +277,8 @@ pub fn sort_and_project(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Acti
 
 pub fn semijoin(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, left_chunk_ix: usize, right_chunk_ix: usize) {
     let join_vars = chunks[left_chunk_ix].bound_vars.intersection(&chunks[right_chunk_ix].bound_vars).cloned().collect();
-    let left_vars = chunks[left_chunk_ix].bound_vars.iter().cloned().collect();
-    let right_vars = chunks[right_chunk_ix].bound_vars.iter().cloned().collect();
+    let left_vars = chunks[left_chunk_ix].bound_vars.clone();
+    let right_vars = chunks[right_chunk_ix].bound_vars.clone();
     sort_and_project(chunks, actions, left_chunk_ix, &join_vars, &left_vars);
     sort_and_project(chunks, actions, right_chunk_ix, &join_vars, &right_vars);
     let left_key = sort_key(&chunks[left_chunk_ix], &join_vars);
@@ -287,12 +287,10 @@ pub fn semijoin(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, lef
     actions.push(runtime::Action::SemiJoin(left_chunk_ix, right_chunk_ix, left_key, right_key));
 }
 
-pub fn join(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, join_tree: &mut Tree, left_chunk_ix: usize, right_chunk_ix: usize) {
+pub fn join(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, join_tree: &mut Tree, left_chunk_ix: usize, right_chunk_ix: usize, select: HashSet<VariableId>) {
     let join_vars = chunks[left_chunk_ix].bound_vars.intersection(&chunks[right_chunk_ix].bound_vars).cloned().collect();
-    let left_vars = chunks[left_chunk_ix].bound_vars.iter().cloned().collect();
-    let right_vars = chunks[right_chunk_ix].bound_vars.iter().cloned().collect();
-    sort_and_project(chunks, actions, left_chunk_ix, &join_vars, &left_vars);
-    sort_and_project(chunks, actions, right_chunk_ix, &join_vars, &right_vars);
+    sort_and_project(chunks, actions, left_chunk_ix, &join_vars, &select);
+    sort_and_project(chunks, actions, right_chunk_ix, &join_vars, &select);
     let left_key = sort_key(&chunks[left_chunk_ix], &join_vars);
     let right_key = sort_key(&chunks[right_chunk_ix], &join_vars);
     assert_eq!(left_key.len(), right_key.len());
@@ -318,10 +316,20 @@ pub fn join(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, join_tr
     join_tree[0].1 = None;
 }
 
-pub fn collapse_subtree(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, join_tree: &mut Tree, subtree: &Tree) -> usize {
+pub fn collapse_subtree(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, join_tree: &mut Tree, select: &Vec<VariableId>, primitives: &Vec<Primitive>, subtree: &Tree) -> usize {
     for edge in subtree.iter().rev() {
         if let &(child_ix, Some(parent_ix)) = edge {
-            join(chunks, actions, join_tree, child_ix, parent_ix)
+            let mut vars = select.iter().cloned().collect::<HashSet<_>>();
+            for (chunk_ix, chunk) in chunks.iter().enumerate() {
+                if (chunk_ix != child_ix) && (chunk_ix != parent_ix) {
+                    vars.extend(chunk.bound_vars.clone());
+                }
+            }
+            for primitive in primitives.iter() {
+                vars.extend(primitive.bound_input_vars.clone());
+                vars.extend(primitive.bound_output_vars.clone());
+            }
+            join(chunks, actions, join_tree, child_ix, parent_ix, vars);
         }
     }
     subtree[0].0 // return the root ix
@@ -435,13 +443,13 @@ pub fn compile_query(query: &Query, program: &Program, strings: &mut Vec<String>
     // TODO when joining project away any vars that are not in other chunks, in other primitives or in the select
     while primitives.len() > 0 {
         let (primitive_ix, subtree) = cheapest_primitive_subtree(&chunks, &join_tree, &primitives);
-        let root_ix = collapse_subtree(&mut chunks, &mut actions, &mut join_tree, &subtree);
+        let root_ix = collapse_subtree(&mut chunks, &mut actions, &mut join_tree, &query.select, &primitives, &subtree);
         apply(&mut chunks, &mut actions, strings, root_ix, &primitives[primitive_ix]);
         primitives.remove(primitive_ix);
     }
     let remaining_tree = join_tree.clone();
-    let root_ix = collapse_subtree(&mut chunks, &mut actions, &mut join_tree, &remaining_tree);
-    sort_and_project(&mut chunks, &mut actions, root_ix, &query.select, &vec![]);
+    let root_ix = collapse_subtree(&mut chunks, &mut actions, &mut join_tree, &query.select, &primitives, &remaining_tree);
+    sort_and_project(&mut chunks, &mut actions, root_ix, &query.select, &HashSet::new());
     runtime::Query{upstream: upstream, actions: actions, result_ix: root_ix}
 }
 

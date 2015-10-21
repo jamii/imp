@@ -1062,3 +1062,198 @@ Ignoring the concat, *a* valid join tree for Yannakakis would be "letter ?l is a
 Intuitively though, it seems that for every query there should be *some* sensible join tree. I'm currently trying to figure out if there is a way to bound the costs of a given tree containing primitives. Then the compiler could just generate every valid tree and choose the tree with the lowest bounds.
 
 Today I'm rereading http://arxiv.org/pdf/1508.07532.pdf and http://arxiv.org/pdf/1508.01239.pdf, both of which calculate bounds for related problems. Hopefully something in there will inspire me. I've been stalled on this for a week or so, so I would be happy to find a crude solution for now and come back to it later.
+
+## Primitives
+
+I finally settled on a solution. I'm pretty sure there are cases where it will do something daft but I'll worry about those when I come to them.
+
+We start by ignoring the primitives, building a join tree just for the views and running a full [GYO reduction](http://infolab.stanford.edu/~ullman/cs345notes/slides01-3.pdf).
+
+``` rust
+let mut join_tree = build_join_tree(&chunks);
+for chunk_ix in 0..chunks.len() {
+    filter(&mut chunks, &mut actions, chunk_ix);
+    selfjoin(&mut chunks, &mut actions, chunk_ix);
+}
+for edge in join_tree.iter().rev() {
+    if let &(child_ix, Some(parent_ix)) = edge {
+        semijoin(&mut chunks, &mut actions, child_ix, parent_ix);
+    }
+}
+for edge in join_tree.iter().rev() {
+    if let &(child_ix, Some(parent_ix)) = edge {
+        semijoin(&mut chunks, &mut actions, parent_ix, child_ix);
+    }
+}
+```
+
+Then we repeatedly:
+
+* find the smallest subtree which contains enough variables to apply some primitive
+* join together all the chunks in the subtree
+* apply the primitive
+
+``` rust
+while primitives.len() > 0 {
+    let (primitive_ix, subtree) = cheapest_primitive_subtree(&chunks, &join_tree, &primitives);
+    let root_ix = collapse_subtree(&mut chunks, &mut actions, &mut join_tree, &subtree);
+    apply(&mut chunks, &mut actions, strings, root_ix, &primitives[primitive_ix]);
+    primitives.remove(primitive_ix);
+}
+```
+
+Finally, we join together any remaining chunks and project out the result variables.
+
+``` rust
+let remaining_tree = join_tree.clone();
+let root_ix = collapse_subtree(&mut chunks, &mut actions, &mut join_tree, &remaining_tree);
+sort_and_project(&mut chunks, &mut actions, root_ix, &query.select, &vec![]);
+```
+
+The work done by `apply` mostly involves handling constant bindings and dealing with edge cases like when the output of a function needs to be joined to something in the chunk.
+
+``` rust
+pub fn apply(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, strings: &mut Vec<String>, chunk_ix: usize, primitive: &Primitive) {
+    {
+        let chunk = &mut chunks[chunk_ix];
+        let num_columns: usize = chunk.kinds.iter().map(|kind| kind.width()).sum();
+        let mut constants = vec![];
+        let input_ixes = primitive.input_bindings.iter().map(|binding| {
+            match *binding {
+                Binding::Unbound => panic!("Unbound input in: {:#?}", primitive),
+                Binding::Constant(ref constant) => {
+                    let ix = constants.len();
+                    match *constant {
+                        Value::Id(id) => {
+                            constants.push(id)
+                        }
+                        Value::Number(number) => {
+                            constants.push(number as u64)
+                        }
+                        Value::Text(ref string) => {
+                            constants.push(hash(string));
+                            constants.push(strings.len() as u64);
+                            strings.push(string.clone());
+                        }
+                    }
+                    num_columns + ix
+                },
+                Binding::Variable(_) => {
+                    let ix = chunk.bindings.iter().position(|chunk_binding| chunk_binding == binding).unwrap();
+                    chunk.kinds.iter().take(ix).map(|kind| kind.width()).sum()
+                }
+            }
+        }).collect();
+        if constants.len() > 0 {
+            // TODO this seems like an expensive solution to constant bindings in the inputs
+            actions.push(runtime::Action::Extend(chunk_ix, constants));
+        }
+        actions.push(runtime::Action::Apply(chunk_ix, primitive.primitive, input_ixes));
+        chunk.kinds.extend(primitive.output_kinds.clone());
+        chunk.bindings.extend(primitive.output_bindings.clone());
+        chunk.bound_vars.extend(primitive.bound_output_vars.clone());
+    }
+    filter(chunks, actions, chunk_ix); // handle any output vars that are constants
+    selfjoin(chunks, actions, chunk_ix); // handle any output vars that need joining
+}
+```
+
+Finally, the runtime has two new actions to handle.
+
+``` rust
+impl Chunk {
+    pub fn extend(&self, constants: &[u64]) -> Chunk {
+    let mut data = vec![];
+    for row in self.data.chunks(self.row_width) {
+        data.extend(row);
+        data.extend(constants);
+    }
+    Chunk{ data: data, row_width: self.row_width + constants.len() }
+}
+
+impl Primitive {
+    fn apply(&self, chunk: &Chunk, args: &[usize]) -> Chunk {
+        let mut data = vec![];
+        match (*self, args) {
+            (Primitive::Add, [a, b]) => {
+                for row in chunk.data.chunks(chunk.row_width) {
+                    data.extend(row);
+                    data.push(((row[a] as f64) + (row[b] as f64)) as u64);
+                }
+                Chunk{data: data, row_width: chunk.row_width + 1}
+            }
+            _ => panic!("What are this: {:?} {:?}", self, args)
+        }
+    }
+}
+```
+
+The end result is this:
+
+* views which don't use primitives still gain the runtime bounds from Yannakakis
+* views which do use primitives have the runtime bounds that Yannakakis would have if applied to the same view with all the primitives removed
+
+Note that removing primitives can potentially vastly increase the output size, which means that these bounds are much looser. For example:
+
+```
+person ?p has first name ?fn
+person ?p has last name ?ln
+?n = concat(?fn, ?ln)
+letter ?l is addressed to ?n
+
+```
+person ?p has first name ?fn
+person ?p has last name ?ln
+letter ?l is addressed to ?n
+```
+
+Thie first query is guaranteed to take no more time than the second query, which generates every possible combination of letter and person. That's not a very tight bound.
+
+In practice, simple examples like this end up with sensible plans, but in complex queries with multiple primitives it is possible to coerce the compiler into bad decisions. My intuition is that is should be possible to prevent this by being more careful about which order primitives are applied in - choosing the subtree with the smallest bound rather than the least number of nodes - but computing the bounds is complicated and I want to move on to other subjects.
+
+## Notes on design
+
+The rest of the compiler is mostly dull book-keeping but I want to call attention to the style of programming. Over the last year or two I've leaned more and more towards data-oriented design as advocated by eg [Mike Acton](http://www.slideshare.net/cellperformance/data-oriented-design-and-c). The primary reason for that is *not* performance but because I find it prevents me agonising over code organisation and because it plays well with the Rust borrow checker. An example of this is the join tree. A traditional approach would be something like:
+
+``` rust
+struct Tree {
+    chunk: Chunk,
+    children: Vec<Tree>,
+}
+```
+
+Since everything is connected by pointers anything I have to think carefully about where to keep data eg if later I am walking the tree and I need a list of the bindings for the chunk, I either have to include the bindings in the Chunk struct beforehand or I have to look it up in some chunk-to-bindings hashtable. Is the chunk hashable? Am I ever going to mutate it?
+
+In Rust I have to think about ownership too. Does the chunk-to-bindings hashtable have it's own copy of the chunk or is it sharing with the tree? The former adds unnecessary copies but the latter imposes a bunch of lifetime annotations that clog up all my code.
+
+A much simpler approach is to store all the information separately and tie it together with a simple key. In this case, I just store the chunks in one vector, the bindings in another vector and use the position in the vector as the key.
+
+``` rust
+struct Tree {
+    chunk: usize,
+    children: Vec<Tree>,
+}
+```
+
+But we still have a recursive, mutable type which is [painful](http://stackoverflow.com/questions/28608823/how-to-model-complex-recursive-data-structures-graphs) in Rust. Even in a normal language we have to write extra code to handle operations like inserting edges or traversing the tree. Life is easier with a simpler representation.
+
+``` rust
+// (child, parent) sorted from root downwards
+type Tree = Vec<(usize, Option<usize>)>;
+```
+
+Most of the code that touches this the tree becomes delightfully simple eg:
+
+``` rust
+while unused.len() > 1 { // one chunk will be left behind as the root
+    let (child_ix, parent_ix) = find_join_ear(chunks, &unused);
+    unused.retain(|ix| *ix != child_ix);
+    tree.push((child_ix, Some(parent_ix)));
+}
+tree.push((unused[0], None));
+tree.rev();
+```
+
+There are incidental performance benefits - we now have a single contiguous allocation for the whole tree - but the main benefit is just simplicity. I'm leaning more and more towards just [putting things in arrays](https://youtu.be/JjDsP5n2kSM?t=752) until profiling demands otherwise.
+
+I think it's interesting that the borrow checker directly encourages what I judge to be good design. I wonder what kind of effect that will have on the long-term quality of the Rust ecosystem.

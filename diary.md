@@ -1110,88 +1110,10 @@ let root_ix = collapse_subtree(&mut chunks, &mut actions, &mut join_tree, &remai
 sort_and_project(&mut chunks, &mut actions, root_ix, &query.select, &vec![]);
 ```
 
-The work done by `apply` mostly involves handling constant bindings and dealing with edge cases like when the output of a function needs to be joined to something in the chunk.
-
-``` rust
-pub fn apply(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, strings: &mut Vec<String>, chunk_ix: usize, primitive: &Primitive) {
-    {
-        let chunk = &mut chunks[chunk_ix];
-        let num_columns: usize = chunk.kinds.iter().map(|kind| kind.width()).sum();
-        let mut constants = vec![];
-        let input_ixes = primitive.input_bindings.iter().map(|binding| {
-            match *binding {
-                Binding::Unbound => panic!("Unbound input in: {:#?}", primitive),
-                Binding::Constant(ref constant) => {
-                    let ix = constants.len();
-                    match *constant {
-                        Value::Id(id) => {
-                            constants.push(id)
-                        }
-                        Value::Number(number) => {
-                            constants.push(number as u64)
-                        }
-                        Value::Text(ref string) => {
-                            constants.push(hash(string));
-                            constants.push(strings.len() as u64);
-                            strings.push(string.clone());
-                        }
-                    }
-                    num_columns + ix
-                },
-                Binding::Variable(_) => {
-                    let ix = chunk.bindings.iter().position(|chunk_binding| chunk_binding == binding).unwrap();
-                    chunk.kinds.iter().take(ix).map(|kind| kind.width()).sum()
-                }
-            }
-        }).collect();
-        if constants.len() > 0 {
-            // TODO this seems like an expensive solution to constant bindings in the inputs
-            actions.push(runtime::Action::Extend(chunk_ix, constants));
-        }
-        actions.push(runtime::Action::Apply(chunk_ix, primitive.primitive, input_ixes));
-        chunk.kinds.extend(primitive.output_kinds.clone());
-        chunk.bindings.extend(primitive.output_bindings.clone());
-        chunk.bound_vars.extend(primitive.bound_output_vars.clone());
-    }
-    filter(chunks, actions, chunk_ix); // handle any output vars that are constants
-    selfjoin(chunks, actions, chunk_ix); // handle any output vars that need joining
-}
-```
-
-Finally, the runtime has two new actions to handle.
-
-``` rust
-impl Chunk {
-    pub fn extend(&self, constants: &[u64]) -> Chunk {
-    let mut data = vec![];
-    for row in self.data.chunks(self.row_width) {
-        data.extend(row);
-        data.extend(constants);
-    }
-    Chunk{ data: data, row_width: self.row_width + constants.len() }
-}
-
-impl Primitive {
-    fn apply(&self, chunk: &Chunk, args: &[usize]) -> Chunk {
-        let mut data = vec![];
-        match (*self, args) {
-            (Primitive::Add, [a, b]) => {
-                for row in chunk.data.chunks(chunk.row_width) {
-                    data.extend(row);
-                    data.push(((row[a] as f64) + (row[b] as f64)) as u64);
-                }
-                Chunk{data: data, row_width: chunk.row_width + 1}
-            }
-            _ => panic!("What are this: {:?} {:?}", self, args)
-        }
-    }
-}
-```
-
-The end result is this:
+The reasoning here is that primitives are usually cheap to compute and may be useful in later joins, so we want to apply them as early as possible. Running the full reduction (instead of the half reduction I was using before) allows joining the chunks in any order, at the cost of some extra sorting. The end result is:
 
 * views which don't use primitives still gain the runtime bounds from Yannakakis
-* views which do use primitives have the runtime bounds that Yannakakis would have if applied to the same view with all the primitives removed
+* views which do use primitives have the runtime bounds that Yannakakis would have IF all the primtives were removed from the query
 
 Note that removing primitives can potentially vastly increase the output size, which means that these bounds are much looser. For example:
 

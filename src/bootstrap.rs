@@ -227,17 +227,18 @@ fn sort_key(chunk: &Chunk, vars: &Vec<VariableId>) -> Vec<usize> {
 }
 
 pub fn filter(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk_ix: usize) {
-    let bindings = &chunks[chunk_ix].bindings;
-    let kinds = &chunks[chunk_ix].kinds;
-    for field in 0..bindings.len() {
-        if let Binding::Constant(ref value) = bindings[field] {
-            let column = kinds[0..field].iter().map(|kind| kind.width()).sum();
+    for field in 0..chunks[chunk_ix].bindings.len() {
+        if let Binding::Constant(ref value) = chunks[chunk_ix].bindings[field] {
+            let column = chunks[chunk_ix].kinds[0..field].iter().map(|kind| kind.width()).sum();
             let raw_value = match *value {
                 Value::Id(id) => id,
                 Value::Number(number) => number as u64,
                 Value::Text(ref text) => hash(text),
             };
             actions.push(runtime::Action::Filter(chunk_ix, column, raw_value));
+        }
+        if let Binding::Constant(_) = chunks[chunk_ix].bindings[field] {
+            chunks[chunk_ix].bindings[field] = Binding::Unbound;
         }
     }
 }
@@ -327,7 +328,6 @@ pub fn collapse_subtree(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Acti
 }
 
 pub fn apply(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, strings: &mut Vec<String>, chunk_ix: usize, primitive: &Primitive) {
-    // TODO handle constants in input vars
     {
         let chunk = &mut chunks[chunk_ix];
         let num_columns: usize = chunk.kinds.iter().map(|kind| kind.width()).sum();
@@ -339,15 +339,21 @@ pub fn apply(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, string
                     let ix = constants.len();
                     match *constant {
                         Value::Id(id) => {
-                            constants.push(id)
+                            constants.push(id);
+                            chunk.kinds.push(Kind::Id);
+                            chunk.bindings.push(Binding::Unbound);
                         }
                         Value::Number(number) => {
-                            constants.push(number as u64)
+                            constants.push(number as u64);
+                            chunk.kinds.push(Kind::Number);
+                            chunk.bindings.push(Binding::Unbound);
                         }
                         Value::Text(ref string) => {
                             constants.push(hash(string));
                             constants.push(strings.len() as u64);
                             strings.push(string.clone());
+                            chunk.kinds.push(Kind::Text);
+                            chunk.bindings.push(Binding::Unbound);
                         }
                     }
                     num_columns + ix
@@ -770,6 +776,10 @@ pub mod tests{
         assert_set_eq!(
             runtime_program.states[2].data.iter().cloned(),
             vec![3,4,6,8, 6,7,9,11, 11,12,14,16]
+            );
+        assert_set_eq!(
+            runtime_program.states[4].data.iter().cloned(),
+            vec![3,4,6,8]
             );
     }
 }

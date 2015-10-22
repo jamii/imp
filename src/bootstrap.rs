@@ -395,7 +395,13 @@ pub fn apply(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, string
             }).unwrap();
             chunk.kinds.iter().take(ix).map(|kind| kind.width()).sum()
         }).collect();
-        actions.push(runtime::Action::Apply(chunk_ix, primitive.primitive, input_ixes, group_ixes));
+        let over_ixes = primitive.over_bindings.iter().map(|binding| {
+            let ix = chunk.bindings.iter().position(|chunk_binding| chunk_binding == binding).unwrap();
+            let column = chunk.kinds.iter().take(ix).map(|kind| kind.width()).sum();
+            let kind = chunk.kinds[ix];
+            (column, kind)
+        }).collect();
+        actions.push(runtime::Action::Apply(chunk_ix, primitive.primitive, input_ixes, group_ixes, over_ixes));
         chunk.kinds.extend(primitive.output_kinds.clone());
         chunk.bindings.extend(primitive.output_bindings.clone());
         chunk.bound_vars.extend(primitive.bound_output_vars.clone());
@@ -429,6 +435,17 @@ fn as_primitive(view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<Bind
             bound_input_vars: bound_vars(&vec![b.clone()]),
             bound_output_vars: bound_vars(&vec![a.clone()]),
             bound_aggregate_vars: &bound_vars(&vec![b.clone()]) | &bound_vars(over_bindings),
+        }),
+        ("row _", [ref a]) => Some(Primitive{
+            primitive: Ordinal,
+            input_kinds: vec![],
+            input_bindings: vec![],
+            output_kinds: vec![Number],
+            output_bindings: vec![a.clone()],
+            over_bindings: over_bindings.clone(),
+            bound_input_vars: bound_vars(&vec![]),
+            bound_output_vars: bound_vars(&vec![a.clone()]),
+            bound_aggregate_vars: bound_vars(over_bindings),
         }),
         _ => None,
     }
@@ -853,6 +870,21 @@ pub mod tests{
         assert_set_eq!(
             runtime_program.states[16].data.iter().cloned(),
             vec![350]
+            );
+    }
+
+    #[test]
+    pub fn test_sorting() {
+        let bootstrap_program = load(&["data/sorting.imp"]);
+        let mut runtime_program = compile(&bootstrap_program);
+        runtime_program.run();
+        assert_set_eq!(
+            runtime_program.states[2].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
+            vec!["bob", "eve"]
+            );
+        assert_set_eq!(
+            runtime_program.states[4].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
+            vec!["bob"]
             );
     }
 }

@@ -335,10 +335,55 @@ pub fn hash<T: hash::Hash>(t: &T) -> u64 {
 pub enum Primitive {
     Add,
     Sum,
+    Ordinal,
+}
+
+// TODO this is grossly inefficient compared to untyped sort
+fn typed_sort(chunk: &Chunk, ixes: &[(usize, Kind)], strings: &Vec<String>) -> Chunk {
+    let mut data = chunk.data.clone();
+    for &(ix, kind) in ixes.iter().rev() {
+        let mut new_data = Vec::with_capacity(data.len());
+        match kind {
+            Kind::Id => {
+                let mut buffer = vec![];
+                for row in data.chunks(chunk.row_width) {
+                    buffer.push((row[ix], row));
+                }
+                buffer.sort_by(|&(key_a, _), &(key_b, _)| key_a.cmp(&key_b));
+                for (_, row) in buffer.into_iter() {
+                    new_data.extend(row);
+                }
+            }
+            Kind::Number => {
+                let mut buffer = vec![];
+                for row in data.chunks(chunk.row_width) {
+                    buffer.push((row[ix] as f64, row));
+                }
+                // TODO NaN can cause panic here
+                buffer.sort_by(|&(key_a, _), &(key_b, _)| key_a.partial_cmp(&key_b).unwrap());
+                for (_, row) in buffer.into_iter() {
+                    new_data.extend(row);
+                }
+            }
+            Kind::Text => {
+                let mut buffer = vec![];
+                for row in data.chunks(chunk.row_width) {
+                    buffer.push((&strings[row[ix+1] as usize], row));
+                }
+                buffer.sort_by(|&(ref key_a, _), &(ref key_b, _)| key_a.cmp(key_b));
+                for (_, row) in buffer.into_iter() {
+                    new_data.extend(row);
+                }
+            }
+        }
+        data = new_data;
+        println!("{:?}", (ix, kind, &data));
+    }
+    Chunk{data: data, row_width: chunk.row_width}
 }
 
 impl Primitive {
-    fn apply(&self, chunk: &Chunk, input_ixes: &[usize], group_ixes: &[usize]) -> Chunk {
+    fn apply(&self, chunk: &Chunk, input_ixes: &[usize], group_ixes: &[usize], over_ixes: &[(usize, Kind)], strings: &Vec<String>) -> Chunk {
         let mut data = vec![];
         match (*self, input_ixes) {
             (Primitive::Add, [a, b]) => {
@@ -360,11 +405,22 @@ impl Primitive {
                     }
                 }
             }
+            (Primitive::Ordinal, []) => {
+                println!("{:?}", over_ixes);
+                let sorted_chunk = typed_sort(chunk, over_ixes, strings).sort(group_ixes);
+                for group in sorted_chunk.groups(group_ixes) {
+                    for (ordinal, row) in group.chunks(chunk.row_width).enumerate() {
+                        data.extend(row);
+                        data.push((ordinal + 1) as u64);
+                    }
+                }
+            }
             _ => panic!("What are this: {:?} {:?} {:?}", self, input_ixes, group_ixes)
         }
         let num_outputs = match *self {
             Primitive::Add => 1,
             Primitive::Sum => 1,
+            Primitive::Ordinal => 1,
         };
         Chunk{data: data, row_width: chunk.row_width + num_outputs}
     }
@@ -378,7 +434,7 @@ pub enum Action {
     Join(usize, usize, Vec<usize>, Vec<usize>),
     SelfJoin(usize, usize, usize),
     Filter(usize, usize, u64),
-    Apply(usize, Primitive, Vec<usize>, Vec<usize>),
+    Apply(usize, Primitive, Vec<usize>, Vec<usize>, Vec<(usize, Kind)>),
     Extend(usize, Vec<u64>),
     DebugChunk(usize),
     DebugText(usize, usize),
@@ -426,8 +482,8 @@ impl Query {
                     let chunk = chunks[ix].filter(column, value);
                     chunks[ix] = Cow::Owned(chunk);
                 }
-                &Action::Apply(ix, primitive, ref input_ixes, ref group_ixes) => {
-                    let chunk = primitive.apply(&chunks[ix], &*input_ixes, &*group_ixes);
+                &Action::Apply(ix, primitive, ref input_ixes, ref group_ixes, ref over_ixes) => {
+                    let chunk = primitive.apply(&chunks[ix], &*input_ixes, &*group_ixes, &*over_ixes, strings);
                     chunks[ix] = Cow::Owned(chunk);
                 }
                 &Action::Extend(ix, ref constants) => {

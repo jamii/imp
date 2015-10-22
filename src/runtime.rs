@@ -333,7 +333,8 @@ pub fn hash<T: hash::Hash>(t: &T) -> u64 {
 
 #[derive(Clone, Debug, Copy)]
 pub enum Primitive {
-    Add
+    Add,
+    Sum,
 }
 
 impl Primitive {
@@ -345,10 +346,27 @@ impl Primitive {
                     data.extend(row);
                     data.push(((row[a] as f64) + (row[b] as f64)) as u64);
                 }
-                Chunk{data: data, row_width: chunk.row_width + 1}
+            }
+            (Primitive::Sum, [a]) => {
+                let sorted_chunk = chunk.sort(group_ixes);
+                for group in sorted_chunk.groups(group_ixes) {
+                    let mut sum = 0f64;
+                    for row in group.chunks(chunk.row_width) {
+                        sum += row[a] as f64;
+                    }
+                    for row in group.chunks(chunk.row_width) {
+                        data.extend(row);
+                        data.push(sum as u64);
+                    }
+                }
             }
             _ => panic!("What are this: {:?} {:?} {:?}", self, input_ixes, group_ixes)
         }
+        let num_outputs = match *self {
+            Primitive::Add => 1,
+            Primitive::Sum => 1,
+        };
+        Chunk{data: data, row_width: chunk.row_width + num_outputs}
     }
 }
 

@@ -404,15 +404,25 @@ fn as_primitive(view_id: &str, bindings: &Vec<Binding>) -> Option<Primitive> {
     use runtime::Primitive::*;
     use runtime::Kind::*;
     match (view_id, &bindings[..]) {
-        ("_ = _ + _", [ref c, ref a, ref b]) => Some(Primitive{
+        ("_ = _ + _", [ref a, ref b, ref c]) => Some(Primitive{
             primitive: Add,
             input_kinds: vec![Number, Number],
-            input_bindings: vec![a.clone(), b.clone()],
+            input_bindings: vec![b.clone(), c.clone()],
             output_kinds: vec![Number],
-            output_bindings: vec![c.clone()],
-            bound_input_vars: bound_vars(&vec![a.clone(), b.clone()]),
-            bound_output_vars: bound_vars(&vec![c.clone()]),
+            output_bindings: vec![a.clone()],
+            bound_input_vars: bound_vars(&vec![b.clone(), c.clone()]),
+            bound_output_vars: bound_vars(&vec![a.clone()]),
             bound_aggregate_vars: bound_vars(&vec![]),
+        }),
+        ("_ = sum(_)", [ref a, ref b]) => Some(Primitive{
+            primitive: Sum,
+            input_kinds: vec![Number],
+            input_bindings: vec![b.clone()],
+            output_kinds: vec![Number],
+            output_bindings: vec![a.clone()],
+            bound_input_vars: bound_vars(&vec![b.clone()]),
+            bound_output_vars: bound_vars(&vec![a.clone()]),
+            bound_aggregate_vars: bound_vars(&vec![b.clone()]),
         }),
         _ => None,
     }
@@ -804,6 +814,10 @@ pub mod tests{
         assert_set_eq!(
             runtime_program.states[4].data.iter().cloned(),
             vec![3,4,6,8]
+            );
+        assert_set_eq!(
+            runtime_program.states[6].data.iter().cloned(),
+            vec![17]
             );
     }
 }

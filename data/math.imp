@@ -26,3 +26,38 @@
 +
 ?a is a prime
 ?b = sum(?a)
+
+?a:number likes ?b:number
+=
+1.5 3
+2 4
+0.00004 0.00004
+2.7 5.4
+16.2 17.4
+
+?a:number is half ?b:number
++
+?a likes ?b
+?b = ?a + ?a
+
+person ?p:text works at company ?c:text for ?d:number USD
+=
+"alice" "alice corp" 100
+"bob" "alice corp" 50
+"eve" "alice corp" 100
+"eve" "evil eve studios" 100
+
+person ?p:text makes ?t:number USD
++
+person ?p works at company ?c for ?d USD
+?t = sum(?d) over ?c
+
+company ?c:text spends ?t:number USD
++
+person ?p works at company ?c for ?d USD
+?t = sum(?d) over ?p
+
+total salary is ?t:number USD
++
+person ?p works at company ?c for ?d USD
+?t = sum(?d) over ?p ?c

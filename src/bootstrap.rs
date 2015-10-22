@@ -51,6 +51,7 @@ pub enum Member {
 pub struct Clause {
     pub view: ViewId,
     pub bindings: Vec<Binding>,
+    pub over_bindings: Vec<Binding>,
 }
 
 #[derive(Clone, Debug)]
@@ -73,6 +74,7 @@ pub struct Primitive {
     pub output_kinds: Vec<Kind>,
     pub input_bindings: Vec<Binding>,
     pub output_bindings: Vec<Binding>,
+    pub over_bindings: Vec<Binding>,
     pub bound_input_vars: HashSet<VariableId>,
     pub bound_output_vars: HashSet<VariableId>,
     pub bound_aggregate_vars: HashSet<VariableId>,
@@ -383,13 +385,15 @@ pub fn apply(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, string
             // TODO this seems like an expensive solution to constant bindings in the inputs
             actions.push(runtime::Action::Extend(chunk_ix, constants));
         }
+        // TODO will eventually need to maintain the order of over_bindings
         let group_ixes = chunk.bound_vars.difference(&primitive.bound_aggregate_vars).map(|var| {
-            chunk.bindings.iter().position(|binding| {
+            let ix = chunk.bindings.iter().position(|binding| {
                 match *binding {
                     Binding::Variable(ref bound_var) => bound_var == var,
                     _ => false
                 }
-            }).unwrap()
+            }).unwrap();
+            chunk.kinds.iter().take(ix).map(|kind| kind.width()).sum()
         }).collect();
         actions.push(runtime::Action::Apply(chunk_ix, primitive.primitive, input_ixes, group_ixes));
         chunk.kinds.extend(primitive.output_kinds.clone());
@@ -400,7 +404,7 @@ pub fn apply(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, string
     selfjoin(chunks, actions, chunk_ix); // handle any output vars that need joining
 }
 
-fn as_primitive(view_id: &str, bindings: &Vec<Binding>) -> Option<Primitive> {
+fn as_primitive(view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<Binding>) -> Option<Primitive> {
     use runtime::Primitive::*;
     use runtime::Kind::*;
     match (view_id, &bindings[..]) {
@@ -410,9 +414,10 @@ fn as_primitive(view_id: &str, bindings: &Vec<Binding>) -> Option<Primitive> {
             input_bindings: vec![b.clone(), c.clone()],
             output_kinds: vec![Number],
             output_bindings: vec![a.clone()],
+            over_bindings: over_bindings.clone(),
             bound_input_vars: bound_vars(&vec![b.clone(), c.clone()]),
             bound_output_vars: bound_vars(&vec![a.clone()]),
-            bound_aggregate_vars: bound_vars(&vec![]),
+            bound_aggregate_vars: bound_vars(over_bindings),
         }),
         ("_ = sum(_)", [ref a, ref b]) => Some(Primitive{
             primitive: Sum,
@@ -420,9 +425,10 @@ fn as_primitive(view_id: &str, bindings: &Vec<Binding>) -> Option<Primitive> {
             input_bindings: vec![b.clone()],
             output_kinds: vec![Number],
             output_bindings: vec![a.clone()],
+            over_bindings: over_bindings.clone(),
             bound_input_vars: bound_vars(&vec![b.clone()]),
             bound_output_vars: bound_vars(&vec![a.clone()]),
-            bound_aggregate_vars: bound_vars(&vec![b.clone()]),
+            bound_aggregate_vars: &bound_vars(&vec![b.clone()]) | &bound_vars(over_bindings),
         }),
         _ => None,
     }
@@ -434,7 +440,7 @@ pub fn compile_query(query: &Query, program: &Program, strings: &mut Vec<String>
     let mut primitives = vec![];
     for clause in query.clauses.iter() {
         let view = program.ids.iter().position(|id| *id == clause.view);
-        let primitive = as_primitive(&clause.view, &clause.bindings);
+        let primitive = as_primitive(&clause.view, &clause.bindings, &clause.over_bindings);
         match (view, primitive) {
             (Some(ix), None) => {
                 upstream.push(ix);
@@ -466,7 +472,6 @@ pub fn compile_query(query: &Query, program: &Program, strings: &mut Vec<String>
             semijoin(&mut chunks, &mut actions, parent_ix, child_ix);
         }
     }
-    // TODO when joining project away any vars that are not in other chunks, in other primitives or in the select
     while primitives.len() > 0 {
         let (primitive_ix, subtree) = cheapest_primitive_subtree(&chunks, &join_tree, &primitives);
         let root_ix = collapse_subtree(&mut chunks, &mut actions, &mut join_tree, &query.select, &primitives, &subtree);
@@ -600,11 +605,11 @@ pub fn compile(program: &Program) -> runtime::Program {
     runtime::Program{ids: ids, schemas: schemas, states: states, views: views, downstreams: downstreams, dirty: dirty, strings: strings}
 }
 
-// We shall see that at which dogs howl in the dark, and that at which cats prick up their ears after midnight
-fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>) {
+// Searchers after horror haunt strange, far place
+fn parse_bindings(text: &str) -> Vec<Binding> {
     let var_re = Regex::new(r#"_|\?[:alnum:]*(:[:alnum:]*)?|"[^"]*"|([:digit:]|\.)+|#[:digit:]+"#).unwrap();
     let kind_re = Regex::new(r":[:alnum:]*").unwrap();
-    let bindings = text.matches(&var_re).map(|var_text| {
+    text.matches(&var_re).map(|var_text| {
         match var_text.chars().next().unwrap() {
             '_' => Binding::Unbound,
             '?' => Binding::Variable(kind_re.replace(var_text, "")),
@@ -612,8 +617,20 @@ fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>) {
             '"' => Binding::Constant(Value::Text(var_text[1..var_text.len()-1].to_owned())),
             _ => Binding::Constant(Value::Number(var_text.parse::<f64>().unwrap())),
         }
-    }).collect();
-    let kinds = text.matches(&var_re).map(|var_text| {
+    }).collect()
+}
+
+// We shall see that at which dogs howl in the dark, and that at which cats prick up their ears after midnight
+fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<Binding>) {
+    let var_re = Regex::new(r#"_|\?[:alnum:]*(:[:alnum:]*)?|"[^"]*"|([:digit:]|\.)+|#[:digit:]+"#).unwrap();
+    let kind_re = Regex::new(r":[:alnum:]*").unwrap();
+    let over_re = Regex::new(r"(.*) over (.*)").unwrap();
+    let (inner_text, over_bindings) = match over_re.captures(text) {
+        Some(captures) => (captures.at(1).unwrap(), parse_bindings(captures.at(2).unwrap())),
+        None => (text, vec![]),
+    };
+    let bindings = parse_bindings(inner_text);
+    let kinds = inner_text.matches(&var_re).map(|var_text| {
         var_text.matches(&kind_re).next().map(|kind_text| {
             match kind_text {
                     ":id" => Kind::Id,
@@ -623,8 +640,8 @@ fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>) {
                 }
             })
     }).collect();
-    let view_id = var_re.replace_all(text, "_");
-    (view_id, bindings, kinds)
+    let view_id = var_re.replace_all(inner_text, "_");
+    (view_id, bindings, kinds, over_bindings)
 }
 
 // I have seen beyond the bounds of infinity and drawn down daemons from the stars
@@ -675,11 +692,11 @@ fn parse_query(mut lines: Vec<&str>, view_id: ViewId, schema: Vec<Kind>, select:
                 clauses = vec![];
             }
             _ => {
-                let (view_id, bindings, kinds) = parse_clause(line);
+                let (view_id, bindings, kinds, over_bindings) = parse_clause(line);
                 for kind in kinds.into_iter() {
                     assert_eq!(kind, None);
                 }
-                clauses.push(Clause{view: view_id, bindings: bindings})
+                clauses.push(Clause{view: view_id, bindings: bindings, over_bindings: over_bindings})
             }
         }
     }
@@ -694,7 +711,8 @@ fn parse_query(mut lines: Vec<&str>, view_id: ViewId, schema: Vec<Kind>, select:
 // If I am mad, it is mercy!
 fn parse_view(text: &str) -> Vec<(ViewId, Vec<Kind>, View)> {
     let lines = text.split("\n").collect::<Vec<_>>();
-    let (view_id, bindings, kinds) = parse_clause(lines[0]);
+    let (view_id, bindings, kinds, over_bindings) = parse_clause(lines[0]);
+    assert_eq!(over_bindings, vec![]);
     let select = bindings.into_iter().map(|binding| match binding { Binding::Variable(var) => var, _ => panic!() }).collect::<Vec<_>>();
     let schema = kinds.into_iter().map(|kind| kind.unwrap()).collect::<Vec<_>>();
     match lines[1].chars().next().unwrap() {
@@ -818,6 +836,23 @@ pub mod tests{
         assert_set_eq!(
             runtime_program.states[6].data.iter().cloned(),
             vec![17]
+            );
+        // TODO unbreak floats :(
+        // assert_set_eq!(
+        //     runtime_program.states[9].data.chunks(2).map(|chunk| (chunk[0], chunk[1])),
+        //     vec![(1.5 as u64, 3.0 as u64), (2.0 as u64, 4.0 as u64), (2.7 as u64, 5.4 as u64)]
+        //     );
+        assert_set_eq!(
+            runtime_program.states[12].data.chunks(3).map(|chunk| (&runtime_program.strings[chunk[1] as usize][..], chunk[2])),
+            vec![("alice", 100), ("bob", 50), ("eve", 200)]
+            );
+        assert_set_eq!(
+            runtime_program.states[14].data.chunks(3).map(|chunk| (&runtime_program.strings[chunk[1] as usize][..], chunk[2])),
+            vec![("alice corp", 250), ("evil eve studios", 100)]
+            );
+        assert_set_eq!(
+            runtime_program.states[16].data.iter().cloned(),
+            vec![350]
             );
     }
 }

@@ -1122,6 +1122,7 @@ person ?p has first name ?fn
 person ?p has last name ?ln
 ?n = concat(?fn, ?ln)
 letter ?l is addressed to ?n
+```
 
 ```
 person ?p has first name ?fn

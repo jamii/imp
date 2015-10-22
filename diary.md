@@ -1080,7 +1080,7 @@ for edge in join_tree.iter().rev() {
         semijoin(&mut chunks, &mut actions, child_ix, parent_ix);
     }
 }
-for edge in join_tree.iter().rev() {
+for edge in join_tree.iter() {
     if let &(child_ix, Some(parent_ix)) = edge {
         semijoin(&mut chunks, &mut actions, parent_ix, child_ix);
     }

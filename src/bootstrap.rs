@@ -75,6 +75,7 @@ pub struct Primitive {
     pub output_bindings: Vec<Binding>,
     pub bound_input_vars: HashSet<VariableId>,
     pub bound_output_vars: HashSet<VariableId>,
+    pub bound_aggregate_vars: HashSet<VariableId>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -172,19 +173,25 @@ fn all_subtrees(tree: &Tree) -> Vec<Tree> {
     subtrees
 }
 
-fn vars_in_tree(chunks: &Vec<Chunk>, tree: &Tree) -> HashSet<VariableId> {
-    let mut vars = HashSet::new();
+fn vars_for_subtree(chunks: &Vec<Chunk>, tree: &Tree, subtree: &Tree) -> (HashSet<VariableId>, HashSet<VariableId>) {
+    let mut vars_inside = HashSet::new();
+    let mut vars_outside = HashSet::new();
     for &(child_ix, _) in tree.iter() {
-        vars.extend(chunks[child_ix].bound_vars.clone());
+        if subtree.iter().any(|&(subtree_child_ix, _)| subtree_child_ix == child_ix) {
+            vars_inside.extend(chunks[child_ix].bound_vars.clone());
+        } else {
+            vars_outside.extend(chunks[child_ix].bound_vars.clone());
+        }
     }
-    vars
+    (vars_inside, vars_outside)
 }
 
 fn cheapest_primitive_subtree(chunks: &Vec<Chunk>, join_tree: &Tree, primitives: &Vec<Primitive>) -> (usize, Tree) {
     for subtree in all_subtrees(join_tree).into_iter() {
-        let vars = vars_in_tree(chunks, &subtree);
+        let (vars_inside, vars_outside) = vars_for_subtree(chunks, join_tree, &subtree);
         for (primitive_ix, primitive) in primitives.iter().enumerate() {
-            if primitive.bound_input_vars.is_subset(&vars) {
+            if primitive.bound_input_vars.is_subset(&vars_inside)
+            && (primitive.bound_aggregate_vars.intersection(&vars_outside).count() == 0) {
                 return (primitive_ix, subtree);
             }
         }
@@ -376,7 +383,15 @@ pub fn apply(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, string
             // TODO this seems like an expensive solution to constant bindings in the inputs
             actions.push(runtime::Action::Extend(chunk_ix, constants));
         }
-        actions.push(runtime::Action::Apply(chunk_ix, primitive.primitive, input_ixes));
+        let group_ixes = chunk.bound_vars.difference(&primitive.bound_aggregate_vars).map(|var| {
+            chunk.bindings.iter().position(|binding| {
+                match *binding {
+                    Binding::Variable(ref bound_var) => bound_var == var,
+                    _ => false
+                }
+            }).unwrap()
+        }).collect();
+        actions.push(runtime::Action::Apply(chunk_ix, primitive.primitive, input_ixes, group_ixes));
         chunk.kinds.extend(primitive.output_kinds.clone());
         chunk.bindings.extend(primitive.output_bindings.clone());
         chunk.bound_vars.extend(primitive.bound_output_vars.clone());
@@ -397,6 +412,7 @@ fn as_primitive(view_id: &str, bindings: &Vec<Binding>) -> Option<Primitive> {
             output_bindings: vec![c.clone()],
             bound_input_vars: bound_vars(&vec![a.clone(), b.clone()]),
             bound_output_vars: bound_vars(&vec![c.clone()]),
+            bound_aggregate_vars: bound_vars(&vec![]),
         }),
         _ => None,
     }

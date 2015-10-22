@@ -337,9 +337,9 @@ pub enum Primitive {
 }
 
 impl Primitive {
-    fn apply(&self, chunk: &Chunk, args: &[usize]) -> Chunk {
+    fn apply(&self, chunk: &Chunk, input_ixes: &[usize], group_ixes: &[usize]) -> Chunk {
         let mut data = vec![];
-        match (*self, args) {
+        match (*self, input_ixes) {
             (Primitive::Add, [a, b]) => {
                 for row in chunk.data.chunks(chunk.row_width) {
                     data.extend(row);
@@ -347,7 +347,7 @@ impl Primitive {
                 }
                 Chunk{data: data, row_width: chunk.row_width + 1}
             }
-            _ => panic!("What are this: {:?} {:?}", self, args)
+            _ => panic!("What are this: {:?} {:?} {:?}", self, input_ixes, group_ixes)
         }
     }
 }
@@ -360,7 +360,7 @@ pub enum Action {
     Join(usize, usize, Vec<usize>, Vec<usize>),
     SelfJoin(usize, usize, usize),
     Filter(usize, usize, u64),
-    Apply(usize, Primitive, Vec<usize>),
+    Apply(usize, Primitive, Vec<usize>, Vec<usize>),
     Extend(usize, Vec<u64>),
     DebugChunk(usize),
     DebugText(usize, usize),
@@ -408,8 +408,8 @@ impl Query {
                     let chunk = chunks[ix].filter(column, value);
                     chunks[ix] = Cow::Owned(chunk);
                 }
-                &Action::Apply(ix, primitive, ref args) => {
-                    let chunk = primitive.apply(&chunks[ix], &*args);
+                &Action::Apply(ix, primitive, ref input_ixes, ref group_ixes) => {
+                    let chunk = primitive.apply(&chunks[ix], &*input_ixes, &*group_ixes);
                     chunks[ix] = Cow::Owned(chunk);
                 }
                 &Action::Extend(ix, ref constants) => {

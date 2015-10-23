@@ -169,6 +169,21 @@ impl Chunk {
         Chunk{data: data, row_width: row_width}
     }
 
+    pub fn antijoin(&self, other: &Chunk, self_key: &[usize], other_key: &[usize]) -> Chunk {
+        let mut data = vec![];
+        for diff in self.diffs(other, self_key, other_key) {
+            match diff {
+                Diff::Right(other_words) => {
+                    for other_row in other_words.chunks(other.row_width) {
+                        data.extend(other_row);
+                    }
+                }
+                _ => ()
+            }
+        }
+        Chunk{data: data, row_width: other.row_width}
+    }
+
     pub fn union(&self, other: &Chunk, key: &[usize]) -> Chunk {
         let mut data = vec![];
         for diff in self.diffs(other, &key[..], &key[..]) {
@@ -452,6 +467,7 @@ pub enum Action {
     Project(usize, Vec<usize>),
     SemiJoin(usize, usize, Vec<usize>, Vec<usize>),
     Join(usize, usize, Vec<usize>, Vec<usize>),
+    AntiJoin(usize, usize, Vec<usize>, Vec<usize>),
     SelfJoin(usize, usize, usize),
     Filter(usize, usize, u64),
     Apply(usize, Primitive, Vec<usize>, Vec<usize>, Vec<(usize, Kind, Direction)>),
@@ -491,6 +507,11 @@ impl Query {
                 },
                 &Action::Join(left_ix, right_ix, ref left_key, ref right_key) => {
                     let chunk = chunks[left_ix].join(&chunks[right_ix], &left_key[..], &right_key[..]);
+                    chunks[left_ix] = Cow::Owned(Chunk::empty());
+                    chunks[right_ix] = Cow::Owned(chunk);
+                }
+                &Action::AntiJoin(left_ix, right_ix, ref left_key, ref right_key) => {
+                    let chunk = chunks[left_ix].antijoin(&chunks[right_ix], &left_key[..], &right_key[..]);
                     chunks[left_ix] = Cow::Owned(Chunk::empty());
                     chunks[right_ix] = Cow::Owned(chunk);
                 }

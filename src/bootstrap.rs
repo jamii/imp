@@ -68,8 +68,14 @@ pub struct Chunk {
 }
 
 #[derive(Clone, Debug)]
+pub enum PrimitiveOrNegated {
+    Primitive(runtime::Primitive),
+    Negated(usize),
+}
+
+#[derive(Clone, Debug)]
 pub struct Primitive {
-    pub primitive: runtime::Primitive,
+    pub primitive: PrimitiveOrNegated,
     pub input_kinds: Vec<Kind>,
     pub output_kinds: Vec<Kind>,
     pub input_bindings: Vec<Binding>,
@@ -118,17 +124,17 @@ fn bound_vars(bindings: &Vec<Binding>) -> HashSet<VariableId> {
     vars
 }
 
-fn find_join_ear(chunks: &Vec<Chunk>, unused: &Vec<usize>) -> (usize, usize) {
-    for &child_ix in unused.iter() {
+fn find_join_ear(chunks: &Vec<Chunk>, to_join: &Vec<usize>) -> (usize, usize) {
+    for &child_ix in to_join.iter() {
         let child_vars = &chunks[child_ix].bound_vars;
         let mut joined_vars = HashSet::new();
-        for &other_ix in unused.iter() {
+        for &other_ix in to_join.iter() {
             if child_ix != other_ix {
                 let other_vars = &chunks[other_ix].bound_vars;
                 joined_vars.extend(child_vars.intersection(other_vars).cloned());
             }
         }
-        for &parent_ix in unused.iter() {
+        for &parent_ix in to_join.iter() {
             if child_ix != parent_ix {
                 let parent_vars = &chunks[parent_ix].bound_vars;
                 if joined_vars.is_subset(parent_vars) {
@@ -137,19 +143,18 @@ fn find_join_ear(chunks: &Vec<Chunk>, unused: &Vec<usize>) -> (usize, usize) {
             }
         }
     }
-    panic!("Cant find an ear in: {:#?}", (chunks, unused));
+    panic!("Cant find an ear in: {:#?}", (chunks, to_join));
 }
 
-fn build_join_tree(chunks: &Vec<Chunk>) -> Tree {
+fn build_join_tree(chunks: &Vec<Chunk>, mut to_join: Vec<usize>) -> Tree {
     assert!(chunks.len() > 0);
-    let mut unused = (0..chunks.len()).collect::<Vec<_>>();
     let mut tree = vec![];
-    while unused.len() > 1 { // one chunk will be left behind as the root
-        let (child_ix, parent_ix) = find_join_ear(chunks, &unused);
-        unused.retain(|ix| *ix != child_ix);
+    while to_join.len() > 1 { // one chunk will be left behind as the root
+        let (child_ix, parent_ix) = find_join_ear(chunks, &to_join);
+        to_join.retain(|ix| *ix != child_ix);
         tree.push((child_ix, Some(parent_ix)));
     }
-    tree.push((unused[0], None));
+    tree.push((to_join[0], None));
     tree.reverse();
     tree
 }
@@ -401,7 +406,12 @@ pub fn apply(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, string
             let kind = chunk.kinds[ix];
             (column, kind, direction)
         }).collect();
-        actions.push(runtime::Action::Apply(chunk_ix, primitive.primitive, input_ixes, group_ixes, over_ixes));
+        match primitive.primitive {
+            PrimitiveOrNegated::Primitive(runtime_primitive) => {
+                actions.push(runtime::Action::Apply(chunk_ix, runtime_primitive, input_ixes, group_ixes, over_ixes));
+            }
+            _ => unreachable!(),
+        }
         chunk.kinds.extend(primitive.output_kinds.clone());
         chunk.bindings.extend(primitive.output_bindings.clone());
         chunk.bound_vars.extend(primitive.bound_output_vars.clone());
@@ -410,13 +420,29 @@ pub fn apply(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, string
     selfjoin(chunks, actions, chunk_ix); // handle any output vars that need joining
 }
 
-fn as_primitive(view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<(Binding, runtime::Direction)>) -> Option<Primitive> {
+pub fn negate(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk_ix: usize, primitive: &Primitive) {
+    match primitive.primitive {
+        PrimitiveOrNegated::Negated(negated_ix) => {
+            let join_vars = chunks[negated_ix].bound_vars.intersection(&chunks[chunk_ix].bound_vars).cloned().collect();
+            let chunk_vars = &chunks[chunk_ix].bound_vars.clone();
+            sort_and_project(chunks, actions, negated_ix, &join_vars, &HashSet::new());
+            sort_and_project(chunks, actions, chunk_ix, &join_vars, chunk_vars);
+            let left_key = sort_key(&chunks[negated_ix], &join_vars);
+            let right_key = sort_key(&chunks[chunk_ix], &join_vars);
+            assert_eq!(left_key.len(), right_key.len());
+            actions.push(runtime::Action::AntiJoin(negated_ix, chunk_ix, left_key, right_key));
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn as_primitive(program: &Program, view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<(Binding, runtime::Direction)>) -> Option<Primitive> {
     use runtime::Primitive::*;
     use runtime::Kind::*;
     let bound_over_vars = bound_vars(&over_bindings.iter().map(|&(ref binding, _)| binding).cloned().collect());
     match (view_id, &bindings[..]) {
         ("_ = _ + _", [ref a, ref b, ref c]) => Some(Primitive{
-            primitive: Add,
+            primitive: PrimitiveOrNegated::Primitive(Add),
             input_kinds: vec![Number, Number],
             input_bindings: vec![b.clone(), c.clone()],
             output_kinds: vec![Number],
@@ -427,7 +453,7 @@ fn as_primitive(view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<(Bin
             bound_aggregate_vars: bound_over_vars,
         }),
         ("_ = sum(_)", [ref a, ref b]) => Some(Primitive{
-            primitive: Sum,
+            primitive: PrimitiveOrNegated::Primitive(Sum),
             input_kinds: vec![Number],
             input_bindings: vec![b.clone()],
             output_kinds: vec![Number],
@@ -438,7 +464,7 @@ fn as_primitive(view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<(Bin
             bound_aggregate_vars: &bound_vars(&vec![b.clone()]) | &bound_over_vars,
         }),
         ("row _", [ref a]) => Some(Primitive{
-            primitive: Ordinal,
+            primitive: PrimitiveOrNegated::Primitive(Ordinal),
             input_kinds: vec![],
             input_bindings: vec![],
             output_kinds: vec![Number],
@@ -448,7 +474,24 @@ fn as_primitive(view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<(Bin
             bound_output_vars: bound_vars(&vec![a.clone()]),
             bound_aggregate_vars: bound_over_vars,
         }),
-        _ => None,
+        _ => {
+            if view_id.starts_with("! ") {
+                let ix = program.ids.iter().position(|id| *id == view_id[2..]).unwrap();
+                Some(Primitive{
+                    primitive: PrimitiveOrNegated::Negated(ix),
+                    input_kinds: program.schemas[ix].clone(),
+                    input_bindings: bindings.clone(),
+                    output_kinds: vec![],
+                    output_bindings: vec![],
+                    over_bindings: vec![],
+                    bound_input_vars: bound_vars(bindings),
+                    bound_output_vars: bound_vars(&vec![]),
+                    bound_aggregate_vars: bound_vars(&vec![]),
+                })
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -458,7 +501,7 @@ pub fn compile_query(query: &Query, program: &Program, strings: &mut Vec<String>
     let mut primitives = vec![];
     for clause in query.clauses.iter() {
         let view = program.ids.iter().position(|id| *id == clause.view);
-        let primitive = as_primitive(&clause.view, &clause.bindings, &clause.over_bindings);
+        let primitive = as_primitive(&program, &clause.view, &clause.bindings, &clause.over_bindings);
         match (view, primitive) {
             (Some(ix), None) => {
                 upstream.push(ix);
@@ -474,7 +517,24 @@ pub fn compile_query(query: &Query, program: &Program, strings: &mut Vec<String>
             other => panic!("What are this: {:#?}", (clause, other)),
         }
     }
-    let mut join_tree = build_join_tree(&chunks);
+    let to_join = (0..chunks.len()).collect();
+    for primitive in primitives.iter_mut() {
+        let Primitive{primitive: ref mut primitive_or_negated, input_kinds: ref kinds, input_bindings: ref bindings, ..} = *primitive;
+        // TODO this is horrific hackery
+        match *primitive_or_negated {
+            PrimitiveOrNegated::Negated(ref mut ix) => {
+                upstream.push(*ix);
+                *ix = chunks.len();
+                chunks.push(Chunk{
+                    kinds: kinds.clone(),
+                    bindings: bindings.clone(),
+                    bound_vars: bound_vars(bindings),
+                });
+            }
+            _ => (),
+        }
+    }
+    let mut join_tree = build_join_tree(&chunks, to_join);
     let mut actions = vec![];
     for chunk_ix in 0..chunks.len() {
         filter(&mut chunks, &mut actions, chunk_ix);
@@ -493,7 +553,13 @@ pub fn compile_query(query: &Query, program: &Program, strings: &mut Vec<String>
     while primitives.len() > 0 {
         let (primitive_ix, subtree) = cheapest_primitive_subtree(&chunks, &join_tree, &primitives);
         let root_ix = collapse_subtree(&mut chunks, &mut actions, &mut join_tree, &query.select, &primitives, &subtree);
-        apply(&mut chunks, &mut actions, strings, root_ix, &primitives[primitive_ix]);
+        {
+            let primitive = &primitives[primitive_ix];
+            match primitive.primitive {
+                PrimitiveOrNegated::Primitive(_) => apply(&mut chunks, &mut actions, strings, root_ix, primitive),
+                PrimitiveOrNegated::Negated(_) => negate(&mut chunks, &mut actions, root_ix, primitive),
+            }
+        }
         primitives.remove(primitive_ix);
     }
     let remaining_tree = join_tree.clone();
@@ -904,6 +970,25 @@ pub mod tests{
         assert_set_eq!(
             runtime_program.states[10].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
             vec!["eve"]
+            );
+    }
+
+    #[test]
+    pub fn test_negation() {
+        let bootstrap_program = load(&["data/negation.imp"]);
+        let mut runtime_program = compile(&bootstrap_program);
+        runtime_program.run();
+        assert_set_eq!(
+            runtime_program.states[4].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
+            vec!["alice", "bob", "cin"]
+            );
+        assert_set_eq!(
+            runtime_program.states[6].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
+            vec!["eve", "alice", "bob"]
+            );
+        assert_set_eq!(
+            runtime_program.states[8].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
+            vec!["alice", "bob", "cin"]
             );
     }
 }

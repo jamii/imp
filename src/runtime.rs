@@ -330,6 +330,11 @@ pub fn hash<T: hash::Hash>(t: &T) -> u64 {
     hash::Hasher::finish(&s)
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Copy)]
+pub enum Direction {
+    Ascending,
+    Descending,
+}
 
 #[derive(Clone, Debug, Copy)]
 pub enum Primitive {
@@ -339,9 +344,9 @@ pub enum Primitive {
 }
 
 // TODO this is grossly inefficient compared to untyped sort
-fn typed_sort(chunk: &Chunk, ixes: &[(usize, Kind)], strings: &Vec<String>) -> Chunk {
+fn typed_sort(chunk: &Chunk, ixes: &[(usize, Kind, Direction)], strings: &Vec<String>) -> Chunk {
     let mut data = chunk.data.clone();
-    for &(ix, kind) in ixes.iter().rev() {
+    for &(ix, kind, direction) in ixes.iter().rev() {
         let mut new_data = Vec::with_capacity(data.len());
         match kind {
             Kind::Id => {
@@ -349,7 +354,10 @@ fn typed_sort(chunk: &Chunk, ixes: &[(usize, Kind)], strings: &Vec<String>) -> C
                 for row in data.chunks(chunk.row_width) {
                     buffer.push((row[ix], row));
                 }
-                buffer.sort_by(|&(key_a, _), &(key_b, _)| key_a.cmp(&key_b));
+                match direction {
+                    Direction::Ascending => buffer.sort_by(|&(key_a, _), &(key_b, _)| key_a.cmp(&key_b)),
+                    Direction::Descending => buffer.sort_by(|&(key_a, _), &(key_b, _)| key_b.cmp(&key_a)),
+                }
                 for (_, row) in buffer.into_iter() {
                     new_data.extend(row);
                 }
@@ -360,7 +368,10 @@ fn typed_sort(chunk: &Chunk, ixes: &[(usize, Kind)], strings: &Vec<String>) -> C
                     buffer.push((row[ix] as f64, row));
                 }
                 // TODO NaN can cause panic here
-                buffer.sort_by(|&(key_a, _), &(key_b, _)| key_a.partial_cmp(&key_b).unwrap());
+                match direction {
+                    Direction::Ascending => buffer.sort_by(|&(key_a, _), &(key_b, _)| key_a.partial_cmp(&key_b).unwrap()),
+                    Direction::Descending => buffer.sort_by(|&(key_a, _), &(key_b, _)| key_b.partial_cmp(&key_a).unwrap()),
+                }
                 for (_, row) in buffer.into_iter() {
                     new_data.extend(row);
                 }
@@ -370,20 +381,22 @@ fn typed_sort(chunk: &Chunk, ixes: &[(usize, Kind)], strings: &Vec<String>) -> C
                 for row in data.chunks(chunk.row_width) {
                     buffer.push((&strings[row[ix+1] as usize], row));
                 }
-                buffer.sort_by(|&(ref key_a, _), &(ref key_b, _)| key_a.cmp(key_b));
+                match direction {
+                    Direction::Ascending => buffer.sort_by(|&(ref key_a, _), &(ref key_b, _)| key_a.cmp(key_b)),
+                    Direction::Descending => buffer.sort_by(|&(ref key_a, _), &(ref key_b, _)| key_b.cmp(key_a)),
+                }
                 for (_, row) in buffer.into_iter() {
                     new_data.extend(row);
                 }
             }
         }
         data = new_data;
-        println!("{:?}", (ix, kind, &data));
     }
     Chunk{data: data, row_width: chunk.row_width}
 }
 
 impl Primitive {
-    fn apply(&self, chunk: &Chunk, input_ixes: &[usize], group_ixes: &[usize], over_ixes: &[(usize, Kind)], strings: &Vec<String>) -> Chunk {
+    fn apply(&self, chunk: &Chunk, input_ixes: &[usize], group_ixes: &[usize], over_ixes: &[(usize, Kind, Direction)], strings: &Vec<String>) -> Chunk {
         let mut data = vec![];
         match (*self, input_ixes) {
             (Primitive::Add, [a, b]) => {
@@ -434,7 +447,7 @@ pub enum Action {
     Join(usize, usize, Vec<usize>, Vec<usize>),
     SelfJoin(usize, usize, usize),
     Filter(usize, usize, u64),
-    Apply(usize, Primitive, Vec<usize>, Vec<usize>, Vec<(usize, Kind)>),
+    Apply(usize, Primitive, Vec<usize>, Vec<usize>, Vec<(usize, Kind, Direction)>),
     Extend(usize, Vec<u64>),
     DebugChunk(usize),
     DebugText(usize, usize),

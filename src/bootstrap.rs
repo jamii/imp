@@ -51,7 +51,7 @@ pub enum Member {
 pub struct Clause {
     pub view: ViewId,
     pub bindings: Vec<Binding>,
-    pub over_bindings: Vec<Binding>,
+    pub over_bindings: Vec<(Binding, runtime::Direction)>,
 }
 
 #[derive(Clone, Debug)]
@@ -74,7 +74,7 @@ pub struct Primitive {
     pub output_kinds: Vec<Kind>,
     pub input_bindings: Vec<Binding>,
     pub output_bindings: Vec<Binding>,
-    pub over_bindings: Vec<Binding>,
+    pub over_bindings: Vec<(Binding, runtime::Direction)>,
     pub bound_input_vars: HashSet<VariableId>,
     pub bound_output_vars: HashSet<VariableId>,
     pub bound_aggregate_vars: HashSet<VariableId>,
@@ -395,11 +395,11 @@ pub fn apply(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, string
             }).unwrap();
             chunk.kinds.iter().take(ix).map(|kind| kind.width()).sum()
         }).collect();
-        let over_ixes = primitive.over_bindings.iter().map(|binding| {
+        let over_ixes = primitive.over_bindings.iter().map(|&(ref binding, direction)| {
             let ix = chunk.bindings.iter().position(|chunk_binding| chunk_binding == binding).unwrap();
             let column = chunk.kinds.iter().take(ix).map(|kind| kind.width()).sum();
             let kind = chunk.kinds[ix];
-            (column, kind)
+            (column, kind, direction)
         }).collect();
         actions.push(runtime::Action::Apply(chunk_ix, primitive.primitive, input_ixes, group_ixes, over_ixes));
         chunk.kinds.extend(primitive.output_kinds.clone());
@@ -410,9 +410,10 @@ pub fn apply(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, string
     selfjoin(chunks, actions, chunk_ix); // handle any output vars that need joining
 }
 
-fn as_primitive(view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<Binding>) -> Option<Primitive> {
+fn as_primitive(view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<(Binding, runtime::Direction)>) -> Option<Primitive> {
     use runtime::Primitive::*;
     use runtime::Kind::*;
+    let bound_over_vars = bound_vars(&over_bindings.iter().map(|&(ref binding, _)| binding).cloned().collect());
     match (view_id, &bindings[..]) {
         ("_ = _ + _", [ref a, ref b, ref c]) => Some(Primitive{
             primitive: Add,
@@ -423,7 +424,7 @@ fn as_primitive(view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<Bind
             over_bindings: over_bindings.clone(),
             bound_input_vars: bound_vars(&vec![b.clone(), c.clone()]),
             bound_output_vars: bound_vars(&vec![a.clone()]),
-            bound_aggregate_vars: bound_vars(over_bindings),
+            bound_aggregate_vars: bound_over_vars,
         }),
         ("_ = sum(_)", [ref a, ref b]) => Some(Primitive{
             primitive: Sum,
@@ -434,7 +435,7 @@ fn as_primitive(view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<Bind
             over_bindings: over_bindings.clone(),
             bound_input_vars: bound_vars(&vec![b.clone()]),
             bound_output_vars: bound_vars(&vec![a.clone()]),
-            bound_aggregate_vars: &bound_vars(&vec![b.clone()]) | &bound_vars(over_bindings),
+            bound_aggregate_vars: &bound_vars(&vec![b.clone()]) | &bound_over_vars,
         }),
         ("row _", [ref a]) => Some(Primitive{
             primitive: Ordinal,
@@ -445,7 +446,7 @@ fn as_primitive(view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<Bind
             over_bindings: over_bindings.clone(),
             bound_input_vars: bound_vars(&vec![]),
             bound_output_vars: bound_vars(&vec![a.clone()]),
-            bound_aggregate_vars: bound_vars(over_bindings),
+            bound_aggregate_vars: bound_over_vars,
         }),
         _ => None,
     }
@@ -622,11 +623,26 @@ pub fn compile(program: &Program) -> runtime::Program {
     runtime::Program{ids: ids, schemas: schemas, states: states, views: views, downstreams: downstreams, dirty: dirty, strings: strings}
 }
 
-// Searchers after horror haunt strange, far place
-fn parse_bindings(text: &str) -> Vec<Binding> {
+// We shall see that at which dogs howl in the dark, and that at which cats prick up their ears after midnight
+fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<(Binding, runtime::Direction)>) {
     let var_re = Regex::new(r#"_|\?[:alnum:]*(:[:alnum:]*)?|"[^"]*"|([:digit:]|\.)+|#[:digit:]+"#).unwrap();
+    let sort_re = Regex::new(r"-?\?[:alnum:]*").unwrap();
     let kind_re = Regex::new(r":[:alnum:]*").unwrap();
-    text.matches(&var_re).map(|var_text| {
+    let over_re = Regex::new(r"(.*) over (.*)").unwrap();
+    let (inner_text, over_bindings) = match over_re.captures(text) {
+        Some(captures) => {
+            let over_bindings = captures.at(2).unwrap().matches(&sort_re).map(|sort_text| {
+                match sort_text.chars().next().unwrap() {
+                    '?' => (Binding::Variable(sort_text.to_owned()), runtime::Direction::Ascending),
+                    '-' => (Binding::Variable(sort_text[1..].to_owned()), runtime::Direction::Descending),
+                    _ => unreachable!(),
+                }
+            }).collect();
+            (captures.at(1).unwrap(), over_bindings)
+        },
+        None => (text, vec![]),
+    };
+    let bindings = inner_text.matches(&var_re).map(|var_text| {
         match var_text.chars().next().unwrap() {
             '_' => Binding::Unbound,
             '?' => Binding::Variable(kind_re.replace(var_text, "")),
@@ -634,19 +650,7 @@ fn parse_bindings(text: &str) -> Vec<Binding> {
             '"' => Binding::Constant(Value::Text(var_text[1..var_text.len()-1].to_owned())),
             _ => Binding::Constant(Value::Number(var_text.parse::<f64>().unwrap())),
         }
-    }).collect()
-}
-
-// We shall see that at which dogs howl in the dark, and that at which cats prick up their ears after midnight
-fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<Binding>) {
-    let var_re = Regex::new(r#"_|\?[:alnum:]*(:[:alnum:]*)?|"[^"]*"|([:digit:]|\.)+|#[:digit:]+"#).unwrap();
-    let kind_re = Regex::new(r":[:alnum:]*").unwrap();
-    let over_re = Regex::new(r"(.*) over (.*)").unwrap();
-    let (inner_text, over_bindings) = match over_re.captures(text) {
-        Some(captures) => (captures.at(1).unwrap(), parse_bindings(captures.at(2).unwrap())),
-        None => (text, vec![]),
-    };
-    let bindings = parse_bindings(inner_text);
+    }).collect();
     let kinds = inner_text.matches(&var_re).map(|var_text| {
         var_text.matches(&kind_re).next().map(|kind_text| {
             match kind_text {
@@ -885,6 +889,18 @@ pub mod tests{
         assert_set_eq!(
             runtime_program.states[4].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
             vec!["bob"]
+            );
+        assert_set_eq!(
+            runtime_program.states[6].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
+            vec!["alice", "eve"]
+            );
+        assert_set_eq!(
+            runtime_program.states[8].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
+            vec!["alice"]
+            );
+        assert_set_eq!(
+            runtime_program.states[10].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
+            vec!["eve"]
             );
     }
 }

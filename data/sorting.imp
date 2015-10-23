@@ -15,3 +15,18 @@ row 1 over ?d ?p
 +
 ?p works at ?c for ?d USD
 row 1 over ?d ?p ?c
+
+?p:text is paid most at their company
++
+?p works at ?c for ?d USD
+row 1 over -?d ?p
+
+?p:text is paid most
++
+?p works at ?c for ?d USD
+row 1 over -?d ?p ?c
+
+?p:text is also paid most
++
+?p works at ?c for ?d USD
+row 1 over -?d -?p ?c

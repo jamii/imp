@@ -1314,3 +1314,30 @@ fn typed_sort(chunk: &Chunk, ixes: &[(usize, Kind, Direction)], strings: &Vec<St
 ```
 
 The query language is basically feature-complete at this point. I'm missing state and stratification but I don't *need* either of those to bootstrap. The compiler has become a bit of a mess and is probably full of bugs though. I think the next thing I want to do is to get some basic editor integration working to make debugging easier and then write some actual programs. If everything works well enough, it may be worth trying to bootstrap right away instead of cleaning up the existing compiler.
+
+## Negation
+
+I totally forgot I needed negation. I added it only at the level of individual clauses, like standard datalog. This means I can write:
+
+```
+?p:text works at alice crop but not evil eve studios
++
+?p works at "alice corp" for _ USD
+! ?p works at "evil eve studios" for _ USD
+```
+
+But I can't directly write:
+
+```
+?p:text only works at alice crop
++
+?p works at "alice corp" for _ USD
+! {
+  ?p works at ?c for _ USD
+  c != "alice corp"
+}
+```
+
+Most query languages don't support that anyway, so maybe it's ok?
+
+I piggybacked negation onto primitives too. The compiler is getting gnarly. Might be time for a cleanup soon.

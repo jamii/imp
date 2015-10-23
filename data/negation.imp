@@ -28,7 +28,7 @@
 ?p works at "alice corp" for _ USD
 ! ?p has 3 cats
 
-?p:text only works at alice crop
+?p:text works at alice crop but not evil eve studios
 +
 ?p works at "alice corp" for _ USD
 ! ?p works at "evil eve studios" for _ USD

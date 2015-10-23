@@ -1180,3 +1180,137 @@ tree.rev();
 There are incidental performance benefits - we now have a single contiguous allocation for the whole tree - but the main benefit is just simplicity. I'm leaning more and more towards just [putting things in arrays](https://youtu.be/JjDsP5n2kSM?t=752) until profiling demands otherwise.
 
 I think it's interesting that the borrow checker directly encourages what I judge to be good design. I wonder what kind of effect that will have on the long-term quality of the Rust ecosystem.
+
+## Aggregates
+
+Aggregates have been a constant ergonomic nightmare in Eve. This shouldn't be surprising - they are the dumping ground for everything non-relational and non-monotonic - all the awkward bits of logic that actually intrinsically require waiting or ordering. They also interact weirdly with set semantics, because projecting out unused columns also removes duplicates in the remaining data which can change the result of an aggregate like `sum`.
+
+So I'm surprised to find myself not entirely hating the design in Imp. There are some places in the compiler that I suspect might be buggy, but I think the semantics at least are sound. Aggregates look like this:
+
+```
+company ?c:text spends ?t:number USD
++
+person ?p works at company ?c for ?d USD
+?t = sum(?d) over ?p
+
+total salary is ?t:number USD
++
+person ?p works at company ?c for ?d USD
+?t = sum(?d) over ?p ?c
+```
+
+Syntactically, aggregates behave exactly like primitives except that there is an optional 'over' clause that controls grouping and sorting. When `sum(?d) over ?p` is applied, it groups the current chunk by everything except ?d and ?p and then sums over ?d in each group, giving the total salary across all people at the same company. Similarly, `sum(?d) over ?p ?c` groups the current chunk by everything except ?d, ?p and ?c, giving the total salary overall.
+
+A weakness of this scheme is it doesn't always capture intent. For example, we might want to change the second query to:
+
+```
+total salary at european companies is ?t:number USD
++
+person ?p works at company ?c for ?d USD
+?t = sum(?d) over ?p ?c
+company ?c is based in ?country
+?country is in europe
+```
+
+This now calculates the total salary per country, not for the whole of Europe. The correct query is:
+
+```
+total salary at european companies is ?t:number USD
++
+person ?p works at company ?c for ?d USD
+?t = sum(?d) over ?p ?c ?country
+company ?c is based in ?country
+?country is in europe
+```
+
+But this can still double-count if it is possible for a company to be based in multiple countries. In cases like this, it may be safer to just split it into two views:
+
+```
+person ?p:text works at european company ?c:text for ?d:number USD
++
+person ?p works at company ?c for ?d USD
+company ?c is based in ?country
+?country is in europe
+
+total salary at european companies is ?t:number USD
++
+person ?p works at european company ?c for ?d USD
+?t = sum(?d) over ?p ?c
+```
+
+The upside of specifying groups this way is that can handle sorting too. The primitive `row _` sorts each group in the order specified by 'over' and then numbers them in ascending order. This gives us min, max, limit, pagination etc.
+
+```
+?p:text is paid least at their company
++
+?p works at ?c for ?d USD
+row 1 over ?d ?p
+
+?p:text is in the top ten at their company
++
+?p works at ?c for ?d USD
+row ?n over -?d ?p
+n <= 10
+```
+
+The `-?d` in the second example specifies that `?d` should be sorted in descending order.
+
+The implementation of aggregates took very little work since it piggybacks on primitives. The scheduler now allows primitives to specify variables on which they depend non-monotonically and will only schedule the primitive when anything that might filter down those variables has already been applied. In the last example above, if we added the clause `?p is a real employee` it would have to be joined with `?p works at ?c for ?d USD` *before* the rows were sorted and numbered.
+
+The sorting also has to be handled specially. The radix sort used for joining just sorts values by their bitwise representation, which gives the wrong results for numbers and strings. For aggregates I added a hideously inefficient sort function that piggybacks on the stdlib sort.
+
+``` rust
+// TODO this is grossly inefficient compared to untyped sort
+fn typed_sort(chunk: &Chunk, ixes: &[(usize, Kind, Direction)], strings: &Vec<String>) -> Chunk {
+    let mut data = chunk.data.clone();
+    for &(ix, kind, direction) in ixes.iter().rev() {
+        let mut new_data = Vec::with_capacity(data.len());
+        match kind {
+            Kind::Id => {
+                let mut buffer = vec![];
+                for row in data.chunks(chunk.row_width) {
+                    buffer.push((row[ix], row));
+                }
+                match direction {
+                    Direction::Ascending => buffer.sort_by(|&(key_a, _), &(key_b, _)| key_a.cmp(&key_b)),
+                    Direction::Descending => buffer.sort_by(|&(key_a, _), &(key_b, _)| key_b.cmp(&key_a)),
+                }
+                for (_, row) in buffer.into_iter() {
+                    new_data.extend(row);
+                }
+            }
+            Kind::Number => {
+                let mut buffer = vec![];
+                for row in data.chunks(chunk.row_width) {
+                    buffer.push((to_number(row[ix]), row));
+                }
+                // TODO NaN can cause panic here
+                match direction {
+                    Direction::Ascending => buffer.sort_by(|&(key_a, _), &(key_b, _)| key_a.partial_cmp(&key_b).unwrap()),
+                    Direction::Descending => buffer.sort_by(|&(key_a, _), &(key_b, _)| key_b.partial_cmp(&key_a).unwrap()),
+                }
+                for (_, row) in buffer.into_iter() {
+                    new_data.extend(row);
+                }
+            }
+            Kind::Text => {
+                let mut buffer = vec![];
+                for row in data.chunks(chunk.row_width) {
+                    buffer.push((&strings[row[ix+1] as usize], row));
+                }
+                match direction {
+                    Direction::Ascending => buffer.sort_by(|&(ref key_a, _), &(ref key_b, _)| key_a.cmp(key_b)),
+                    Direction::Descending => buffer.sort_by(|&(ref key_a, _), &(ref key_b, _)| key_b.cmp(key_a)),
+                }
+                for (_, row) in buffer.into_iter() {
+                    new_data.extend(row);
+                }
+            }
+        }
+        data = new_data;
+    }
+    Chunk{data: data, row_width: chunk.row_width}
+}
+```
+
+The query language is basically feature-complete at this point. I'm missing state and stratification but I don't *need* either of those to bootstrap. The compiler has become a bit of a mess and is probably full of bugs though. I think the next thing I want to do is to get some basic editor integration working to make debugging easier and then write some actual programs. If everything works well enough, it may be worth trying to bootstrap right away instead of cleaning up the existing compiler.

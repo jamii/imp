@@ -330,6 +330,14 @@ pub fn hash<T: hash::Hash>(t: &T) -> u64 {
     hash::Hasher::finish(&s)
 }
 
+pub fn to_number(u: u64) -> f64 {
+    unsafe{ ::std::mem::transmute(u) }
+}
+
+pub fn from_number(f: f64) -> u64 {
+    unsafe{ ::std::mem::transmute(f) }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Copy)]
 pub enum Direction {
     Ascending,
@@ -365,7 +373,7 @@ fn typed_sort(chunk: &Chunk, ixes: &[(usize, Kind, Direction)], strings: &Vec<St
             Kind::Number => {
                 let mut buffer = vec![];
                 for row in data.chunks(chunk.row_width) {
-                    buffer.push((row[ix] as f64, row));
+                    buffer.push((to_number(row[ix]), row));
                 }
                 // TODO NaN can cause panic here
                 match direction {
@@ -402,7 +410,7 @@ impl Primitive {
             (Primitive::Add, [a, b]) => {
                 for row in chunk.data.chunks(chunk.row_width) {
                     data.extend(row);
-                    data.push(((row[a] as f64) + (row[b] as f64)) as u64);
+                    data.push(from_number(to_number(row[a]) + to_number(row[b])));
                 }
             }
             (Primitive::Sum, [a]) => {
@@ -410,21 +418,20 @@ impl Primitive {
                 for group in sorted_chunk.groups(group_ixes) {
                     let mut sum = 0f64;
                     for row in group.chunks(chunk.row_width) {
-                        sum += row[a] as f64;
+                        sum += to_number(row[a]);
                     }
                     for row in group.chunks(chunk.row_width) {
                         data.extend(row);
-                        data.push(sum as u64);
+                        data.push(from_number(sum));
                     }
                 }
             }
             (Primitive::Ordinal, []) => {
-                println!("{:?}", over_ixes);
                 let sorted_chunk = typed_sort(chunk, over_ixes, strings).sort(group_ixes);
                 for group in sorted_chunk.groups(group_ixes) {
                     for (ordinal, row) in group.chunks(chunk.row_width).enumerate() {
                         data.extend(row);
-                        data.push((ordinal + 1) as u64);
+                        data.push(from_number((ordinal + 1) as f64));
                     }
                 }
             }
@@ -812,7 +819,7 @@ pub mod tests{
             for (kind, field) in kinds.iter().zip(line.split("\t")) {
                 match *kind {
                     Kind::Id => data.push(field.parse::<u64>().unwrap()),
-                    Kind::Number => data.push(field.parse::<f64>().unwrap() as u64),
+                    Kind::Number => data.push(from_number(field.parse::<f64>().unwrap())),
                     Kind::Text => {
                         let field = field.to_owned();
                         data.push(hash(&field));

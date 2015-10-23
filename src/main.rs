@@ -20,12 +20,13 @@ macro_rules! time {
 }
 
 macro_rules! assert_set_eq {
-    ($left:expr, $right:expr) => {
-        assert_eq!(
-            $left.collect::<::std::collections::HashSet<_>>(),
-            $right.into_iter().collect::<::std::collections::HashSet<_>>()
-            )
-    }
+    ($left:expr, $right:expr) => {{
+        let mut left = $left.collect::<Vec<_>>();
+        left.sort_by(|a,b| a.partial_cmp(b).unwrap()); left.dedup();
+        let mut right = $right;
+        right.sort_by(|a,b| a.partial_cmp(b).unwrap()); right.dedup();
+        assert_eq!(left, right);
+    }}
 }
 
 mod runtime;

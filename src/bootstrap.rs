@@ -241,7 +241,7 @@ pub fn filter(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk
             let column = chunks[chunk_ix].kinds[0..field].iter().map(|kind| kind.width()).sum();
             let raw_value = match *value {
                 Value::Id(id) => id,
-                Value::Number(number) => number as u64,
+                Value::Number(number) => runtime::from_number(number),
                 Value::Text(ref text) => hash(text),
             };
             actions.push(runtime::Action::Filter(chunk_ix, column, raw_value));
@@ -361,7 +361,7 @@ pub fn apply(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, string
                             chunk.bindings.push(Binding::Unbound);
                         }
                         Value::Number(number) => {
-                            constants.push(number as u64);
+                            constants.push(runtime::from_number(number));
                             chunk.kinds.push(Kind::Number);
                             chunk.bindings.push(Binding::Unbound);
                         }
@@ -514,7 +514,7 @@ pub fn compile_input(input: &Input, schema: &[Kind], strings: &mut Vec<String>) 
             for (kind, column) in schema.iter().zip(columns.iter()) {
                 match *kind {
                     Kind::Id => data.push(fields[*column].parse::<u64>().unwrap()),
-                    Kind::Number => data.push(fields[*column].parse::<f64>().unwrap() as u64),
+                    Kind::Number => data.push(runtime::from_number(fields[*column].parse::<f64>().unwrap())),
                     Kind::Text => {
                         let field = fields[*column].to_owned();
                         data.push(hash(&field));
@@ -530,7 +530,7 @@ pub fn compile_input(input: &Input, schema: &[Kind], strings: &mut Vec<String>) 
         for (value, kind) in row.iter().zip(schema.iter()) {
             match (value, *kind) {
                 (&Value::Id(id), Kind::Id) => data.push(id),
-                (&Value::Number(number), Kind::Number) => data.push(number as u64),
+                (&Value::Number(number), Kind::Number) => data.push(runtime::from_number(number)),
                 (&Value::Text(ref text), Kind::Text) => {
                     let text = text.to_owned();
                     data.push(hash(&text));
@@ -774,6 +774,7 @@ pub fn load<P: AsRef<Path>>(filenames: &[P]) -> Program {
 #[cfg(test)]
 pub mod tests{
     use super::*;
+    use runtime;
     use test::{Bencher, black_box};
 
     #[test]
@@ -847,33 +848,35 @@ pub mod tests{
         let mut runtime_program = compile(&bootstrap_program);
         runtime_program.run();
         assert_set_eq!(
-            runtime_program.states[2].data.iter().cloned(),
-            vec![3,4,6,8, 6,7,9,11, 11,12,14,16]
+            runtime_program.states[2].data.iter().map(|d| runtime::to_number(*d)),
+            vec![3.0,4.0,6.0,8.0, 6.0,7.0,9.0,11.0, 11.0,12.0,14.0,16.0]
             );
         assert_set_eq!(
-            runtime_program.states[4].data.iter().cloned(),
-            vec![3,4,6,8]
+            runtime_program.states[4].data.iter().map(|d| runtime::to_number(*d)),
+            vec![3.0,4.0,6.0,8.0]
             );
         assert_set_eq!(
-            runtime_program.states[6].data.iter().cloned(),
-            vec![17]
-            );
-        // TODO unbreak floats :(
-        // assert_set_eq!(
-        //     runtime_program.states[9].data.chunks(2).map(|chunk| (chunk[0], chunk[1])),
-        //     vec![(1.5 as u64, 3.0 as u64), (2.0 as u64, 4.0 as u64), (2.7 as u64, 5.4 as u64)]
-        //     );
-        assert_set_eq!(
-            runtime_program.states[12].data.chunks(3).map(|chunk| (&runtime_program.strings[chunk[1] as usize][..], chunk[2])),
-            vec![("alice", 100), ("bob", 50), ("eve", 200)]
+            runtime_program.states[6].data.iter().map(|d| runtime::to_number(*d)),
+            vec![17.0]
             );
         assert_set_eq!(
-            runtime_program.states[14].data.chunks(3).map(|chunk| (&runtime_program.strings[chunk[1] as usize][..], chunk[2])),
-            vec![("alice corp", 250), ("evil eve studios", 100)]
+            runtime_program.states[9].data.chunks(2).map(|chunk|
+                (runtime::to_number(chunk[0]), runtime::to_number(chunk[1]))),
+            vec![(1.5, 3.0), (2.0, 4.0), (2.7, 5.4)]
             );
         assert_set_eq!(
-            runtime_program.states[16].data.iter().cloned(),
-            vec![350]
+            runtime_program.states[12].data.chunks(3).map(|chunk|
+                (&runtime_program.strings[chunk[1] as usize][..], runtime::to_number(chunk[2]))),
+            vec![("alice", 100.0), ("bob", 50.0), ("eve", 200.0)]
+            );
+        assert_set_eq!(
+            runtime_program.states[14].data.chunks(3).map(|chunk|
+                (&runtime_program.strings[chunk[1] as usize][..], runtime::to_number(chunk[2]))),
+            vec![("alice corp", 250.0), ("evil eve studios", 100.0)]
+            );
+        assert_set_eq!(
+            runtime_program.states[16].data.iter().map(|d| runtime::to_number(*d)),
+            vec![350.0]
             );
     }
 

@@ -689,22 +689,17 @@ pub fn compile(program: &Program) -> runtime::Program {
     runtime::Program{ids: ids, schemas: schemas, states: states, views: views, downstreams: downstreams, dirty: dirty, strings: strings}
 }
 
+peg_file! parser("parser.rustpeg");
+
 // We shall see that at which dogs howl in the dark, and that at which cats prick up their ears after midnight
 fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<(Binding, runtime::Direction)>) {
     let var_re = Regex::new(r#"_|\?[:alnum:]*(:[:alnum:]*)?|"[^"]*"|([:digit:]|\.)+|#[:digit:]+"#).unwrap();
-    let sort_re = Regex::new(r"-?\?[:alnum:]*").unwrap();
     let kind_re = Regex::new(r":[:alnum:]*").unwrap();
     let over_re = Regex::new(r"(.*) over (.*)").unwrap();
     let (inner_text, over_bindings) = match over_re.captures(text) {
         Some(captures) => {
-            let over_bindings = captures.at(2).unwrap().matches(&sort_re).map(|sort_text| {
-                match sort_text.chars().next().unwrap() {
-                    '?' => (Binding::Variable(sort_text.to_owned()), runtime::Direction::Ascending),
-                    '-' => (Binding::Variable(sort_text[1..].to_owned()), runtime::Direction::Descending),
-                    _ => unreachable!(),
-                }
-            }).collect();
-            (captures.at(1).unwrap(), over_bindings)
+            let over_str = captures.at(2).unwrap();
+            (captures.at(1).unwrap(), parser::over_bindings(over_str).unwrap())
         },
         None => (text, vec![]),
     };

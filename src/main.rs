@@ -3,6 +3,8 @@
 #![feature(step_by)]
 #![allow(dead_code)]
 #![feature(slice_patterns)]
+#![feature(plugin)]
+#![plugin(peg_syntax_ext)]
 
 extern crate rand;
 extern crate test;

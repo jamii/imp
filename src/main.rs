@@ -48,8 +48,9 @@ fn watch(filenames: &[String]) -> () {
 fn main() {
     use std::env;
     let args = env::args().collect::<Vec<String>>();
-    match &*args[1] {
-        "--watch" => watch(&args[2..]),
-        _ => panic!("Didn't understand this command:\n {:?}", &args[1..]),
+    if args.len() < 3 || args[1] != "--watch" {
+        println!("usage: {} --watch <imp-program-files>...", args[0]);
+        return;
     }
+    watch(&args[2..]);
 }

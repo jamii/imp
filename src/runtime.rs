@@ -364,6 +364,9 @@ pub enum Primitive {
     Add,
     Sum,
     Ordinal,
+    LessThan,
+    Copy,
+    Min,
 }
 
 // TODO this is grossly inefficient compared to untyped sort
@@ -373,7 +376,7 @@ fn typed_sort(chunk: &Chunk, ixes: &[(usize, Kind, Direction)], strings: &Vec<St
         let mut new_data = Vec::with_capacity(data.len());
         match kind {
             Kind::Id => {
-                let mut buffer = vec![];
+                let mut buffer = Vec::with_capacity(data.len() / chunk.row_width);
                 for row in data.chunks(chunk.row_width) {
                     buffer.push((row[ix], row));
                 }
@@ -386,7 +389,7 @@ fn typed_sort(chunk: &Chunk, ixes: &[(usize, Kind, Direction)], strings: &Vec<St
                 }
             }
             Kind::Number => {
-                let mut buffer = vec![];
+                let mut buffer = Vec::with_capacity(data.len() / chunk.row_width);
                 for row in data.chunks(chunk.row_width) {
                     buffer.push((to_number(row[ix]), row));
                 }
@@ -400,7 +403,7 @@ fn typed_sort(chunk: &Chunk, ixes: &[(usize, Kind, Direction)], strings: &Vec<St
                 }
             }
             Kind::Text => {
-                let mut buffer = vec![];
+                let mut buffer = Vec::with_capacity(data.len() / chunk.row_width);
                 for row in data.chunks(chunk.row_width) {
                     buffer.push((&strings[row[ix+1] as usize], row));
                 }
@@ -416,6 +419,25 @@ fn typed_sort(chunk: &Chunk, ixes: &[(usize, Kind, Direction)], strings: &Vec<St
         data = new_data;
     }
     Chunk{data: data, row_width: chunk.row_width}
+}
+
+fn typed_cmp(row_a: &[u64], row_b: &[u64], ixes: &[(usize, Kind, Direction)], strings: &Vec<String>) -> Ordering {
+    for &(ix, kind, direction) in ixes.iter() {
+        let ordering = match kind {
+            Kind::Id => row_a[ix].cmp(&row_b[ix]),
+            // TODO NaN can cause panic here
+            Kind::Number => to_number(row_a[ix]).partial_cmp(&to_number(row_b[ix])).unwrap(),
+            Kind::Text => strings[row_a[ix+1] as usize].cmp(&strings[row_b[ix+1] as usize]),
+        };
+        match (ordering, direction) {
+            (Ordering::Greater, Direction::Ascending) => return Ordering::Greater,
+            (Ordering::Less, Direction::Ascending) => return Ordering::Less,
+            (Ordering::Greater, Direction::Descending) => return Ordering::Less,
+            (Ordering::Less, Direction::Descending) => return Ordering::Greater,
+            (Ordering::Equal, _) => (),
+        }
+    }
+    return Ordering::Equal;
 }
 
 impl Primitive {
@@ -450,12 +472,41 @@ impl Primitive {
                     }
                 }
             }
+            (Primitive::LessThan, [a, b]) => {
+                for row in chunk.data.chunks(chunk.row_width) {
+                    if to_number(row[a]) < to_number(row[b]) {
+                        data.extend(row);
+                    }
+                }
+            }
+            (Primitive::Copy, [a]) => {
+                for row in chunk.data.chunks(chunk.row_width) {
+                    data.extend(row);
+                    data.push(row[a]);
+                }
+            }
+            (Primitive::Min, []) => {
+                let sorted_chunk = chunk.sort(group_ixes);
+                for group in sorted_chunk.groups(group_ixes) {
+                    let mut min = &group[0..chunk.row_width];
+                    for row in group[chunk.row_width..].chunks(chunk.row_width) {
+                        match typed_cmp(min, row, over_ixes, strings) {
+                            Ordering::Greater => min = row,
+                            _ => ()
+                        }
+                    }
+                    data.extend(min);
+                }
+            }
             _ => panic!("What are this: {:?} {:?} {:?}", self, input_ixes, group_ixes)
         }
         let num_outputs = match *self {
             Primitive::Add => 1,
             Primitive::Sum => 1,
             Primitive::Ordinal => 1,
+            Primitive::LessThan => 0,
+            Primitive::Copy => 1,
+            Primitive::Min => 0,
         };
         Chunk{data: data, row_width: chunk.row_width + num_outputs}
     }
@@ -620,6 +671,7 @@ impl Program {
     pub fn run(&mut self) {
         let &mut Program{ref mut states, ref views, ref downstreams, ref mut dirty, ref strings, ..} = self;
         while let Some(ix) = dirty.iter().position(|&is_dirty| is_dirty) {
+            println!("Running {:?}", ix);
             dirty[ix] = false;
             let new_chunk = match views[ix] {
                 View::Input => panic!("How did an input get dirtied?"),

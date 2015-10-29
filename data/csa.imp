@@ -20,12 +20,3 @@ the planned route from ?start:id to ?finish:id starting at ?st:number arrives at
 +
 we want to get from ?start to ?finish starting at ?st
 the best route from ?start to ?finish starting at ?st arrives at ?at via _
-
-by ?t:number we can reach ?x:id
-+
-we want to get from ?x to _ starting at ?t
-+
-by ?yt we can reach ?y
-there is a train from ?y to ?x leaving at ?lt and arriving at ?t
-?yt < ?lt
-min over ?t ?y ?yt ?lt

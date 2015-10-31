@@ -1,10 +1,12 @@
-use runtime::{self, hash, Kind};
 use std::collections::HashSet;
 use regex::Regex;
 use std::path::Path;
 use std::io::prelude::*;
 use std::fs::File;
 use std::rc::Rc;
+
+use primitive;
+use runtime::{self, hash, Kind};
 
 pub type ViewId = String;
 pub type VariableId = String;
@@ -69,7 +71,7 @@ pub struct Chunk {
 
 #[derive(Clone, Debug)]
 pub enum PrimitiveOrNegated {
-    Primitive(runtime::Primitive),
+    Primitive(primitive::Primitive),
     Negated(usize),
 }
 
@@ -113,7 +115,7 @@ fn ordered_union(xs: &Vec<VariableId>, ys: &HashSet<VariableId>) -> Vec<Variable
     results
 }
 
-fn bound_vars(bindings: &Vec<Binding>) -> HashSet<VariableId> {
+pub fn bound_vars(bindings: &Vec<Binding>) -> HashSet<VariableId> {
     let mut vars = HashSet::new();
     for binding in bindings.iter() {
         match *binding {
@@ -436,105 +438,13 @@ pub fn negate(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk
     }
 }
 
-fn as_primitive(program: &Program, view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<(Binding, runtime::Direction)>) -> Option<Primitive> {
-    use runtime::Primitive::*;
-    use runtime::Kind::*;
-    let bound_over_vars = bound_vars(&over_bindings.iter().map(|&(ref binding, _)| binding).cloned().collect());
-    match (view_id, &bindings[..]) {
-        ("_ = _ + _", [ref a, ref b, ref c]) => Some(Primitive{
-            primitive: PrimitiveOrNegated::Primitive(Add),
-            input_kinds: vec![Number, Number],
-            input_bindings: vec![b.clone(), c.clone()],
-            output_kinds: vec![Number],
-            output_bindings: vec![a.clone()],
-            over_bindings: over_bindings.clone(),
-            bound_input_vars: bound_vars(&vec![b.clone(), c.clone()]),
-            bound_output_vars: bound_vars(&vec![a.clone()]),
-            bound_aggregate_vars: bound_over_vars,
-        }),
-        ("_ = sum(_)", [ref a, ref b]) => Some(Primitive{
-            primitive: PrimitiveOrNegated::Primitive(Sum),
-            input_kinds: vec![Number],
-            input_bindings: vec![b.clone()],
-            output_kinds: vec![Number],
-            output_bindings: vec![a.clone()],
-            over_bindings: over_bindings.clone(),
-            bound_input_vars: bound_vars(&vec![b.clone()]),
-            bound_output_vars: bound_vars(&vec![a.clone()]),
-            bound_aggregate_vars: &bound_vars(&vec![b.clone()]) | &bound_over_vars,
-        }),
-        ("row _", [ref a]) => Some(Primitive{
-            primitive: PrimitiveOrNegated::Primitive(Ordinal),
-            input_kinds: vec![],
-            input_bindings: vec![],
-            output_kinds: vec![Number],
-            output_bindings: vec![a.clone()],
-            over_bindings: over_bindings.clone(),
-            bound_input_vars: bound_vars(&vec![]),
-            bound_output_vars: bound_vars(&vec![a.clone()]),
-            bound_aggregate_vars: bound_over_vars,
-        }),
-        ("_ < _", [ref a, ref b]) => Some(Primitive{
-            primitive: PrimitiveOrNegated::Primitive(LessThan),
-            input_kinds: vec![Number, Number],
-            input_bindings: vec![a.clone(), b.clone()],
-            output_kinds: vec![],
-            output_bindings: vec![],
-            over_bindings: over_bindings.clone(),
-            bound_input_vars: bound_vars(&vec![a.clone(), b.clone()]),
-            bound_output_vars: bound_vars(&vec![]),
-            bound_aggregate_vars: bound_over_vars,
-        }),
-        ("_ <- _", [ref a, ref b]) => Some(Primitive{
-            primitive: PrimitiveOrNegated::Primitive(Copy),
-            input_kinds: vec![Id],
-            input_bindings: vec![b.clone()],
-            output_kinds: vec![Id],
-            output_bindings: vec![a.clone()],
-            over_bindings: over_bindings.clone(),
-            bound_input_vars: bound_vars(&vec![b.clone()]),
-            bound_output_vars: bound_vars(&vec![a.clone()]),
-            bound_aggregate_vars: bound_over_vars,
-        }),
-        ("min", []) => Some(Primitive{
-            primitive: PrimitiveOrNegated::Primitive(Min),
-            input_kinds: vec![],
-            input_bindings: vec![],
-            output_kinds: vec![],
-            output_bindings: vec![],
-            over_bindings: over_bindings.clone(),
-            bound_input_vars: bound_vars(&vec![]),
-            bound_output_vars: bound_vars(&vec![]),
-            bound_aggregate_vars: bound_over_vars,
-        }),
-        _ => {
-            if view_id.starts_with("! ") {
-                let ix = program.ids.iter().position(|id| *id == view_id[2..]).unwrap();
-                Some(Primitive{
-                    primitive: PrimitiveOrNegated::Negated(ix),
-                    input_kinds: program.schemas[ix].clone(),
-                    input_bindings: bindings.clone(),
-                    output_kinds: vec![],
-                    output_bindings: vec![],
-                    over_bindings: vec![],
-                    bound_input_vars: bound_vars(bindings),
-                    bound_output_vars: bound_vars(&vec![]),
-                    bound_aggregate_vars: bound_vars(&vec![]),
-                })
-            } else {
-                None
-            }
-        }
-    }
-}
-
 pub fn compile_query(query: &Query, program: &Program, strings: &mut Vec<String>) -> runtime::Query {
     let mut upstream = vec![];
     let mut chunks = vec![];
     let mut primitives = vec![];
     for clause in query.clauses.iter() {
         let view = program.ids.iter().position(|id| *id == clause.view);
-        let primitive = as_primitive(&program, &clause.view, &clause.bindings, &clause.over_bindings);
+        let primitive = primitive::for_bootstrap(&program, &clause.view, &clause.bindings, &clause.over_bindings);
         match (view, primitive) {
             (Some(ix), None) => {
                 upstream.push(ix);

@@ -9,8 +9,6 @@ extern crate test;
 extern crate time;
 extern crate regex;
 
-use std::io::prelude::*;
-
 macro_rules! time {
     ($name:expr, $expr:expr) => {{
         let start = ::time::precise_time_s();
@@ -31,6 +29,7 @@ macro_rules! assert_set_eq {
     }}
 }
 
+mod primitive;
 mod runtime;
 mod bootstrap;
 

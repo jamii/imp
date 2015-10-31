@@ -384,7 +384,7 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn run(&self, strings: &Vec<String>, states: &[Rc<Chunk>]) -> Chunk {
+    pub fn run(&self, strings: &mut Vec<String>, states: &[Rc<Chunk>]) -> Chunk {
         let mut chunks = self.upstream.iter().map(|&ix| Cow::Borrowed(&*states[ix])).collect::<Vec<_>>();
         for action in self.actions.iter() {
             // println!("");
@@ -486,6 +486,12 @@ pub struct Program {
     pub strings: Vec<String>, // to be replaced by gc
 }
 
+pub fn push_string(data: &mut Vec<u64>, strings: &mut Vec<String>, string: String) {
+    data.push(hash(&string));
+    data.push(strings.len() as u64);
+    strings.push(string);
+}
+
 #[derive(Clone, Debug)]
 pub enum View {
     Input,
@@ -518,7 +524,7 @@ impl Program {
     }
 
     pub fn run(&mut self) {
-        let &mut Program{ref mut states, ref views, ref downstreams, ref mut dirty, ref strings, ..} = self;
+        let &mut Program{ref mut states, ref views, ref downstreams, ref mut dirty, ref mut strings, ..} = self;
         while let Some(ix) = dirty.iter().position(|&is_dirty| is_dirty) {
             println!("Running {:?}", ix);
             dirty[ix] = false;
@@ -742,12 +748,7 @@ pub mod tests{
                 match *kind {
                     Kind::Id => data.push(field.parse::<u64>().unwrap()),
                     Kind::Number => data.push(from_number(field.parse::<f64>().unwrap())),
-                    Kind::Text => {
-                        let field = field.to_owned();
-                        data.push(hash(&field));
-                        data.push(strings.len() as u64);
-                        strings.push(field);
-                    }
+                    Kind::Text => push_string(&mut data, strings, field.to_owned())
                 }
             }
         }
@@ -829,7 +830,7 @@ pub mod tests{
 
             result_ix: 5
         };
-        query.run(&strings, &states[..])
+        query.run(&mut strings, &states[..])
     }
 
     #[test]

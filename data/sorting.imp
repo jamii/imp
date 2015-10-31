@@ -9,24 +9,24 @@
 ?p:text is paid least at their company
 +
 ?p works at ?c for ?d USD
-row 1 over ?d ?p
+row 0 over ?d ?p
 
 ?p:text is paid least
 +
 ?p works at ?c for ?d USD
-row 1 over ?d ?p ?c
+row 0 over ?d ?p ?c
 
 ?p:text is paid most at their company
 +
 ?p works at ?c for ?d USD
-row 1 over -?d ?p
+row 0 over -?d ?p
 
 ?p:text is paid most
 +
 ?p works at ?c for ?d USD
-row 1 over -?d ?p ?c
+row 0 over -?d ?p ?c
 
 ?p:text is also paid most
 +
 ?p works at ?c for ?d USD
-row 1 over -?d -?p ?c
+row 0 over -?d -?p ?c

@@ -704,13 +704,7 @@ fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<(Bi
         None => (text, vec![]),
     };
     let bindings = inner_text.matches(&var_re).map(|var_text| {
-        match var_text.chars().next().unwrap() {
-            '_' => Binding::Unbound,
-            '?' => Binding::Variable(kind_re.replace(var_text, "")),
-            '#' => Binding::Constant(Value::Id(var_text[1..].parse::<u64>().unwrap())),
-            '"' => Binding::Constant(Value::Text(var_text[1..var_text.len()-1].to_owned())),
-            _ => Binding::Constant(Value::Number(var_text.parse::<f64>().unwrap())),
-        }
+        parser::variable(var_text).unwrap()
     }).collect();
     let kinds = inner_text.matches(&var_re).map(|var_text| {
         var_text.matches(&kind_re).next().map(|kind_text| {

@@ -1,12 +1,12 @@
 use runtime::{Direction};
-use bootstrap::{Binding};
+use bootstrap::{Binding, Value};
 
 #[pub]
 over_bindings -> Vec<(Binding, Direction)>
   = sort ++ (" "+)
 
 sort -> (Binding, Direction)
-  = d:sort_direction v:name { (Binding::Variable(v), d) }
+  = d:sort_direction v:named_variable { (v, d) }
 
 sort_direction -> Direction
   = descending:"-"? {
@@ -16,5 +16,48 @@ sort_direction -> Direction
     }
   }
 
+#[pub]
+variable -> Binding
+  = unbound_variable / named_variable
+  / constant_id / constant_text / constant_number
+
+unbound_variable -> Binding
+  = "_" { Binding::Unbound }
+
+named_variable -> Binding
+  = n:name kind? { Binding::Variable(n) }
+
+constant_id -> Binding
+  = "#" id:number_u64 { Binding::Constant(Value::Id(id)) }
+
+constant_text -> Binding
+  = s:string_literal { Binding::Constant(Value::Text(s)) }
+
+constant_number -> Binding
+  = n:number_f64 { Binding::Constant(Value::Number(n)) }
+
+// No escaping for now.
+string_literal -> String
+  = "\"" s:string_literal_contents "\"" { s }
+
+string_literal_contents -> String
+  = [^"]* { match_str.to_owned() }
+
+kind -> String
+  = ":" identifier { match_str.to_owned() }
+
 name -> String
-  = "?" [A-Za-z0-9]+ { match_str.to_owned() }
+  = "?" identifier { match_str.to_owned() }
+
+identifier = [A-Za-z0-9]+
+
+/** Numbers **/
+
+number_u64 -> u64
+  = integer_digits { match_str.parse::<u64>().unwrap() }
+
+number_f64 -> f64
+  = integer_digits { match_str.parse::<f64>().unwrap() }
+
+decimal_digits = [0-9]+ ("." [0-9]+)? { () }
+integer_digits = [0-9]+

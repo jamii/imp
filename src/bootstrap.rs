@@ -507,6 +507,7 @@ pub fn compile_query(query: &Query, program: &Program, strings: &mut Vec<String>
     let remaining_tree = join_tree.clone();
     let root_ix = collapse_subtree(&mut chunks, &mut actions, &mut join_tree, &query.select, &primitives, &remaining_tree);
     sort_and_project(&mut chunks, &mut actions, root_ix, &query.select, &HashSet::new());
+    assert_eq!(&query.select.iter().cloned().collect::<HashSet<_>>(), &chunks[root_ix].bound_vars);
     runtime::Query{upstream: upstream, actions: actions, result_ix: root_ix}
 }
 
@@ -623,7 +624,7 @@ pub fn compile(program: &Program) -> runtime::Program {
 
 // We shall see that at which dogs howl in the dark, and that at which cats prick up their ears after midnight
 fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<(Binding, runtime::Direction)>) {
-    let var_re = Regex::new(r#"_|\?[:alnum:]*(:[:alnum:]*)?|"[^"]*"|([:digit:]|\.)+|#[:digit:]+"#).unwrap();
+    let var_re = Regex::new(r#"_|\?[:alnum:]*(:[:alnum:]*)?|"[^"]*"|-?([:digit:]|\.)+|#[:digit:]+"#).unwrap();
     let sort_re = Regex::new(r"-?\?[:alnum:]*").unwrap();
     let kind_re = Regex::new(r":[:alnum:]*").unwrap();
     let over_re = Regex::new(r"(.*) over (.*)").unwrap();
@@ -671,7 +672,7 @@ fn parse_input(lines: Vec<&str>, view_id: ViewId, schema: Vec<Kind>) -> Vec<(Vie
         let columns = words.map(|word| word.parse::<usize>().unwrap()).collect();
         (filename.to_owned(), columns)
     });
-    let value_re = Regex::new(r#""[^"]*"|([:digit:]|\.)+|#[:digit:]+"#).unwrap();
+    let value_re = Regex::new(r#""[^"]*"|-?([:digit:]|\.)+|#[:digit:]+"#).unwrap();
     let rows = lines[2..].iter().map(|line| {
         let values = line.matches(&value_re).map(|value_text| {
             match value_text.chars().next().unwrap() {
@@ -772,8 +773,11 @@ pub fn load<P: AsRef<Path>>(filenames: &[P]) -> Program {
 #[cfg(test)]
 pub mod tests{
     use super::*;
-    use runtime::{to_number};
+    use runtime::{self, to_number};
     use test::{Bencher, black_box};
+    use std::io::prelude::*;
+    use std::fs::File;
+    use std::rc::Rc;
 
     #[test]
     pub fn test_metal() {
@@ -941,5 +945,23 @@ pub mod tests{
             runtime_program.states[6].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
             vec!["apple"]
             );
+    }
+
+    #[test]
+    pub fn test_imp() {
+        let bootstrap_program = load(&["data/imp.imp"]);
+        let mut runtime_program = compile(&bootstrap_program);
+        let mut text = String::new();
+        File::open("data/imp.imp").unwrap().read_to_string(&mut text).unwrap();
+        {
+            let runtime::Program{ref mut states, ref mut strings, ..} = runtime_program;
+            let mut data = vec![];
+            runtime::push_string(&mut data, strings, text);
+            let mut chunk = (*states[0]).clone();
+            chunk.data = data;
+            states[0] = Rc::new(chunk);
+        }
+        runtime_program.run();
+        assert!(false);
     }
 }

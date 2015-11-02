@@ -160,7 +160,7 @@ pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec
             bound_output_vars: bound_vars(&vec![]),
             bound_aggregate_vars: bound_over_vars,
         }),
-        ("result _ of _ split by _ is at _-_", [ref chunk_ix, ref text, ref regex, ref from_ix, ref to_ix]) => Some(bootstrap::Primitive{
+        ("result _ of _ split by _ is at _ to _", [ref chunk_ix, ref text, ref regex, ref from_ix, ref to_ix]) => Some(bootstrap::Primitive{
             primitive: PrimitiveOrNegated::Primitive(Split),
             input_kinds: vec![Text, Text],
             input_bindings: vec![text.clone(), regex.clone()],
@@ -171,7 +171,7 @@ pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec
             bound_output_vars: bound_vars(&vec![chunk_ix.clone(), from_ix.clone(), to_ix.clone()]),
             bound_aggregate_vars: bound_over_vars,
         }),
-        ("result _ of _ searched by _ is at _-_", [ref chunk_ix, ref text, ref regex, ref from_ix, ref to_ix]) => Some(bootstrap::Primitive{
+        ("result _ of _ searched by _ is at _ to _", [ref chunk_ix, ref text, ref regex, ref from_ix, ref to_ix]) => Some(bootstrap::Primitive{
             primitive: PrimitiveOrNegated::Primitive(Search),
             input_kinds: vec![Text, Text],
             input_bindings: vec![text.clone(), regex.clone()],
@@ -193,7 +193,7 @@ pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec
             bound_output_vars: bound_vars(&vec![result.clone()]),
             bound_aggregate_vars: bound_over_vars,
         }),
-        ("the text at _-_ in _ is _", [ref from_ix, ref to_ix, ref text, ref result]) => Some(bootstrap::Primitive{
+        ("the text at _ to _ in _ is _", [ref from_ix, ref to_ix, ref text, ref result]) => Some(bootstrap::Primitive{
             primitive: PrimitiveOrNegated::Primitive(Substring),
             input_kinds: vec![Number, Number, Text],
             input_bindings: vec![from_ix.clone(), to_ix.clone(), text.clone()],

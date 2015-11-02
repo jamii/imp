@@ -1,0 +1,36 @@
+the program is ?p:text
+=
+
+member type ?t:text is delimited by ?d:text
+=
+"insert" "+"
+"remove" "-"
+"input" "="
+
+view ?vx:number at ?va:number to ?vz:number is ?v:text
++
+the program is ?p
+result ?vx of ?p split by "\n\n" is at ?va to ?vz
+the text at ?va to ?vz in ?p is ?v
+
+head ?vx:number at ?ha:number to ?hz:number is ?h:text
++
+view ?vx at _ to _ is ?v
+result 0 of ?v split by "\n\+\n|\n-\n|\n=" is at ?ha to ?hz
+the text at ?ha to ?hz in ?v is ?h
+
+member ?mx:number,?vx:number at ?ma:number to ?mz:number is ?m:text
++
+view ?vx at _ to _ is ?v
+result ?n of ?v split by "\n\+\n|\n-\n|\n=" is at ?ma to ?mz
+0 < ?n
+?mx = ?n + -1
+the text at ?ma to ?mz in ?v is ?m
+
+member type ?mx:number,?vx:number at ?ta:number to ?tz:number is ?t:text
++
+view ?vx at _ to _ is ?v
+result ?mx of ?v searched by "\n\+\n|\n-\n|\n=" is at ?ta to ?tz
+the text at ?ta to ?tz in ?v is ?ddd
+the text at 1 to 2 in ?ddd is ?d
+member type ?t is delimited by ?d

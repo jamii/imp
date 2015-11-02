@@ -245,6 +245,16 @@ impl Chunk {
         }
         Chunk{ data: data, row_width: self.row_width + constants.len() }
     }
+    pub fn print(&self, kinds: &Vec<Kind>, strings: &Vec<String>) {
+        for row in self.data.chunks(self.row_width) {
+            for col in 0..kinds.len() {
+                let ix = kinds[0..col].iter().map(|kind| kind.width()).sum();
+                kinds[col].print(row, ix, strings);
+                print!("\t");
+            }
+            print!("\n");
+        }
+    }
 }
 
 impl<'a> Iterator for Groups<'a> {
@@ -338,6 +348,14 @@ impl Kind {
             Kind::Text => size_of::<(Hash, Text)>(),
         };
         bytes / 8
+    }
+
+    pub fn print(&self, row: &[u64], ix: usize, strings: &Vec<String>) {
+        match *self {
+            Kind::Id => print!("{:?}", row[ix]),
+            Kind::Number => print!("{:?}", to_number(row[ix])),
+            Kind::Text => print!("{:?}", &strings[row[ix+1] as usize]),
+        }
     }
 }
 

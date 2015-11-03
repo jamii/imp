@@ -5,8 +5,8 @@
 ?x:text is food number ?n:number
 +
 ?list is a list of foods
-result ?n of ?list split by " " is at ?a to ?b
-the text at ?a to ?b in ?list is ?x
+result ?n of ?list split by " " is at ?a to ?b breaking at ?c
+the text at ?c to ?b in ?list is ?x
 
 ?x:text is a csv list of foods
 +

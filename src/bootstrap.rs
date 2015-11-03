@@ -497,6 +497,7 @@ pub fn compile_query(query: &Query, program: &Program, strings: &mut Vec<String>
         let root_ix = collapse_subtree(&mut chunks, &mut actions, &mut join_tree, &query.select, &primitives, &subtree);
         {
             let primitive = &primitives[primitive_ix];
+            assert!(primitive.bound_input_vars.is_subset(&chunks[root_ix].bound_vars));
             match primitive.primitive {
                 PrimitiveOrNegated::Primitive(_) => apply(&mut chunks, &mut actions, strings, root_ix, primitive),
                 PrimitiveOrNegated::Negated(_) => negate(&mut chunks, &mut actions, root_ix, primitive),

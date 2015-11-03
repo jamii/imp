@@ -1,25 +1,64 @@
 the program is ?p:text
 =
 
-member type ?t:text is delimited by ?d:text
+?child:text is found in ?parent:text by ?action:text with ?regex:text
 =
-"insert" "+"
-"remove" "-"
-"input" "="
+"view" "program" "split drop" "\n\n"
+"head" "view" "search" "^[^\n]*"
+"member" "view" "split keep" "\n\+\n|\n-\n|\n= "
+"insert" "member" "tag" "^\n\+\n"
+"remove" "member" "tag" "^\n-\n"
+"input" "member" "tag" "^\n= "
+"clause" "insert" "split drop" "\n"
+"clause" "remove" "split drop" "\n"
+"variable with kind" "head" "search" "\?[:alnum:]*:[:alnum:]*"
+"kind" "variable with kind" "search" ":[:alnum:]*"
+"variable" "variable with kind" "search" "\?[:alnum:]*"
+"variable" "clause" "search" "(\?[:alnum:]*|_)"
 
-?t:text is a type of query member
-=
-"insert"
-"remove"
+?pk:text ?pa:number ?pz:number has child ?ck:text ?ca:number ?cz:number
++
+the program is ?program
+?program has length ?pz
+?pk <<- "program"
+?pa <- 0
+?ck <<- ?pk
+?ca <- ?pa
+?cz <- ?pz
++
+?ck is found in ?pk by "split keep" with ?re
+_ _ _ has child ?pk ?pa ?pz
+?pk ?pa ?pz has text ?p
+result _ of ?p split by ?re is at ?ra to ?rz breaking at _
+?ca = ?pa + ?ra
+?cz = ?pa + ?rz
++
+?ck is found in ?pk by "split drop" with ?re
+_ _ _ has child ?pk ?pa ?pz
+?pk ?pa ?pz has text ?p
+result _ of ?p split by ?re is at _ to ?rz breaking at ?ra
+?ca = ?pa + ?ra
+?cz = ?pa + ?rz
++
+?ck is found in ?pk by "search" with ?re
+_ _ _ has child ?pk ?pa ?pz
+?pk ?pa ?pz has text ?p
+result _ of ?p searched by ?re is at ?ra to ?rz
+?ca = ?pa + ?ra
+?cz = ?pa + ?rz
++
+?ck is found in ?pk by "tag" with ?re
+_ _ _ has child ?pk ?pa ?pz
+?pk ?pa ?pz has text ?p
+result 0 of ?p searched by ?re is at 0 to ?ra
+?ca = ?pa + ?ra
+?cz <- ?pz
 
-regex for ?c:text is ?r:text
-=
-"view delimiter" "\n\n"
-"member delimiter" "\n\+\n|\n-\n|\n="
-"clause delimiter" "\n"
-"variable with kind" "\?[:alnum:]*:[:alnum:]*"
-"variable" "\?[:alnum:]*"
-"kind" ":[:alnum:]*"
+?ck:text ?ca:number ?cz:number has text ?c:text
++
+the program is ?program
+_ _ _ has child ?ck ?ca ?cz
+the text at ?ca to ?cz in ?program is ?c
 
 ?n:text is a primitive view
 =
@@ -33,88 +72,4 @@ regex for ?c:text is ?r:text
 "result _ of _ searched by _ is at _ to _"
 "_ with _ replaced by _ is _"
 "the text at _ to _ in _ is _"
-
-view ?vx:number at ?va:number to ?vz:number is ?v:text
-+
-the program is ?p
-regex for "view delimiter" is ?vd
-result ?vx of ?p split by ?vd is at ?va to ?vz
-the text at ?va to ?vz in ?p is ?v
-
-head ?vx:number at ?ha:number to ?hz:number is ?h:text
-+
-view ?vx at _ to _ is ?v
-regex for "member delimiter" is ?md
-result 0 of ?v split by ?md is at ?ha to ?hz
-the text at ?ha to ?hz in ?v is ?h
-
-member ?mx:number of view ?vx:number at ?ma:number to ?mz:number is ?m:text
-+
-view ?vx at _ to _ is ?v
-regex for "member delimiter" is ?md
-result ?n of ?v split by ?md is at ?ma to ?mz
-0 < ?n
-?mx = ?n + -1
-the text at ?ma to ?mz in ?v is ?m
-
-member type ?mx:number of view ?vx:number at ?ta:number to ?tz:number is ?t:text
-+
-view ?vx at _ to _ is ?v
-regex for "member delimiter" is ?md
-result ?mx of ?v searched by ?md is at ?ta to ?tz
-the text at ?ta to ?tz in ?v is ?ddd
-the text at 1 to 2 in ?ddd is ?d
-member type ?t is delimited by ?d
-
-view ?vx:number is named ?n:text
-+
-head ?vx at _ to _ is ?h
-regex for "variable with kind" is ?vkd
-?h with ?vkd replaced by "_" is ?n
-
-field ?vax:number of view ?vx:number at ?va:number to ?vz:number is ?v:text
-+
-head ?vx at _ to _ is ?h
-regex for "variable with kind" is ?vk
-result ?vax of ?h searched by ?vk is at ?va to ?vz
-the text at ?va to ?vz in ?h is ?v
-
-field ?vax:number of view ?vx:number is named ?n:text
-+
-field ?vax of view ?vx at _ to _ is ?v
-regex for "variable" is ?vre
-result 0 of ?v searched by ?vre is at ?na to ?nz
-?nb = ?na + 1
-the text at ?nb to ?nz in ?v is ?n
-
-field ?vax:number of view ?vx:number has kind ?k:text
-+
-field ?vax of view ?vx at _ to _ is ?v
-regex for "kind" is ?kre
-result 0 of ?v searched by ?kre is at ?ka to ?kz
-?kb = ?ka + 1
-the text at ?kb to ?kz in ?v is ?k
-
-member ?mx:number of view ?vx:number is a query
-+
-member type ?mx of view ?vx at _ to _ is ?t
-?t is a type of query member
-
-clause ?cx:number of member ?mx:number of view ?vx:number at ?ca:number to ?cz:number is ?c:text
-+
-member ?mx of view ?vx is a query
-member ?mx of view ?vx at _ to _ is ?m
-regex for "clause delimiter" is ?cd
-result ?cx of ?m split by ?cd is at ?ca to ?cz
-the text at ?ca to ?cz in ?m is ?c
-
-clause ?cx:number of member ?mx:number of view ?vx:number is named ?n:text
-+
-clause ?cx of member ?mx of view ?vx at _ to _ is ?c
-regex for "variable" is ?vre
-?c with ?vre replaced by "_" is ?n
-
-clause ?cx:number of member ?mx:number of view ?vx:number is a primitive
-+
-clause ?cx of member ?mx of view ?vx is named ?n
-?n is a primitive view
+"_ has length _"

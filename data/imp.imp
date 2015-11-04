@@ -1,64 +1,24 @@
-the program is ?p:text
+outside says ?pk:text ?pa:number ?pz:number has child ?ck:text ?ca:number ?cz:number with text ?c:text
 =
 
-?child:text is found in ?parent:text by ?action:text with ?regex:text
+?pk:text ?pa:number ?pz:number has child ?ck:text ?ca:number ?cz:number with text ?c:text
++
+outside says ?pk ?pa ?pz has child ?ck ?ca ?cz with text ?c
++
+?ck is found in ?pk by capture ?n of ?re
+_ _ _ has child ?pk ?pa ?pz with text ?p
+capture ?n of result _ of ?p searched by ?re is at ?ra to ?rz
+?ca = ?pa + ?ra
+?cz = ?pa + ?rz
+the text at ?ra to ?rz in ?p is ?c
+
+?child:text is found in ?parent:text by capture ?n:number of ?regex:text
 =
-"view" "program" "split drop" "\n\n"
-"head" "view" "search" "^[^\n]*"
-"member" "view" "split keep" "\n\+\n|\n-\n|\n= "
-"insert" "member" "tag" "^\n\+\n"
-"remove" "member" "tag" "^\n-\n"
-"input" "member" "tag" "^\n= "
-"clause" "insert" "split drop" "\n"
-"clause" "remove" "split drop" "\n"
-"variable with kind" "head" "search" "\?[:alnum:]*:[:alnum:]*"
-"kind" "variable with kind" "search" ":[:alnum:]*"
-"variable" "variable with kind" "search" "\?[:alnum:]*"
-"variable" "clause" "search" "(\?[:alnum:]*|_)"
-
-?pk:text ?pa:number ?pz:number has child ?ck:text ?ca:number ?cz:number
-+
-the program is ?program
-?program has length ?pz
-?pk <<- "program"
-?pa <- 0
-?ck <<- ?pk
-?ca <- ?pa
-?cz <- ?pz
-+
-?ck is found in ?pk by "split keep" with ?re
-_ _ _ has child ?pk ?pa ?pz
-?pk ?pa ?pz has text ?p
-result _ of ?p split by ?re is at ?ra to ?rz breaking at _
-?ca = ?pa + ?ra
-?cz = ?pa + ?rz
-+
-?ck is found in ?pk by "split drop" with ?re
-_ _ _ has child ?pk ?pa ?pz
-?pk ?pa ?pz has text ?p
-result _ of ?p split by ?re is at _ to ?rz breaking at ?ra
-?ca = ?pa + ?ra
-?cz = ?pa + ?rz
-+
-?ck is found in ?pk by "search" with ?re
-_ _ _ has child ?pk ?pa ?pz
-?pk ?pa ?pz has text ?p
-result _ of ?p searched by ?re is at ?ra to ?rz
-?ca = ?pa + ?ra
-?cz = ?pa + ?rz
-+
-?ck is found in ?pk by "tag" with ?re
-_ _ _ has child ?pk ?pa ?pz
-?pk ?pa ?pz has text ?p
-result 0 of ?p searched by ?re is at 0 to ?ra
-?ca = ?pa + ?ra
-?cz <- ?pz
-
-?ck:text ?ca:number ?cz:number has text ?c:text
-+
-the program is ?program
-_ _ _ has child ?ck ?ca ?cz
-the text at ?ca to ?cz in ?program is ?c
+"view" "program" 0 "(.+\n)+"
+"head" "view" 0 "^.*"
+"insert" "view" 1 "\n\+((\n[^\+-=].*)+)"
+"remove" "view" 1 "\n-((\n[^\+-=].*)+)"
+"input" "view" 1 "\n=(.*(\n[^\+-=].*)+)"
 
 ?n:text is a primitive view
 =

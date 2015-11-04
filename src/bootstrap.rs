@@ -774,7 +774,7 @@ pub fn load<P: AsRef<Path>>(filenames: &[P]) -> Program {
 #[cfg(test)]
 pub mod tests{
     use super::*;
-    use runtime::{self, to_number};
+    use runtime::{self, to_number, from_number};
     use test::{Bencher, black_box};
     use std::io::prelude::*;
     use std::fs::File;
@@ -957,6 +957,12 @@ pub mod tests{
         {
             let runtime::Program{ref mut states, ref mut strings, ..} = runtime_program;
             let mut data = vec![];
+            runtime::push_string(&mut data, strings, "program".to_owned());
+            data.push(from_number(0.0));
+            data.push(from_number(text.len() as f64));
+            runtime::push_string(&mut data, strings, "program".to_owned());
+            data.push(from_number(0.0));
+            data.push(from_number(text.len() as f64));
             runtime::push_string(&mut data, strings, text);
             let mut chunk = (*states[0]).clone();
             chunk.data = data;

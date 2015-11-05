@@ -14,7 +14,7 @@ the text at ?ra to ?rz in ?p is ?c
 
 ?child:text is found in ?parent:text by capture ?n:number of ?regex:text
 =
-"view" "program" 0 "(.+\n)+"
+"view" "program" 0 "(.+\n?)+"
 "head" "view" 0 "^.*"
 "insert" "view" 1 "\n\+((\n[^\+-=].*)+)"
 "remove" "view" 1 "\n-((\n[^\+-=].*)+)"
@@ -24,7 +24,9 @@ the text at ?ra to ?rz in ?p is ?c
 "variable" "variable with kind" 1 "\?([:alnum:]*)"
 "clause" "insert" 1 "\n(.*)"
 "clause" "remove" 1 "\n(.*)"
-"binding" "clause" 2 "(^|\s)(_\S*|\?[:alnum:]*|#[:digit:]+|-?[:digit:]+(\.[:digit]+)?|\x22(\\\x22|[^\x22])*\x22)"
+"negation" "clause" 0 "^! "
+"clause body" "clause" 2 "^(! )?(.*)"
+"binding" "clause body" 2 "(^|\s)(_\S*|\?[:alnum:]*|#[:digit:]+|-?[:digit:]+(\.[:digit]+)?|\x22(\\\x22|[^\x22])*\x22)"
 "unbound" "binding" 0 "^_\S*$"
 "variable" "binding" 1 "^\?([:alnum:]*)$"
 "id" "binding" 0 "^#[:digit:]+$"
@@ -39,28 +41,45 @@ the text at ?ra to ?rz in ?p is ?c
 "number" "row" 2 "(^|\s)(-?[:digit:]+(\.[:digit]+)?)"
 "text" "row" 2 "(^|\s)(\x22(\\\x22|[^\x22])*\x22)"
 
-?vk:text ?va:number ?vz:number is named ?n:text
+head ?va:number ?vz:number is named ?n:text
 +
-?vk <<- "head"
 child "head" ?va ?vz of _ _ _ has text ?v
 "variable with kind" is found in "head" by capture _ of ?re
 ?v with ?re replaced by "$1_" is ?n
+
+clause ?va:number ?vz:number is named ?n:text
 +
-?vk <<- "clause"
-child "clause" ?va ?vz of _ _ _ has text ?v
+child "clause body" _ _ of "clause" ?va ?vz has text ?v
 "binding" is found in "clause" by capture _ of ?re
 ?v with ?re replaced by "$1_" is ?n
 
-?n:text is a primitive view
+view ?n:text is primitive
 =
 "_ = _ + _"
 "_ = sum(_)"
 "row _"
 "_ < _"
 "_ <- _"
+"_ <<- _"
 "min"
-"result _ of _ split by _ is at _ to _"
+"result _ of _ split by _ is at _ to _ breaking at _"
 "result _ of _ searched by _ is at _ to _"
+"capture _ of result _ of _ searched by _ is at _ to _"
 "_ with _ replaced by _ is _"
 "the text at _ to _ in _ is _"
 "_ has length _"
+
+clause ?va:number ?vz:number is primitive
++
+clause ?va ?vz is named ?n
+view ?n is primitive
+
+clause ?va:number ?vz:number is negated
++
+child "negation" _ _ of "clause" ?va ?vz has text _
+
+clause ?va:number ?vz:number is finite
++
+clause ?va ?vz is named _
+! clause ?va ?vz is primitive
+! clause ?va ?vz is negated

@@ -24,19 +24,32 @@ the text at ?ra to ?rz in ?p is ?c
 "variable" "variable with kind" 1 "\?([:alnum:]*)"
 "clause" "insert" 1 "\n(.*)"
 "clause" "remove" 1 "\n(.*)"
-"variable" "clause" 2 "(^|\s)(\?[:alnum:]*)"
-"unbound" "clause" 2 "(^|\s)(_)\S*"
-"id" "clause" 2 "(^|\s)(#[:digit:]+)"
-"number" "clause" 2 "(^|\s)(-?([:digit:]|\.)+)"
-"text" "clause" 2 "(^|\s)(\x22(\\\x22|[^\x22])*\x22)"
+"binding" "clause" 2 "(^|\s)(_\S*|\?[:alnum:]*|#[:digit:]+|-?[:digit:]+(\.[:digit]+)?|\x22(\\\x22|[^\x22])*\x22)"
+"unbound" "binding" 0 "^_\S*$"
+"variable" "binding" 1 "^\?([:alnum:]*)$"
+"id" "binding" 0 "^#[:digit:]+$"
+"number" "binding" 0 "^-?[:digit:]+(\.[:digit]+)?$"
+"text" "binding" 0 "^\x22(\\\x22|[^\x22])*\x22$"
 "import" "input" 0 "^.*"
 "filename" "import" 1 "^\s*(\S*)"
 "cols" "import" 1 "^\s*\S*(.*)"
 "col" "cols" 1 "\s*(\S*)"
 "row" "input" 1 "\n(.*)"
 "id" "row" 2 "(^|\s)(#[:digit:]+)"
-"number" "row" 2 "(^|\s)(-?([:digit:]|\.)+)"
+"number" "row" 2 "(^|\s)(-?[:digit:]+(\.[:digit]+)?)"
 "text" "row" 2 "(^|\s)(\x22(\\\x22|[^\x22])*\x22)"
+
+?vk:text ?va:number ?vz:number is named ?n:text
++
+?vk <<- "head"
+child "head" ?va ?vz of _ _ _ has text ?v
+"variable with kind" is found in "head" by capture _ of ?re
+?v with ?re replaced by "$1_" is ?n
++
+?vk <<- "clause"
+child "clause" ?va ?vz of _ _ _ has text ?v
+"binding" is found in "clause" by capture _ of ?re
+?v with ?re replaced by "$1_" is ?n
 
 ?n:text is a primitive view
 =

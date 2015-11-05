@@ -246,6 +246,7 @@ impl Chunk {
         Chunk{ data: data, row_width: self.row_width + constants.len() }
     }
     pub fn print(&self, kinds: &Vec<Kind>, strings: &Vec<String>) {
+        println!("{:?}", kinds);
         for row in self.data.chunks(self.row_width) {
             for col in 0..kinds.len() {
                 let ix = kinds[0..col].iter().map(|kind| kind.width()).sum();
@@ -571,11 +572,6 @@ impl Program {
                 }
             }
             // states[ix].print(&schemas[ix], strings);
-        }
-        for ix in 0..schemas.len() {
-            println!("View {:?}", ix);
-            states[ix].print(&schemas[ix], strings);
-            println!("");
         }
     }
 

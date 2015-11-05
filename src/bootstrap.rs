@@ -940,7 +940,7 @@ pub mod tests{
             );
         assert_set_eq!(
             runtime_program.states[4].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
-            vec!["apple, cake, swordfish"]
+            vec!["beer cake swordfish"]
             );
         assert_set_eq!(
             runtime_program.states[6].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),

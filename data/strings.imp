@@ -8,10 +8,10 @@
 result ?n of ?list split by " " is at ?a to ?b breaking at ?c
 the text at ?c to ?b in ?list is ?x
 
-?x:text is a csv list of foods
+?x:text is a dubious list of foods
 +
 ?list is a list of foods
-?list with " " replaced by ", " is ?x
+?list with 0 to 5 replaced by "beer" is ?x
 
 ?x:text is an A food
 +

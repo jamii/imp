@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use regex::{Regex, NoExpand};
+use regex::Regex;
 
 use runtime::{Chunk, Kind, Direction, from_number, to_number, push_string};
 use bootstrap::{self, Binding, bound_vars, PrimitiveOrNegated};
@@ -207,14 +207,14 @@ pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec
             bound_output_vars: bound_vars(&vec![capture_ix.clone(), result_ix.clone(), from_ix.clone(), to_ix.clone()]),
             bound_aggregate_vars: bound_over_vars,
         }),
-        ("_ with _ replaced by _ is _", [ref text, ref regex, ref replacement, ref result]) => Some(bootstrap::Primitive{
+        ("_ with _ to _ replaced by _ is _", [ref text, ref from_ix, ref to_ix, ref replacement, ref result]) => Some(bootstrap::Primitive{
             primitive: PrimitiveOrNegated::Primitive(Replace),
-            input_kinds: vec![Text, Text, Text],
-            input_bindings: vec![text.clone(), regex.clone(), replacement.clone()],
+            input_kinds: vec![Text, Number, Number, Text],
+            input_bindings: vec![text.clone(), from_ix.clone(), to_ix.clone(), replacement.clone()],
             output_kinds: vec![Text],
             output_bindings: vec![result.clone()],
             over_bindings: over_bindings.clone(),
-            bound_input_vars: bound_vars(&vec![text.clone(), regex.clone(), replacement.clone()]),
+            bound_input_vars: bound_vars(&vec![text.clone(), from_ix.clone(), to_ix.clone(), replacement.clone()]),
             bound_output_vars: bound_vars(&vec![result.clone()]),
             bound_aggregate_vars: bound_over_vars,
         }),
@@ -383,13 +383,18 @@ impl Primitive {
                     }
                 }
             }
-            (Primitive::Replace, [text, regex, replacement]) => {
+            (Primitive::Replace, [text, from_ix, to_ix, replacement]) => {
                 for row in chunk.data.chunks(chunk.row_width) {
                     let result = {
                         let text_string = &strings[row[text+1] as usize];
-                        let regex_string = &strings[row[regex+1] as usize];
+                        let from = to_number(row[from_ix]) as usize;
+                        let to = to_number(row[to_ix]) as usize;
                         let replacement_string = &strings[row[replacement+1] as usize];
-                        Regex::new(regex_string).unwrap().replace_all(text_string, NoExpand(replacement_string))
+                        let mut result = String::with_capacity(text_string.len() + from - to + replacement_string.len());
+                        result.push_str(&text_string[..from]);
+                        result.push_str(&replacement_string);
+                        result.push_str(&text_string[to..]);
+                        result
                     };
                     data.extend(row);
                     push_string(&mut data, strings, result);

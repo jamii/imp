@@ -93,6 +93,8 @@ pub enum Binding {
     Variable(VariableId),
 }
 
+pub type KindedBinding = (Binding, Option<Kind>);
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Id(u64),
@@ -704,7 +706,7 @@ fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<(Bi
         None => (text, vec![]),
     };
     let bindings = inner_text.matches(&var_re).map(|var_text| {
-        parser::variable(var_text).unwrap()
+        parser::kinded_binding(var_text).unwrap().0
     }).collect();
     let kinds = inner_text.matches(&var_re).map(|var_text| {
         var_text.matches(&kind_re).next().map(|kind_text| {

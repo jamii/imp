@@ -1,5 +1,5 @@
-use runtime::{Direction};
-use bootstrap::{Binding, Value};
+use runtime::{Direction, Kind};
+use bootstrap::{Binding, Value, KindedBinding};
 
 #[pub]
 over_bindings -> Vec<(Binding, Direction)>
@@ -17,7 +17,13 @@ sort_direction -> Direction
   }
 
 #[pub]
-variable -> Binding
+kinded_binding -> KindedBinding
+  = add_kind_to_binding
+
+add_kind_to_binding -> KindedBinding
+  = b:binding { (b, None) }
+
+binding -> Binding
   = unbound_variable / named_variable
   / constant_id / constant_text / constant_number
 

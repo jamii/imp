@@ -18,10 +18,7 @@ sort_direction -> Direction
 
 #[pub]
 kinded_binding -> KindedBinding
-  = add_kind_to_binding
-
-add_kind_to_binding -> KindedBinding
-  = b:binding { (b, None) }
+  = kinded_variable / b:binding { (b, None) }
 
 binding -> Binding
   = unbound_variable / named_variable
@@ -29,6 +26,9 @@ binding -> Binding
 
 unbound_variable -> Binding
   = "_" { Binding::Unbound }
+
+kinded_variable -> KindedBinding
+  = n:name k:kind? { (Binding::Variable(n), k) }
 
 named_variable -> Binding
   = n:name kind? { Binding::Variable(n) }
@@ -49,8 +49,11 @@ string_literal -> String
 string_literal_contents -> String
   = [^"]* { match_str.to_owned() }
 
-kind -> String
-  = ":" identifier { match_str.to_owned() }
+kind -> Kind
+  = ":id"     { Kind::Id }
+  / ":text"   { Kind::Text }
+  / ":number" { Kind::Number }
+  / ":" identifier { panic!("Unknown kind: {:?}", match_str) }
 
 name -> String
   = "?" identifier { match_str.to_owned() }

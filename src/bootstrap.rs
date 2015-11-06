@@ -696,7 +696,6 @@ peg_file! parser("parser.rustpeg");
 // We shall see that at which dogs howl in the dark, and that at which cats prick up their ears after midnight
 fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<(Binding, runtime::Direction)>) {
     let var_re = Regex::new(r#"_|\?[:alnum:]*(:[:alnum:]*)?|"[^"]*"|([:digit:]|\.)+|#[:digit:]+"#).unwrap();
-    let kind_re = Regex::new(r":[:alnum:]*").unwrap();
     let over_re = Regex::new(r"(.*) over (.*)").unwrap();
     let (inner_text, over_bindings) = match over_re.captures(text) {
         Some(captures) => {
@@ -709,14 +708,7 @@ fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<(Bi
         parser::kinded_binding(var_text).unwrap().0
     }).collect();
     let kinds = inner_text.matches(&var_re).map(|var_text| {
-        var_text.matches(&kind_re).next().map(|kind_text| {
-            match kind_text {
-                    ":id" => Kind::Id,
-                    ":text" => Kind::Text,
-                    ":number" => Kind::Number,
-                    other => panic!("Unknown kind: {:?}", other),
-                }
-            })
+        parser::kinded_binding(var_text).unwrap().1
     }).collect();
     let view_id = var_re.replace_all(inner_text, "_");
     (view_id, bindings, kinds, over_bindings)

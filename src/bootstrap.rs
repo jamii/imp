@@ -701,7 +701,6 @@ peg_file! parse("parse.rustpeg");
 
 // We shall see that at which dogs howl in the dark, and that at which cats prick up their ears after midnight
 fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<(Binding, runtime::Direction)>) {
-    let var_re = Regex::new(r#"_|\?[:alnum:]*(:[:alnum:]*)?|"[^"]*"|([:digit:]|\.)+|#[:digit:]+"#).unwrap();
     let over_re = Regex::new(r"(.*) over (.*)").unwrap();
     let (inner_text, over_bindings) = match over_re.captures(text) {
         Some(captures) => {
@@ -710,17 +709,17 @@ fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<(Bi
         },
         None => (text, vec![]),
     };
-    let bindings = inner_text.matches(&var_re).map(|var_text| {
-        parse::kinded_binding(var_text).unwrap().0
-    }).collect();
-    let kinds = inner_text.matches(&var_re).map(|var_text| {
-        parse::kinded_binding(var_text).unwrap().1
-    }).collect();
     let words = parse::simple_clause(inner_text).unwrap();
+    let mut bindings = vec![];
+    let mut kinds = vec![];
     let view_id_words:Vec<String> = words.iter().map(|word| {
         match word.to_owned() {
             Word::View(vs) => vs,
-            _ => "_".to_owned()
+            Word::KindedBinding((b, k)) => {
+                bindings.push(b);
+                kinds.push(k);
+                "_".to_owned()
+            }
         }
     }).collect();
     let view_id = view_id_words.join("");

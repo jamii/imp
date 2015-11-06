@@ -96,6 +96,12 @@ pub enum Binding {
 pub type KindedBinding = (Binding, Option<Kind>);
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum Word {
+    View(String),
+    KindedBinding(KindedBinding)
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Id(u64),
     Number(f64),
@@ -710,7 +716,14 @@ fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<(Bi
     let kinds = inner_text.matches(&var_re).map(|var_text| {
         parse::kinded_binding(var_text).unwrap().1
     }).collect();
-    let view_id = var_re.replace_all(inner_text, "_");
+    let words = parse::simple_clause(inner_text).unwrap();
+    let view_id_words:Vec<String> = words.iter().map(|word| {
+        match word.to_owned() {
+            Word::View(vs) => vs,
+            _ => "_".to_owned()
+        }
+    }).collect();
+    let view_id = view_id_words.join("");
     (view_id, bindings, kinds, over_bindings)
 }
 

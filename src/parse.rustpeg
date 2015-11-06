@@ -1,5 +1,5 @@
 use runtime::{Direction, Kind};
-use bootstrap::{Binding, Value, KindedBinding};
+use bootstrap::{Binding, Value, KindedBinding, Word};
 
 #[pub]
 over_bindings -> Vec<(Binding, Direction)>
@@ -15,6 +15,17 @@ sort_direction -> Direction
       None    => Direction::Ascending
     }
   }
+
+#[pub]
+simple_clause -> Vec<Word>
+  = word+
+
+word -> Word
+  = kb:kinded_binding { Word::KindedBinding(kb) }
+  / vt:view_term { Word::View(vt) }
+
+view_term -> String
+  = [^?:_"#0-9]+ { match_str.to_owned() }
 
 #[pub]
 kinded_binding -> KindedBinding

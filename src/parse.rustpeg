@@ -2,6 +2,13 @@ use runtime::{Direction, Kind};
 use bootstrap::{Binding, Value, KindedBinding, Word};
 
 #[pub]
+clause -> (Vec<Word>, Vec<(Binding, Direction)>)
+  = sc:simple_clause oc:over_clause { (sc, oc) }
+
+over_clause -> Vec<(Binding, Direction)>
+  = " over " ob:over_bindings { ob }
+  / { vec![] }
+
 over_bindings -> Vec<(Binding, Direction)>
   = sort ++ (" "+)
 
@@ -16,7 +23,6 @@ sort_direction -> Direction
     }
   }
 
-#[pub]
 simple_clause -> Vec<Word>
   = word+
 
@@ -25,9 +31,8 @@ word -> Word
   / vt:view_term { Word::View(vt) }
 
 view_term -> String
-  = [^?:_"#0-9]+ { match_str.to_owned() }
+  = (!" over " [^?:_"#0-9])+ { match_str.to_owned() }
 
-#[pub]
 kinded_binding -> KindedBinding
   = kinded_variable / b:binding { (b, None) }
 

@@ -699,17 +699,8 @@ pub fn compile(program: &Program) -> runtime::Program {
 
 peg_file! parse("parse.rustpeg");
 
-// We shall see that at which dogs howl in the dark, and that at which cats prick up their ears after midnight
 fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<(Binding, runtime::Direction)>) {
-    let over_re = Regex::new(r"(.*) over (.*)").unwrap();
-    let (inner_text, over_bindings) = match over_re.captures(text) {
-        Some(captures) => {
-            let over_str = captures.at(2).unwrap();
-            (captures.at(1).unwrap(), parse::over_bindings(over_str).unwrap())
-        },
-        None => (text, vec![]),
-    };
-    let words = parse::simple_clause(inner_text).unwrap();
+    let (words, over_bindings) = parse::clause(text).unwrap();
     let mut bindings = vec![];
     let mut kinds = vec![];
     let view_id_words:Vec<String> = words.iter().map(|word| {

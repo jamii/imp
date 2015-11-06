@@ -691,7 +691,7 @@ pub fn compile(program: &Program) -> runtime::Program {
     runtime::Program{ids: ids, schemas: schemas, states: states, views: views, downstreams: downstreams, dirty: dirty, strings: strings}
 }
 
-peg_file! parser("parser.rustpeg");
+peg_file! parse("parse.rustpeg");
 
 // We shall see that at which dogs howl in the dark, and that at which cats prick up their ears after midnight
 fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<(Binding, runtime::Direction)>) {
@@ -700,15 +700,15 @@ fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<(Bi
     let (inner_text, over_bindings) = match over_re.captures(text) {
         Some(captures) => {
             let over_str = captures.at(2).unwrap();
-            (captures.at(1).unwrap(), parser::over_bindings(over_str).unwrap())
+            (captures.at(1).unwrap(), parse::over_bindings(over_str).unwrap())
         },
         None => (text, vec![]),
     };
     let bindings = inner_text.matches(&var_re).map(|var_text| {
-        parser::kinded_binding(var_text).unwrap().0
+        parse::kinded_binding(var_text).unwrap().0
     }).collect();
     let kinds = inner_text.matches(&var_re).map(|var_text| {
-        parser::kinded_binding(var_text).unwrap().1
+        parse::kinded_binding(var_text).unwrap().1
     }).collect();
     let view_id = var_re.replace_all(inner_text, "_");
     (view_id, bindings, kinds, over_bindings)

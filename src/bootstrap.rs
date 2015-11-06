@@ -1,10 +1,12 @@
-use runtime::{self, hash, Kind};
 use std::collections::HashSet;
 use regex::Regex;
 use std::path::Path;
 use std::io::prelude::*;
 use std::fs::File;
 use std::rc::Rc;
+
+use primitive;
+use runtime::{self, hash, Kind, push_string};
 
 pub type ViewId = String;
 pub type VariableId = String;
@@ -69,7 +71,7 @@ pub struct Chunk {
 
 #[derive(Clone, Debug)]
 pub enum PrimitiveOrNegated {
-    Primitive(runtime::Primitive),
+    Primitive(primitive::Primitive),
     Negated(usize),
 }
 
@@ -121,7 +123,7 @@ fn ordered_union(xs: &Vec<VariableId>, ys: &HashSet<VariableId>) -> Vec<Variable
     results
 }
 
-fn bound_vars(bindings: &Vec<Binding>) -> HashSet<VariableId> {
+pub fn bound_vars(bindings: &Vec<Binding>) -> HashSet<VariableId> {
     let mut vars = HashSet::new();
     for binding in bindings.iter() {
         match *binding {
@@ -156,6 +158,7 @@ fn find_join_ear(chunks: &Vec<Chunk>, to_join: &Vec<usize>) -> (usize, usize) {
 
 fn build_join_tree(chunks: &Vec<Chunk>, mut to_join: Vec<usize>) -> Tree {
     assert!(chunks.len() > 0);
+    assert!(to_join.len() > 0);
     let mut tree = vec![];
     while to_join.len() > 1 { // one chunk will be left behind as the root
         let (child_ix, parent_ix) = find_join_ear(chunks, &to_join);
@@ -379,9 +382,7 @@ pub fn apply(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, string
                             chunk.bindings.push(Binding::Unbound);
                         }
                         Value::Text(ref string) => {
-                            constants.push(hash(string));
-                            constants.push(strings.len() as u64);
-                            strings.push(string.clone());
+                            runtime::push_string(&mut constants, strings, string.to_owned());
                             chunk.kinds.push(Kind::Text);
                             chunk.bindings.push(Binding::Unbound);
                         }
@@ -444,72 +445,13 @@ pub fn negate(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk
     }
 }
 
-fn as_primitive(program: &Program, view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<(Binding, runtime::Direction)>) -> Option<Primitive> {
-    use runtime::Primitive::*;
-    use runtime::Kind::*;
-    let bound_over_vars = bound_vars(&over_bindings.iter().map(|&(ref binding, _)| binding).cloned().collect());
-    match (view_id, &bindings[..]) {
-        ("_ = _ + _", [ref a, ref b, ref c]) => Some(Primitive{
-            primitive: PrimitiveOrNegated::Primitive(Add),
-            input_kinds: vec![Number, Number],
-            input_bindings: vec![b.clone(), c.clone()],
-            output_kinds: vec![Number],
-            output_bindings: vec![a.clone()],
-            over_bindings: over_bindings.clone(),
-            bound_input_vars: bound_vars(&vec![b.clone(), c.clone()]),
-            bound_output_vars: bound_vars(&vec![a.clone()]),
-            bound_aggregate_vars: bound_over_vars,
-        }),
-        ("_ = sum(_)", [ref a, ref b]) => Some(Primitive{
-            primitive: PrimitiveOrNegated::Primitive(Sum),
-            input_kinds: vec![Number],
-            input_bindings: vec![b.clone()],
-            output_kinds: vec![Number],
-            output_bindings: vec![a.clone()],
-            over_bindings: over_bindings.clone(),
-            bound_input_vars: bound_vars(&vec![b.clone()]),
-            bound_output_vars: bound_vars(&vec![a.clone()]),
-            bound_aggregate_vars: &bound_vars(&vec![b.clone()]) | &bound_over_vars,
-        }),
-        ("row _", [ref a]) => Some(Primitive{
-            primitive: PrimitiveOrNegated::Primitive(Ordinal),
-            input_kinds: vec![],
-            input_bindings: vec![],
-            output_kinds: vec![Number],
-            output_bindings: vec![a.clone()],
-            over_bindings: over_bindings.clone(),
-            bound_input_vars: bound_vars(&vec![]),
-            bound_output_vars: bound_vars(&vec![a.clone()]),
-            bound_aggregate_vars: bound_over_vars,
-        }),
-        _ => {
-            if view_id.starts_with("! ") {
-                let ix = program.ids.iter().position(|id| *id == view_id[2..]).unwrap();
-                Some(Primitive{
-                    primitive: PrimitiveOrNegated::Negated(ix),
-                    input_kinds: program.schemas[ix].clone(),
-                    input_bindings: bindings.clone(),
-                    output_kinds: vec![],
-                    output_bindings: vec![],
-                    over_bindings: vec![],
-                    bound_input_vars: bound_vars(bindings),
-                    bound_output_vars: bound_vars(&vec![]),
-                    bound_aggregate_vars: bound_vars(&vec![]),
-                })
-            } else {
-                None
-            }
-        }
-    }
-}
-
 pub fn compile_query(query: &Query, program: &Program, strings: &mut Vec<String>) -> runtime::Query {
     let mut upstream = vec![];
     let mut chunks = vec![];
     let mut primitives = vec![];
     for clause in query.clauses.iter() {
         let view = program.ids.iter().position(|id| *id == clause.view);
-        let primitive = as_primitive(&program, &clause.view, &clause.bindings, &clause.over_bindings);
+        let primitive = primitive::for_bootstrap(&program, &clause.view, &clause.bindings, &clause.over_bindings);
         match (view, primitive) {
             (Some(ix), None) => {
                 upstream.push(ix);
@@ -589,12 +531,7 @@ pub fn compile_input(input: &Input, schema: &[Kind], strings: &mut Vec<String>) 
                 match *kind {
                     Kind::Id => data.push(fields[*column].parse::<u64>().unwrap()),
                     Kind::Number => data.push(runtime::from_number(fields[*column].parse::<f64>().unwrap())),
-                    Kind::Text => {
-                        let field = fields[*column].to_owned();
-                        data.push(hash(&field));
-                        data.push(strings.len() as u64);
-                        strings.push(field);
-                    }
+                    Kind::Text => push_string(&mut data, strings, fields[*column].to_owned()),
                 }
             }
         }
@@ -605,12 +542,7 @@ pub fn compile_input(input: &Input, schema: &[Kind], strings: &mut Vec<String>) 
             match (value, *kind) {
                 (&Value::Id(id), Kind::Id) => data.push(id),
                 (&Value::Number(number), Kind::Number) => data.push(runtime::from_number(number)),
-                (&Value::Text(ref text), Kind::Text) => {
-                    let text = text.to_owned();
-                    data.push(hash(&text));
-                    data.push(strings.len() as u64);
-                    strings.push(text);
-                }
+                (&Value::Text(ref text), Kind::Text) => push_string(&mut data, strings, text.to_owned()),
                 _ => panic!("Kind mismatch: {:?} {:?}", kind, value),
             }
         }
@@ -826,7 +758,7 @@ pub fn load<P: AsRef<Path>>(filenames: &[P]) -> Program {
 #[cfg(test)]
 pub mod tests{
     use super::*;
-    use runtime;
+    use runtime::{to_number};
     use test::{Bencher, black_box};
 
     #[test]
@@ -900,34 +832,34 @@ pub mod tests{
         let mut runtime_program = compile(&bootstrap_program);
         runtime_program.run();
         assert_set_eq!(
-            runtime_program.states[2].data.iter().map(|d| runtime::to_number(*d)),
+            runtime_program.states[2].data.iter().map(|d| to_number(*d)),
             vec![3.0,4.0,6.0,8.0, 6.0,7.0,9.0,11.0, 11.0,12.0,14.0,16.0]
             );
         assert_set_eq!(
-            runtime_program.states[4].data.iter().map(|d| runtime::to_number(*d)),
+            runtime_program.states[4].data.iter().map(|d| to_number(*d)),
             vec![3.0,4.0,6.0,8.0]
             );
         assert_set_eq!(
-            runtime_program.states[6].data.iter().map(|d| runtime::to_number(*d)),
+            runtime_program.states[6].data.iter().map(|d| to_number(*d)),
             vec![17.0]
             );
         assert_set_eq!(
             runtime_program.states[9].data.chunks(2).map(|chunk|
-                (runtime::to_number(chunk[0]), runtime::to_number(chunk[1]))),
+                (to_number(chunk[0]), to_number(chunk[1]))),
             vec![(1.5, 3.0), (2.0, 4.0), (2.7, 5.4)]
             );
         assert_set_eq!(
             runtime_program.states[12].data.chunks(3).map(|chunk|
-                (&runtime_program.strings[chunk[1] as usize][..], runtime::to_number(chunk[2]))),
+                (&runtime_program.strings[chunk[1] as usize][..], to_number(chunk[2]))),
             vec![("alice", 100.0), ("bob", 50.0), ("eve", 200.0)]
             );
         assert_set_eq!(
             runtime_program.states[14].data.chunks(3).map(|chunk|
-                (&runtime_program.strings[chunk[1] as usize][..], runtime::to_number(chunk[2]))),
+                (&runtime_program.strings[chunk[1] as usize][..], to_number(chunk[2]))),
             vec![("alice corp", 250.0), ("evil eve studios", 100.0)]
             );
         assert_set_eq!(
-            runtime_program.states[16].data.iter().map(|d| runtime::to_number(*d)),
+            runtime_program.states[16].data.iter().map(|d| to_number(*d)),
             vec![350.0]
             );
     }
@@ -975,6 +907,25 @@ pub mod tests{
         assert_set_eq!(
             runtime_program.states[8].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
             vec!["alice", "bob", "cin"]
+            );
+    }
+
+    #[test]
+    pub fn test_strings() {
+        let bootstrap_program = load(&["data/strings.imp"]);
+        let mut runtime_program = compile(&bootstrap_program);
+        runtime_program.run();
+        assert_set_eq!(
+            runtime_program.states[2].data.chunks(3).map(|chunk| (&runtime_program.strings[chunk[1] as usize][..], to_number(chunk[2]))),
+            vec![("apple", 0.0), ("cake", 1.0), ("swordfish", 2.0)]
+            );
+        assert_set_eq!(
+            runtime_program.states[4].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
+            vec!["apple, cake, swordfish"]
+            );
+        assert_set_eq!(
+            runtime_program.states[6].data.chunks(2).map(|chunk| &runtime_program.strings[chunk[1] as usize][..]),
+            vec!["apple"]
             );
     }
 }

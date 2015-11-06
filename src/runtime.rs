@@ -4,6 +4,8 @@ use std::rc::Rc;
 use std::mem::size_of;
 use std::borrow::Cow;
 
+use primitive;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Chunk {
     pub data: Vec<u64>,
@@ -359,108 +361,6 @@ pub enum Direction {
     Descending,
 }
 
-#[derive(Clone, Debug, Copy)]
-pub enum Primitive {
-    Add,
-    Sum,
-    Ordinal,
-}
-
-// TODO this is grossly inefficient compared to untyped sort
-fn typed_sort(chunk: &Chunk, ixes: &[(usize, Kind, Direction)], strings: &Vec<String>) -> Chunk {
-    let mut data = chunk.data.clone();
-    for &(ix, kind, direction) in ixes.iter().rev() {
-        let mut new_data = Vec::with_capacity(data.len());
-        match kind {
-            Kind::Id => {
-                let mut buffer = vec![];
-                for row in data.chunks(chunk.row_width) {
-                    buffer.push((row[ix], row));
-                }
-                match direction {
-                    Direction::Ascending => buffer.sort_by(|&(key_a, _), &(key_b, _)| key_a.cmp(&key_b)),
-                    Direction::Descending => buffer.sort_by(|&(key_a, _), &(key_b, _)| key_b.cmp(&key_a)),
-                }
-                for (_, row) in buffer.into_iter() {
-                    new_data.extend(row);
-                }
-            }
-            Kind::Number => {
-                let mut buffer = vec![];
-                for row in data.chunks(chunk.row_width) {
-                    buffer.push((to_number(row[ix]), row));
-                }
-                // TODO NaN can cause panic here
-                match direction {
-                    Direction::Ascending => buffer.sort_by(|&(key_a, _), &(key_b, _)| key_a.partial_cmp(&key_b).unwrap()),
-                    Direction::Descending => buffer.sort_by(|&(key_a, _), &(key_b, _)| key_b.partial_cmp(&key_a).unwrap()),
-                }
-                for (_, row) in buffer.into_iter() {
-                    new_data.extend(row);
-                }
-            }
-            Kind::Text => {
-                let mut buffer = vec![];
-                for row in data.chunks(chunk.row_width) {
-                    buffer.push((&strings[row[ix+1] as usize], row));
-                }
-                match direction {
-                    Direction::Ascending => buffer.sort_by(|&(ref key_a, _), &(ref key_b, _)| key_a.cmp(key_b)),
-                    Direction::Descending => buffer.sort_by(|&(ref key_a, _), &(ref key_b, _)| key_b.cmp(key_a)),
-                }
-                for (_, row) in buffer.into_iter() {
-                    new_data.extend(row);
-                }
-            }
-        }
-        data = new_data;
-    }
-    Chunk{data: data, row_width: chunk.row_width}
-}
-
-impl Primitive {
-    fn apply(&self, chunk: &Chunk, input_ixes: &[usize], group_ixes: &[usize], over_ixes: &[(usize, Kind, Direction)], strings: &Vec<String>) -> Chunk {
-        let mut data = vec![];
-        match (*self, input_ixes) {
-            (Primitive::Add, [a, b]) => {
-                for row in chunk.data.chunks(chunk.row_width) {
-                    data.extend(row);
-                    data.push(from_number(to_number(row[a]) + to_number(row[b])));
-                }
-            }
-            (Primitive::Sum, [a]) => {
-                let sorted_chunk = chunk.sort(group_ixes);
-                for group in sorted_chunk.groups(group_ixes) {
-                    let mut sum = 0f64;
-                    for row in group.chunks(chunk.row_width) {
-                        sum += to_number(row[a]);
-                    }
-                    for row in group.chunks(chunk.row_width) {
-                        data.extend(row);
-                        data.push(from_number(sum));
-                    }
-                }
-            }
-            (Primitive::Ordinal, []) => {
-                let sorted_chunk = typed_sort(chunk, over_ixes, strings).sort(group_ixes);
-                for group in sorted_chunk.groups(group_ixes) {
-                    for (ordinal, row) in group.chunks(chunk.row_width).enumerate() {
-                        data.extend(row);
-                        data.push(from_number((ordinal + 1) as f64));
-                    }
-                }
-            }
-            _ => panic!("What are this: {:?} {:?} {:?}", self, input_ixes, group_ixes)
-        }
-        let num_outputs = match *self {
-            Primitive::Add => 1,
-            Primitive::Sum => 1,
-            Primitive::Ordinal => 1,
-        };
-        Chunk{data: data, row_width: chunk.row_width + num_outputs}
-    }
-}
-
 #[derive(Clone, Debug)]
 pub enum Action {
     Sort(usize, Vec<usize>),
@@ -470,7 +370,7 @@ pub enum Action {
     AntiJoin(usize, usize, Vec<usize>, Vec<usize>),
     SelfJoin(usize, usize, usize),
     Filter(usize, usize, u64),
-    Apply(usize, Primitive, Vec<usize>, Vec<usize>, Vec<(usize, Kind, Direction)>),
+    Apply(usize, primitive::Primitive, Vec<usize>, Vec<usize>, Vec<(usize, Kind, Direction)>),
     Extend(usize, Vec<u64>),
     DebugChunk(usize),
     DebugText(usize, usize),
@@ -484,7 +384,7 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn run(&self, strings: &Vec<String>, states: &[Rc<Chunk>]) -> Chunk {
+    pub fn run(&self, strings: &mut Vec<String>, states: &[Rc<Chunk>]) -> Chunk {
         let mut chunks = self.upstream.iter().map(|&ix| Cow::Borrowed(&*states[ix])).collect::<Vec<_>>();
         for action in self.actions.iter() {
             // println!("");
@@ -586,6 +486,12 @@ pub struct Program {
     pub strings: Vec<String>, // to be replaced by gc
 }
 
+pub fn push_string(data: &mut Vec<u64>, strings: &mut Vec<String>, string: String) {
+    data.push(hash(&string));
+    data.push(strings.len() as u64);
+    strings.push(string);
+}
+
 #[derive(Clone, Debug)]
 pub enum View {
     Input,
@@ -618,8 +524,9 @@ impl Program {
     }
 
     pub fn run(&mut self) {
-        let &mut Program{ref mut states, ref views, ref downstreams, ref mut dirty, ref strings, ..} = self;
+        let &mut Program{ref mut states, ref views, ref downstreams, ref mut dirty, ref mut strings, ..} = self;
         while let Some(ix) = dirty.iter().position(|&is_dirty| is_dirty) {
+            println!("Running {:?}", ix);
             dirty[ix] = false;
             let new_chunk = match views[ix] {
                 View::Input => panic!("How did an input get dirtied?"),
@@ -841,12 +748,7 @@ pub mod tests{
                 match *kind {
                     Kind::Id => data.push(field.parse::<u64>().unwrap()),
                     Kind::Number => data.push(from_number(field.parse::<f64>().unwrap())),
-                    Kind::Text => {
-                        let field = field.to_owned();
-                        data.push(hash(&field));
-                        data.push(strings.len() as u64);
-                        strings.push(field);
-                    }
+                    Kind::Text => push_string(&mut data, strings, field.to_owned())
                 }
             }
         }
@@ -928,7 +830,7 @@ pub mod tests{
 
             result_ix: 5
         };
-        query.run(&strings, &states[..])
+        query.run(&mut strings, &states[..])
     }
 
     #[test]

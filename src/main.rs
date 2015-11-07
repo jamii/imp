@@ -11,6 +11,10 @@ extern crate test;
 extern crate time;
 extern crate regex;
 
+use std::io::prelude::*;
+use std::fs::File;
+use std::rc::Rc;
+
 macro_rules! time {
     ($name:expr, $expr:expr) => {{
         let start = ::time::precise_time_s();
@@ -40,11 +44,26 @@ fn run(filenames: &[String]) -> () {
     let bootstrap_program = bootstrap::load(filenames);
     print!("compiling...");
     let mut runtime_program = bootstrap::compile(&bootstrap_program);
+    print!("injecting...");
+    let mut text = String::new();
+    File::open("data/imp.imp").unwrap().read_to_string(&mut text).unwrap();
+    {
+        let runtime::Program{ref mut states, ref mut strings, ..} = runtime_program;
+        let mut data = vec![];
+        runtime::push_string(&mut data, strings, "program".to_owned());
+        data.push(runtime::from_number(0.0));
+        data.push(runtime::from_number(text.len() as f64));
+        runtime::push_string(&mut data, strings, "program".to_owned());
+        data.push(runtime::from_number(0.0));
+        data.push(runtime::from_number(text.len() as f64));
+        runtime::push_string(&mut data, strings, text);
+        let mut chunk = (*states[0]).clone();
+        chunk.data = data;
+        states[0] = Rc::new(chunk);
+    }
     print!("running...");
     runtime_program.run();
-    println!("done!");
-    println!("{:#?}", &runtime_program.views);
-    println!("{:#?}", &runtime_program.states[runtime_program.states.len() - 1]);
+    runtime_program.print();
 }
 
 fn watch(filenames: &[String]) -> () {
@@ -55,6 +74,15 @@ fn watch(filenames: &[String]) -> () {
 
 fn main() {
     use std::env;
+    use regex::Regex;
+    use std::io::prelude::*;
+    use std::fs::File;
+    let mut text = String::new();
+    File::open("data/imp.imp").unwrap().read_to_string(&mut text).unwrap();
+    for (a,b) in Regex::new(r"\n\+((\n[^\+-=].*)+)").unwrap().find_iter(&text) {
+        println!("{:?}", &text[a..b]);
+        println!("");
+    }
     let args = env::args().collect::<Vec<String>>();
     match &*args[1] {
         "--run" => run(&args[2..]),

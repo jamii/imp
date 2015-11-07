@@ -82,7 +82,7 @@ number_u64 -> u64
   = integer_digits { match_str.parse::<u64>().unwrap() }
 
 number_f64 -> f64
-  = integer_digits { match_str.parse::<f64>().unwrap() }
+  = "-"? integer_digits { match_str.parse::<f64>().unwrap() }
 
 decimal_digits = [0-9]+ ("." [0-9]+)? { () }
 integer_digits = [0-9]+

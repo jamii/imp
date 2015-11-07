@@ -6,7 +6,7 @@ use std::borrow::Cow;
 
 use primitive;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Chunk {
     pub data: Vec<u64>,
     pub row_width: usize,
@@ -245,6 +245,16 @@ impl Chunk {
         }
         Chunk{ data: data, row_width: self.row_width + constants.len() }
     }
+    pub fn print(&self, kinds: &Vec<Kind>, strings: &Vec<String>) {
+        for row in self.data.chunks(self.row_width) {
+            for col in 0..kinds.len() {
+                let ix = kinds[0..col].iter().map(|kind| kind.width()).sum();
+                kinds[col].print(row, ix, strings);
+                print!("\t");
+            }
+            print!("\n");
+        }
+    }
 }
 
 impl<'a> Iterator for Groups<'a> {
@@ -338,6 +348,14 @@ impl Kind {
             Kind::Text => size_of::<(Hash, Text)>(),
         };
         bytes / 8
+    }
+
+    pub fn print(&self, row: &[u64], ix: usize, strings: &Vec<String>) {
+        match *self {
+            Kind::Id => print!("{:?}", row[ix]),
+            Kind::Number => print!("{:?}", to_number(row[ix])),
+            Kind::Text => print!("{:?}", &strings[row[ix+1] as usize]),
+        }
     }
 }
 
@@ -499,6 +517,19 @@ pub enum View {
     Union(Union),
 }
 
+// TODO assumes both will have the same sort order. is that safe?
+pub fn chunk_eq(a: &Chunk, b: &Chunk, kinds: &Vec<Kind>) -> bool {
+    let a_data = &a.data;
+    let b_data = &b.data;
+    return
+        (a_data.len() == b_data.len())
+        && (a.row_width == b.row_width)
+        && (0..kinds.len()).all(|kind_ix| {
+            let col = kinds[..kind_ix].iter().map(|kind| kind.width()).sum();
+            (col..a_data.len()).step_by(a.row_width).all(|value_ix| a_data[value_ix] == b_data[value_ix])
+        })
+}
+
 impl Program {
     pub fn get_state(&self, id: ViewId) -> &Chunk {
         let &Program{ref ids, ref states, ..} = self;
@@ -524,7 +555,7 @@ impl Program {
     }
 
     pub fn run(&mut self) {
-        let &mut Program{ref mut states, ref views, ref downstreams, ref mut dirty, ref mut strings, ..} = self;
+        let &mut Program{ref schemas, ref mut states, ref views, ref downstreams, ref mut dirty, ref mut strings, ..} = self;
         while let Some(ix) = dirty.iter().position(|&is_dirty| is_dirty) {
             println!("Running {:?}", ix);
             dirty[ix] = false;
@@ -533,13 +564,26 @@ impl Program {
                 View::Query(ref query) => query.run(strings, &states[..]),
                 View::Union(ref union) => union.run(&states[..])
             };
-            // TODO using != assumes both will have the same sort order. is that safe?
-            if *states[ix] != new_chunk {
+            if !chunk_eq(&states[ix], &new_chunk, &schemas[ix]) {
                 states[ix] = Rc::new(new_chunk);
                 for &downstream_ix in downstreams[ix].iter() {
                     dirty[downstream_ix] = true;
                 }
             }
+            // states[ix].print(&schemas[ix], strings);
+        }
+        for ix in 0..schemas.len() {
+            println!("View {:?}", ix);
+            states[ix].print(&schemas[ix], strings);
+            println!("");
+        }
+    }
+
+    pub fn print(&self) {
+        for ix in 0..self.ids.len() {
+            println!("View {:?}", ix);
+            self.states[ix].print(&self.schemas[ix], &self.strings);
+            println!("");
         }
     }
 }

@@ -1,0 +1,53 @@
+outside says ?pk:text ?pa:number ?pz:number has child ?ck:text ?ca:number ?cz:number with text ?c:text
+=
+
+child ?ck:text ?ca:number ?cz:number of ?pk:text ?pa:number ?pz:number has text ?c:text
++
+outside says ?pk ?pa ?pz has child ?ck ?ca ?cz with text ?c
++
+?ck is found in ?pk by capture ?n of ?re
+child ?pk ?pa ?pz of _ _ _ has text ?p
+capture ?n of result _ of ?p searched by ?re is at ?ra to ?rz
+?ca = ?pa + ?ra
+?cz = ?pa + ?rz
+the text at ?ra to ?rz in ?p is ?c
+
+?child:text is found in ?parent:text by capture ?n:number of ?regex:text
+=
+"view" "program" 0 "(.+\n)+"
+"head" "view" 0 "^.*"
+"insert" "view" 1 "\n\+((\n[^\+-=].*)+)"
+"remove" "view" 1 "\n-((\n[^\+-=].*)+)"
+"input" "view" 1 "\n=(.*(\n[^\+-=].*)+)"
+"variable with kind" "head" 2 "(^|\s)(\?[:alnum:]*:[:alnum:]*)"
+"kind" "variable with kind" 1 ":([:alnum:]*)"
+"variable" "variable with kind" 1 "\?([:alnum:]*)"
+"clause" "insert" 1 "\n(.*)"
+"clause" "remove" 1 "\n(.*)"
+"variable" "clause" 2 "(^|\s)(\?[:alnum:]*)"
+"unbound" "clause" 2 "(^|\s)(_)\S*"
+"id" "clause" 2 "(^|\s)(#[:digit:]+)"
+"number" "clause" 2 "(^|\s)(-?([:digit:]|\.)+)"
+"text" "clause" 2 "(^|\s)(\x22(\\\x22|[^\x22])*\x22)"
+"import" "input" 0 "^.*"
+"filename" "import" 1 "^\s*(\S*)"
+"cols" "import" 1 "^\s*\S*(.*)"
+"col" "cols" 1 "\s*(\S*)"
+"row" "input" 1 "\n(.*)"
+"id" "row" 2 "(^|\s)(#[:digit:]+)"
+"number" "row" 2 "(^|\s)(-?([:digit:]|\.)+)"
+"text" "row" 2 "(^|\s)(\x22(\\\x22|[^\x22])*\x22)"
+
+?n:text is a primitive view
+=
+"_ = _ + _"
+"_ = sum(_)"
+"row _"
+"_ < _"
+"_ <- _"
+"min"
+"result _ of _ split by _ is at _ to _"
+"result _ of _ searched by _ is at _ to _"
+"_ with _ replaced by _ is _"
+"the text at _ to _ in _ is _"
+"_ has length _"

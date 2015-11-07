@@ -82,11 +82,14 @@ pub enum Primitive {
     Ordinal,
     LessThan,
     Copy,
+    CopyString,
     Min,
     Split,
     Search,
+    Capture,
     Replace,
     Substring,
+    Length,
 }
 
 pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<(Binding, Direction)>) -> Option<bootstrap::Primitive> {
@@ -149,6 +152,17 @@ pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec
             bound_output_vars: bound_vars(&vec![a.clone()]),
             bound_aggregate_vars: bound_over_vars,
         }),
+        ("_ <<- _", [ref a, ref b]) => Some(bootstrap::Primitive{
+            primitive: PrimitiveOrNegated::Primitive(CopyString),
+            input_kinds: vec![Text],
+            input_bindings: vec![b.clone()],
+            output_kinds: vec![Text],
+            output_bindings: vec![a.clone()],
+            over_bindings: over_bindings.clone(),
+            bound_input_vars: bound_vars(&vec![b.clone()]),
+            bound_output_vars: bound_vars(&vec![a.clone()]),
+            bound_aggregate_vars: bound_over_vars,
+        }),
         ("min", []) => Some(bootstrap::Primitive{
             primitive: PrimitiveOrNegated::Primitive(Min),
             input_kinds: vec![],
@@ -160,26 +174,37 @@ pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec
             bound_output_vars: bound_vars(&vec![]),
             bound_aggregate_vars: bound_over_vars,
         }),
-        ("result _ of _ split by _ is at _-_", [ref chunk_ix, ref text, ref regex, ref from_ix, ref to_ix]) => Some(bootstrap::Primitive{
+        ("result _ of _ split by _ is at _ to _ breaking at _", [ref result_ix, ref text, ref regex, ref from_ix, ref to_ix, ref break_ix]) => Some(bootstrap::Primitive{
             primitive: PrimitiveOrNegated::Primitive(Split),
             input_kinds: vec![Text, Text],
             input_bindings: vec![text.clone(), regex.clone()],
-            output_kinds: vec![Number, Number, Number],
-            output_bindings: vec![chunk_ix.clone(), from_ix.clone(), to_ix.clone()],
+            output_kinds: vec![Number, Number, Number, Number],
+            output_bindings: vec![result_ix.clone(), from_ix.clone(), to_ix.clone(), break_ix.clone()],
             over_bindings: over_bindings.clone(),
             bound_input_vars: bound_vars(&vec![text.clone(), regex.clone()]),
-            bound_output_vars: bound_vars(&vec![chunk_ix.clone(), from_ix.clone(), to_ix.clone()]),
+            bound_output_vars: bound_vars(&vec![result_ix.clone(), from_ix.clone(), to_ix.clone(), break_ix.clone()]),
             bound_aggregate_vars: bound_over_vars,
         }),
-        ("result _ of _ searched by _ is at _-_", [ref chunk_ix, ref text, ref regex, ref from_ix, ref to_ix]) => Some(bootstrap::Primitive{
+        ("result _ of _ searched by _ is at _ to _", [ref result_ix, ref text, ref regex, ref from_ix, ref to_ix]) => Some(bootstrap::Primitive{
             primitive: PrimitiveOrNegated::Primitive(Search),
             input_kinds: vec![Text, Text],
             input_bindings: vec![text.clone(), regex.clone()],
             output_kinds: vec![Number, Number, Number],
-            output_bindings: vec![chunk_ix.clone(), from_ix.clone(), to_ix.clone()],
+            output_bindings: vec![result_ix.clone(), from_ix.clone(), to_ix.clone()],
             over_bindings: over_bindings.clone(),
             bound_input_vars: bound_vars(&vec![text.clone(), regex.clone()]),
-            bound_output_vars: bound_vars(&vec![chunk_ix.clone(), from_ix.clone(), to_ix.clone()]),
+            bound_output_vars: bound_vars(&vec![result_ix.clone(), from_ix.clone(), to_ix.clone()]),
+            bound_aggregate_vars: bound_over_vars,
+        }),
+        ("capture _ of result _ of _ searched by _ is at _ to _", [ref capture_ix, ref result_ix, ref text, ref regex, ref from_ix, ref to_ix]) => Some(bootstrap::Primitive{
+            primitive: PrimitiveOrNegated::Primitive(Capture),
+            input_kinds: vec![Text, Text],
+            input_bindings: vec![text.clone(), regex.clone()],
+            output_kinds: vec![Number, Number, Number, Number],
+            output_bindings: vec![capture_ix.clone(), result_ix.clone(), from_ix.clone(), to_ix.clone()],
+            over_bindings: over_bindings.clone(),
+            bound_input_vars: bound_vars(&vec![text.clone(), regex.clone()]),
+            bound_output_vars: bound_vars(&vec![capture_ix.clone(), result_ix.clone(), from_ix.clone(), to_ix.clone()]),
             bound_aggregate_vars: bound_over_vars,
         }),
         ("_ with _ replaced by _ is _", [ref text, ref regex, ref replacement, ref result]) => Some(bootstrap::Primitive{
@@ -193,7 +218,7 @@ pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec
             bound_output_vars: bound_vars(&vec![result.clone()]),
             bound_aggregate_vars: bound_over_vars,
         }),
-        ("the text at _-_ in _ is _", [ref from_ix, ref to_ix, ref text, ref result]) => Some(bootstrap::Primitive{
+        ("the text at _ to _ in _ is _", [ref from_ix, ref to_ix, ref text, ref result]) => Some(bootstrap::Primitive{
             primitive: PrimitiveOrNegated::Primitive(Substring),
             input_kinds: vec![Number, Number, Text],
             input_bindings: vec![from_ix.clone(), to_ix.clone(), text.clone()],
@@ -202,6 +227,17 @@ pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec
             over_bindings: over_bindings.clone(),
             bound_input_vars: bound_vars(&vec![from_ix.clone(), to_ix.clone(), text.clone()]),
             bound_output_vars: bound_vars(&vec![result.clone()]),
+            bound_aggregate_vars: bound_over_vars,
+        }),
+        ("_ has length _", [ref text, ref length]) => Some(bootstrap::Primitive{
+            primitive: PrimitiveOrNegated::Primitive(Length),
+            input_kinds: vec![Text],
+            input_bindings: vec![text.clone()],
+            output_kinds: vec![Number],
+            output_bindings: vec![length.clone()],
+            over_bindings: over_bindings.clone(),
+            bound_input_vars: bound_vars(&vec![text.clone()]),
+            bound_output_vars: bound_vars(&vec![length.clone()]),
             bound_aggregate_vars: bound_over_vars,
         }),
         _ => {
@@ -270,6 +306,13 @@ impl Primitive {
                     data.push(row[a]);
                 }
             }
+            (Primitive::CopyString, [a]) => {
+                for row in chunk.data.chunks(chunk.row_width) {
+                    data.extend(row);
+                    data.push(row[a]);
+                    data.push(row[a+1]);
+                }
+            }
             (Primitive::Min, []) => {
                 let sorted_chunk = chunk.sort(group_ixes);
                 for group in sorted_chunk.groups(group_ixes) {
@@ -288,31 +331,55 @@ impl Primitive {
                 for row in chunk.data.chunks(chunk.row_width) {
                     let text_string = &strings[row[text+1] as usize];
                     let regex_string = &strings[row[regex+1] as usize];
-                    let mut last_ix = 0;
+                    let mut last_from_ix = 0;
+                    let mut last_to_ix = 0;
                     let mut count = 0;
-                    for (chunk_ix, (from_ix, to_ix)) in Regex::new(regex_string).unwrap().find_iter(text_string).enumerate() {
+                    for (result_ix, (from_ix, to_ix)) in Regex::new(regex_string).unwrap().find_iter(text_string).enumerate() {
                         data.extend(row);
-                        data.push(from_number(chunk_ix as f64));
-                        data.push(from_number(last_ix as f64));
+                        data.push(from_number(result_ix as f64));
+                        data.push(from_number(last_from_ix as f64));
                         data.push(from_number(from_ix as f64));
-                        last_ix = to_ix;
+                        data.push(from_number(last_to_ix as f64));
+                        last_from_ix = from_ix;
+                        last_to_ix = to_ix;
                         count += 1;
                     }
                     data.extend(row);
                     data.push(from_number(count as f64));
-                    data.push(from_number(last_ix as f64));
+                    data.push(from_number(last_from_ix as f64));
                     data.push(from_number(text_string.len() as f64));
+                    data.push(from_number(last_to_ix as f64));
                 }
             }
             (Primitive::Search, [text, regex]) => {
                 for row in chunk.data.chunks(chunk.row_width) {
                     let text_string = &strings[row[text+1] as usize];
                     let regex_string = &strings[row[regex+1] as usize];
-                    for (chunk_ix, (from_ix, to_ix)) in Regex::new(regex_string).unwrap().find_iter(text_string).enumerate() {
+                    for (result_ix, (from_ix, to_ix)) in Regex::new(regex_string).unwrap().find_iter(text_string).enumerate() {
                         data.extend(row);
-                        data.push(from_number(chunk_ix as f64));
+                        data.push(from_number(result_ix as f64));
                         data.push(from_number(from_ix as f64));
                         data.push(from_number(to_ix as f64));
+                    }
+                }
+            }
+            (Primitive::Capture, [text, regex]) => {
+                for row in chunk.data.chunks(chunk.row_width) {
+                    let text_string = &strings[row[text+1] as usize];
+                    let regex_string = &strings[row[regex+1] as usize];
+                    for (result_ix, capture) in Regex::new(regex_string).unwrap().captures_iter(text_string).enumerate() {
+                        for (capture_ix, ixes) in capture.iter_pos().enumerate() {
+                            match ixes {
+                                Some((from_ix, to_ix)) => {
+                                    data.extend(row);
+                                    data.push(from_number(capture_ix as f64));
+                                    data.push(from_number(result_ix as f64));
+                                    data.push(from_number(from_ix as f64));
+                                    data.push(from_number(to_ix as f64));
+                                }
+                                None => () // optional group was not matched
+                            }
+                        }
                     }
                 }
             }
@@ -340,6 +407,12 @@ impl Primitive {
                     push_string(&mut data, strings, result);
                 }
             }
+            (Primitive::Length, [text]) => {
+                for row in chunk.data.chunks(chunk.row_width) {
+                    data.extend(row);
+                    data.push(from_number(strings[row[text+1] as usize].len() as f64));
+                }
+            }
             _ => panic!("What are this: {:?} {:?} {:?}", self, input_ixes, group_ixes)
         }
         let num_outputs = match *self {
@@ -348,11 +421,14 @@ impl Primitive {
             Primitive::Ordinal => 1,
             Primitive::LessThan => 0,
             Primitive::Copy => 1,
+            Primitive::CopyString => 2,
             Primitive::Min => 0,
-            Primitive::Split => 3,
+            Primitive::Split => 4,
             Primitive::Search => 3,
+            Primitive::Capture => 4,
             Primitive::Replace => 2,
             Primitive::Substring => 2,
+            Primitive::Length => 1,
         };
         Chunk{data: data, row_width: chunk.row_width + num_outputs}
     }

@@ -651,18 +651,10 @@ fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<(Bi
     (view_id, bindings, kinds, over_bindings)
 }
 
-// I have seen beyond the bounds of infinity and drawn down daemons from the stars
 fn parse_input(lines: Vec<&str>, view_id: ViewId, schema: Vec<Kind>) -> Vec<(ViewId, Vec<Kind>, View)> {
     let tsv = parse::input_tsv(lines[1]).unwrap();
-    let value_re = Regex::new(r#""[^"]*"|-?([:digit:]|\.)+|#[:digit:]+"#).unwrap();
     let rows = lines[2..].iter().map(|line| {
-        let values = line.matches(&value_re).map(|value_text| {
-            match value_text.chars().next().unwrap() {
-                '#' => Value::Id(value_text[1..].parse::<u64>().unwrap()),
-                '"' => Value::Text(value_text[1..value_text.len()-1].to_owned()),
-                _ => Value::Number(value_text.parse::<f64>().unwrap()),
-            }
-        }).collect::<Vec<_>>();
+        let values = parse::input_row(line).unwrap();
         assert_eq!(values.len(), schema.len());
         values
     }).collect();

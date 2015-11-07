@@ -10,6 +10,10 @@ columns -> Vec<usize>
   = number_usize ++ " "
 
 #[pub]
+input_row -> Vec<Value>
+  = value ++ " "
+
+#[pub]
 clause -> (Vec<Word>, Vec<(Binding, Direction)>)
   = sc:simple_clause oc:over_clause { (sc, oc) }
 
@@ -45,8 +49,7 @@ kinded_binding -> KindedBinding
   = kinded_variable / b:binding { (b, None) }
 
 binding -> Binding
-  = unbound_variable / named_variable
-  / constant_id / constant_text / constant_number
+  = unbound_variable / named_variable / constant
 
 unbound_variable -> Binding
   = "_" { Binding::Unbound }
@@ -57,14 +60,20 @@ kinded_variable -> KindedBinding
 named_variable -> Binding
   = n:name kind? { Binding::Variable(n) }
 
-constant_id -> Binding
-  = "#" id:number_u64 { Binding::Constant(Value::Id(id)) }
+constant -> Binding
+  = v:value { Binding::Constant(v) }
 
-constant_text -> Binding
-  = s:string_literal { Binding::Constant(Value::Text(s)) }
+value -> Value
+  = value_id / value_text / value_number
 
-constant_number -> Binding
-  = n:number_f64 { Binding::Constant(Value::Number(n)) }
+value_id -> Value
+  = "#" id:number_u64 { Value::Id(id) }
+
+value_text -> Value
+  = s:string_literal { Value::Text(s) }
+
+value_number -> Value
+  = n:number_f64 { Value::Number(n) }
 
 // No escaping for now.
 string_literal -> String
@@ -96,7 +105,7 @@ number_u64 -> u64
   = integer_digits { match_str.parse::<u64>().unwrap() }
 
 number_f64 -> f64
-  = "-"? integer_digits { match_str.parse::<f64>().unwrap() }
+  = "-"? decimal_digits { match_str.parse::<f64>().unwrap() }
 
 decimal_digits = [0-9]+ ("." [0-9]+)? { () }
 integer_digits = [0-9]+

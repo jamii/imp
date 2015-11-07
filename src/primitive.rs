@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use regex::{Regex, NoExpand};
+use regex::{Regex};
 
 use runtime::{Chunk, Kind, Direction, from_number, to_number, push_string};
 use bootstrap::{self, Binding, bound_vars, PrimitiveOrNegated};
@@ -386,10 +386,10 @@ impl Primitive {
             (Primitive::Replace, [text, regex, replacement]) => {
                 for row in chunk.data.chunks(chunk.row_width) {
                     let result = {
-                        let text_string = &strings[row[text+1] as usize];
+                        let text_string = &*strings[row[text+1] as usize];
                         let regex_string = &strings[row[regex+1] as usize];
-                        let replacement_string = &strings[row[replacement+1] as usize];
-                        Regex::new(regex_string).unwrap().replace_all(text_string, NoExpand(replacement_string))
+                        let replacement_string = &*strings[row[replacement+1] as usize];
+                        Regex::new(regex_string).unwrap().replace_all(text_string, replacement_string)
                     };
                     data.extend(row);
                     push_string(&mut data, strings, result);

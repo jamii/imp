@@ -653,12 +653,7 @@ fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<(Bi
 
 // I have seen beyond the bounds of infinity and drawn down daemons from the stars
 fn parse_input(lines: Vec<&str>, view_id: ViewId, schema: Vec<Kind>) -> Vec<(ViewId, Vec<Kind>, View)> {
-    let mut words = lines[1].split(" ");
-    words.next().unwrap(); // drop "="
-    let tsv = words.next().map(|filename| {
-        let columns = words.map(|word| word.parse::<usize>().unwrap()).collect();
-        (filename.to_owned(), columns)
-    });
+    let tsv = parse::input_tsv(lines[1]).unwrap();
     let value_re = Regex::new(r#""[^"]*"|-?([:digit:]|\.)+|#[:digit:]+"#).unwrap();
     let rows = lines[2..].iter().map(|line| {
         let values = line.matches(&value_re).map(|value_text| {

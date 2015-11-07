@@ -2,6 +2,14 @@ use runtime::{Direction, Kind};
 use bootstrap::{Binding, Value, KindedBinding, Word};
 
 #[pub]
+input_tsv -> Option<(String, Vec<usize>)>
+  = "=" !. { None }
+  / "= " f:file_name " " cs:columns { Some((f, cs))}
+
+columns -> Vec<usize>
+  = number_usize ++ " "
+
+#[pub]
 clause -> (Vec<Word>, Vec<(Binding, Direction)>)
   = sc:simple_clause oc:over_clause { (sc, oc) }
 
@@ -76,7 +84,13 @@ name -> String
 
 identifier = [A-Za-z0-9]+
 
+file_name -> String
+  = [^ ]* { match_str.to_owned() }
+
 /** Numbers **/
+
+number_usize -> usize
+  = integer_digits { match_str.parse::<usize>().unwrap() }
 
 number_u64 -> u64
   = integer_digits { match_str.parse::<u64>().unwrap() }

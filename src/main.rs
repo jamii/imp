@@ -72,15 +72,6 @@ fn watch(filenames: &[String]) -> () {
 
 fn main() {
     use std::env;
-    use regex::Regex;
-    use std::io::prelude::*;
-    use std::fs::File;
-    let mut text = String::new();
-    File::open("data/imp.imp").unwrap().read_to_string(&mut text).unwrap();
-    for (a,b) in Regex::new(r"\n\+((\n[^\+-=].*)+)").unwrap().find_iter(&text) {
-        println!("{:?}", &text[a..b]);
-        println!("");
-    }
     let args = env::args().collect::<Vec<String>>();
     match &*args[1] {
         "--run" => run(&args[2..]),

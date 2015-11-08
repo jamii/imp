@@ -61,7 +61,7 @@ fn run(filenames: &[String]) -> () {
     }
     print!("running...");
     runtime_program.run();
-    runtime_program.print();
+    runtime_program.print(&bootstrap_program.ids);
 }
 
 fn watch(filenames: &[String]) -> () {

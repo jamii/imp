@@ -575,9 +575,9 @@ impl Program {
         }
     }
 
-    pub fn print(&self) {
+    pub fn print(&self, names: &Vec<String>) {
         for ix in 0..self.ids.len() {
-            println!("View {:?}", ix);
+            println!("View {:?}: {:?}", ix, &names[ix]);
             self.states[ix].print(&self.schemas[ix], &self.strings);
             println!("");
         }

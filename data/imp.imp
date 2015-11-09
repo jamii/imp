@@ -80,6 +80,36 @@ head ?ha ?hz is named ?name
 child "head" ?ha ?hz of "view" ?va ?vz has text _
 node ?n2 of type "union" is at ?va ?vz
 
+field ?f:number of node ?n:number has variable ?v:text and kind ?k:text
++
+node ?n of type "union" is at ?na ?nz
+child "head" ?ha ?hz of "view" ?na ?nz has text _
+child "variable with kind" ?vka ?vkz of "head" ?ha ?hz has text _
+child "variable" _ _ of "variable with kind" ?vka ?vkz has text ?v
+child "kind" _ _ of "variable with kind" ?vka ?vkz has text ?k
+row ?f over ?vka ?vkz ?v ?k
+
+values of kind ?k:text have width ?w:number
+=
+"id" 1
+"number" 1
+"text" 2
+
+member ?m:number of union node ?n:number is ?action:text node ?n2:number
++
+node ?n of type "union" is at ?na ?nz
+child ?action ?ca ?cz of "view" ?na ?nz has text _
+node ?n2 of type "query" is at ?ca ?cz
+row ?m over ?ca ?cz ?n2 ?action
+
+union node ?n:number has key ?f:number = ?v:number
++
+field ?f of node ?n has variable _ and kind ?k
+field ?f2 of node ?n has variable _ and kind ?k2
+?f2 < ?f
+values of kind ?k2 have width ?w
+?v = sum(?w) over ?f2 ?k2
+
 view ?n:text is primitive
 =
 "_ = _ + _"

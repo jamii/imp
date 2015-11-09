@@ -51,8 +51,34 @@ child "head" ?va ?vz of _ _ _ has text ?v
 clause ?va:number ?vz:number is named ?n:text
 +
 child "clause body" _ _ of "clause" ?va ?vz has text ?v
-"clause" contains "binding" found by capture _ of ?re
+"clause body" contains "binding" found by capture _ of ?re
 ?v with ?re replaced by "$1_" is ?n
+
+?k:text becomes a node of type ?t:text
+=
+"view" "union"
+"input" "input"
+"insert" "query"
+"remove" "query"
+
+node ?n:number of type ?t:text is at ?na:number ?nz:number
++
+?k becomes a node of type ?t
+child ?k ?na ?nz of _ _ _ has text _
+row ?n over ?nz ?na ?k ?t
+
+node ?n1:number depends on node ?n2:number
++
+node ?n1 of type "union" is at ?na ?nz
+child _ ?ca ?cz of "view" ?na ?nz has text _
+node ?n2 of type _ is at ?ca ?cz
++
+node ?n1 of type "query" is at ?na ?nz
+child "clause" ?ca ?cz of _ ?na ?nz has text _
+clause ?ca ?cz is named ?name
+head ?ha ?hz is named ?name
+child "head" ?ha ?hz of "view" ?va ?vz has text _
+node ?n2 of type "union" is at ?va ?vz
 
 view ?n:text is primitive
 =

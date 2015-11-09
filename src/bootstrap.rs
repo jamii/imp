@@ -969,7 +969,7 @@ pub mod tests{
             states[0] = Rc::new(chunk);
         }
         runtime_program.run();
-        runtime_program.print();
+        runtime_program.print(&bootstrap_program.ids);
         assert!(false);
     }
 }

@@ -35,7 +35,7 @@ child ?ck:text ?ca:number ?cz:number of ?pk:text ?pa:number ?pz:number has text 
 +
 outside says ?pk ?pa ?pz has child ?ck ?ca ?cz with text ?c
 +
-?pk contains _ ?ck found by capture ?n of ?re
+?pk contains ?ck found by capture ?n of ?re
 child ?pk ?pa ?pz of _ _ _ has text ?p
 capture ?n of result _ of ?p searched by ?re is at ?ra to ?rz
 ?ca = ?pa + ?ra
@@ -45,14 +45,70 @@ the text at ?ra to ?rz in ?p is ?c
 head ?va:number ?vz:number is named ?n:text
 +
 child "head" ?va ?vz of _ _ _ has text ?v
-"variable with kind" is found in "head" by capture _ of ?re
+"head" contains "variable with kind" found by capture _ of ?re
 ?v with ?re replaced by "$1_" is ?n
 
 clause ?va:number ?vz:number is named ?n:text
 +
 child "clause body" _ _ of "clause" ?va ?vz has text ?v
-"binding" is found in "clause" by capture _ of ?re
+"clause body" contains "binding" found by capture _ of ?re
 ?v with ?re replaced by "$1_" is ?n
+
+?k:text becomes a node of type ?t:text
+=
+"view" "union"
+"input" "input"
+"insert" "query"
+"remove" "query"
+
+node ?n:number of type ?t:text is at ?na:number ?nz:number
++
+?k becomes a node of type ?t
+child ?k ?na ?nz of _ _ _ has text _
+row ?n over ?nz ?na ?k ?t
+
+node ?n1:number depends on node ?n2:number
++
+node ?n1 of type "union" is at ?na ?nz
+child _ ?ca ?cz of "view" ?na ?nz has text _
+node ?n2 of type _ is at ?ca ?cz
++
+node ?n1 of type "query" is at ?na ?nz
+child "clause" ?ca ?cz of _ ?na ?nz has text _
+clause ?ca ?cz is named ?name
+head ?ha ?hz is named ?name
+child "head" ?ha ?hz of "view" ?va ?vz has text _
+node ?n2 of type "union" is at ?va ?vz
+
+field ?f:number of node ?n:number has variable ?v:text and kind ?k:text
++
+node ?n of type "union" is at ?na ?nz
+child "head" ?ha ?hz of "view" ?na ?nz has text _
+child "variable with kind" ?vka ?vkz of "head" ?ha ?hz has text _
+child "variable" _ _ of "variable with kind" ?vka ?vkz has text ?v
+child "kind" _ _ of "variable with kind" ?vka ?vkz has text ?k
+row ?f over ?vka ?vkz ?v ?k
+
+values of kind ?k:text have width ?w:number
+=
+"id" 1
+"number" 1
+"text" 2
+
+member ?m:number of union node ?n:number is ?action:text node ?n2:number
++
+node ?n of type "union" is at ?na ?nz
+child ?action ?ca ?cz of "view" ?na ?nz has text _
+node ?n2 of type "query" is at ?ca ?cz
+row ?m over ?ca ?cz ?n2 ?action
+
+union node ?n:number has key ?f:number = ?v:number
++
+field ?f of node ?n has variable _ and kind ?k
+field ?f2 of node ?n has variable _ and kind ?k2
+?f2 < ?f
+values of kind ?k2 have width ?w
+?v = sum(?w) over ?f2 ?k2
 
 view ?n:text is primitive
 =

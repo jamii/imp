@@ -63,7 +63,7 @@ fn run(filenames: &[String]) -> () {
     }
     print!("running...");
     runtime_program.run();
-    runtime_program.print();
+    runtime_program.print(&bootstrap_program.ids);
 }
 
 fn watch(filenames: &[String]) -> () {
@@ -74,15 +74,6 @@ fn watch(filenames: &[String]) -> () {
 
 fn main() {
     use std::env;
-    use regex::Regex;
-    use std::io::prelude::*;
-    use std::fs::File;
-    let mut text = String::new();
-    File::open("data/imp.imp").unwrap().read_to_string(&mut text).unwrap();
-    for (a,b) in Regex::new(r"\n\+((\n[^\+-=].*)+)").unwrap().find_iter(&text) {
-        println!("{:?}", &text[a..b]);
-        println!("");
-    }
     let args = env::args().collect::<Vec<String>>();
     match &*args[1] {
         "--run" => run(&args[2..]),

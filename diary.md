@@ -1341,3 +1341,176 @@ But I can't directly write:
 Most query languages don't support that anyway, so maybe it's ok?
 
 I piggybacked negation onto primitives too. The compiler is getting gnarly. Might be time for a cleanup soon.
+
+## Parsing
+
+I tried to work on editor integration and ended up just [procrastinating](https://github.com/jamii/imp/blob/master/data/csa.imp) a lot. This week I changed tack and started bootstrapping instead.
+
+The current parser is a [nasty mess](https://github.com/jamii/imp/blob/2e344bcdb4fd288c37052b8340cfad3b0dfc6878/src/bootstrap.rs#L626-L763) of regular expressions. This is partly because I care more at this stage about getting something working than making it pretty, but it's also because Imp doesn't really need or benefit from the traditional parsing formalisms.
+
+One reason for that is that I want parsing errors to be locally contained. In most languages, deleting a single parenthesis can make the whole program unparseable. This is a disaster for live programming. In Imp, the high-level structure of the program is a [regular language](https://en.wikipedia.org/wiki/Regular_language). There are only three levels of nesting (program -> view -> member -> clause) so each one gets to use a unique delimiter. The first half of the parser just splits up the program at these delimiters, not caring about the text between them. This means that syntax errors can only break things locally eg missing a view delimiter mashes two views together but leaves all the other views intact.
+
+The second reason is that the clauses themselves don't have a very well rigid grammar. Given the clause `most "cats" prefer ?x` the parser picks out the bindings `"cats"` and `?x` and then converts the remainder into the view name `most _ prefer _`. Handling that in a traditional grammar is mildly unpleasant.
+
+So instead the Imp grammar is given by tree of regular expressions:
+
+```
+?parent:text contains ?child:text found by capture ?n:number of ?regex:text
+=
+"program" "view" 0 "(.+\n?)+"
+"view" "head" 0 "^.*"
+"view" "insert" 1 "\n\+((\n[^\+-=].*)+)"
+"view" "remove" 1 "\n-((\n[^\+-=].*)+)"
+"view" "input" 1 "\n=(.*(\n[^\+-=].*)+)"
+"head" "variable with kind" 2 "(^|\s)(\?[:alnum:]*:[:alnum:]*)"
+"variable with kind" "kind" 1 ":([:alnum:]*)"
+"variable with kind" "variable" 1 "\?([:alnum:]*)"
+"insert" "clause" 1 "\n(.*)"
+"remove" "clause" 1 "\n(.*)"
+"clause" "negation" 0 "^! "
+"clause" "clause body" 2 "^(! )?(.*)"
+"clause body" "binding" 2 "(^|\s)(_\S*|\?[:alnum:]*|#[:digit:]+|-?[:digit:]+(\.[:digit]+)?|\x22(\\\x22|[^\x22])*\x22)"
+"binding" "unbound" 0 "^_\S*$"
+"binding" "variable" 1 "^\?([:alnum:]*)$"
+"binding" "id" 0 "^#[:digit:]+$"
+"binding" "number" 0 "^-?[:digit:]+(\.[:digit]+)?$"
+"binding" "text" 0 "^\x22(\\\x22|[^\x22])*\x22$"
+"input" "import" 0 "^.*"
+"import" "filename" 1 "^\s*(\S*)"
+"import" "cols" 1 "^\s*\S*(.*)"
+"cols" "col" 1 "\s*(\S*)"
+"input" "row" 1 "\n(.*)"
+"row" "value" 2 "(^|\s)(#[:digit:]+|-?[:digit:]+(\.[:digit]+)?|\x22(\\\x22|[^\x22])*\x22)"
+"value" "id" 0 "#[:digit:]+"
+"value" "number" 0 "-?[:digit:]+(\.[:digit]+)?"
+"value" "text" 0 "\x22(\\\x22|[^\x22])*\x22"
+```
+
+The result of parsing is a similar tree, where each node is identified by rule creating it and by the byte indices at which it starts and ends in the program text.
+
+```
+child ?ck:text ?ca:number ?cz:number of ?pk:text ?pa:number ?pz:number has text ?c:text
++
+outside says ?pk ?pa ?pz has child ?ck ?ca ?cz with text ?c
++
+?pk contains ?ck found by capture ?n of ?re
+child ?pk ?pa ?pz of _ _ _ has text ?p
+capture ?n of result _ of ?p searched by ?re is at ?ra to ?rz
+?ca = ?pa + ?ra
+?cz = ?pa + ?rz
+the text at ?ra to ?rz in ?p is ?c
+```
+
+I also added some basic debugging support which watches the file and prints results like:
+
+```
+View 4: "child _ _ _ of _ _ _ has text _"
+[Text, Number, Number, Text, Number, Number, Text]
+"value" 184 193 "row"   184 213 "\"program\""
+"value" 194 200 "row"   184 213 "\"view\""
+"value" 201 202 "row"   184 213 "0"
+"value" 203 213 "row"   184 213 "\"(.+\\n?)+\""
+"value" 214 220 "row"   214 235 "\"view\""
+"value" 221 227 "row"   214 235 "\"head\""
+...
+```
+
+That's the whole parser. It isn't pretty and there is some unpleasant repetition in the grammar, but every attempt I've made to reduce that repetition has resulted in something that is more complicated overall. When the whole parser consists of 28 rules and 6 lines of logic it's hard to gain anything from adding further abstraction.
+
+The [nasty mess](https://github.com/jamii/imp/blob/2e344bcdb4fd288c37052b8340cfad3b0dfc6878/src/bootstrap.rs#L626-L763) in the Rust version expresses more or less the same logic but is much more verbose. The reason for that is that I started by writing down the types I wanted to output:
+
+``` rust
+#[derive(Clone, Debug)]
+pub struct Program {
+    pub ids: Vec<ViewId>,
+    pub schedule: Vec<usize>,
+    pub schemas: Vec<Vec<Kind>>,
+    pub views: Vec<View>,
+}
+
+#[derive(Clone, Debug)]
+pub enum View {
+    Input(Input),
+    Query(Query),
+    Union(Union),
+}
+
+#[derive(Clone, Debug)]
+pub struct Input {
+    pub tsv: Option<(String, Vec<usize>)>,
+    pub rows: Vec<Vec<Value>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Query {
+    pub clauses: Vec<Clause>,
+    pub select: Vec<VariableId>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Union {
+    pub members: Vec<Member>,
+}
+
+#[derive(Clone, Debug)]
+pub enum Member {
+    Insert(ViewId),
+    Remove(ViewId),
+}
+
+#[derive(Clone, Debug)]
+pub struct Clause {
+    pub view: ViewId,
+    pub bindings: Vec<Binding>,
+    pub over_bindings: Vec<(Binding, runtime::Direction)>,
+}
+```
+
+By starting with a heterogenous tree of custom types I had *already missed* the opportunity to build a simple, data-driven parser like the Imp version. What's more, I can easily add information to the Imp version in a way that would require modifying types in the Rust version:
+
+```
+head ?va:number ?vz:number is named ?n:text
++
+child "head" ?va ?vz of _ _ _ has text ?v
+"head" contains "variable with kind" found by capture _ of ?re
+?v with ?re replaced by "$1_" is ?n
+
+clause ?va:number ?vz:number is named ?n:text
++
+child "clause body" _ _ of "clause" ?va ?vz has text ?v
+"clause" contains "binding" found by capture _ of ?re
+?v with ?re replaced by "$1_" is ?n
+
+view ?n:text is primitive
+=
+"_ = _ + _"
+"_ = sum(_)"
+"row _"
+"_ < _"
+"_ <- _"
+"_ <<- _"
+"min"
+"result _ of _ split by _ is at _ to _ breaking at _"
+"result _ of _ searched by _ is at _ to _"
+"capture _ of result _ of _ searched by _ is at _ to _"
+"_ with _ replaced by _ is _"
+"the text at _ to _ in _ is _"
+"_ has length _"
+
+clause ?va:number ?vz:number is primitive
++
+clause ?va ?vz is named ?n
+view ?n is primitive
+
+clause ?va:number ?vz:number is negated
++
+child "negation" _ _ of "clause" ?va ?vz has text _
+
+clause ?va:number ?vz:number is finite
++
+clause ?va ?vz is named _
+! clause ?va ?vz is primitive
+! clause ?va ?vz is negated
+```
+
+In a pointerful language like Rust or Clojure or Javascript I would have to spend time deciding where this data lives and how to access it. Any change to the organization of the pointer graph would require rewriting all the code that traverses it. In Imp I just define the data and refer to it directly. I strongly suspect that this is going to be a major improvement.

@@ -90,6 +90,8 @@ pub enum Primitive {
     Replace,
     Substring,
     Length,
+    IsNumber,
+    IsId,
 }
 
 pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<(Binding, Direction)>) -> Option<bootstrap::Primitive> {
@@ -238,6 +240,28 @@ pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec
             over_bindings: over_bindings.clone(),
             bound_input_vars: bound_vars(&vec![text.clone()]),
             bound_output_vars: bound_vars(&vec![length.clone()]),
+            bound_aggregate_vars: bound_over_vars,
+        }),
+        ("_ is number _", [ref text, ref number]) => Some(bootstrap::Primitive{
+            primitive: PrimitiveOrNegated::Primitive(IsNumber),
+            input_kinds: vec![Text],
+            input_bindings: vec![text.clone()],
+            output_kinds: vec![Number],
+            output_bindings: vec![number.clone()],
+            over_bindings: over_bindings.clone(),
+            bound_input_vars: bound_vars(&vec![text.clone()]),
+            bound_output_vars: bound_vars(&vec![number.clone()]),
+            bound_aggregate_vars: bound_over_vars,
+        }),
+        ("_ is id _", [ref text, ref id]) => Some(bootstrap::Primitive{
+            primitive: PrimitiveOrNegated::Primitive(IsId),
+            input_kinds: vec![Text],
+            input_bindings: vec![text.clone()],
+            output_kinds: vec![Id],
+            output_bindings: vec![id.clone()],
+            over_bindings: over_bindings.clone(),
+            bound_input_vars: bound_vars(&vec![text.clone()]),
+            bound_output_vars: bound_vars(&vec![id.clone()]),
             bound_aggregate_vars: bound_over_vars,
         }),
         _ => {
@@ -413,6 +437,30 @@ impl Primitive {
                     data.push(from_number(strings[row[text+1] as usize].len() as f64));
                 }
             }
+            (Primitive::IsNumber, [text]) => {
+                for row in chunk.data.chunks(chunk.row_width) {
+                    let text_string = &strings[row[text+1] as usize];
+                    match text_string.parse::<f64>() {
+                        Ok(number) => {
+                            data.extend(row);
+                            data.push(from_number(number));
+                        }
+                        Err(_) => ()
+                    }
+                }
+            }
+            (Primitive::IsId, [text]) => {
+                for row in chunk.data.chunks(chunk.row_width) {
+                    let text_string = &strings[row[text+1] as usize];
+                    match text_string.parse::<u64>() {
+                        Ok(id) => {
+                            data.extend(row);
+                            data.push(id);
+                        }
+                        Err(_) => ()
+                    }
+                }
+            }
             _ => panic!("What are this: {:?} {:?} {:?}", self, input_ixes, group_ixes)
         }
         let num_outputs = match *self {
@@ -429,6 +477,8 @@ impl Primitive {
             Primitive::Replace => 2,
             Primitive::Substring => 2,
             Primitive::Length => 1,
+            Primitive::IsNumber => 1,
+            Primitive::IsId => 1,
         };
         Chunk{data: data, row_width: chunk.row_width + num_outputs}
     }

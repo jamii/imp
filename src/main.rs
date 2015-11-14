@@ -18,7 +18,7 @@ macro_rules! time {
         let start = ::time::precise_time_s();
         let result = $expr;
         let end = ::time::precise_time_s();
-        println!("{} took {}s", $name, end - start);
+        println!("{}s for {}", end - start, $name);
         result
     }};
 }
@@ -38,11 +38,8 @@ mod runtime;
 mod bootstrap;
 
 fn run(filenames: &[String]) -> () {
-    print!("Loading...");
-    let bootstrap_program = bootstrap::load(filenames);
-    print!("compiling...");
-    let mut runtime_program = bootstrap::compile(&bootstrap_program);
-    print!("injecting...");
+    let bootstrap_program = time!("loading", {bootstrap::load(filenames)});
+    let mut runtime_program = time!("compiling", {bootstrap::compile(&bootstrap_program)});
     let mut text = String::new();
     File::open("data/imp.imp").unwrap().read_to_string(&mut text).unwrap();
     {
@@ -59,9 +56,11 @@ fn run(filenames: &[String]) -> () {
         chunk.data = data;
         states[0] = Rc::new(chunk);
     }
-    print!("running...");
-    runtime_program.run();
+    time!("running", {
+        runtime_program.run();
+    });
     runtime_program.print(&bootstrap_program.ids);
+    println!("{:#?}", &runtime_program.views[3]);
 }
 
 fn watch(filenames: &[String]) -> () {

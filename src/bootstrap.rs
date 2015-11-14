@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use regex::Regex;
 use std::path::Path;
 use std::io::prelude::*;
@@ -620,7 +620,7 @@ pub fn compile(program: &Program) -> runtime::Program {
         }
     }
 
-    runtime::Program{ids: ids, schemas: schemas, states: states, views: views, downstreams: downstreams, dirty: dirty, strings: strings}
+    runtime::Program{ids: ids, schemas: schemas, states: states, views: views, downstreams: downstreams, dirty: dirty, strings: strings, regexes: HashMap::new()}
 }
 
 // We shall see that at which dogs howl in the dark, and that at which cats prick up their ears after midnight

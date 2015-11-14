@@ -3,6 +3,8 @@ use std::hash;
 use std::rc::Rc;
 use std::mem::size_of;
 use std::borrow::Cow;
+use regex::{Regex};
+use std::collections::HashMap;
 
 use primitive;
 
@@ -403,7 +405,7 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn run(&self, strings: &mut Vec<String>, states: &[Rc<Chunk>]) -> Chunk {
+    pub fn run(&self, strings: &mut Vec<String>, regexes: &mut HashMap<String, Regex>, states: &[Rc<Chunk>]) -> Chunk {
         let mut chunks = self.upstream.iter().map(|&ix| Cow::Borrowed(&*states[ix])).collect::<Vec<_>>();
         for action in self.actions.iter() {
             // println!("");
@@ -443,7 +445,7 @@ impl Query {
                     chunks[ix] = Cow::Owned(chunk);
                 }
                 &Action::Apply(ix, primitive, ref input_ixes, ref group_ixes, ref over_ixes) => {
-                    let chunk = primitive.apply(&chunks[ix], &*input_ixes, &*group_ixes, &*over_ixes, strings);
+                    let chunk = primitive.apply(&chunks[ix], &*input_ixes, &*group_ixes, &*over_ixes, strings, regexes);
                     chunks[ix] = Cow::Owned(chunk);
                 }
                 &Action::Extend(ix, ref constants) => {
@@ -503,6 +505,7 @@ pub struct Program {
     pub dirty: Vec<bool>, // should be BitSet but that has been removed from std :(
 
     pub strings: Vec<String>, // to be replaced by gc
+    pub regexes: HashMap<String, Regex>,
 }
 
 pub fn push_string(data: &mut Vec<u64>, strings: &mut Vec<String>, string: String) {
@@ -556,13 +559,13 @@ impl Program {
     }
 
     pub fn run(&mut self) {
-        let &mut Program{ref schemas, ref mut states, ref views, ref downstreams, ref mut dirty, ref mut strings, ..} = self;
+        let &mut Program{ref schemas, ref mut states, ref views, ref downstreams, ref mut dirty, ref mut strings, ref mut regexes, ..} = self;
         while let Some(ix) = dirty.iter().position(|&is_dirty| is_dirty) {
-            println!("Running {:?}", ix);
+            time!(format!("view {:?}", ix), {
             dirty[ix] = false;
             let new_chunk = match views[ix] {
                 View::Input => panic!("How did an input get dirtied?"),
-                View::Query(ref query) => query.run(strings, &states[..]),
+                View::Query(ref query) => query.run(strings, regexes, &states[..]),
                 View::Union(ref union) => union.run(&states[..])
             };
             if !chunk_eq(&states[ix], &new_chunk, &schemas[ix]) {
@@ -571,6 +574,7 @@ impl Program {
                     dirty[downstream_ix] = true;
                 }
             }
+        });
             // states[ix].print(&schemas[ix], strings);
         }
     }
@@ -591,7 +595,7 @@ pub mod tests{
     use std::cmp::Ordering;
     use rand::{Rng, SeedableRng, StdRng};
     use test::{Bencher, black_box};
-    use std::collections::HashSet;
+    use std::collections::{HashSet, HashMap};
     use std::io::prelude::*;
     use std::fs::File;
     use std::rc::Rc;
@@ -870,7 +874,7 @@ pub mod tests{
 
             result_ix: 5
         };
-        query.run(&mut strings, &states[..])
+        query.run(&mut strings, &mut HashMap::new(), &states[..])
     }
 
     #[test]

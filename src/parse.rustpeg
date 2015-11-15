@@ -1,33 +1,57 @@
 use runtime::{Direction, Kind};
-use bootstrap::{Binding, Value, KindedBinding, Word};
+use bootstrap::{Input, Binding, Value, KindedBinding, Word, AbstractView, AbstractSection, AbstractHeadWord, AbstractClause, AbstractClauseWord};
+
+/** Top **/
 
 #[pub]
-input_tsv -> Option<(String, Vec<usize>)>
-  = "=" !. { None }
-  / "= " f:file_name " " cs:columns { Some((f, cs))}
+program -> Vec<AbstractView>
+  = view_followed_by_blank_lines+
 
-columns -> Vec<usize>
-  = number_usize ++ " "
+view_followed_by_blank_lines -> AbstractView
+  = v:view [\n]* { v }
 
-#[pub]
-input_row -> Vec<Value>
-  = value ++ " "
+view -> AbstractView
+  = h:head [\n] b:section+ { AbstractView{head: h, body: b} }
 
-#[pub]
-clause -> (Vec<Word>, Vec<(Binding, Direction)>)
-  = sc:simple_clause oc:over_clause { (sc, oc) }
+head -> Vec<AbstractHeadWord>
+  = head_word+
 
-over_clause -> Vec<(Binding, Direction)>
-  = " over " ob:over_bindings { ob }
-  / { vec![] }
+/** Sections **/
+
+section -> AbstractSection
+  = insert / remove / input
+
+insert -> AbstractSection
+  = insert_header cs:clause+ { AbstractSection::Insert(cs) }
+
+remove -> AbstractSection
+  = remove_header cs:clause+ { AbstractSection::Remove(cs) }
+
+input -> AbstractSection
+  = tsv:input_header rs:row* {
+    AbstractSection::Input(Input{tsv: tsv, rows: rs})
+  }
+
+row -> Vec<Value>
+  = vs:(value ++ [ ]) [\n]? { vs }
+
+
+clause -> AbstractClause
+  = !section_header cs:clause_words obs:over_bindings [\n]? {
+    AbstractClause{words: cs, over_bindings: obs}
+  }
+
+clause_words -> Vec<AbstractClauseWord>
+  = clause_word+
 
 over_bindings -> Vec<(Binding, Direction)>
-  = sort ++ (" "+)
+  = over obs:(over_binding ++ ([ ]+)) { obs }
+  / { vec![] }
 
-sort -> (Binding, Direction)
-  = d:sort_direction v:named_variable { (v, d) }
+over_binding -> (Binding, Direction)
+  = d:direction v:named_variable { (v, d) }
 
-sort_direction -> Direction
+direction -> Direction
   = descending:"-"? {
     match descending {
       Some(_) => Direction::Descending,
@@ -35,33 +59,64 @@ sort_direction -> Direction
     }
   }
 
-simple_clause -> Vec<Word>
-  = word+
 
-word -> Word
-  = kb:kinded_binding { Word::KindedBinding(kb) }
-  / vt:view_term { Word::View(vt) }
+section_header = insert_header / remove_header / input_header { () }
+insert_header  = "+\n"
+remove_header  = "-\n"
 
-view_term -> String
-  = (!" over " [^?:_"#0-9])+ { match_str.to_owned() }
+input_header -> Option<(String, Vec<usize>)>
+  // !! until we get rid of input_tsv
+  = tsv:input_tsv [\n] { tsv }
 
-kinded_binding -> KindedBinding
-  = kinded_variable / b:binding { (b, None) }
+#[pub]
+input_tsv -> Option<(String, Vec<usize>)>
+  = "= " f:file_name " " cs:columns { Some((f, cs))}
+  / "=" { None }
+
+file_name -> String
+  = [^ ]* { match_str.to_owned() }
+
+columns -> Vec<usize>
+  = number_usize ++ [ ]
+
+/** Words **/
+
+head_word -> AbstractHeadWord
+  = head_particle / variable_with_kind
+
+head_particle -> AbstractHeadWord
+  = [^?\n]+ { AbstractHeadWord::Particle(match_str.to_owned()) }
+
+variable_with_kind -> AbstractHeadWord
+  = v:variable k:kind { AbstractHeadWord::VariableWithKind(v, k) }
+
+
+clause_word -> AbstractClauseWord
+  = clause_particle / b:binding { AbstractClauseWord::Binding(b) }
+
+clause_particle -> AbstractClauseWord
+  // aggressively forbid escape characters.
+  = (!over [^-?\n_0-9#".])+ {
+    AbstractClauseWord::Particle(match_str.to_owned())
+  }
+
+over = " over "
+
+/** Bindings **/
 
 binding -> Binding
   = unbound_variable / named_variable / constant
-
+  
 unbound_variable -> Binding
-  = "_" { Binding::Unbound }
-
-kinded_variable -> KindedBinding
-  = n:name k:kind? { (Binding::Variable(n), k) }
+  = [_] { Binding::Unbound }
 
 named_variable -> Binding
-  = n:name kind? { Binding::Variable(n) }
+  = v:variable { Binding::Variable(v) }
 
 constant -> Binding
   = v:value { Binding::Constant(v) }
+
+/** Values **/
 
 value -> Value
   = value_id / value_text / value_number
@@ -75,12 +130,10 @@ value_text -> Value
 value_number -> Value
   = n:number_f64 { Value::Number(n) }
 
-// No escaping for now.
-string_literal -> String
-  = "\"" s:string_literal_contents "\"" { s }
+/** Variables **/
 
-string_literal_contents -> String
-  = [^"]* { match_str.to_owned() }
+variable -> String
+  = "?" identifier { match_str.to_owned() }
 
 kind -> Kind
   = ":id"     { Kind::Id }
@@ -88,13 +141,16 @@ kind -> Kind
   / ":number" { Kind::Number }
   / ":" identifier { panic!("Unknown kind: {:?}", match_str) }
 
-name -> String
-  = "?" identifier { match_str.to_owned() }
+identifier = [A-Za-z0-9_]+
 
-identifier = [A-Za-z0-9]+
+/** String Literals **/
 
-file_name -> String
-  = [^ ]* { match_str.to_owned() }
+string_literal -> String
+  = ["] s:string_literal_contents ["] { s }
+
+string_literal_contents -> String
+  // No escaping for now.
+  = [^"]* { match_str.to_owned() }
 
 /** Numbers **/
 
@@ -109,3 +165,35 @@ number_f64 -> f64
 
 decimal_digits = [0-9]+ ("." [0-9]+)? { () }
 integer_digits = [0-9]+
+
+/** Debugging **/
+
+non_blank_line -> String
+  = [^\n]+ [\n]? { match_str.to_owned() }
+
+// !! Nonsense follows...
+
+#[pub]
+input_row -> Vec<Value>
+  = value ++ " "
+
+#[pub]
+old_clause -> (Vec<Word>, Vec<(Binding, Direction)>)
+  = ws:wordish+ oc:over_bindings { (ws, oc) }
+
+
+wordish -> Word
+  = kb:kinded_binding { Word::KindedBinding(kb) }
+  / vt:view_term { Word::View(vt) }
+
+view_term -> String
+  = (!" over " [^?:_"#0-9])+ { match_str.to_owned() }
+
+kinded_binding -> KindedBinding
+  = kinded_variable / b:binding { (b, None) }
+
+kinded_variable -> KindedBinding
+  = n:name k:kind? { (Binding::Variable(n), k) }
+
+name -> String
+  = "?" identifier { match_str.to_owned() }

@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use regex::Regex;
 use std::path::Path;
 use std::io::prelude::*;
 use std::fs::File;
@@ -11,7 +10,7 @@ use runtime::{self, hash, Kind, push_string};
 pub type ViewId = String;
 pub type VariableId = String;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Program {
     pub ids: Vec<ViewId>,
     pub schedule: Vec<usize>,
@@ -19,37 +18,37 @@ pub struct Program {
     pub views: Vec<View>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum View {
     Input(Input),
     Query(Query),
     Union(Union),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Input {
     pub tsv: Option<(String, Vec<usize>)>,
     pub rows: Vec<Vec<Value>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Query {
     pub clauses: Vec<Clause>,
     pub select: Vec<VariableId>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Union {
     pub members: Vec<Member>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Member {
     Insert(ViewId),
     Remove(ViewId),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Clause {
     pub view: ViewId,
     pub bindings: Vec<Binding>,
@@ -93,14 +92,6 @@ pub enum Binding {
     Unbound,
     Constant(Value),
     Variable(VariableId),
-}
-
-pub type KindedBinding = (Binding, Option<Kind>);
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Word {
-    View(String),
-    KindedBinding(KindedBinding)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -631,10 +622,53 @@ pub fn compile(program: &Program) -> runtime::Program {
     runtime::Program{ids: ids, schemas: schemas, states: states, views: views, downstreams: downstreams, dirty: dirty, strings: strings}
 }
 
+/** Parsing **/
+
+// !! old
+pub type KindedBinding = (Binding, Option<Kind>);
+
+// !! old
+#[derive(Clone, Debug, PartialEq)]
+pub enum Word {
+    View(String),
+    KindedBinding(KindedBinding)
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AbstractView {
+    pub head: Vec<AbstractHeadWord>,
+    pub body: Vec<AbstractSection>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum AbstractHeadWord {
+    Particle(String),
+    VariableWithKind(VariableId, Kind),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum AbstractSection {
+    Insert(Vec<AbstractClause>),
+    Remove(Vec<AbstractClause>),
+    Input(Input),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AbstractClause {
+    pub words: Vec<AbstractClauseWord>,
+    pub over_bindings: Vec<(Binding, runtime::Direction)>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum AbstractClauseWord {
+    Particle(String),
+    Binding(Binding),
+}
+
 peg_file! parse("parse.rustpeg");
 
 fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<(Binding, runtime::Direction)>) {
-    let (words, over_bindings) = parse::clause(text).unwrap();
+    let (words, over_bindings) = parse::old_clause(text).unwrap();
     let mut bindings = vec![];
     let mut kinds = vec![];
     let view_id_words:Vec<String> = words.iter().map(|word| {
@@ -717,7 +751,11 @@ fn parse_view(text: &str) -> Vec<(ViewId, Vec<Kind>, View)> {
     }
 }
 
+// !! move after decoration methods
 pub fn parse(text: &str) -> Program {
+    let pp = parse::program(text);
+    println!("pp: {:?}", pp);
+    
     let mut ids = vec![];
     let mut schedule = vec![];
     let mut schemas = vec![];
@@ -730,6 +768,96 @@ pub fn parse(text: &str) -> Program {
                 schemas.push(schema);
                 views.push(view);
             }
+        }
+    }
+    let p = Program{ids: ids, schedule: schedule, schemas: schemas, views: views};
+//    println!("text: {:?}", text); // !!
+//    println!("p: {:?}", p); // !!
+    let dp = decorate(pp.unwrap());
+//    println!(""); //!!
+//    println!("dp: {:?}", dp); //!!
+    assert_eq!(dp, p);
+    p
+}
+
+fn decorate_clauses(clauses: Vec<AbstractClause>, select: Vec<VariableId>) -> View {
+    let cs = clauses.into_iter().map(|clause| {
+        let mut bindings: Vec<Binding> = vec![];
+        let ws: Vec<String> = clause.words.into_iter().map(|word|
+            match word {
+                AbstractClauseWord::Particle(p) => p,
+                AbstractClauseWord::Binding(b) => {
+                    bindings.push(b);
+                    "_".to_owned()
+                }
+            }
+        ).collect();
+        let view_id = ws.join("");
+        Clause{view: view_id, bindings: bindings, over_bindings: clause.over_bindings}
+    }).collect();
+    View::Query(Query{clauses: cs, select: select})
+}
+
+fn decorate_view(view: AbstractView) -> Vec<(ViewId, Vec<Kind>, View)> {
+    let mut select: Vec<VariableId> = vec![];
+    let mut schema: Vec<Kind> = vec![];
+    let ws: Vec<String> = view.head.into_iter().map(|word|
+        match word {
+            AbstractHeadWord::Particle(p) => p,
+            AbstractHeadWord::VariableWithKind(variable, kind) => {
+                select.push(variable);
+                schema.push(kind);
+                "_".to_owned()
+            },
+        }
+    ).collect();
+    let view_id = ws.join("");
+        
+    let mut members = vec![];
+    let mut triples = vec![];
+    let mut should_use_union = true;
+    for section in view.body {
+        let member_id = format!("{} | member {}", view_id, members.len());
+        let section_view = match section {
+            AbstractSection::Insert(clauses) => {
+                members.push(Member::Insert(member_id.to_owned()));
+                decorate_clauses(clauses, select.to_owned())
+            }
+            AbstractSection::Remove(clauses) => {
+                members.push(Member::Remove(member_id.to_owned()));
+                decorate_clauses(clauses, select.to_owned())
+            }
+            AbstractSection::Input(input) => {
+                should_use_union = false;
+                View::Input(input)
+            }
+        };
+        triples.push((member_id, schema.to_owned(), section_view));
+    }
+    
+    if should_use_union {
+        triples.push((view_id.to_owned(), schema.to_owned(),
+            View::Union(Union{members: members})))
+    } else if triples.len() > 1 {
+        panic!("expect one input section in {:?}", view_id);
+    } else {
+        triples[0].0 = view_id.to_owned();
+    }
+    
+    triples
+}
+
+fn decorate(abstract_views: Vec<AbstractView>) -> Program {
+    let mut ids = vec![];
+    let mut schedule = vec![];
+    let mut schemas = vec![];
+    let mut views = vec![];
+    for view in abstract_views {
+        for (id, schema, view) in decorate_view(view) {
+            schedule.push(ids.len()); // scheduling in textual order for now.
+            ids.push(id);
+            schemas.push(schema);
+            views.push(view);
         }
     }
     Program{ids: ids, schedule: schedule, schemas: schemas, views: views}

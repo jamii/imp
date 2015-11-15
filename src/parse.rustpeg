@@ -65,13 +65,8 @@ insert_header  = "+\n"
 remove_header  = "-\n"
 
 input_header -> Option<(String, Vec<usize>)>
-  // !! until we get rid of input_tsv
-  = tsv:input_tsv [\n] { tsv }
-
-#[pub]
-input_tsv -> Option<(String, Vec<usize>)>
-  = "= " f:file_name " " cs:columns { Some((f, cs))}
-  / "=" { None }
+  = "=\n" { None }
+  / "= " f:file_name [ ] cs:columns [\n] { Some((f, cs))}
 
 file_name -> String
   = [^ ]* { match_str.to_owned() }
@@ -170,30 +165,3 @@ integer_digits = [0-9]+
 
 non_blank_line -> String
   = [^\n]+ [\n]? { match_str.to_owned() }
-
-// !! Nonsense follows...
-
-#[pub]
-input_row -> Vec<Value>
-  = value ++ " "
-
-#[pub]
-old_clause -> (Vec<Word>, Vec<(Binding, Direction)>)
-  = ws:wordish+ oc:over_bindings { (ws, oc) }
-
-
-wordish -> Word
-  = kb:kinded_binding { Word::KindedBinding(kb) }
-  / vt:view_term { Word::View(vt) }
-
-view_term -> String
-  = (!" over " [^?:_"#0-9])+ { match_str.to_owned() }
-
-kinded_binding -> KindedBinding
-  = kinded_variable / b:binding { (b, None) }
-
-kinded_variable -> KindedBinding
-  = n:name k:kind? { (Binding::Variable(n), k) }
-
-name -> String
-  = "?" identifier { match_str.to_owned() }

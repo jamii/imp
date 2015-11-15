@@ -667,119 +667,6 @@ pub enum AbstractClauseWord {
 
 peg_file! parse("parse.rustpeg");
 
-fn parse_clause(text: &str) -> (ViewId, Vec<Binding>, Vec<Option<Kind>>, Vec<(Binding, runtime::Direction)>) {
-    let (words, over_bindings) = parse::old_clause(text).unwrap();
-    let mut bindings = vec![];
-    let mut kinds = vec![];
-    let view_id_words:Vec<String> = words.iter().map(|word| {
-        match word.to_owned() {
-            Word::View(vs) => vs,
-            Word::KindedBinding((b, k)) => {
-                bindings.push(b);
-                kinds.push(k);
-                "_".to_owned()
-            }
-        }
-    }).collect();
-    let view_id = view_id_words.join("");
-    (view_id, bindings, kinds, over_bindings)
-}
-
-fn parse_input(lines: Vec<&str>, view_id: ViewId, schema: Vec<Kind>) -> Vec<(ViewId, Vec<Kind>, View)> {
-    let tsv = parse::input_tsv(lines[1]).unwrap();
-    let rows = lines[2..].iter().map(|line| {
-        let values = parse::input_row(line).unwrap();
-        assert_eq!(values.len(), schema.len());
-        values
-    }).collect();
-    vec![(view_id, schema, View::Input(Input{tsv: tsv, rows: rows}))]
-}
-
-// I have harnessed the shadows that stride from world to world to sow death and madness
-fn parse_query(mut lines: Vec<&str>, view_id: ViewId, schema: Vec<Kind>, select: Vec<VariableId>) -> Vec<(ViewId, Vec<Kind>, View)> {
-    let mut members = vec![];
-    let mut views = vec![];
-    let mut clauses = vec![];
-    lines.remove(0); // drop header
-    for line in lines.iter() {
-        match *line {
-            "+" => {
-                let member_id = format!("{} | member {}", view_id, members.len());
-                let query_id = format!("{} | member {}", view_id, (members.len() as isize) - 1);
-                members.push(Member::Insert(member_id));
-                let query = View::Query(Query{clauses: clauses, select: select.clone()});
-                views.push((query_id, schema.clone(), query));
-                clauses = vec![];
-            }
-            "-" => {
-                let member_id = format!("{} | member {}", view_id, members.len());
-                let query_id = format!("{} | member {}", view_id, (members.len() as isize) - 1);
-                members.push(Member::Remove(member_id));
-                let query = View::Query(Query{clauses: clauses, select: select.clone()});
-                views.push((query_id, schema.clone(), query));
-                clauses = vec![];
-            }
-            _ => {
-                let (view_id, bindings, kinds, over_bindings) = parse_clause(line);
-                for kind in kinds.into_iter() {
-                    assert_eq!(kind, None);
-                }
-                clauses.push(Clause{view: view_id, bindings: bindings, over_bindings: over_bindings})
-            }
-        }
-    }
-    let query_id = format!("{} | member {}", view_id, members.len() - 1);
-    let query = View::Query(Query{clauses: clauses, select: select.clone()});
-    views.push((query_id, schema.clone(), query));
-    views.remove(0);
-    views.push((view_id, schema.clone(), View::Union(Union{members: members})));
-    views
-}
-
-// If I am mad, it is mercy!
-fn parse_view(text: &str) -> Vec<(ViewId, Vec<Kind>, View)> {
-    let lines = text.split("\n").collect::<Vec<_>>();
-    let (view_id, bindings, kinds, over_bindings) = parse_clause(lines[0]);
-    assert_eq!(over_bindings, vec![]);
-    let select = bindings.into_iter().map(|binding| match binding { Binding::Variable(var) => var, _ => panic!() }).collect::<Vec<_>>();
-    let schema = kinds.into_iter().map(|kind| kind.unwrap()).collect::<Vec<_>>();
-    match lines[1].chars().next().unwrap() {
-        '=' => parse_input(lines, view_id, schema),
-        '+' => parse_query(lines, view_id, schema, select),
-        '-' => parse_query(lines, view_id, schema, select),
-        _ => panic!("What are this? {:?}", lines[1]),
-    }
-}
-
-// !! move after decoration methods
-pub fn parse(text: &str) -> Program {
-    let pp = parse::program(text);
-    println!("pp: {:?}", pp);
-    
-    let mut ids = vec![];
-    let mut schedule = vec![];
-    let mut schemas = vec![];
-    let mut views = vec![];
-    for view_text in text.split("\n\n") {
-        if view_text != "" {
-            for (id, schema, view) in parse_view(view_text) {
-                schedule.push(ids.len()); // ie just scheduling in textual order for now
-                ids.push(id);
-                schemas.push(schema);
-                views.push(view);
-            }
-        }
-    }
-    let p = Program{ids: ids, schedule: schedule, schemas: schemas, views: views};
-//    println!("text: {:?}", text); // !!
-//    println!("p: {:?}", p); // !!
-    let dp = decorate(pp.unwrap());
-//    println!(""); //!!
-//    println!("dp: {:?}", dp); //!!
-    assert_eq!(dp, p);
-    p
-}
-
 fn decorate_clauses(clauses: Vec<AbstractClause>, select: Vec<VariableId>) -> View {
     let cs = clauses.into_iter().map(|clause| {
         let mut bindings: Vec<Binding> = vec![];
@@ -861,6 +748,11 @@ fn decorate(abstract_views: Vec<AbstractView>) -> Program {
         }
     }
     Program{ids: ids, schedule: schedule, schemas: schemas, views: views}
+}
+
+pub fn parse(text: &str) -> Program {
+    let abstract_views = parse::program(text).unwrap();
+    decorate(abstract_views)
 }
 
 pub fn load<P: AsRef<Path>>(filenames: &[P]) -> Program {

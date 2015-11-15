@@ -624,16 +624,6 @@ pub fn compile(program: &Program) -> runtime::Program {
 
 /** Parsing **/
 
-// !! old
-pub type KindedBinding = (Binding, Option<Kind>);
-
-// !! old
-#[derive(Clone, Debug, PartialEq)]
-pub enum Word {
-    View(String),
-    KindedBinding(KindedBinding)
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct AbstractView {
     pub head: Vec<AbstractHeadWord>,

@@ -1,5 +1,5 @@
 use runtime::{Direction, Kind};
-use bootstrap::{Input, Binding, Value, KindedBinding, Word, AbstractView, AbstractSection, AbstractHeadWord, AbstractClause, AbstractClauseWord};
+use bootstrap::{Input, Binding, Value, AbstractView, AbstractSection, AbstractHeadWord, AbstractClause, AbstractClauseWord};
 
 /** Top **/
 

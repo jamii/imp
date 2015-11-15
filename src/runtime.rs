@@ -558,7 +558,7 @@ impl Program {
     pub fn run(&mut self) {
         let &mut Program{ref schemas, ref mut states, ref views, ref downstreams, ref mut dirty, ref mut strings, ..} = self;
         while let Some(ix) = dirty.iter().position(|&is_dirty| is_dirty) {
-            println!("Running {:?}", ix);
+            // println!("Running {:?}", ix);
             dirty[ix] = false;
             let new_chunk = match views[ix] {
                 View::Input => panic!("How did an input get dirtied?"),

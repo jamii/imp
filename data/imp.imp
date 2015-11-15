@@ -88,6 +88,10 @@ child "variable with kind" ?vka ?vkz of "head" ?ha ?hz has text _
 child "variable" _ _ of "variable with kind" ?vka ?vkz has text ?v
 child "kind" _ _ of "variable with kind" ?vka ?vkz has text ?k
 row ?f over ?vka ?vkz ?v ?k
++
+field ?f of node ?n2 has variable ?v and kind ?k
+node ?n2 of type "union" is at _ _
+node ?n2 depends on node ?n
 
 values of kind ?k:text have width ?w:number
 =
@@ -109,6 +113,41 @@ field ?f2 of node ?n has variable _ and kind ?k2
 ?f2 < ?f
 values of kind ?k2 have width ?w
 ?v = sum(?w) over ?f2 ?k2
+
+row at ?ra:number ?rz:number is row ?r:number
++
+child "row" ?ra ?rz of "input" ?na ?nz has text _
+row ?r over ?ra ?rz
+
+value at ?va:number ?vz:number is value ?v:number
++
+child "value" ?va ?vz of "row" ?ra ?rz has text _
+row ?v over ?va ?vz
+
+field ?f:number of row ?r:number of input node ?n:number has raw value ?v:text
++
+node ?n of type "input" is at ?na ?nz
+child "row" ?ra ?rz of "input" ?na ?nz has text _
+child "value" ?va ?vz of "row" ?ra ?rz has text ?v
+row at ?ra ?rz is row ?r
+value at ?va ?vz is value ?f
+
+field ?f:number of row ?r:number of input node ?n:number has id value ?v:number
++
+field ?f of node ?n has variable _ and kind "id"
+field ?f of row ?r of input node ?n has raw value ?raw
+?raw is id ?v
+
+field ?f:number of row ?r:number of input node ?n:number has number value ?v:number
++
+field ?f of node ?n has variable _ and kind "number"
+field ?f of row ?r of input node ?n has raw value ?raw
+?raw is number ?v
+
+field ?f:number of row ?r:number of input node ?n:number has text value ?v:text
++
+field ?f of node ?n has variable _ and kind "text"
+field ?f of row ?r of input node ?n has raw value ?v
 
 view ?n:text is primitive
 =

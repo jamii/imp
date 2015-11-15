@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use regex::{Regex};
+use std::collections::HashMap;
 
 use runtime::{Chunk, Kind, Direction, from_number, to_number, push_string};
 use bootstrap::{self, Binding, bound_vars, PrimitiveOrNegated};
@@ -90,6 +91,8 @@ pub enum Primitive {
     Replace,
     Substring,
     Length,
+    IsNumber,
+    IsId,
 }
 
 pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<(Binding, Direction)>) -> Option<bootstrap::Primitive> {
@@ -240,6 +243,28 @@ pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec
             bound_output_vars: bound_vars(&vec![length.clone()]),
             bound_aggregate_vars: bound_over_vars,
         }),
+        ("_ is number _", [ref text, ref number]) => Some(bootstrap::Primitive{
+            primitive: PrimitiveOrNegated::Primitive(IsNumber),
+            input_kinds: vec![Text],
+            input_bindings: vec![text.clone()],
+            output_kinds: vec![Number],
+            output_bindings: vec![number.clone()],
+            over_bindings: over_bindings.clone(),
+            bound_input_vars: bound_vars(&vec![text.clone()]),
+            bound_output_vars: bound_vars(&vec![number.clone()]),
+            bound_aggregate_vars: bound_over_vars,
+        }),
+        ("_ is id _", [ref text, ref id]) => Some(bootstrap::Primitive{
+            primitive: PrimitiveOrNegated::Primitive(IsId),
+            input_kinds: vec![Text],
+            input_bindings: vec![text.clone()],
+            output_kinds: vec![Id],
+            output_bindings: vec![id.clone()],
+            over_bindings: over_bindings.clone(),
+            bound_input_vars: bound_vars(&vec![text.clone()]),
+            bound_output_vars: bound_vars(&vec![id.clone()]),
+            bound_aggregate_vars: bound_over_vars,
+        }),
         _ => {
             if view_id.starts_with("! ") {
                 let ix = program.ids.iter().position(|id| *id == view_id[2..]).unwrap();
@@ -261,8 +286,15 @@ pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec
     }
 }
 
+pub fn cache_regex<'a>(string: &String, regexes: &'a mut HashMap<String, Regex>) -> &'a Regex {
+    if !regexes.contains_key(string) {
+        regexes.insert(string.to_owned(), Regex::new(string).unwrap());
+    }
+    regexes.get(string).unwrap()
+}
+
 impl Primitive {
-    pub fn apply(&self, chunk: &Chunk, input_ixes: &[usize], group_ixes: &[usize], over_ixes: &[(usize, Kind, Direction)], strings: &mut Vec<String>) -> Chunk {
+    pub fn apply(&self, chunk: &Chunk, input_ixes: &[usize], group_ixes: &[usize], over_ixes: &[(usize, Kind, Direction)], strings: &mut Vec<String>, regexes: &mut HashMap<String, Regex>) -> Chunk {
         let mut data = vec![];
         match (*self, input_ixes) {
             (Primitive::Add, [a, b]) => {
@@ -334,7 +366,7 @@ impl Primitive {
                     let mut last_from_ix = 0;
                     let mut last_to_ix = 0;
                     let mut count = 0;
-                    for (result_ix, (from_ix, to_ix)) in Regex::new(regex_string).unwrap().find_iter(text_string).enumerate() {
+                    for (result_ix, (from_ix, to_ix)) in cache_regex(regex_string, regexes).find_iter(text_string).enumerate() {
                         data.extend(row);
                         data.push(from_number(result_ix as f64));
                         data.push(from_number(last_from_ix as f64));
@@ -355,7 +387,7 @@ impl Primitive {
                 for row in chunk.data.chunks(chunk.row_width) {
                     let text_string = &strings[row[text+1] as usize];
                     let regex_string = &strings[row[regex+1] as usize];
-                    for (result_ix, (from_ix, to_ix)) in Regex::new(regex_string).unwrap().find_iter(text_string).enumerate() {
+                    for (result_ix, (from_ix, to_ix)) in cache_regex(regex_string, regexes).find_iter(text_string).enumerate() {
                         data.extend(row);
                         data.push(from_number(result_ix as f64));
                         data.push(from_number(from_ix as f64));
@@ -367,7 +399,7 @@ impl Primitive {
                 for row in chunk.data.chunks(chunk.row_width) {
                     let text_string = &strings[row[text+1] as usize];
                     let regex_string = &strings[row[regex+1] as usize];
-                    for (result_ix, capture) in Regex::new(regex_string).unwrap().captures_iter(text_string).enumerate() {
+                    for (result_ix, capture) in cache_regex(regex_string, regexes).captures_iter(text_string).enumerate() {
                         for (capture_ix, ixes) in capture.iter_pos().enumerate() {
                             match ixes {
                                 Some((from_ix, to_ix)) => {
@@ -389,7 +421,7 @@ impl Primitive {
                         let text_string = &*strings[row[text+1] as usize];
                         let regex_string = &strings[row[regex+1] as usize];
                         let replacement_string = &*strings[row[replacement+1] as usize];
-                        Regex::new(regex_string).unwrap().replace_all(text_string, replacement_string)
+                        cache_regex(regex_string, regexes).replace_all(text_string, replacement_string)
                     };
                     data.extend(row);
                     push_string(&mut data, strings, result);
@@ -413,6 +445,30 @@ impl Primitive {
                     data.push(from_number(strings[row[text+1] as usize].len() as f64));
                 }
             }
+            (Primitive::IsNumber, [text]) => {
+                for row in chunk.data.chunks(chunk.row_width) {
+                    let text_string = &strings[row[text+1] as usize];
+                    match text_string.parse::<f64>() {
+                        Ok(number) => {
+                            data.extend(row);
+                            data.push(from_number(number));
+                        }
+                        Err(_) => ()
+                    }
+                }
+            }
+            (Primitive::IsId, [text]) => {
+                for row in chunk.data.chunks(chunk.row_width) {
+                    let text_string = &strings[row[text+1] as usize];
+                    match text_string.parse::<u64>() {
+                        Ok(id) => {
+                            data.extend(row);
+                            data.push(id);
+                        }
+                        Err(_) => ()
+                    }
+                }
+            }
             _ => panic!("What are this: {:?} {:?} {:?}", self, input_ixes, group_ixes)
         }
         let num_outputs = match *self {
@@ -429,6 +485,8 @@ impl Primitive {
             Primitive::Replace => 2,
             Primitive::Substring => 2,
             Primitive::Length => 1,
+            Primitive::IsNumber => 1,
+            Primitive::IsId => 1,
         };
         Chunk{data: data, row_width: chunk.row_width + num_outputs}
     }

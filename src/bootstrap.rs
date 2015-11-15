@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use std::path::Path;
 use std::io::prelude::*;
 use std::fs::File;
@@ -619,7 +619,7 @@ pub fn compile(program: &Program) -> runtime::Program {
         }
     }
 
-    runtime::Program{ids: ids, schemas: schemas, states: states, views: views, downstreams: downstreams, dirty: dirty, strings: strings}
+    runtime::Program{ids: ids, schemas: schemas, states: states, views: views, downstreams: downstreams, dirty: dirty, strings: strings, regexes: HashMap::new()}
 }
 
 /** Parsing **/

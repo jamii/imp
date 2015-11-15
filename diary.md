@@ -1145,7 +1145,7 @@ struct Tree {
 }
 ```
 
-Since everything is connected by pointers anything I have to think carefully about where to keep data eg if later I am walking the tree and I need a list of the bindings for the chunk, I either have to include the bindings in the Chunk struct beforehand or I have to look it up in some chunk-to-bindings hashtable. Is the chunk hashable? Am I ever going to mutate it?
+Since everything is connected by pointers I have to think carefully about where to keep data eg if later I am walking the tree and I need a list of the bindings for the chunk, I either have to include the bindings in the Chunk struct beforehand or I have to look it up in some chunk-to-bindings hashtable. Is the chunk hashable? Am I ever going to mutate it?
 
 In Rust I have to think about ownership too. Does the chunk-to-bindings hashtable have it's own copy of the chunk or is it sharing with the tree? The former adds unnecessary copies but the latter imposes a bunch of lifetime annotations that clog up all my code.
 

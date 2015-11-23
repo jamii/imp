@@ -164,6 +164,9 @@ view ?n:text is primitive
 "_ with _ replaced by _ is _"
 "the text at _ to _ in _ is _"
 "_ has length _"
+"_ is number _"
+"_ is id _"
+"_ != _"
 
 clause ?va:number ?vz:number is primitive
 +
@@ -179,3 +182,41 @@ clause ?va:number ?vz:number is finite
 clause ?va ?vz is named _
 ! clause ?va ?vz is primitive
 ! clause ?va ?vz is negated
+
+clause ?c:number of node ?n:number is at ?ca:number ?cz:number
++
+node ?n of type _ is at ?na ?nz
+child "clause" ?ca ?cz of "node" ?na ?nz has text _
+row ?c over ?ca ?cz
+
+clause ?c:number of node ?n:number binds ?v:text
++
+clause ?c of node ?n is at ?ca ?cz
+child "binding" ?ba ?bz of "clause" ?ca ?cz has text _
+child "variable" ?va ?vz of "binding" ?ba ?bz has text ?v
+
+clause ?c:number of node ?n:number is unjoined in step ?s:number
++
+clause ?c of node ?n is at _ _
+?s <- 0
++
+clause ?c of node ?n is unjoined in step ?s2
+?s = ?s2 + 1
+! clause ?c of node ?n is joined to clause _ in step ?s2
+
+clause ?c:number of node ?n:number is joined to clause ?p:number in step ?s:number
++
+clause ?c of node ?n is unjoined in step ?s
+clause ?p of node ?n is unjoined in step ?s
+! clause ?c of node ?n is not covered by clause ?p in step ?s
+row 0 over ?c ?p
+
+clause ?c:number of node ?n:number is not covered by clause ?p:number in step ?s:number
++
+clause ?c of node ?n is unjoined in step ?s
+clause ?p of node ?n is unjoined in step ?s
+clause ?o of node ?n is unjoined in step ?s
+clause ?c of node ?n binds ?v
+! clause ?p of node ?n binds ?v
+clause ?o of node ?n binds ?v
+?c != ?o

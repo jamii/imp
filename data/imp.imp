@@ -21,6 +21,7 @@ outside says ?pk:text ?pa:number ?pz:number has child ?ck:text ?ca:number ?cz:nu
 "binding" "id" 0 "^#[:digit:]+$"
 "binding" "number" 0 "^-?[:digit:]+(\.[:digit]+)?$"
 "binding" "text" 0 "^\x22(\\\x22|[^\x22])*\x22$"
+"clause body" "grouping" 1 " over (.*)"
 "input" "import" 0 "^.*"
 "import" "filename" 1 "^\s*(\S*)"
 "import" "cols" 1 "^\s*\S*(.*)"
@@ -52,7 +53,9 @@ clause ?va:number ?vz:number is named ?n:text
 +
 child "clause body" _ _ of "clause" ?va ?vz has text ?v
 "clause body" contains "binding" found by capture _ of ?re
-?v with ?re replaced by "$1_" is ?n
+"clause body" contains "grouping" found by capture _ of ?re2
+?v with ?re replaced by "$1_" is ?n2
+?n2 with ?re2 replaced by "" is ?n
 
 ?k:text becomes a node of type ?t:text
 =
@@ -167,6 +170,7 @@ view ?n:text is primitive
 "_ is number _"
 "_ is id _"
 "_ != _"
+"count _"
 
 clause ?va:number ?vz:number is primitive
 +
@@ -186,37 +190,64 @@ clause ?va ?vz is named _
 clause ?c:number of node ?n:number is at ?ca:number ?cz:number
 +
 node ?n of type _ is at ?na ?nz
-child "clause" ?ca ?cz of "node" ?na ?nz has text _
+child "clause" ?ca ?cz of _ ?na ?nz has text _
 row ?c over ?ca ?cz
 
 clause ?c:number of node ?n:number binds ?v:text
 +
 clause ?c of node ?n is at ?ca ?cz
-child "binding" ?ba ?bz of "clause" ?ca ?cz has text _
+child "clause body" ?cba ?cbz of "clause" ?ca ?cz has text _
+child "binding" ?ba ?bz of "clause body" ?cba ?cbz has text _
 child "variable" ?va ?vz of "binding" ?ba ?bz has text ?v
 
 clause ?c:number of node ?n:number is unjoined in step ?s:number
 +
-clause ?c of node ?n is at _ _
+clause ?c of node ?n is at ?ca ?cz
+clause ?ca ?cz is finite
 ?s <- 0
 +
 clause ?c of node ?n is unjoined in step ?s2
 ?s = ?s2 + 1
-! clause ?c of node ?n is joined to clause _ in step ?s2
+clause ?o of node ?n is joined to clause _ in step ?s2
+?c != ?o
 
 clause ?c:number of node ?n:number is joined to clause ?p:number in step ?s:number
 +
 clause ?c of node ?n is unjoined in step ?s
 clause ?p of node ?n is unjoined in step ?s
-! clause ?c of node ?n is not covered by clause ?p in step ?s
+?c != ?p
+! clause ?c of node ?n is not covered by clause ?p in step ?s because _
 row 0 over ?c ?p
 
-clause ?c:number of node ?n:number is not covered by clause ?p:number in step ?s:number
+clause ?c:number of node ?n:number is not covered by clause ?p:number in step ?s:number because ?o:number
 +
-clause ?c of node ?n is unjoined in step ?s
-clause ?p of node ?n is unjoined in step ?s
-clause ?o of node ?n is unjoined in step ?s
 clause ?c of node ?n binds ?v
 ! clause ?p of node ?n binds ?v
 clause ?o of node ?n binds ?v
 ?c != ?o
+clause ?p of node ?n is unjoined in step ?s
+clause ?o of node ?n is unjoined in step ?s
+
+node ?n:number has root clause ?c:number
++
+clause ?c of node ?n is unjoined in step 0
+count 1 over ?c
++
+clause _ of node ?n is joined to clause ?c in step ?s
+min over -?s ?c
+
+clause ?c:number is not joined in node ?n:number
++
+clause ?c of node ?n is unjoined in step 0
+! clause ?c of node ?n is joined to clause _ in step _
+! node ?n has root clause ?c
+
+node ?n:number is named ?name:text
++
+node ?n of type _ is at ?na ?nz
+child "head" ?ha ?hz of _ ?na ?nz has text _
+head ?ha ?hz is named ?name
+
+?n:number ?s:number ?c:number ?p:number ?o:number
++
+clause ?c of node ?n is not covered by clause ?p in step ?s because ?o

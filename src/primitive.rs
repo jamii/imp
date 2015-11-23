@@ -93,6 +93,7 @@ pub enum Primitive {
     Length,
     IsNumber,
     IsId,
+    NotEqual,
 }
 
 pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<(Binding, Direction)>) -> Option<bootstrap::Primitive> {
@@ -263,6 +264,17 @@ pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec
             over_bindings: over_bindings.clone(),
             bound_input_vars: bound_vars(&vec![text.clone()]),
             bound_output_vars: bound_vars(&vec![id.clone()]),
+            bound_aggregate_vars: bound_over_vars,
+        }),
+        ("_ != _", [ref a, ref b]) => Some(bootstrap::Primitive{
+            primitive: PrimitiveOrNegated::Primitive(NotEqual),
+            input_kinds: vec![Number, Number],
+            input_bindings: vec![a.clone(), b.clone()],
+            output_kinds: vec![],
+            output_bindings: vec![],
+            over_bindings: over_bindings.clone(),
+            bound_input_vars: bound_vars(&vec![a.clone(), b.clone()]),
+            bound_output_vars: bound_vars(&vec![]),
             bound_aggregate_vars: bound_over_vars,
         }),
         _ => {
@@ -469,6 +481,13 @@ impl Primitive {
                     }
                 }
             }
+            (Primitive::NotEqual, [a,b]) => {
+                for row in chunk.data.chunks(chunk.row_width) {
+                    if row[a] != row[b] {
+                        data.extend(row);
+                    }
+                }
+            }
             _ => panic!("What are this: {:?} {:?} {:?}", self, input_ixes, group_ixes)
         }
         let num_outputs = match *self {
@@ -487,6 +506,7 @@ impl Primitive {
             Primitive::Length => 1,
             Primitive::IsNumber => 1,
             Primitive::IsId => 1,
+            Primitive::NotEqual => 0,
         };
         Chunk{data: data, row_width: chunk.row_width + num_outputs}
     }

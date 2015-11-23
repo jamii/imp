@@ -507,8 +507,9 @@ pub fn compile_query(query: &Query, program: &Program, strings: &mut Vec<String>
     }
     let remaining_tree = join_tree.clone();
     let root_ix = collapse_subtree(&mut chunks, &mut actions, &mut join_tree, &query.select, &primitives, &remaining_tree);
-    sort_and_project(&mut chunks, &mut actions, root_ix, &query.select, &HashSet::new());
-    assert_eq!(&query.select.iter().cloned().collect::<HashSet<_>>(), &chunks[root_ix].bound_vars);
+    let (key, _, bindings) = project_key(&chunks[root_ix], &query.select);
+    actions.push(runtime::Action::Project(root_ix, key));
+    assert_eq!(&query.select.iter().cloned().collect::<HashSet<_>>(), &bound_vars(&bindings));
     runtime::Query{upstream: upstream, actions: actions, result_ix: root_ix}
 }
 

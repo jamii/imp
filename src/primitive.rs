@@ -95,6 +95,8 @@ pub enum Primitive {
     IsId,
     NotEqual,
     Count,
+    GetBit,
+    SetBit,
 }
 
 pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec<Binding>, over_bindings: &Vec<(Binding, Direction)>) -> Option<bootstrap::Primitive> {
@@ -287,6 +289,28 @@ pub fn for_bootstrap(program: &bootstrap::Program, view_id: &str, bindings: &Vec
             over_bindings: over_bindings.clone(),
             bound_input_vars: bound_vars(&vec![]),
             bound_output_vars: bound_vars(&vec![a.clone()]),
+            bound_aggregate_vars: bound_over_vars,
+        }),
+        ("_ = get bit _ of _", [ref bit, ref ix, ref bits]) => Some(bootstrap::Primitive{
+            primitive: PrimitiveOrNegated::Primitive(GetBit),
+            input_kinds: vec![Number, Id],
+            input_bindings: vec![ix.clone(), bits.clone()],
+            output_kinds: vec![Number],
+            output_bindings: vec![bit.clone()],
+            over_bindings: over_bindings.clone(),
+            bound_input_vars: bound_vars(&vec![ix.clone(), bits.clone()]),
+            bound_output_vars: bound_vars(&vec![bit.clone()]),
+            bound_aggregate_vars: bound_over_vars,
+        }),
+        ("_ = set bit _ of _", [ref new_bits, ref ix, ref bits]) => Some(bootstrap::Primitive{
+            primitive: PrimitiveOrNegated::Primitive(SetBit),
+            input_kinds: vec![Number, Id],
+            input_bindings: vec![ix.clone(), bits.clone()],
+            output_kinds: vec![Id],
+            output_bindings: vec![new_bits.clone()],
+            over_bindings: over_bindings.clone(),
+            bound_input_vars: bound_vars(&vec![ix.clone(), bits.clone()]),
+            bound_output_vars: bound_vars(&vec![new_bits.clone()]),
             bound_aggregate_vars: bound_over_vars,
         }),
         _ => {
@@ -510,6 +534,20 @@ impl Primitive {
                     }
                 }
             }
+            (Primitive::GetBit, [ix, bits]) => {
+                for row in chunk.data.chunks(chunk.row_width) {
+                    let bit = (row[bits] >> (to_number(row[ix]) as u64)) & 1;
+                    data.extend(row);
+                    data.push(from_number(bit as f64));
+                }
+            }
+            (Primitive::SetBit, [ix, bits]) => {
+                for row in chunk.data.chunks(chunk.row_width) {
+                    let new_bits = row[bits] | (1 << (to_number(row[ix]) as u64));
+                    data.extend(row);
+                    data.push(new_bits);
+                }
+            }
             _ => panic!("What are this: {:?} {:?} {:?}", self, input_ixes, group_ixes)
         }
         let num_outputs = match *self {
@@ -530,6 +568,8 @@ impl Primitive {
             Primitive::IsId => 1,
             Primitive::NotEqual => 0,
             Primitive::Count => 1,
+            Primitive::GetBit => 1,
+            Primitive::SetBit => 1,
         };
         Chunk{data: data, row_width: chunk.row_width + num_outputs}
     }

@@ -216,10 +216,10 @@ clause ?c:number of node ?n:number is joined to clause ?p:number in step ?s:numb
 clause ?c of node ?n is unjoined in step ?s
 clause ?p of node ?n is unjoined in step ?s
 ?c != ?p
-! clause ?c of node ?n is not covered by clause ?p in step ?s because _
+! clause ?c of node ?n is not covered by clause ?p in step ?s
 row 0 over ?c ?p
 
-clause ?c:number of node ?n:number is not covered by clause ?p:number in step ?s:number because ?o:number
+clause ?c:number of node ?n:number is not covered by clause ?p:number in step ?s:number
 +
 clause ?c of node ?n binds ?v
 ! clause ?p of node ?n binds ?v
@@ -247,7 +247,3 @@ node ?n:number is named ?name:text
 node ?n of type _ is at ?na ?nz
 child "head" ?ha ?hz of _ ?na ?nz has text _
 head ?ha ?hz is named ?name
-
-?n:number ?s:number ?c:number ?p:number ?o:number
-+
-clause ?c of node ?n is not covered by clause ?p in step ?s because ?o

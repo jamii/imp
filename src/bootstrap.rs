@@ -288,7 +288,7 @@ pub fn sort_and_project(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Acti
         let (project_key, kinds, bindings) = project_key(&chunks[chunk_ix], &vars);
         let bound_vars = bound_vars(&bindings);
         chunks[chunk_ix] = Chunk{kinds: kinds, bindings: bindings, bound_vars: bound_vars};
-        let sort_key = sort_key(&chunks[chunk_ix], sort_vars);
+        let sort_key = sort_key(&chunks[chunk_ix], &vars);
         actions.push(runtime::Action::Project(chunk_ix, project_key, sort_key));
     }
 }

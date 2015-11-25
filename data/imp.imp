@@ -152,6 +152,19 @@ field ?f:number of row ?r:number of input node ?n:number has text value ?v:text
 field ?f of node ?n has variable _ and kind "text"
 field ?f of row ?r of input node ?n has raw value ?v
 
+clause ?c:number of node ?n:number is at ?ca:number ?cz:number
++
+node ?n of type _ is at ?na ?nz
+child "clause" ?ca ?cz of _ ?na ?nz has text _
+row ?c over ?ca ?cz
+
+clause ?c:number of node ?n:number binds ?v:text
++
+clause ?c of node ?n is at ?ca ?cz
+child "clause body" ?cba ?cbz of "clause" ?ca ?cz has text _
+child "binding" ?ba ?bz of "clause body" ?cba ?cbz has text _
+child "variable" ?va ?vz of "binding" ?ba ?bz has text ?v
+
 view ?n:text is primitive
 =
 "_ = _ + _"
@@ -174,38 +187,26 @@ view ?n:text is primitive
 "_ = get bit _ of _"
 "_ = set bit _ of _"
 
-clause ?va:number ?vz:number is primitive
-+
-clause ?va ?vz is named ?n
-view ?n is primitive
-
-clause ?va:number ?vz:number is negated
-+
-child "negation" _ _ of "clause" ?va ?vz has text _
-
-clause ?va:number ?vz:number is finite
-+
-clause ?va ?vz is named _
-! clause ?va ?vz is primitive
-! clause ?va ?vz is negated
-
-clause ?c:number of node ?n:number is at ?ca:number ?cz:number
-+
-node ?n of type _ is at ?na ?nz
-child "clause" ?ca ?cz of _ ?na ?nz has text _
-row ?c over ?ca ?cz
-
-clause ?c:number of node ?n:number binds ?v:text
+clause ?c:number of node ?n:number is primitive
 +
 clause ?c of node ?n is at ?ca ?cz
-child "clause body" ?cba ?cbz of "clause" ?ca ?cz has text _
-child "binding" ?ba ?bz of "clause body" ?cba ?cbz has text _
-child "variable" ?va ?vz of "binding" ?ba ?bz has text ?v
+clause ?ca ?cz is named ?name
+view ?name is primitive
+
+clause ?c:number of node ?n:number is negated
++
+clause ?c of node ?n is at ?ca ?cz
+child "negation" _ _ of "clause" ?ca ?cz has text _
+
+clause ?c:number of node ?n:number is finite
++
+clause ?c of node ?n is at ?ca ?cz
+! clause ?c of node ?n is primitive
+! clause ?c of node ?n is negated
 
 clause ?c:number of node ?n:number is unjoined in step ?s:number
 +
-clause ?c of node ?n is at ?ca ?cz
-clause ?ca ?cz is finite
+clause ?c of node ?n is finite
 ?s <- 0
 +
 clause ?c of node ?n is unjoined in step ?s2
@@ -267,7 +268,14 @@ clause ?c of node ?n is unjoined in step 0
 1 = get bit ?c of ?t
 clause ?c of node ?n binds ?v
 
-primitive ?p field ?f is a ?kind ?type
+node ?n:number subtree ?t:id does not finish ?v:text
++
+node ?n has subtree ?t
+clause ?c of node ?n is unjoined in step 0
+0 = get bit ?c of ?t
+clause ?c of node ?n binds ?v
+
+primitive ?p:text field ?f:number is a ?kind:text ?type:text
 =
 "_ = _ + _" 0 "output" "number"
 "_ = _ + _" 1 "input" "number"
@@ -321,3 +329,38 @@ primitive ?p field ?f is a ?kind ?type
 "_ = set bit _ of _" 0 "output" "id"
 "_ = set bit _ of _" 1 "input" "number"
 "_ = set bit _ of _" 2 "input" "id"
+
+node ?n:number clause ?c:number binding ?b:number is at ?ba:number ?bz:number
++
+clause ?c of node ?n is at ?ca ?cz
+child "clause body" ?cba ?cbz of "clause" ?ca ?cz has text _
+child "binding" ?ba ?bz of "clause body" ?cba ?cbz has text _
+row ?b over ?ba ?bz
+
+node ?n:number clause ?c:number binding ?b:number binds ?v:text
++
+node ?n clause ?c binding ?b is at ?ba ?bz
+child "variable" ?va ?vz of "binding" ?ba ?bz has text ?v
+
+node ?n:number clause ?c:number depends on ?kind:text ?v:text
++
+clause ?c of node ?n is primitive
+clause ?c of node ?n is at ?ca ?cz
+clause ?va ?vz is named ?name
+node ?n clause ?c binding ?b binds ?v
+primitive ?name field ?b is a ?kind _
+
+node ?n:number clause ?c:number cannot be run on subtree ?t:id
++
+node ?n has subtree ?t
+node ?n clause ?c depends on "input" ?v
+! node ?n subtree ?t binds ?v
++
+node ?n has subtree ?t
+node ?n clause ?c depends on "aggregate" ?v
+! node ?n subtree ?t binds ?v
++
+node ?n has subtree ?t
+node ?n clause ?c depends on "aggregate" ?v
+node ?n subtree ?t does not finish ?v
+

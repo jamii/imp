@@ -346,6 +346,7 @@ pub fn collapse_subtree(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Acti
             for primitive in primitives.iter() {
                 vars.extend(primitive.bound_input_vars.clone());
                 vars.extend(primitive.bound_output_vars.clone());
+                vars.extend(primitive.bound_aggregate_vars.clone());
             }
             join(chunks, actions, join_tree, child_ix, parent_ix, vars);
         }

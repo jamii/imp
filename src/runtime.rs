@@ -105,24 +105,23 @@ impl Chunk {
         Groups{chunk: &self, key: key, ix: 0}
     }
 
-    pub fn project(&self, key: &[usize]) -> Chunk {
+    pub fn project(&self, project_key: &[usize], sort_key: &[usize]) -> Chunk {
         // project
         let mut data = vec![];
         for row in self.data.chunks(self.row_width) {
-            for &word_ix in key.iter() {
+            for &word_ix in project_key.iter() {
                 data.push(row[word_ix]);
             }
         }
-        let mut result = Chunk{data: data, row_width: key.len()};
+        let mut result = Chunk{data: data, row_width: project_key.len()};
 
         // sort
-        let key = (0..key.len()).collect::<Vec<_>>();
-        result = result.sort(&key[..]);
+        result = result.sort(sort_key);
 
         // dedup
         let mut data = vec![];
-        for group in result.groups(&key[..]) {
-            data.extend(&group[..key.len()]);
+        for group in result.groups(sort_key) {
+            data.extend(&group[..project_key.len()]);
         }
         result.data = data;
         result
@@ -385,7 +384,7 @@ pub enum Direction {
 #[derive(Clone, Debug)]
 pub enum Action {
     Sort(usize, Vec<usize>),
-    Project(usize, Vec<usize>),
+    Project(usize, Vec<usize>, Vec<usize>),
     SemiJoin(usize, usize, Vec<usize>, Vec<usize>),
     Join(usize, usize, Vec<usize>, Vec<usize>),
     AntiJoin(usize, usize, Vec<usize>, Vec<usize>),
@@ -417,8 +416,8 @@ impl Query {
                     let chunk = chunks[ix].sort(&key[..]);
                     chunks[ix] = Cow::Owned(chunk);
                 },
-                &Action::Project(ix, ref key) => {
-                    let chunk = chunks[ix].project(&key[..]);
+                &Action::Project(ix, ref project_key, ref sort_key) => {
+                    let chunk = chunks[ix].project(&project_key[..], &sort_key[..]);
                     chunks[ix] = Cow::Owned(chunk);
                 }
                 &Action::SemiJoin(left_ix, right_ix, ref left_key, ref right_key) => {
@@ -575,7 +574,7 @@ impl Program {
                 }
             }
         });
-            // states[ix].print(&schemas[ix], strings);
+        // states[ix].print(&schemas[ix], strings);
         }
     }
 
@@ -839,12 +838,12 @@ pub mod tests{
 
             // semijoin PlaylistTrack and Track on TrackId
             Sort(3, vec![1]),
-            Project(2, vec![0, 3]),
+            Project(2, vec![0, 3], vec![0, 1]),
             SemiJoin(3, 2, vec![1], vec![0]),
 
             // semijoin Track and Album on AlbumId
             Sort(2, vec![1]),
-            Project(1, vec![0, 3]),
+            Project(1, vec![0, 3], vec![0, 1]),
             SemiJoin(2, 1, vec![1], vec![0]),
 
             // join Artist and Album on ArtistId
@@ -853,23 +852,23 @@ pub mod tests{
             Join(0, 1, vec![0], vec![1]),
 
             // join AlbumId/Name and Track on AlbumId
-            Project(1, vec![3, 1, 2]),
+            Project(1, vec![3, 1, 2], vec![0, 1, 2]),
             Join(1, 2, vec![0], vec![1]),
 
             // join TrackId/Name and PlaylistTrack on TrackId
-            Project(2, vec![3, 1, 2]),
+            Project(2, vec![3, 1, 2], vec![0, 1, 2]),
             Join(2, 3, vec![0], vec![1]),
 
             // join PlaylistId/Name and Playlist on PlaylistId
-            Project(3, vec![3, 1, 2]),
+            Project(3, vec![3, 1, 2], vec![0, 1, 2]),
             Join(3, 4, vec![0], vec![0]),
 
             // join Name/Name and Query on Name
-            Project(4, vec![4, 5, 1, 2]),
+            Project(4, vec![4, 5, 1, 2], vec![0, 1, 2, 3]),
             Join(4, 5, vec![0], vec![0]),
 
             // project Name without hash
-            Project(5, vec![3]),
+            Project(5, vec![3], vec![0]),
             ],
 
             result_ix: 5

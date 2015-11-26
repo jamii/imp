@@ -59,10 +59,17 @@ fn run(filenames: &[String]) -> () {
         states[0] = Rc::new(chunk);
     }
     time!("running", {
+        println!("{:#?}", bootstrap_program.ids.iter().enumerate().collect::<Vec<_>>());
         runtime_program.run();
     });
     runtime_program.print(&bootstrap_program.ids);
-    println!("{:#?}", &runtime_program.views[3]);
+    for (id, state) in bootstrap_program.ids.iter().zip(runtime_program.states.iter()) {
+        println!("{:?} \t {:?}", state.data.len() / state.row_width, id);
+    }
+    // println!("{:?}", &bootstrap_program.ids);
+    // println!("{:#?}", &runtime_program.views[bootstrap_program.ids.iter().position(|id|
+    //     id == "clause _ of node _ is not covered by clause _ in step _ because _ | member 0"
+    //     ).unwrap()]);
 }
 
 fn watch(filenames: &[String]) -> () {

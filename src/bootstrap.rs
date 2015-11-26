@@ -275,19 +275,20 @@ fn selfjoin(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk_i
     }
 }
 
-pub fn sort_and_project(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk_ix: usize, sort_vars: &Vec<VariableId>, select_vars: &HashSet<VariableId>) {
+pub fn sort_and_project(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk_ix: usize, sort_vars: &Vec<VariableId>, select_vars: &HashSet<VariableId>, order_matters: bool) {
     let vars = ordered_union(sort_vars, select_vars);
     let num_fields = chunks[chunk_ix].bindings.len();
     let num_projected_vars = bound_vars(&chunks[chunk_ix].bindings).intersection(&vars.iter().cloned().collect()).count();
-    if num_projected_vars == num_fields {
+    if (num_projected_vars == num_fields) && !order_matters {
         // would project everything, might as well just sort
         let key = sort_key(&chunks[chunk_ix], sort_vars);
         actions.push(runtime::Action::Sort(chunk_ix, key));
     } else {
-        let (key, kinds, bindings) = project_key(&chunks[chunk_ix], &vars);
-        actions.push(runtime::Action::Project(chunk_ix, key));
+        let (project_key, kinds, bindings) = project_key(&chunks[chunk_ix], &vars);
         let bound_vars = bound_vars(&bindings);
         chunks[chunk_ix] = Chunk{kinds: kinds, bindings: bindings, bound_vars: bound_vars};
+        let sort_key = sort_key(&chunks[chunk_ix], &vars);
+        actions.push(runtime::Action::Project(chunk_ix, project_key, sort_key));
     }
 }
 
@@ -295,8 +296,8 @@ pub fn semijoin(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, lef
     let join_vars = chunks[left_chunk_ix].bound_vars.intersection(&chunks[right_chunk_ix].bound_vars).cloned().collect();
     let left_vars = chunks[left_chunk_ix].bound_vars.clone();
     let right_vars = chunks[right_chunk_ix].bound_vars.clone();
-    sort_and_project(chunks, actions, left_chunk_ix, &join_vars, &left_vars);
-    sort_and_project(chunks, actions, right_chunk_ix, &join_vars, &right_vars);
+    sort_and_project(chunks, actions, left_chunk_ix, &join_vars, &left_vars, false);
+    sort_and_project(chunks, actions, right_chunk_ix, &join_vars, &right_vars, false);
     let left_key = sort_key(&chunks[left_chunk_ix], &join_vars);
     let right_key = sort_key(&chunks[right_chunk_ix], &join_vars);
     assert_eq!(left_key.len(), right_key.len());
@@ -305,8 +306,8 @@ pub fn semijoin(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, lef
 
 pub fn join(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, join_tree: &mut Tree, left_chunk_ix: usize, right_chunk_ix: usize, select: HashSet<VariableId>) {
     let join_vars = chunks[left_chunk_ix].bound_vars.intersection(&chunks[right_chunk_ix].bound_vars).cloned().collect();
-    sort_and_project(chunks, actions, left_chunk_ix, &join_vars, &select);
-    sort_and_project(chunks, actions, right_chunk_ix, &join_vars, &select);
+    sort_and_project(chunks, actions, left_chunk_ix, &join_vars, &select, false);
+    sort_and_project(chunks, actions, right_chunk_ix, &join_vars, &select, false);
     let left_key = sort_key(&chunks[left_chunk_ix], &join_vars);
     let right_key = sort_key(&chunks[right_chunk_ix], &join_vars);
     assert_eq!(left_key.len(), right_key.len());
@@ -344,6 +345,7 @@ pub fn collapse_subtree(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Acti
             for primitive in primitives.iter() {
                 vars.extend(primitive.bound_input_vars.clone());
                 vars.extend(primitive.bound_output_vars.clone());
+                vars.extend(primitive.bound_aggregate_vars.clone());
             }
             join(chunks, actions, join_tree, child_ix, parent_ix, vars);
         }
@@ -425,8 +427,8 @@ pub fn negate(chunks: &mut Vec<Chunk>, actions: &mut Vec<runtime::Action>, chunk
         PrimitiveOrNegated::Negated(negated_ix) => {
             let join_vars = chunks[negated_ix].bound_vars.intersection(&chunks[chunk_ix].bound_vars).cloned().collect();
             let chunk_vars = &chunks[chunk_ix].bound_vars.clone();
-            sort_and_project(chunks, actions, negated_ix, &join_vars, &HashSet::new());
-            sort_and_project(chunks, actions, chunk_ix, &join_vars, chunk_vars);
+            sort_and_project(chunks, actions, negated_ix, &join_vars, &HashSet::new(), false);
+            sort_and_project(chunks, actions, chunk_ix, &join_vars, chunk_vars, false);
             let left_key = sort_key(&chunks[negated_ix], &join_vars);
             let right_key = sort_key(&chunks[chunk_ix], &join_vars);
             assert_eq!(left_key.len(), right_key.len());
@@ -506,7 +508,7 @@ pub fn compile_query(query: &Query, program: &Program, strings: &mut Vec<String>
     }
     let remaining_tree = join_tree.clone();
     let root_ix = collapse_subtree(&mut chunks, &mut actions, &mut join_tree, &query.select, &primitives, &remaining_tree);
-    sort_and_project(&mut chunks, &mut actions, root_ix, &query.select, &HashSet::new());
+    sort_and_project(&mut chunks, &mut actions, root_ix, &query.select, &HashSet::new(), true);
     assert_eq!(&query.select.iter().cloned().collect::<HashSet<_>>(), &chunks[root_ix].bound_vars);
     runtime::Query{upstream: upstream, actions: actions, result_ix: root_ix}
 }

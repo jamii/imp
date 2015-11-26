@@ -251,26 +251,26 @@ node ?n of type _ is at ?na ?nz
 child "head" ?ha ?hz of _ ?na ?nz has text _
 head ?ha ?hz is named ?name
 
-node ?n:number has subtree ?t:id
+node ?n:number has subtree ?t:id with root ?r:number
 +
-clause ?c of node ?n is unjoined in step 0
-?t = set bit ?c of #0
+clause ?r of node ?n is unjoined in step 0
+?t = set bit ?r of #0
 +
 clause ?c of node ?n is joined to clause ?p in step _
-node ?n has subtree ?t2
+node ?n has subtree ?t2 with root ?r
 1 = get bit ?p of ?t2
 ?t = set bit ?c of ?t2
 
 node ?n:number subtree ?t:id binds ?v:text
 +
-node ?n has subtree ?t
+node ?n has subtree ?t with root _
 clause ?c of node ?n is unjoined in step 0
 1 = get bit ?c of ?t
 clause ?c of node ?n binds ?v
 
 node ?n:number subtree ?t:id does not finish ?v:text
 +
-node ?n has subtree ?t
+node ?n has subtree ?t with root _
 clause ?c of node ?n is unjoined in step 0
 0 = get bit ?c of ?t
 clause ?c of node ?n binds ?v
@@ -352,15 +352,62 @@ primitive ?name field ?b is a ?kind _
 
 node ?n:number clause ?c:number cannot be run on subtree ?t:id
 +
-node ?n has subtree ?t
+node ?n has subtree ?t with root _
 node ?n clause ?c depends on "input" ?v
 ! node ?n subtree ?t binds ?v
 +
-node ?n has subtree ?t
+node ?n has subtree ?t with root _
 node ?n clause ?c depends on "aggregate" ?v
 ! node ?n subtree ?t binds ?v
 +
-node ?n has subtree ?t
+node ?n has subtree ?t with root _
 node ?n clause ?c depends on "aggregate" ?v
 node ?n subtree ?t does not finish ?v
 
+in node ?n:number wave ?w:number subtree ?t:id has ?numc:number clauses
++
+node ?n has subtree ?t with root _
+in node ?n wave ?w clause ?c is unjoined
+1 = get bit ?c of ?t
+count ?numc over ?c
+
+in node ?n:number wave ?w:number primitive ?p:number is unscheduled
++
+?w <- 0
+clause ?p of node ?n is primitive
++
+in node ?n wave ?w2 primitive ?p is unscheduled
+in node ?n wave ?w2 primitive _ is scheduled on subtree _
+! in node ?n wave ?w2 primitive ?p is scheduled on subtree _
+?w = ?w2 + 1
+
+in node ?n:number wave ?w:number clause ?c:number is unjoined
++
+?w <- 0
+clause ?c of node ?n is finite
++
+in node ?n wave ?w2 clause ?c is unjoined
+in node ?n wave ?w2 primitive _ is scheduled on subtree _
+! in node ?n wave ?w2 clause ?c is joined
+?w = ?w2 + 1
+
+in node ?n:number wave ?w:number primitive ?p:number is scheduled on subtree ?t:id
++
+in node ?n wave ?w primitive ?p is unscheduled
+node ?n has subtree ?t with root _
+! node ?n clause ?p cannot be run on subtree ?t
+in node ?n wave ?w subtree ?t has ?numc clauses
+min over ?numc ?t ?p
+
+in node ?n:number wave ?w:number clause ?c:number is joined
++
+in node ?n wave ?w primitive _ is scheduled on subtree ?t
+in node ?n wave ?w clause ?c is unjoined
+node ?n has subtree ?t with root ?r
+?c != ?r
+1 = get bit ?c of ?t
+
+in node ?n:number primitive ?p:number never gets scheduled
++
+clause ?p of node ?n is primitive
+! in node ?n wave _ primitive ?p is scheduled on subtree _

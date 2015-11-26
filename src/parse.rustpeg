@@ -91,11 +91,13 @@ clause_word -> AbstractClauseWord
 
 clause_particle -> AbstractClauseWord
   // aggressively forbid escape characters.
-  = (!over [^-?\n_0-9#".])+ {
+  = (!over !start_of_negative_number [^?\n_0-9#".])+ {
     AbstractClauseWord::Particle(match_str.to_owned())
   }
 
 over = " over "
+
+start_of_negative_number = "-" [0-9]
 
 /** Bindings **/
 

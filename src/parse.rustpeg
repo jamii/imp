@@ -80,7 +80,7 @@ head_word -> AbstractHeadWord
   = head_particle / variable_with_kind
 
 head_particle -> AbstractHeadWord
-  = [^?\n]+ { AbstractHeadWord::Particle(match_str.to_owned()) }
+  = p:particle { AbstractHeadWord::Particle(p) }
 
 variable_with_kind -> AbstractHeadWord
   = v:variable k:kind { AbstractHeadWord::VariableWithKind(v, k) }
@@ -90,9 +90,12 @@ clause_word -> AbstractClauseWord
   = clause_particle / b:binding { AbstractClauseWord::Binding(b) }
 
 clause_particle -> AbstractClauseWord
-  // aggressively forbid escape characters.
+  = p:particle { AbstractClauseWord::Particle(p) }
+
+particle -> String
+  // aggressively forbids escape characters.
   = (!over !start_of_negative_number [^?\n_0-9#".])+ {
-    AbstractClauseWord::Particle(match_str.to_owned())
+    match_str.to_owned()
   }
 
 over = " over "

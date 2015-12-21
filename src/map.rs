@@ -64,14 +64,14 @@ impl Node {
         }
     }
 
-    fn get_node_offset(&self, pos: usize) -> isize {
-        let ix = (self.get_header().node_bitmap << (32 - pos)).count_ones() as isize;
-        (mem::size_of::<Header>() as isize) + ((mem::size_of::<Node> as isize) * ix)
+    fn get_node_offset(&self, pos: usize) -> usize {
+        let ix = (self.get_header().node_bitmap << (32 - pos)).count_ones() as usize;
+        mem::size_of::<Header>() + (mem::size_of::<Node>() * ix)
     }
 
-    fn get_leaf_offset(&self, pos: usize, layout: &mut Layout) -> isize {
-        let ix = (self.get_header().leaf_bitmap << (32 - pos)).count_ones() as isize;
-        (layout.allocated_bytes as isize) - ((ix + 1) * (layout.leaf_bytes as isize))
+    fn get_leaf_offset(&self, pos: usize, layout: &mut Layout) -> usize {
+        let ix = (self.get_header().leaf_bitmap << (32 - pos)).count_ones() as usize;
+        layout.allocated_bytes - ((ix + 1) * layout.leaf_bytes)
     }
 
     fn insert_node(&mut self, mut layout: &mut Layout, node: Node, pos: usize) {
@@ -79,10 +79,11 @@ impl Node {
             self.increase_size(layout);
         }
         unsafe {
+            (*(self.start as *mut Header)).node_bitmap |= 1 << pos;
             let node_offset = self.get_node_offset(pos);
-            let later_node_bytes = mem::size_of::<Header>() + layout.total_node_bytes - (node_offset as usize);
-            ptr::copy(self.start.offset(node_offset), self.start.offset(node_offset + 1), later_node_bytes);
-            *(self.start.offset(node_offset) as *mut Node) = node;
+            let later_node_bytes = mem::size_of::<Header>() + layout.total_node_bytes - node_offset;
+            ptr::copy(self.start.offset(node_offset as isize), self.start.offset((node_offset + 1) as isize), later_node_bytes);
+            *(self.start.offset(node_offset as isize) as *mut Node) = node;
         }
     }
 
@@ -94,15 +95,15 @@ impl Node {
             println!("layout claims {:?}", &layout);
             (*(self.start as *mut Header)).leaf_bitmap |= 1 << pos;
             let leaf_offset = self.get_leaf_offset(pos, layout);
-            let leaves_offset = (layout.allocated_bytes as isize) - (layout.total_leaf_bytes as isize);
-            println!("copying {:?} {:?} {:?}", leaves_offset, leaves_offset - (layout.leaf_bytes as isize), (leaf_offset - leaves_offset + (layout.leaf_bytes as isize)) as usize);
+            let leaves_offset = layout.allocated_bytes - layout.total_leaf_bytes;
+            println!("copying {:?} {:?} {:?}", leaves_offset, leaves_offset - layout.leaf_bytes, leaf_offset + layout.leaf_bytes - leaves_offset);
             ptr::copy(
-                self.start.offset(leaves_offset),
-                self.start.offset(leaves_offset - (layout.leaf_bytes as isize)),
-                (leaf_offset - leaves_offset + (layout.leaf_bytes as isize)) as usize
+                self.start.offset(leaves_offset as isize),
+                self.start.offset((leaves_offset - layout.leaf_bytes) as isize),
+                leaf_offset + layout.leaf_bytes - leaves_offset
                 );
             println!("copying {:?} {:?} {:?}", "leaf", leaf_offset, layout.leaf_bytes);
-            ptr::copy(leaf.as_ptr() as *const u8, self.start.offset(leaf_offset), layout.leaf_bytes);
+            ptr::copy(leaf.as_ptr() as *const u8, self.start.offset(leaf_offset as isize), layout.leaf_bytes);
         }
     }
 
@@ -143,11 +144,21 @@ pub fn main() {
     println!("{:?}", node.layout(leaf_bytes));
     println!("{:?}", node.as_slice(leaf_bytes));
     let mut layout = node.layout(leaf_bytes);
-    node.insert_leaf(&mut layout, &[4, 5, 6], 4);
+    node.insert_leaf(&mut layout, &[4, 5, 6], 2);
     println!("{:?}", node.layout(leaf_bytes));
     println!("{:?}", node.as_slice(leaf_bytes));
     let mut layout = node.layout(leaf_bytes);
-    node.insert_leaf(&mut layout, &[7, 8, 9], 2);
+    node.insert_leaf(&mut layout, &[7, 8, 9], 4);
+    println!("{:?}", node.layout(leaf_bytes));
+    println!("{:?}", node.as_slice(leaf_bytes));
+    let node2 = Node::new();
+    let mut layout = node.layout(leaf_bytes);
+    node.insert_node(&mut layout, node2, 5);
+    println!("{:?}", node.layout(leaf_bytes));
+    println!("{:?}", node.as_slice(leaf_bytes));
+    let node3 = Node::new();
+    let mut layout = node.layout(leaf_bytes);
+    node.insert_node(&mut layout, node3, 6);
     println!("{:?}", node.layout(leaf_bytes));
     println!("{:?}", node.as_slice(leaf_bytes));
     println!("after");

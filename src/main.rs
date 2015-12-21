@@ -5,6 +5,7 @@
 #![feature(slice_patterns)]
 #![feature(plugin)]
 #![plugin(peg_syntax_ext)]
+#![feature(alloc, heap_api)]
 
 extern crate rand;
 extern crate test;
@@ -35,6 +36,7 @@ macro_rules! assert_set_eq {
     }}
 }
 
+mod map;
 mod primitive;
 mod runtime;
 mod bootstrap;

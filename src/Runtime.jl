@@ -168,32 +168,32 @@ end
 @row(I12, [UTF8String, UTF8String]) # playlist_name artist_name
 
 metal(data) = begin
-  @time data[5] = filter(row -> row.f2 == "Heavy Metal Classic", data[5])
+  i0 = filter(row -> row.f2 == "Heavy Metal Classic", data[5])
 
-  @time i1 = @project(data[5], Playlist, I1, [:f1 :f2])
-  @time i2 = @project(data[4], PlaylistTrack, I2, [:f1 :f2])
-  @time i2s = @semijoin_sorted(i2, i1, I2, I1, [:f1], [:f1], I2, [:f1 :f2])
+  i1 = @project(i0, Playlist, I1, [:f1 :f2])
+  i2 = @project(data[4], PlaylistTrack, I2, [:f1 :f2])
+  i2s = @semijoin_sorted(i2, i1, I2, I1, [:f1], [:f1], I2, [:f1 :f2])
 
-  @time i3 = @project(i2s, I2, I3, [:f2 :f1])
-  @time i4 = @project(data[3], Track, I4, [:f1 :f3])
-  @time i4s = @semijoin_sorted(i4, i3, I4, I3, [:f1], [:f1], I4, [:f1 :f2])
+  i3 = @project(i2s, I2, I3, [:f2 :f1])
+  i4 = @project(data[3], Track, I4, [:f1 :f3])
+  i4s = @semijoin_sorted(i4, i3, I4, I3, [:f1], [:f1], I4, [:f1 :f2])
 
-  @time i5 = @project(i4s, I4, I5, [:f2 :f1])
-  @time i6 = @project(data[2], Album, I6, [:f1 :f3])
-  @time i6s = @semijoin_sorted(i6, i5, I6, I5, [:f1], [:f1], I6, [:f1 :f2])
+  i5 = @project(i4s, I4, I5, [:f2 :f1])
+  i6 = @project(data[2], Album, I6, [:f1 :f3])
+  i6s = @semijoin_sorted(i6, i5, I6, I5, [:f1], [:f1], I6, [:f1 :f2])
 
-  @time i7 = @project(i6s, I6, I7, [:f2 :f1])
-  @time i8 = @project(data[1], Artist, I8, [:f1 :f2])
-  @time i9 = @join_sorted(i7, i8, I7, I8, [:f1], [:f1], I9, [:f2], [:f2])
+  i7 = @project(i6s, I6, I7, [:f2 :f1])
+  i8 = @project(data[1], Artist, I8, [:f1 :f2])
+  i9 = @join_sorted(i7, i8, I7, I8, [:f1], [:f1], I9, [:f2], [:f2])
 
-  @time i9s = @project(i9, I9, I9, [:f1 :f2])
-  @time i10 = @join_sorted(i5, i9s, I5, I9, [:f1], [:f1], I10, [:f2], [:f2])
+  i9s = @project(i9, I9, I9, [:f1 :f2])
+  i10 = @join_sorted(i5, i9s, I5, I9, [:f1], [:f1], I10, [:f2], [:f2])
 
-  @time i10s = @project(i10, I10, I10, [:f1 :f2])
-  @time i11 = @join_sorted(i3, i10s, I3, I10, [:f1], [:f1], I11, [:f2], [:f2])
+  i10s = @project(i10, I10, I10, [:f1 :f2])
+  i11 = @join_sorted(i3, i10s, I3, I10, [:f1], [:f1], I11, [:f2], [:f2])
 
-  @time i11s = @project(i11, I11, I11, [:f1 :f2])
-  @time i12 = @join_sorted(i1, i11s, I1, I11, [:f1], [:f1], I12, [:f2], [:f2])
+  i11s = @project(i11, I11, I11, [:f1 :f2])
+  i12 = @join_sorted(i1, i11s, I1, I11, [:f1], [:f1], I12, [:f2], [:f2])
 
   i12
 end
@@ -203,6 +203,9 @@ go() = begin
   @time metal(c)
 end
 
-go()
-
+# go()
+# using Benchmark
+# c = chinook()
+# @time benchmark(()->metal(c), "", 1000)
+# @time [copy(cc) for cc in c]
 end

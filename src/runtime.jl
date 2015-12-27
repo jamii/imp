@@ -1,76 +1,14 @@
-key_cmp{X,Y}(x::X, y::Y, xkey::Vector{Int}, ykey::Vector{Int}) = begin
-  for i in 1:length(xkey)
-    c = cmp(x[xkey[i]],y[ykey[i]])
-    if c == -1
-      return -1
-    elseif c == 1
-      return 1
-    end
-  end
-  return 0
-end
-
-join_sorted{X,Y}(xs::Vector{X}, ys::Vector{Y}, xkey::Vector{Int}, ykey::Vector{Int}) = begin
-  xi = 1
-  yi = 1
-  zs = Vector{Tuple{X,Y}}(0)
-  while (xi <= length(xs)) && (yi <= length(ys))
-    x = xs[xi]
-    y = ys[yi]
-    c = key_cmp(x, y, xkey, ykey)
-    if c == -1
-      xi += 1
-    elseif c == 1
-      yi += 1
-    else
-      push!(zs, (x, y))
-      xi += 1
-      yi += 1
-    end
-  end
-  zs
-end
-
-semijoin_sorted{X,Y}(xs::Vector{X}, ys::Vector{Y}, xkey::Vector{Int}, ykey::Vector{Int}) = begin
-  xi = 1
-  yi = 1
-  zs = Vector{Tuple{X}}(0)
-  while (xi <= length(xs)) && (yi <= length(ys))
-    x = xs[xi]
-    y = ys[yi]
-    c = key_cmp(x, y, xkey, ykey)
-    if c == -1
-      xi += 1
-    elseif c == 1
-      yi += 1
-    else
-      push!(zs, x)
-      xi += 1
-      yi += 1
-    end
-  end
-  zs
-end
-
-immutable Row
-  a::Int64
-  b::Int64
-end
-
-Base.isless(x::Row, y::Row) =
-  isless(x.a, y.a) || (isequal(x.a, y.a) && isless(x.b, y.b))
-
-macro construct(ytype, x, key...)
+macro construct(ytype, x, key)
+  key = eval(key)
   :( ($ytype)($([:($x.$k) for k in key]...)) )
 end
 
-macro project(xs, ytype, key...)
-  x = gensym("x")
+macro project(xs, ytype, key)
   :(begin
       xs = $(esc(xs))
       ys = Vector{$ytype}(0)
-      for $x in xs
-        y = @construct($ytype, $x, $(key...))
+      for x in xs
+        y = @construct($ytype, x, $key)
         push!(ys, y)
       end
       sort!(ys, alg=QuickSort)
@@ -87,29 +25,93 @@ macro project(xs, ytype, key...)
     end)
 end
 
-f() = begin
-  xs = Row[Row(a,b) for (a,b) in zip(ids(), ids())]
-  @time @project(xs, Row, b, a)
+macro cmp_by_key(x, y, xkey, ykey)
+  xkey = eval(xkey)
+  ykey = eval(ykey)
+  @assert(length(xkey) == length(ykey))
+  c = gensym("c")
+  :(begin
+      x = $(esc(x))
+      y = $(esc(y))
+      $c = cmp(x.$(xkey[1]), y.$(ykey[1]))
+      $([:(if $c == 0; $c = cmp(x.$(xkey[i]), y.$(ykey[i])) end) for i in 2:length(xkey)]...)
+      $c
+    end)
 end
 
-f()
-
-using Benchmark
-ids() = ids(1000000)
-ids(n) = rand(1:n, n)
-test_join() = begin
-  xs = collect(zip(ids(), ids(), ids()))
-  ys = collect(zip(ids(), ids(), ids()))
-  sort!(xs)
-  sort!(ys)
-#   benchmark(()->join_sorted(xs, ys, [1], [1]), "", 100)
-  @time join_sorted(xs, ys, [1], [1])
+macro construct2(ztype, x, y, xkey, ykey)
+  xkey = eval(xkey)
+  ykey = eval(ykey)
+  :( ($ztype)($([[:($x.$k) for k in xkey] ; [:($y.$k) for k in ykey]]...)) )
 end
 
-read_tsv(filename, types) = begin
+macro join_sorted(xs, ys, xkey, ykey, ztype, zkey1, zkey2)
+  :(begin
+      xs = $(esc(xs))
+      ys = $(esc(ys))
+      xi = 1
+      yi = 1
+      zs = Vector{$ztype}(0)
+      while (xi <= length(xs)) && (yi <= length(ys))
+        x = xs[xi]
+        y = ys[yi]
+        c = @cmp_by_key(x, y, $xkey, $ykey)
+        if c == -1
+          xi += 1
+        elseif c == 1
+          yi += 1
+        else
+          push!(zs, @construct2($ztype, x, y, $zkey1, $zkey2))
+          xi += 1
+          yi += 1
+        end
+      end
+      zs
+    end)
+end
+
+macro semijoin_sorted(xs, ys, xkey, ykey, ztype, zkey)
+  :(begin
+      xs = $(esc(xs))
+      ys = $(esc(ys))
+      xi = 1
+      yi = 1
+      zs = Vector{$ztype}(0)
+      while (xi <= length(xs)) && (yi <= length(ys))
+        x = xs[xi]
+        y = ys[yi]
+        c = @cmp_by_key(x, y, $xkey, $ykey)
+        if c == -1
+          xi += 1
+        elseif c == 1
+          yi += 1
+        else
+          push!(zs, @construct($ztype, x, $zkey))
+          xi += 1
+          yi += 1
+        end
+      end
+      zs
+    end)
+end
+
+macro row(name, types)
+  types = eval(types)
+  :(begin
+      immutable $name
+        $([:($(symbol("f", i))::$(types[i])) for i in 1:length(types)]...)
+      end
+      Base.isless(x::$name, y::$name) = begin
+        c = @cmp_by_key(x, y, $([symbol("f", i) for i in 1:length(types)]), $([symbol("f", i) for i in 1:length(types)]))
+        c == -1
+      end
+    end)
+end
+
+read_tsv(filename, rowtype, fieldtypes) = begin
   println(filename)
   raw = readdlm(filename, '\t', UTF8String, header=true, quotes=false, comments=false)[1]
-  results = Vector{Tuple{types...}}(0)
+  results = Vector{rowtype}(0)
   for i in 1:size(raw,1)
     row = Vector{Any}(vec(raw[i,:]))
     for j in 1:length(types)

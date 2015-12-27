@@ -161,7 +161,11 @@ end
 @row(I5, [Int64, Int64]) # album_id track_id
 @row(I6, [Int64, Int64]) # album_id artist_id
 @row(I7, [Int64, Int64]) # artist_id album_id
-@row(I8, [Int64, UTF8String]) # album_id artist_id
+@row(I8, [Int64, UTF8String]) # artist_id artist_name
+@row(I9, [Int64, UTF8String]) # album_id artist_name
+@row(I10, [Int64, UTF8String]) # track_id artist_name
+@row(I11, [Int64, UTF8String]) # playlist_id artist_name
+@row(I12, [UTF8String, UTF8String]) # playlist_name artist_name
 
 metal(data) = begin
   @time data[5] = filter(row -> row.f2 == "Heavy Metal Classic", data[5])
@@ -180,13 +184,23 @@ metal(data) = begin
 
   @time i7 = @project(i6s, I6, I7, [:f2 :f1])
   @time i8 = @project(data[1], Artist, I8, [:f1 :f2])
-  @time i8s = @semijoin_sorted(i8, i7, I8, I7, [:f1], [:f1], I8, [:f1 :f2])
+  @time i9 = @join_sorted(i7, i8, I7, I8, [:f1], [:f1], I9, [:f2], [:f2])
+
+  @time i9s = @project(i9, I9, I9, [:f1 :f2])
+  @time i10 = @join_sorted(i5, i9s, I5, I9, [:f1], [:f1], I10, [:f2], [:f2])
+
+  @time i10s = @project(i10, I10, I10, [:f1 :f2])
+  @time i11 = @join_sorted(i3, i10s, I3, I10, [:f1], [:f1], I11, [:f2], [:f2])
+
+  @time i11s = @project(i11, I11, I11, [:f1 :f2])
+  @time i12 = @join_sorted(i1, i11s, I1, I11, [:f1], [:f1], I12, [:f2], [:f2])
+
+  i12
 end
 
 go() = begin
   c = chinook()
   @time metal(c)
-  c
 end
 
 go()

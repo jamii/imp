@@ -5,9 +5,9 @@ macro construct(ytype, x, key)
   :( ($ytype)($([:($x.$k) for k in key]...)) )
 end
 
-macro project(xs, ytype, key)
+macro project(xs, xtype, ytype, key)
   :(begin
-      xs = $(esc(xs))
+      xs::Vector{$xtype} = $(esc(xs))
       ys = Vector{$ytype}(0)
       for x in xs
         y = @construct($ytype, x, $key)
@@ -47,10 +47,10 @@ macro construct2(ztype, x, y, xkey, ykey)
   :( ($ztype)($([[:($x.$k) for k in xkey] ; [:($y.$k) for k in ykey]]...)) )
 end
 
-macro join_sorted(xs, ys, xkey, ykey, ztype, zkey1, zkey2)
+macro join_sorted(xs, ys, xtype, ytype, xkey, ykey, ztype, zkey1, zkey2)
   :(begin
-      xs = $(esc(xs))
-      ys = $(esc(ys))
+      xs::Vector{$xtype} = $(esc(xs))
+      ys::Vector{$ytype} = $(esc(ys))
       xi = 1
       yi = 1
       zs = Vector{$ztype}(0)
@@ -63,19 +63,31 @@ macro join_sorted(xs, ys, xkey, ykey, ztype, zkey1, zkey2)
         elseif c == 1
           yi += 1
         else
-          push!(zs, @construct2($ztype, x, y, $zkey1, $zkey2))
-          xi += 1
-          yi += 1
+          xj = xi
+          yj = yi
+          while (xj <= length(xs)) && @cmp_by_key(x, xs[xj], $xkey, $xkey) == 0
+            xj += 1
+          end
+          while (yj <= length(ys)) && @cmp_by_key(y, ys[yj], $ykey, $ykey) == 0
+            yj += 1
+          end
+          for xk in xi:(xj-1)
+            for yk in yi:(yj-1)
+              push!(zs, @construct2($ztype, xs[xk], ys[yk], $zkey1, $zkey2))
+            end
+          end
+          xi = xj
+          yi = yj
         end
       end
       zs
     end)
 end
 
-macro semijoin_sorted(xs, ys, xkey, ykey, ztype, zkey)
+macro semijoin_sorted(xs, ys, xtype, ytype, xkey, ykey, ztype, zkey)
   :(begin
-      xs = $(esc(xs))
-      ys = $(esc(ys))
+      xs::Vector{$xtype} = $(esc(xs))
+      ys::Vector{$ytype} = $(esc(ys))
       xi = 1
       yi = 1
       zs = Vector{$ztype}(0)
@@ -90,7 +102,6 @@ macro semijoin_sorted(xs, ys, xkey, ykey, ztype, zkey)
         else
           push!(zs, @construct($ztype, x, $zkey))
           xi += 1
-          yi += 1
         end
       end
       zs
@@ -143,22 +154,41 @@ chinook() = begin
     ]
 end
 
-@row(I1, [Int64, UTF8String])
-@row(I2, [Int64, Int64])
+@row(I1, [Int64, UTF8String]) # playlist_id playlist_name
+@row(I2, [Int64, Int64]) # playlist_id track_id
+@row(I3, [Int64, Int64]) # track_id playlist_id
+@row(I4, [Int64, Int64]) # track_id album_id
+@row(I5, [Int64, Int64]) # album_id track_id
+@row(I6, [Int64, Int64]) # album_id artist_id
+@row(I7, [Int64, Int64]) # artist_id album_id
+@row(I8, [Int64, UTF8String]) # album_id artist_id
 
 metal(data) = begin
-  data[5] = filter(row -> row.f2 == "Heavy Metal Classic", data[5])
+  @time data[5] = filter(row -> row.f2 == "Heavy Metal Classic", data[5])
 
-  data[5] = @project(data[5], I1, [:f1 :f2])
-  data[4] = @project(data[4], I2, [:f2 :f1])
+  @time i1 = @project(data[5], Playlist, I1, [:f1 :f2])
+  @time i2 = @project(data[4], PlaylistTrack, I2, [:f1 :f2])
+  @time i2s = @semijoin_sorted(i2, i1, I2, I1, [:f1], [:f1], I2, [:f1 :f2])
+
+  @time i3 = @project(i2s, I2, I3, [:f2 :f1])
+  @time i4 = @project(data[3], Track, I4, [:f1 :f3])
+  @time i4s = @semijoin_sorted(i4, i3, I4, I3, [:f1], [:f1], I4, [:f1 :f2])
+
+  @time i5 = @project(i4s, I4, I5, [:f2 :f1])
+  @time i6 = @project(data[2], Album, I6, [:f1 :f3])
+  @time i6s = @semijoin_sorted(i6, i5, I6, I5, [:f1], [:f1], I6, [:f1 :f2])
+
+  @time i7 = @project(i6s, I6, I7, [:f2 :f1])
+  @time i8 = @project(data[1], Artist, I8, [:f1 :f2])
+  @time i8s = @semijoin_sorted(i8, i7, I8, I7, [:f1], [:f1], I8, [:f1 :f2])
 end
 
-begin
+go() = begin
   c = chinook()
-  metal(c)
+  @time metal(c)
   c
 end
 
-end
+go()
 
-reload("Runtime")
+end

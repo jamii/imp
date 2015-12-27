@@ -1,3 +1,5 @@
+module Runtime
+
 macro construct(ytype, x, key)
   key = eval(key)
   :( ($ytype)($([:($x.$k) for k in key]...)) )
@@ -108,32 +110,55 @@ macro row(name, types)
     end)
 end
 
-read_tsv(filename, rowtype, fieldtypes) = begin
+read_tsv(rowtype, filename) = begin
   println(filename)
+  fieldtypes = [fieldtype(rowtype, fieldname) for fieldname in fieldnames(rowtype)]
   raw = readdlm(filename, '\t', UTF8String, header=true, quotes=false, comments=false)[1]
   results = Vector{rowtype}(0)
   for i in 1:size(raw,1)
     row = Vector{Any}(vec(raw[i,:]))
-    for j in 1:length(types)
-      if issubtype(types[j], Number)
-        row[j] = parse(types[j], row[j])
+    for j in 1:length(fieldtypes)
+      if issubtype(fieldtypes[j], Number)
+        row[j] = parse(fieldtypes[j], row[j])
       end
     end
-    push!(results, tuple(row...))
+    push!(results, rowtype(row...))
   end
   results
 end
 
+@row(Artist, [Int64, UTF8String])
+@row(Album, [Int64, UTF8String, Int64])
+@row(Track, [Int64, UTF8String, Int64, Int64, Int64, UTF8String, Float64, Float64, Float64])
+@row(PlaylistTrack, [Int64, Int64])
+@row(Playlist, [Int64, UTF8String])
+
 chinook() = begin
   Any[
-    read_tsv("code/imp/data/Artist.csv", [Int64, UTF8String]),
-    read_tsv("code/imp/data/Album.csv", [Int64, UTF8String, Int64]),
-    read_tsv("code/imp/data/Track.csv", [Int64, UTF8String, Int64, Int64, Int64, UTF8String, Float64, Float64, Float64]),
-    read_tsv("code/imp/data/PlaylistTrack.csv", [Int64, Int64]),
-    read_tsv("code/imp/data/Playlist.csv", [Int64, UTF8String]),
+    read_tsv(Artist, "code/imp/data/Artist.csv"),
+    read_tsv(Album, "code/imp/data/Album.csv"),
+    read_tsv(Track, "code/imp/data/Track.csv"),
+    read_tsv(PlaylistTrack, "code/imp/data/PlaylistTrack.csv"),
+    read_tsv(Playlist, "code/imp/data/Playlist.csv"),
     ]
 end
 
+@row(I1, [Int64, UTF8String])
+@row(I2, [Int64, Int64])
+
 metal(data) = begin
-    data[5] = filter(data[5], row -> row[2] == "Heavy Metal Classic")
-    data[5] = sort_by_key
+  data[5] = filter(row -> row.f2 == "Heavy Metal Classic", data[5])
+
+  data[5] = @project(data[5], I1, [:f1 :f2])
+  data[4] = @project(data[4], I2, [:f2 :f1])
+end
+
+begin
+  c = chinook()
+  metal(c)
+  c
+end
+
+end
+
+reload("Runtime")

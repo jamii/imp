@@ -11,10 +11,6 @@ macro row(name, types)
     end)
 end
 
-xs = [1,2,3]
-last(xs)
-xs[1:length(xs)-1]
-
 @generated cmp_by_key{R1 <: Row, R2 <: Row}(x::R1, y::R2, xkey, ykey) = begin
   xkey = xkey.parameters[1].parameters[1]
   ykey = ykey.parameters[1].parameters[1]
@@ -73,17 +69,11 @@ reshape{C,K}(xs, ys, ytype::Type{C}, ykey::Type{Val{K}}) = begin
   end
 end
 
-project(xs, ytype, ykey; sort=true, dedup=true) = begin
+project(xs, ytype, ykey) = begin
   ys = Vector{ytype}(0)
   reshape(xs, ys, ytype, Val{ykey})
-  if sort
-    sort!(ys, alg=QuickSort)
-  end
-  if dedup
-    dedup_sorted(ys)
-  else
-    ys
-  end
+  sort!(ys, alg=QuickSort)
+  dedup_sorted(ys)
 end
 
 join_sorted_inner{X,Y,Z,XK,YK,ZK1,ZK2}(
@@ -197,71 +187,41 @@ end
 @row(I12, [UTF8String, UTF8String]) # playlist_name artist_name
 
 metal(data) = begin
+  i0 = filter(row -> row.f2 == "Heavy Metal Classic", data[5])
 
-  @time i0 = filter(row -> row.f2 == "Heavy Metal Classic", data[5])
+  i1 = project(i0, I1, (1,2))
+  i2 = project(data[4], I2, (1,2))
+  i2s = semijoin_sorted(i2::Vector{I2}, i1::Vector{I1}, (1,), (1,))
 
-  @time i1 = project(i0, I1, (1,2))
-  @time i2 = project(data[4], I2, (1,2))
-  @time sort(data[4], alg=QuickSort)
-  @time i2s = semijoin_sorted(i2::Vector{I2}, i1::Vector{I1}, (1,), (1,))
+  i3 = project(i2s, I3, (2,1))
+  i4 = project(data[3], I4, (1,3))
+  i4s = semijoin_sorted(i4, i3, (1,), (1,))
 
-  @time i3 = project(i2s, I3, (2,1))
-  @time i4 = project(data[3], I4, (1,3))
-  @time i4s = semijoin_sorted(i4, i3, (1,), (1,))
+  i5 = project(i4s, I5, (2,1))
+  i6 = project(data[2], I6, (1,3))
+  i6s = semijoin_sorted(i6, i5, (1,), (1,))
 
-  @time i5 = project(i4s, I5, (2,1))
-  @time i6 = project(data[2], I6, (1,3))
-  @time i6s = semijoin_sorted(i6, i5, (1,), (1,))
+  i7 = project(i6s, I7, (2,1))
+  i8 = project(data[1], I8, (1,2))
+  i9 = join_sorted(i7, i8, I9, (1,), (1,), (2,), (2,))
 
-  @time i7 = project(i6s, I7, (2,1))
-  @time i8 = project(data[1], I8, (1,2))
-  @time i9 = join_sorted(i7, i8, I9, (1,), (1,), (2,), (2,))
+  i9s = project(i9, I9, (1,2))
+  i10 = join_sorted(i5, i9s, I10, (1,), (1,), (2,), (2,))
 
-  @time i9s = project(i9, I9, (1,2))
-  @time i10 = join_sorted(i5, i9s, I10, (1,), (1,), (2,), (2,))
+  i10s = project(i10, I10, (1,2))
+  i11 = join_sorted(i3, i10s, I11, (1,), (1,), (2,), (2,))
 
-  @time i10s = project(i10, I10, (1,2))
-  @time i11 = join_sorted(i3, i10s, I11, (1,), (1,), (2,), (2,))
-
-  @time i11s = project(i11, I11, (1,2))
-  @time i12 = join_sorted(i1, i11s, I12, (1,), (1,), (2,), (2,))
+  i11s = project(i11, I11, (1,2))
+  i12 = join_sorted(i1, i11s, I12, (1,), (1,), (2,), (2,))
 
   i12
 end
 
 using Benchmark
 
-
 f() = begin
   data = chinook()
-  b = @time benchmark(()->metal(data), "", 1000)
-  b
+  @time benchmark(()->metal(data), "", 1000)
 end
-
-# Base.isless(x::PlaylistTrack, y::PlaylistTrack) = begin
-#   if !isequal(x.f1, y.f1)
-#     return isless(x.f1, y.f1)
-#   end
-#   return isless(x.f2, y.f2)
-# #   (!isequal(x.f1, y.f1) && isless(x.f1, y.f1)) || isless(x.f2, y.f2)
-# end
-
-# f()
-
-ids() = rand(1:1000000, 1000000)
-
-f() = begin
-  xs = [PlaylistTrack(a,b) for (a,b) in zip(ids(), ids())]
-  benchmark(()->sort(xs, alg=QuickSort), "", 100)
-end
-
-g() = begin
-  xs = [(a,b) for (a,b) in zip(ids(), ids())]
-  benchmark(()->sort(xs, alg=QuickSort), "", 100)
-end
-
-# f()
-
-# g()
 
 end

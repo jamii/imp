@@ -1804,3 +1804,422 @@ Things that need thought:
 * Provenance
 
 I think I'm going to look at the aggregates first, because I have a lot of half-formed ideas around query planning that may make incremental evaluation and provenance easier too.
+
+## Theory
+
+I spent two weeks carefully reading all the recent work on join algorithms and eventually reached a tipping point where suddenly it all made sense. I've written most of an article explaining the rough ideas in simpler terms, but before publishing it I want to spend some time trying to simplify the implementation and proof too.
+
+## Unsafe
+
+I also spent a week or two exploring data-structures for the indexes. I tried building a [HAMT](https://en.wikipedia.org/wiki/Hash_array_mapped_trie)-like structure in unsafe Rust. I learned a lot about how unsafe Rust works and how to use valgrind and gdb, but eventually concluded that it just isn't worth the time it would take to finish it.
+
+Using the same layout as [Champ](http://michael.steindorfer.name/publications/oopsla15.pdf) would be far easier and produce far less segfaults. I haven't seen a comparison between the original C++ HAMT and the various descendants in managed languages so it's hard to say how much the extra pointer indirections cost. I wonder if there is some way to estimate the difference without actually having to implement both...
+
+# Compiling
+
+Imp is currently an interpreter. The overhead of interpreting query plans is hard to determine exactly, but the execution time is dominated by sorting and the sort function is ~35% faster if I hardcode the data layout for a specific table, so it's certainly non-trivial.
+
+The current runtime works table-at-a-time to amortise the overhead of interpretation. For example, when applying functions like `+` there is a single dispatch to find the matching code and then a loop over the whole table:
+
+``` rust
+match (*self, input_ixes) {
+    (Primitive::Add, [a, b]) => {
+        for row in chunk.data.chunks(chunk.row_width) {
+            data.extend(row);
+            data.push(from_number(to_number(row[a]) + to_number(row[b])));
+        }
+    }
+    ...
+```
+
+All the new join algorithms I have been researching work tuple-at-a-time so it's not possible to amortise the overhead in the same way. The algorithms are generally simple to write for a specific case, but building an interpreter that efficiently executes any case is difficult. It would be far easier to just emit code for each query, but Rust doesn't make that easy.
+
+In fact, there would be a lot of things that would get easier if was just emitting code in the same language. I could let the existing language handle data layout and type checking. I would be able to use the existing libraries directly instead of [arduously wrapping them](https://github.com/jamii/imp/blob/1c41bdd4f0d5372be307d9d483caf8e8e6e9a1e8/src/primitive.rs) and I could use the repl and other tools with Imp.
+
+This is what I did for most of the early versions of Eve. The problem is that the languages that make this kind of meta-programming practical tend to also have poor control over data layout and very opaque performance models. It's possible to [hack around](http://objectlayout.org/) the limitations but you end up in much the same boat as before - implementing your own data layout and type system that can't play with the existing standard library.
+
+<blockquote class="twitter-tweet" lang="en"><p lang="en" dir="ltr">Heartening to see the focus on multi-stage programming in <a href="https://t.co/iSqkk9fmtW">https://t.co/iSqkk9fmtW</a>. There is a distinct lack of good staging languages.</p>&mdash; Jamie Brandon (@jamiiecb) <a href="https://twitter.com/jamiiecb/status/676921026601725953">December 16, 2015</a></blockquote>
+<script async src="//platform.twitter.com/widgets.js" charset="utf-8"></script>
+
+I ended up using Rust after one too many evenings of wanting to stab Hotspot in the face. Back when I made the decision Mike Innes [argued](https://groups.google.com/forum/#!searchin/eve-talk/julia/eve-talk/5EifQQUHQUw/u3U_ERkbKFcJ) for using Julia instead. Of the objections that I brought up, some have since been fixed and some look like they are going to be fixed in the near future. The remainder (no interior pointers, layout restricted by the gc) seem like a fair trade for potentially removing the interpreter overhead. So I played around with Julia over the holidays.
+
+## Return of the Yannakakis
+
+The first thing I tried in Julia is porting part of the current Imp runtime - enough to hand-compile one of the Chinook queries.
+
+Tables in the Rust version are a `Vec<u64>` with all the data layout being handled by the Imp compiler a layer above. Julia is dynamically typed so I can just use a vector of tuples and let the Julia compiler figure out the layout.
+
+``` julia
+ids() = ids(1000000)
+ids(n) = rand(1:n, n)
+
+eg_table = [(a,b) for (a,b) in zip(ids(), ids())]
+
+typeof(eg_table
+# Array{Tuple{Int64,Int64},1}
+```
+
+In Julia, immutable types like tuples are treated as value types. That means that this `Array{Tuple{Int64,Int64},1}` is a single contiguous allocation, not an array of pointers to tuple objects. To get this in Clojure or Javascript I would have to use a flat array and then write all my own sort functions from scratch to account for the rows. In Julia I can rely on the compiler to handle this for me.
+
+``` julia
+f() = begin
+  xs = [(a,b) for (a,b) in zip(ids(), ids())]
+  @time sort(xs, alg=QuickSort)
+end
+
+# 0.193217 seconds (10 allocations: 15.259 MB, 0.39% gc time)
+```
+
+This is on par with the stdlib sort in Rust and ~2x slower than the radix sort used in Imp. Also note that only 10 allocations were reported. The compiler is smart enough to reuse allocations for the boxed tuples rather than creating 1M temporary tuples on the heap.
+
+We need to build up some basic relational functions.
+
+``` julia
+project(xs, ykey) = begin
+  ys = Vector(0)
+  for x in xs
+    push!(ys, x[ykey])
+  end
+  sort!(ys, alg=QuickSort)
+  dedup_sorted(ys)
+end
+
+f() = begin
+  xs = [(a,b) for (a,b) in zip(ids(), ids())]
+  @time project(xs, [2])
+end
+
+# 1.418393 seconds (4.00 M allocations: 220.172 MB, 8.61% gc time)
+```
+
+That's not good. Far too slow, far too many allocations and, worst of all, the returned value is a `Vector{Any}` ie an array of pointers to tuples.
+
+First, let's fix the return type. By default `Vector` returns a `Vector{Any}`, but we can specify the type if we want something else. Since types are first-class values in Julia we can just pass the return type as an argument.
+
+``` julia
+project(xs, ykey, ytype) = begin
+  ys = Vector{ytype}(0)
+  for x in xs
+    push!(ys, x[ykey])
+  end
+  sort!(ys, alg=QuickSort)
+  dedup_sorted(ys)
+end
+
+f() = begin
+  xs = [(a,b,c) for (a,b,c) in zip(ids(), ids(), ids())]
+  project(xs, [1,2], Tuple{Int64, Int64})
+end
+
+# 0.645461 seconds (5.00 M allocations: 254.867 MB, 10.12% gc time)
+```
+
+Next, we need to give the compiler enough information that it can reuse the allocation for `x[ykey]`. Suppose we made it's job easy by pulling out the critical function and by hardcoding the key:
+
+``` julia
+reshape(xs, ys, ykey) = begin
+  for x in xs
+    push!(ys, (x[1], x[2]))
+  end
+end
+
+project(xs, ykey, ytype) = begin
+  ys = Vector{ytype}(0)
+  reshape(xs, ys, ykey)
+  sort!(ys, alg=QuickSort)
+  dedup_sorted(ys)
+end
+
+f() = begin
+  xs = [(a,b,c) for (a,b,c) in zip(ids(), ids(), ids())]
+  @time project(xs, [1,2], Tuple{Int64, Int64})
+end
+
+#   0.216851 seconds (42 allocations: 34.001 MB, 0.61% gc time)
+```
+
+That's much better. Now I just have to figure out how to make a hardcoded version of reshape for each key. I could (and did) do it with macros, but macros have a tendency to spread and turn everything else into macros. It would be nice if we could just piggyback on the existing specialisation machinery, and Julia recently gained the ability to do just that through the combination of two new features.
+
+The first new feature is [value types](http://docs.julialang.org/en/release-0.4/manual/types/#value-types). `Val{x}` takes an immutable value `x` and turns it into a type, which allows us to specialise on values as well as types.
+
+``` julia
+reshape{T}(xs, ys, ykey::Type{Val{T}}) = begin
+  for x in xs
+    push!(ys, construct(ykey, x))
+  end
+end
+
+project(xs, ykey, ytype) = begin
+  ys = Vector{ytype}(0)
+  reshape(xs, ys, Val{ykey})
+  sort!(ys, alg=QuickSort)
+  dedup_sorted(ys)
+end
+```
+
+The second feature is [generated functions](http://docs.julialang.org/en/release-0.4/manual/metaprogramming/#generated-functions) which allow the programmer to emit custom code for each specalisation of the function.
+
+``` julia
+@generated construct{T}(key::Type{Val{T}}, value) = begin
+  ixes = key.parameters[1].parameters[1]
+  :(begin
+      tuple($([:(value[$ix]) for ix in ixes]...))
+    end)
+end
+```
+
+This is true [multi-stage programming](http://www.cs.rice.edu/~taha/MSP/), something which is painful to achieve with macros and eval alone.
+
+``` julia
+f() = begin
+  xs = [(a,b,c) for (a,b,c) in zip(ids(), ids(), ids())]
+  @time project(xs, (1,2), Tuple{Int64, Int64})
+end
+# 0.208217 seconds (41 allocations: 34.001 MB, 1.06% gc time)
+```
+
+Just as fast as the hardcoded version.
+
+Not so happy if we try some other types though.
+
+``` julia
+f() = begin
+  xs = [(a,Float64(b),c) for (a,b,c) in zip(ids(), ids(), ids())]
+  @time project(xs, (1,2), Tuple{Int64, Float64})
+end
+# 2.746427 seconds (98.79 M allocations: 2.234 GB, 14.23% gc time)
+```
+
+I'm not sure what's going on here yet. I [started a thread](https://groups.google.com/forum/#!topic/julia-users/4L693Z8qePw) on the mailing list. I suspect either a bug in the boxing analysis or some heuristics around when to specialise `push!`.
+
+So tuples don't always work nicely, but fortunately Julia is the kind of language where we can make our own tuples.
+
+``` julia
+abstract Row
+
+macro row(name, types)
+  types = types.args
+  :(immutable $(esc(name)) <: Row
+      $([:($(symbol("f", i))::$(types[i])) for i in 1:length(types)]...)
+    end)
+end
+
+@generated cmp_by_key{R1 <: Row, R2 <: Row}(x::R1, y::R2, xkey, ykey) = begin
+  xkey = xkey.parameters[1].parameters[1]
+  ykey = ykey.parameters[1].parameters[1]
+  @assert(length(xkey) == length(ykey))
+  :(begin
+      $([:(if !isequal(x.$(xkey[i]), y.$(ykey[i])); return isless(x.$(xkey[i]), y.$(ykey[i])) ? -1 : 1; end) for i in 1:length(xkey)]...)
+      return 0
+    end)
+end
+
+@generated Base.isless{R <: Row}(x::R, y::R) = begin
+  key = [symbol("f", i) for i in 1:length(fieldnames(R))]
+  last = pop!(key)
+  :(begin
+      $([:(if !isequal(x.$k, y.$k); return isless(x.$k, y.$k); end) for k in key]...)
+      return isless(x.$last, y.$last)
+    end)
+end
+
+@generated construct{C,K}(constructor::Type{C}, key::Type{Val{K}}, value) = begin
+  constructor = constructor.parameters[1]
+  fields = key.parameters[1].parameters[1]
+  :(begin
+      $constructor($([:(value.$field) for field in fields]...))
+    end)
+end
+
+...
+
+f() = begin
+  xs = [A(a,b,c) for (a,b,c) in zip(ids(), ids(), ids())]
+  @time project(xs, (:f1,:f2), B)
+end
+
+# 0.211331 seconds (41 allocations: 34.001 MB, 1.09% gc time)
+```
+
+So it does the job. Hopefully this is a temporary fix, because tuples are nicer ergonomically, but it's reassuring that we have this level of access to low-level primitives.
+
+Some merge-joins:
+
+``` julia
+join_sorted_inner{X,Y,Z,XK,YK,ZK1,ZK2}(
+  xs::Vector{X}, ys::Vector{Y}, ztype::Type{Z},
+  xkey::Type{Val{XK}}, ykey::Type{Val{YK}}, zkey1::Type{Val{ZK1}}, zkey2::Type{Val{ZK2}}
+  ) = begin
+  zs = Vector{Z}(0)
+  xi = 1
+  yi = 1
+  while (xi <= length(xs)) && (yi <= length(ys))
+    x = xs[xi]
+    y = ys[yi]
+    c = cmp_by_key(x, y, xkey, ykey)
+    if c == -1
+      xi += 1
+    elseif c == 1
+      yi += 1
+    else
+      xj = xi
+      yj = yi
+      while (xj <= length(xs)) && (cmp_by_key(x, xs[xj], xkey, xkey) == 0)
+        xj += 1
+      end
+      while (yj <= length(ys)) && (cmp_by_key(y, ys[yj], ykey, ykey) == 0)
+        yj += 1
+      end
+      for xk in xi:(xj-1)
+        for yk in yi:(yj-1)
+          push!(zs, construct2(Z, zkey1, zkey2, xs[xk], ys[yk]))
+        end
+      end
+      xi = xj
+      yi = yj
+    end
+  end
+  zs
+end
+
+@inline join_sorted(xs, ys, ztype, xkey, ykey, zkey1, zkey2) =
+  join_sorted_inner(xs, ys, ztype, Val{xkey}, Val{ykey}, Val{zkey1}, Val{zkey2})
+
+semijoin_sorted_inner{X,Y,XK,YK}(
+  xs::Vector{X}, ys::Vector{Y},
+  xkey::Type{Val{XK}}, ykey::Type{Val{YK}}
+  ) = begin
+  zs = Vector{X}(0)
+  xi = 1
+  yi = 1
+  while (xi <= length(xs)) && (yi <= length(ys))
+    x = xs[xi]
+    y = ys[yi]
+    c = cmp_by_key(x, y, xkey, ykey)
+    if c == -1
+      xi += 1
+    elseif c == 1
+      yi += 1
+    else
+      push!(zs, x)
+      xi += 1
+    end
+  end
+  zs
+end
+
+@inline semijoin_sorted(xs, ys, xkey, ykey) =
+  semijoin_sorted_inner(xs, ys, Val{xkey}, Val{ykey})
+```
+
+And import the data for the benchmark:
+
+``` julia
+read_tsv(rowtype, filename) = begin
+  fieldtypes = [fieldtype(rowtype, fieldname) for fieldname in fieldnames(rowtype)]
+  raw = readdlm(filename, '\t', UTF8String, header=true, quotes=false, comments=false)[1]
+  results = Vector{rowtype}(0)
+  for i in 1:size(raw,1)
+    row = Vector{Any}(vec(raw[i,:]))
+    for j in 1:length(fieldtypes)
+      if issubtype(fieldtypes[j], Number)
+        row[j] = parse(fieldtypes[j], row[j])
+      end
+    end
+    push!(results, rowtype(row...))
+  end
+  results
+end
+
+@row(Artist, [Int64, UTF8String])
+@row(Album, [Int64, UTF8String, Int64])
+@row(Track, [Int64, UTF8String, Int64, Int64, Int64, UTF8String, Float64, Float64, Float64])
+@row(PlaylistTrack, [Int64, Int64])
+@row(Playlist, [Int64, UTF8String])
+
+chinook() = begin
+  Any[
+    read_tsv(Artist, "code/imp/data/Artist.csv"),
+    read_tsv(Album, "code/imp/data/Album.csv"),
+    read_tsv(Track, "code/imp/data/Track.csv"),
+    read_tsv(PlaylistTrack, "code/imp/data/PlaylistTrack.csv"),
+    read_tsv(Playlist, "code/imp/data/Playlist.csv"),
+    ]
+end
+```
+
+And finally, hand-compile the query plan:
+
+``` julia
+@row(I1, [Int64, UTF8String]) # playlist_id playlist_name
+@row(I2, [Int64, Int64]) # playlist_id track_id
+@row(I3, [Int64, Int64]) # track_id playlist_id
+@row(I4, [Int64, Int64]) # track_id album_id
+@row(I5, [Int64, Int64]) # album_id track_id
+@row(I6, [Int64, Int64]) # album_id artist_id
+@row(I7, [Int64, Int64]) # artist_id album_id
+@row(I8, [Int64, UTF8String]) # artist_id artist_name
+@row(I9, [Int64, UTF8String]) # album_id artist_name
+@row(I10, [Int64, UTF8String]) # track_id artist_name
+@row(I11, [Int64, UTF8String]) # playlist_id artist_name
+@row(I12, [UTF8String, UTF8String]) # playlist_name artist_name
+
+metal(data) = begin
+  i0 = filter(row -> row.f2 == "Heavy Metal Classic", data[5])
+
+  i1 = project(i0, I1, (1,2))
+  i2 = project(data[4], I2, (1,2))
+  i2s = semijoin_sorted(i2::Vector{I2}, i1::Vector{I1}, (1,), (1,))
+
+  i3 = project(i2s, I3, (2,1))
+  i4 = project(data[3], I4, (1,3))
+  i4s = semijoin_sorted(i4, i3, (1,), (1,))
+
+  i5 = project(i4s, I5, (2,1))
+  i6 = project(data[2], I6, (1,3))
+  i6s = semijoin_sorted(i6, i5, (1,), (1,))
+
+  i7 = project(i6s, I7, (2,1))
+  i8 = project(data[1], I8, (1,2))
+  i9 = join_sorted(i7, i8, I9, (1,), (1,), (2,), (2,))
+
+  i9s = project(i9, I9, (1,2))
+  i10 = join_sorted(i5, i9s, I10, (1,), (1,), (2,), (2,))
+
+  i10s = project(i10, I10, (1,2))
+  i11 = join_sorted(i3, i10s, I11, (1,), (1,), (2,), (2,))
+
+  i11s = project(i11, I11, (1,2))
+  i12 = join_sorted(i1, i11s, I12, (1,), (1,), (2,), (2,))
+
+  i12
+end
+```
+
+Fingers crossed:
+
+``` julia
+using Benchmark
+
+f() = begin
+  data = chinook()
+  @time benchmark(()->metal(data), "", 1000)
+end
+
+# mean 1.57ms, max 6.68ms, min 1.27ms
+# total 3.354096 seconds (1.70 M allocations: 1.349 GB, 4.40% gc time)
+```
+
+Compared to the original:
+
+``` bash
+jamie@wanderer:~/code/imp$ cargo bench bench_chinook
+     Running target/release/imp-fdad7c291f20f4c3
+
+running 1 test
+test runtime::tests::bench_chinook_metal     ... bench:   1,524,175 ns/iter (+/- 188,483)
+```
+
+Eerily neck and neck. While the Julia stdlib sort is slower than the radix sort used in Rust imp, it catches up by making reshape and join much faster.
+
+I'm really happy with this. The code is easy to write and debug. Being able to freely mix generated code with normal functions is basically a superpower. It's funny that the two features that made it possible were quietly added without much fanfare. Is Julia the only commercially supported language for multi-stage programming? I can only think of [Terra](http://terralang.org/), [MetaOCaml](http://www.cs.rice.edu/~taha/MetaOCaml/) and [LMS](https://scala-lms.github.io/), none of which I'd want to risk using right now.

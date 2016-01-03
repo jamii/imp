@@ -66,6 +66,31 @@ Base.push!{T}(tree::Tree{T}, row::T) = begin
       end
     end
   end
+  error("Out of bits!")
+end
+
+Base.in{T}(row::T, tree::Tree{T}) = begin
+  node = tree.root
+  for column in 1:length(row)
+    value = row[column]
+    key = hash(value)
+    for ix in 0:(key_length-1)
+      chunk = chunk_at(key, ix)
+      mask = 1 << chunk
+      if (node.node_bitmap & mask) > 0
+        node_ix = 1 + count_ones(node.node_bitmap << (32 - chunk))
+        node = node.nodes[node_ix]
+        # continue loop
+      elseif (node.leaf_bitmap & mask) > 0
+        leaf_ix = 1 + count_ones(node.leaf_bitmap << (32 - chunk))
+        leaf = node.leaves[leaf_ix]
+        return row == leaf
+      else
+        return false
+      end
+    end
+  end
+  error("Out of bits!")
 end
 
 tree = Tree(Tuple{Int64, Int64})
@@ -89,6 +114,8 @@ f() = begin
   end
   @time [hash(row[1]) for row in rows]
   @time sort(rows, alg=QuickSort)
+  @time all([(row in tree) for row in rows])
+  (1000001,) in tree
 end
 
 f()

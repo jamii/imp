@@ -2223,3 +2223,187 @@ test runtime::tests::bench_chinook_metal     ... bench:   1,524,175 ns/iter (+/-
 Eerily neck and neck. While the Julia stdlib sort is slower than the radix sort used in Rust imp, it catches up by making reshape and join much faster.
 
 I'm really happy with this. The code is easy to write and debug. Being able to freely mix generated code with normal functions is basically a superpower. It's funny that the two features that made it possible were quietly added without much fanfare. Is Julia the only commercially supported language for multi-stage programming? I can only think of [Terra](http://terralang.org/), [MetaOCaml](http://www.cs.rice.edu/~taha/MetaOCaml/) and [LMS](https://scala-lms.github.io/), none of which I'd want to risk using right now.
+
+## Indexing
+
+I put together a crude first pass at a HAMT-like thing.
+
+``` julia
+type Node{T}
+  leaf_bitmap::UInt32
+  node_bitmap::UInt32
+  leaves::Vector{T}
+  nodes::Vector{Node{T}}
+end
+
+type Tree{T}
+  root::Node{T}
+end
+
+Tree(T) = Tree(Node{T}(0, 0, T[], Node{T}[]))
+
+const key_length = Int64(ceil(sizeof(hash(0)) * 8.0 / 5.0))
+
+chunk_at(key, ix) = (key >> (ix*5)) & 0b11111
+
+singleton{T}(row::T, column, ix) = begin
+  if ix >= key_length
+    column += 1
+    ix = 0
+    if column > length(row)
+      error("Out of bits")
+    end
+  end
+  value = row[column]
+  key = hash(value)
+  chunk = chunk_at(key, ix)
+  Node{T}(1 << chunk, 0, T[row], Node{T}[])
+end
+
+Base.push!{T}(tree::Tree{T}, row::T) = begin
+  node = tree.root
+  for column in 1:length(row)
+    value = row[column]
+    key = hash(value)
+    for ix in 0:(key_length-1)
+      chunk = chunk_at(key, ix)
+      mask = 1 << chunk
+      if (node.node_bitmap & mask) > 0
+        node_ix = 1 + count_ones(node.node_bitmap << (32 - chunk))
+        node = node.nodes[node_ix]
+        # continue loop
+      elseif (node.leaf_bitmap & mask) > 0
+        leaf_ix = 1 + count_ones(node.leaf_bitmap << (32 - chunk))
+        leaf = node.leaves[leaf_ix]
+        if row == leaf
+          return tree # was a dupe
+        else
+          deleteat!(node.leaves, leaf_ix)
+          child = singleton(leaf, column, ix+1)
+          node.leaf_bitmap $= mask
+          node.node_bitmap |= mask
+          node_ix = 1 + count_ones(node.node_bitmap << (32 - chunk))
+          insert!(node.nodes, node_ix, child)
+          node = child
+          # continue loop
+        end
+      else
+        node.leaf_bitmap |= mask
+        leaf_ix = 1 + count_ones(node.leaf_bitmap << (32 - chunk))
+        insert!(node.leaves, leaf_ix, row)
+        return tree # inserted
+      end
+    end
+  end
+  error("Out of bits!")
+end
+
+Base.in{T}(row::T, tree::Tree{T}) = begin
+  node = tree.root
+  for column in 1:length(row)
+    value = row[column]
+    key = hash(value)
+    for ix in 0:(key_length-1)
+      chunk = chunk_at(key, ix)
+      mask = 1 << chunk
+      if (node.node_bitmap & mask) > 0
+        node_ix = 1 + count_ones(node.node_bitmap << (32 - chunk))
+        node = node.nodes[node_ix]
+        # continue loop
+      elseif (node.leaf_bitmap & mask) > 0
+        leaf_ix = 1 + count_ones(node.leaf_bitmap << (32 - chunk))
+        leaf = node.leaves[leaf_ix]
+        return row == leaf
+      else
+        return false
+      end
+    end
+  end
+  error("Out of bits!")
+end
+```
+
+Naively comparing it to sorting to get a feel for how far away it is from the baseline:
+
+``` julia
+f() = begin
+  rows = [(a,) for a in ids(1000000)]
+  make_tree() = begin
+    tree = Tree(Tuple{Int64})
+    for row in rows
+      push!(tree, row)
+    end
+    tree
+  end
+  tree = make_tree()
+  (benchmark(()->sort(rows, alg=QuickSort), "", 100),
+  benchmark(make_tree, "", 100),
+  benchmark(()->all([(row in tree) for row in rows]), "", 100))
+end
+
+# ~280ms for sorting
+# ~890ms for insert
+# ~480ms for lookup
+```
+
+So this first pass is about 4x slower to build an index than sorting is. Let's start speeding that up.
+
+Some quick digging in the generated code reveals:
+
+```
+julia> @code_native count_ones(0)
+    .text
+Filename: int.jl
+Source line: 133
+    pushq    %rbp
+    movq    %rsp, %rbp
+Source line: 133
+    movq    %rdi, %rax
+    shrq    %rax
+    movabsq    $6148914691236517205, %rcx # imm = 0x5555555555555555
+    andq    %rax, %rcx
+    subq    %rcx, %rdi
+    movabsq    $3689348814741910323, %rcx # imm = 0x3333333333333333
+    movq    %rdi, %rax
+    andq    %rcx, %rax
+    shrq    $2, %rdi
+    andq    %rcx, %rdi
+    addq    %rax, %rdi
+    movabsq    $72340172838076673, %rcx # imm = 0x101010101010101
+    movabsq    $1085102592571150095, %rax # imm = 0xF0F0F0F0F0F0F0F
+    movq    %rdi, %rdx
+    shrq    $4, %rdx
+    addq    %rdi, %rdx
+    andq    %rdx, %rax
+    imulq    %rcx, %rax
+    shrq    $56, %rax
+    popq    %rbp
+    ret
+```
+
+Which is not what I was hoping. Googling avails me not. Kristoffer Carlsson [points me in the right direction](https://groups.google.com/forum/#!topic/julia-users/z7To2f1i1K8). After rebuilding Julia for my native arch I get:
+
+```
+julia> @code_native count_ones(0)
+	.text
+Filename: int.jl
+Source line: 133
+	pushq	%rbp
+	movq	%rsp, %rbp
+Source line: 133
+	popcntq	%rdi, %rax
+	popq	%rbp
+	ret
+```
+
+Rebuilding nets us a small improvement in both sorting and insert:
+
+```
+# ~170ms for sorting
+# ~560ms for insert
+# ~500ms for lookup
+```
+
+I *think* the slight increase in lookup is just crappy benchmarking on my part, but I don't have a good way to reset the system image to test it. And I have no idea where to start looking if I want to figure out why sorting is faster. Maybe if I could find out what extra instructions were enabled...
+
+Since sorting is a little faster now I reran the query benchmark from the last post and got ~1.4ms, down from ~1.6ms, making it just slightly faster on average than the Rust version.

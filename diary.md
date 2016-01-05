@@ -2407,3 +2407,59 @@ Rebuilding nets us a small improvement in both sorting and insert:
 I *think* the slight increase in lookup is just crappy benchmarking on my part, but I don't have a good way to reset the system image to test it. And I have no idea where to start looking if I want to figure out why sorting is faster. Maybe if I could find out what extra instructions were enabled...
 
 Since sorting is a little faster now I reran the query benchmark from the last post and got ~1.4ms, down from ~1.6ms, making it just slightly faster on average than the Rust version.
+
+Next I made `Node{T}` immutable, thinking that it would be stored inline in the parent array, saving half of the pointer chases. No change in the benchmarks. Uh oh.
+
+``` julia
+immutable A
+  a::UInt32
+  b::UInt32
+  c::UInt64
+  d::UInt64
+end
+
+sizeof(A[A(0,0,0,0), A(0,0,0,0)]) # 48
+
+immutable B
+  a::UInt32
+  b::UInt32
+  c::Vector{UInt64}
+  d::Vector{UInt64}
+end
+
+sizeof(B[B(0,0,[],[]), B(0,0,[],[])]) # 16
+```
+
+At first glance this kind of makes sense, because if `Vector{UInt64}` was just a pointer to some contiguous array then that pointer would have to be mutated if the array is resized. (In Rust that's fine - we can pass around interior pointers and happily mutate them.)
+
+But thinking about it some more, the same is true of variables on the stack. If I do:
+
+``` julia
+a = [1,2,3]
+b = a
+push!(a,4)
+println(b)
+```
+
+The only way this could work is if a and b both point to some heap value which itself points to the actual array data. Looking at https://github.com/JuliaLang/julia/blob/master/src/julia.h#L193-L229 confirms my suspicion - we have a double pointer hop for every use of an array.
+
+That doesn't explain why `B` doesn't get stored inline in the array, but it kicks a hole in this whole plan anyway. I need to figure out how to get this down to a single pointer hop per node. Perhaps something like:
+
+``` julia
+type Node{T, L, N}
+  leaf_bitmap::UInt32
+  node_bitmap::UInt32
+  leaves::NTuple{L, Nullable{T}}
+  nodes::NTuple{N, Nullable{Any}}
+end
+```
+
+It depends on where those numbers get stored. I have a sneaking suspicion that it's going to be in another boxed intermediate separating the nodes.
+
+``` julia
+sizeof(Node{Int, 0, 0}) # 8
+```
+
+It certainly doesn't seem to be in the node itself, unless `sizeof` is not counting the metadata.
+
+Humbug.

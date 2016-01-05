@@ -2463,3 +2463,261 @@ sizeof(Node{Int, 0, 0}) # 8
 It certainly doesn't seem to be in the node itself, unless `sizeof` is not counting the metadata.
 
 Humbug.
+
+## Layout
+
+My [question about storing B inline](https://groups.google.com/forum/#!topic/julia-users/9ADnjy1Zcx4) was answered - only types which satisfiy `isbits` will be stored inline ie no types that contain pointers. Fixing that would require modifying the gc, so it's very low on my list of options :)
+
+My plan for today is to better understand the Julia runtime, starting with memory layout.
+
+Tagged Julia values are defined in [julia.h](https://github.com/JuliaLang/julia/blob/master/src/julia.h#L151-L158) - a pointer to the type (with the lower 2 bits used for gc) followed by the value itself. The types are also tagged Julia values, built out of structs later on in [julia.h](https://github.com/JuliaLang/julia/blob/master/src/julia.h#L298-L368). The recursion ends with
+some hardcoded types that are initialized in [jltypes.c](https://github.com/JuliaLang/julia/blob/25c3659d6cec2ebf6e6c7d16b03adac76a47b42a/src/jltypes.c#L3177-L3611).
+
+We can do horrible things with pointers to get a look at the underlying memory:
+
+``` julia
+julia> view_raw(x, n) = begin
+         p = convert(Ptr{UInt}, pointer_from_objref(x))
+         for e in pointer_to_array(p, (n,), false)
+           println(e)
+         end
+       end
+view_raw (generic function with 1 method)
+
+julia> view_raw(Z(5, true, [1,2,3]), 3)
+5
+1
+140234783861264
+```
+
+It looks like type constructors are cached, which makes sense because somewhere there has to be a method cache where these are the keys:
+
+``` julia
+julia> type X{T} a::T end
+
+julia> x1 = X{Int}
+X{Int64}
+
+julia> x2 = X{Int}
+X{Int64}
+
+julia> is(x1, x2)
+true
+
+julia> pointer_from_objref(x1)
+Ptr{Void} @0x00007f8af3e2f2b0
+
+julia> pointer_from_objref(x2)
+Ptr{Void} @0x00007f8af3e2f2b0
+```
+
+Arrays are defined in [julia.h](https://github.com/JuliaLang/julia/blob/master/src/julia.h#L219-L255). It's way more complicated than I expected so I need to poke around to see what's going on. Luckily, they seem to be allocated near other stuff so I don't segfault all other the place while guessing the length.
+
+``` julia
+julia> view_raw([], 10)
+139805903543424
+0
+569348
+0
+0
+0
+0
+139805834444816
+139805834490240
+0
+
+julia> view_raw([7,7,7], 10)
+139805896193984
+3
+561156
+3
+3
+4294967296
+7
+7
+7
+0
+
+julia> view_raw(collect(777:7777), 10)
+28339056
+7001
+561158
+7001
+7001
+0
+0
+139805835290192
+139805901526672
+10
+
+julia> view_raw(collect(777:7777), 20)
+28395088
+7001
+561158
+7001
+7001
+0
+0
+139805835290192
+139805901532816
+20
+544772
+20
+20
+0
+0
+139805834283184
+139805901532992
+0
+569348
+0
+
+julia> view_raw(collect(777:888), 20)
+139805873991552
+112
+561156
+112
+112
+0
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+```
+
+Up to around 2048 words and it gets stored inline. Above that and it gets dumped somewhere else. (Which is weird, because [MALLOC_THRESH=1048576](https://github.com/JuliaLang/julia/blob/ea952fc289a8f8e2aeb317e0ccb9ce59ec745c4f/src/array.c#L555)).
+
+Resizing is interesting:
+
+``` julia
+julia> x = collect(1:10)
+4-element Array{Int64,1}:
+...
+
+julia> view_raw(x, 20)
+139805874711584
+10
+561156
+10
+10
+139814526530144
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+0
+139805834285488
+139805874711728
+0
+
+julia> Int64(pointer(x))
+139805874711584
+
+julia> append!(x, 1:10000000)
+10000004-element Array{Int64,1}:
+...
+
+julia> view_raw(x, 20)
+139805488328720
+10000004
+561158
+10000004
+16777216
+4294967296
+1
+2
+3
+4
+0
+139805875018024
+139805875017984
+24
+102404
+24
+24
+1099511627776
+7954884599197543732
+8897249683018162292
+
+julia> x = collect(1:2000)
+2000-element Array{Int64,1}:
+...
+
+julia> view_raw(x, 20)
+37207568
+2000
+557060
+2000
+2000
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+
+julia> append!(x, 1:10000000)
+10002000-element Array{Int64,1}:
+...
+
+julia> view_raw(x, 20)
+139805082062864
+10002000
+557062
+10002000
+16384000
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+```
+
+If pushing causes the array to be resized it calls realloc and just sets the pointer. If the realloc resized it in place everything is fine. If the realloc made a new allocation elsewhere then we now have an extra pointer hop and, as far as I can tell from reading https://github.com/JuliaLang/julia/blob/master/src/array.c#L561-L607, the old allocation just hangs around. But that can only happen when the original allocation was inline which means the wasted allocation is fairly small.
+
+There are also 6 words of overhead per (1d) array, not including the type tag. But if I count up fields in the struct I get 5 words and I've only ever seen the last word be 0. Maybe the list of dimensions is 0-terminated?
+
+Anyway, I should definitely not be using arrays for my trie.
+
+Other types are created in [boot.jl](https://github.com/JuliaLang/julia/blob/master/base/boot.jl). Strings are arrays of bytes, so they also pay the 6 word overhead. There don't seem to be any other surprises.
+
+I'm tentatively assuming that tuples get laid out like C structs but I haven't found their constructor yet.
+
+(I also got a [walkthrough](https://groups.google.com/forum/#!topic/julia-users/-qgRbw8AaaU) on how to get LLDB working nicely today, and spent a few hours trying to do the same for oprofile and valgrind with no success.)
+
+(I also wrote the [beginnings of a layout inspector](https://github.com/jamii/imp/blob/master/src/Layout.jl) which I have vague plans of turning into a little gui thing.)

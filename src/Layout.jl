@@ -24,6 +24,7 @@ end
 layout(val::Array) = begin
   t = typeof(val)
   fields = Tuple{Union{Symbol, Int}, Int, Any}[]
+  # TODO this is a lie, see https://github.com/JuliaLang/julia/blob/master/src/julia.h#L193-L229
   push!(fields, (:__type__, -sizeof(Ptr), t))
   et = eltype(val)
   if isbits(et)

@@ -22,11 +22,11 @@ singleton{T}(row::T, column, ix) = begin
     column += 1
     ix = 0
     if column > length(row)
-      error("Out of bits at", row)
+      error("Out of bits")
     end
   end
   value = row[column]
-  key = hash(value)
+  key = value # key = hash(value)
   chunk = chunk_at(key, ix)
   Node{T}(1 << chunk, 0, T[row], Node{T}[])
 end
@@ -35,7 +35,7 @@ Base.push!{T}(tree::Tree{T}, row::T) = begin
   node = tree.root
   for column in 1:length(row)
     value = row[column]
-    key = hash(value)
+    key = value # key = hash(value)
     for ix in 0:(key_length-1)
       chunk = chunk_at(key, ix)
       mask = 1 << chunk
@@ -94,7 +94,7 @@ Base.in{T}(row::T, tree::Tree{T}) = begin
 end
 
 ids() = ids(1000000)
-ids(n) = rand(1:n, n)
+ids(n) = rand(n)
 
 f() = begin
   tree = Tree(Tuple{Int64})

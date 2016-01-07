@@ -1,5 +1,5 @@
 #[derive(Clone, Debug)]
-struct Node<T> {
+pub struct Node<T> {
     leaf_bitmap: u32,
     node_bitmap: u32,
     leaves: Vec<T>,
@@ -7,7 +7,7 @@ struct Node<T> {
 }
 
 #[derive(Clone, Debug)]
-struct Tree<T> {
+pub struct Tree<T> {
     root: Node<T>
 }
 
@@ -51,7 +51,7 @@ impl Node<u64> {
 }
 
 impl Tree<u64> {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Tree{
             root: Node{
                 leaf_bitmap: 0,
@@ -62,7 +62,7 @@ impl Tree<u64> {
         }
     }
 
-    fn insert(&mut self, row: &[u64]) {
+    pub fn insert(&mut self, row: &[u64]) {
         let mut node = &mut self.root;
         for column in 0..row.len() {
             let value = row[column];
@@ -103,7 +103,7 @@ impl Tree<u64> {
         panic!("Out of bits!");
     }
 
-    fn contains(&self, row: &[u64]) -> bool {
+    pub fn contains(&self, row: &[u64]) -> bool {
         let mut node = &self.root;
         for column in 0..row.len() {
             let value = row[column];
@@ -148,19 +148,27 @@ pub fn main() {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-
-    use rand::{Rng, SeedableRng, StdRng};
     use test::{Bencher, black_box};
 
     #[bench]
     pub fn bench_map_build_1(bencher: &mut Bencher) {
-        let ids = black_box(ids(7, 1_000));
+        let ids = black_box(ids(7, 1000000));
         bencher.iter(|| {
-            let mut tree = Tree::new(8);
-            for id in ids.iter() {
-                tree.insert(&[*id]);
+            let mut tree: Tree<u64> = Tree::new();
+            for ix in 0..ids.len() {
+                tree.insert(&ids[ix..ix+1]);
             }
             black_box(&tree);
+        });
+    }
+
+    #[bench]
+    pub fn bench_map_baseline_1(bencher: &mut Bencher) {
+        let ids = black_box(ids(7, 1000000));
+        bencher.iter(|| {
+            let mut ids = ids.clone();
+            ids.sort();
+            black_box(&ids);
         });
     }
 }

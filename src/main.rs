@@ -5,7 +5,6 @@
 #![feature(slice_patterns)]
 #![feature(plugin)]
 #![plugin(peg_syntax_ext)]
-#![feature(alloc, heap_api)]
 
 extern crate rand;
 extern crate test;

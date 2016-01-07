@@ -94,19 +94,29 @@ Base.in{T}(row::T, tree::Tree{T}) = begin
 end
 
 ids() = ids(1000000)
-ids(n) = rand(n)
+ids(n) = rand(UInt64, n)
+
+using Benchmark
 
 f() = begin
-  tree = Tree(Tuple{Int64})
-  n = 1000000
-  rows = [(a,) for (a,b) in zip(ids(n), ids(n))]
-  @time for row in rows
-    push!(tree, row)
+  tree = Tree(Tuple{UInt64})
+  push!(tree, (UInt64(1),))
+  (UInt64(1),) in tree
+  for n in [1_000_000, 10_000_000] #, 100_000_000]
+    gc()
+    tree = Tree(Tuple{UInt64})
+    rows = [(a,) for (a,b) in zip(ids(n), ids(n))]
+    @time begin
+      for row in rows
+        push!(tree, row)
+      end
+    end
+    @time begin
+      all([(row in tree) for row in rows])
+    end
   end
-  @time [hash(row[1]) for row in rows]
-  @time sort(rows, alg=QuickSort)
-  @time all([(row in tree) for row in rows])
-  (1000001,) in tree
 end
+
+println(f())
 
 end

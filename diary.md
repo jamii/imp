@@ -2721,3 +2721,67 @@ I'm tentatively assuming that tuples get laid out like C structs but I haven't f
 (I also got a [walkthrough](https://groups.google.com/forum/#!topic/julia-users/-qgRbw8AaaU) on how to get LLDB working nicely today, and spent a few hours trying to do the same for oprofile and valgrind with no success.)
 
 (I also wrote the [beginnings of a layout inspector](https://github.com/jamii/imp/blob/master/src/Layout.jl) which I have vague plans of turning into a little gui thing.)
+
+## Baseline
+
+How much is my naive julia layout costing me?
+
+I [ported the Julia HAMT to Rust](https://github.com/jamii/imp/blob/7c3d76afe7c2288c13677966ff28a870c8b7ea85/src/map.rs). The code is nearly identical. Since they use different hashing algorithms I removed hashing in both and instead just use random keys generated uniformly over the whole UInt64 range. The Julia version *should* have full type information and obviously the Rust version is fully typed. The both use the same codegen and are both specializing on type.
+
+```
+Rust sort 1M - 0.08s
+
+Rust insert 1M - 0.21s
+Rust lookup 1M - 0.12s
+Rust insert 10M - 3.11s
+Rust lookup 10M - 1.92s
+Rust insert 100M - 48.97s
+Rust lookup 100M - 31.26s
+
+Julia insert 1M - 0.59s
+Julia lookup 1M - 0.25s
+Julia insert 10M - 8.59s
+Julia lookup 10M - 5.02s
+Julia insert 100M - OOM
+Julia lookup 100M - OOM
+
+Rust insert 10M peak rss - 475MB
+Julia insert 10M peak rss - 1034MB
+Julia insert 10M allocations - 765MB
+```
+
+(Note that the Rust version could be further optimized. It is currently storing the lengths and capacity of both vectors in each node - an extra 32 bytes per node that could be calculated from the bitmaps instead.)
+
+I suspect that the difference in performance is attributable mostly to the different memory layout (and, for insert, the cost of allocation/gc). To test this, I'm going to add the same overhead to the Rust version:
+
+``` rust
+#[derive(Clone, Debug)]
+pub struct JuliaArray<T> {
+    metadata: [u64; 5], // 7 words, but length/capactity are shared with Vector
+    vec: Vec<T>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Node<T> {
+    metadata: [u64; 1],
+    leaf_bitmap: u32,
+    node_bitmap: u32,
+    leaves: Box<JuliaArray<T>>,
+    nodes: Box<JuliaArray<Node<T>>>,
+}
+```
+
+```
+Julian Rust insert 1M - 0.29s
+Julian Rust lookup 1M - 0.18s
+Julian Rust insert 10M - 4.91s
+Julia Rust lookup 10M - 3.28s
+
+Julian Rust insert 10M peak rss - 670MB
+```
+
+Huh. The memory usage is now similar but the Rust version is still much faster.
+
+The Julia insert spends ~20% of it's time in gc, which would still only bring the Rust version up to ~6s vs ~9s for Julia. The lookup doesn't report any allocations in Julia, so I think I can rule out the cost of allocation.
+
+So now I'm not sure what's going on. Let's try looking at the cpu performance counters. I [can't get line numbers for Julia](https://groups.google.com/forum/#!topic/julia-users/-qgRbw8AaaU) but I can still see if there is any difference in the overall pattern between the two.

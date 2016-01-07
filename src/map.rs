@@ -150,19 +150,24 @@ pub fn ids(seed: usize, n: usize) -> Vec<u64> {
 }
 
 pub fn main() {
-    for &n in [1_000_000, 10_000_000].iter() {
-        let ids = ids(7, n);
-        let mut tree = Box::new(Tree::new());
-        time!("insert", {
-            for ix in 0..ids.len() {
-                tree.insert(&ids[ix..ix+1]);
-            }
-        });
-        time!("lookup", {
-            for ix in 0..ids.len() {
-                tree.contains(&ids[ix..ix+1]);
-            }
-        });
+    let ids = ids(7, 10_000_000);
+    for _ in 0..10 {
+        for &n in [10_000_000].iter() {
+            let mut tree = Box::new(Tree::new());
+            time!("insert", {
+                for ix in 0..ids.len() {
+                    tree.insert(&ids[ix..ix+1]);
+                }
+            });
+            time!("lookup", {
+                (0..ids.len()).all(|ix|
+                    tree.contains(&ids[ix..ix+1])
+                );
+            });
+            time!("drop", {
+                drop(tree);
+            })
+        }
     }
 }
 

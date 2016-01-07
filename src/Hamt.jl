@@ -1,4 +1,4 @@
-module Hamt
+# module Hamt
 
 type Node{T}
   leaf_bitmap::UInt32
@@ -73,7 +73,7 @@ Base.in{T}(row::T, tree::Tree{T}) = begin
   node = tree.root
   for column in 1:length(row)
     value = row[column]
-    key = hash(value)
+    key = value # hash(value)
     for ix in 0:(key_length-1)
       chunk = chunk_at(key, ix)
       mask = 1 << chunk
@@ -96,16 +96,14 @@ end
 ids() = ids(1000000)
 ids(n) = rand(UInt64, n)
 
-using Benchmark
-
 f() = begin
   tree = Tree(Tuple{UInt64})
   push!(tree, (UInt64(1),))
   (UInt64(1),) in tree
-  for n in [1_000_000, 10_000_000] #, 100_000_000]
-    gc()
+  rows = [(a,) for a in ids(10_000_000)]
+  gc_enable(false)
+  for _ in 1:10
     tree = Tree(Tuple{UInt64})
-    rows = [(a,) for (a,b) in zip(ids(n), ids(n))]
     @time begin
       for row in rows
         push!(tree, row)
@@ -114,9 +112,16 @@ f() = begin
     @time begin
       all([(row in tree) for row in rows])
     end
+    tree = Tree(Tuple{UInt64})
+    @time begin
+      gc_enable(true)
+      gc()
+      gc_enable(false)
+    end
+    println("")
   end
 end
 
-println(f())
+f()
 
-end
+# end

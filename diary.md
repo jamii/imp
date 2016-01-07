@@ -2814,4 +2814,369 @@ Julian Rust lookup 10M - 4.83s
 Julia Rust insert 10M peak rss - 633MB
 ```
 
-So now the lookup time is almost identical. The insert time is still short even if we add 20% gc. Let's break out the perf counters:
+So now the lookup time is almost identical. The insert time is still short even if we add 20% gc. Let's break out the perf counters! These numbers are for 10x insert+lookup 10M rows:
+
+```
+jamie@wanderer:~/code/imp/src$ perf stat -e cycles,instructions,branches,branch-misses,context-switches,cache-references,cache-misses -B ../target/release/imp
+5.199791108999989s for insert
+4.474710060000007s for lookup
+7.080400916000144s for insert
+6.229417960999854s for lookup
+7.060942442999931s for insert
+6.299797809999973s for lookup
+7.109493033000035s for insert
+6.253823409000006s for lookup
+7.016020142000116s for insert
+6.215963810000176s for lookup
+7.078056773000071s for insert
+6.315231796000035s for lookup
+7.38005259800002s for insert
+6.26794608199998s for lookup
+7.138151556999901s for insert
+6.276204322000012s for lookup
+7.058818885999926s for insert
+6.217261228000098s for lookup
+7.040932895000196s for insert
+6.261231286000111s for lookup
+
+ Performance counter stats for '../target/release/imp':
+
+   356,295,147,143      cycles                                                        (66.67%)
+   138,966,714,020      instructions              #    0.39  insns per cycle          (83.33%)
+    19,330,421,477      branches                                                      (83.33%)
+       335,132,522      branch-misses             #    1.73% of all branches          (83.33%)
+               407      context-switches                                            
+     3,865,389,150      cache-references                                              (83.33%)
+     2,242,127,883      cache-misses              #   58.005 % of all cache refs      (83.33%)
+
+     159.602175650 seconds time elapsed
+```
+
+The Rust version is faster on the first iteration and slower for all following iterations. This is consistent across multiple runs. I have no idea why. But it means that my benchmarks earlier with a single run per process are not telling the whole story. That's what I get for being lazy.
+
+```
+jamie@wanderer:~/code/imp/src$ perf stat -e cycles,instructions,branches,branch-misses,context-switches,cache-references,cache-misses -B julia Hamt.jl
+WARNING: Base.String is deprecated, use AbstractString instead.
+  likely near /home/jamie/.julia/v0.4/Benchmark/src/benchmarks.jl:13
+WARNING: Base.String is deprecated, use AbstractString instead.
+  likely near /home/jamie/.julia/v0.4/Benchmark/src/benchmarks.jl:13
+WARNING: Base.String is deprecated, use AbstractString instead.
+  likely near /home/jamie/.julia/v0.4/Benchmark/src/benchmarks.jl:41
+
+WARNING: deprecated syntax "{a,b, ...}" at /home/jamie/.julia/v0.4/Benchmark/src/compare.jl:23.
+Use "Any[a,b, ...]" instead.
+  8.136648 seconds (15.31 M allocations: 766.329 MB, 10.92% gc time)
+  4.815498 seconds (2 allocations: 9.537 MB)
+
+ 10.014619 seconds (15.31 M allocations: 766.329 MB, 25.24% gc time)
+  4.692582 seconds (2 allocations: 9.537 MB)
+
+ 10.211293 seconds (15.31 M allocations: 766.329 MB, 23.99% gc time)
+  5.035553 seconds (2 allocations: 9.537 MB)
+
+  9.908472 seconds (15.31 M allocations: 766.329 MB, 24.53% gc time)
+  4.786145 seconds (2 allocations: 9.537 MB)
+
+ 10.174752 seconds (15.31 M allocations: 766.329 MB, 24.43% gc time)
+  4.983574 seconds (2 allocations: 9.537 MB)
+
+  9.897518 seconds (15.31 M allocations: 766.329 MB, 24.45% gc time)
+  4.976863 seconds (2 allocations: 9.537 MB)
+
+ 10.016775 seconds (15.31 M allocations: 766.329 MB, 24.93% gc time)
+  4.608078 seconds (2 allocations: 9.537 MB)
+
+  9.571723 seconds (15.31 M allocations: 766.329 MB, 24.56% gc time)
+  4.663033 seconds (2 allocations: 9.537 MB)
+
+  9.683189 seconds (15.31 M allocations: 766.329 MB, 24.38% gc time)
+  4.614693 seconds (2 allocations: 9.537 MB)
+
+ 10.616815 seconds (15.31 M allocations: 766.329 MB, 23.37% gc time)
+  5.474383 seconds (2 allocations: 9.537 MB)
+
+nothing
+
+ Performance counter stats for 'julia Hamt.jl':
+
+   461,891,446,139      cycles                                                        (66.66%)
+   172,704,455,804      instructions              #    0.37  insns per cycle          (83.33%)
+    30,037,830,863      branches                                                      (83.34%)
+       448,233,381      branch-misses             #    1.49% of all branches          (83.34%)
+            18,070      context-switches                                            
+     5,017,726,390      cache-references                                              (83.34%)
+     2,915,696,296      cache-misses              #   58.108 % of all cache refs      (83.33%)
+
+     169.362873754 seconds time elapsed
+```
+
+Same effect in the Julia version. Benchmarking is hard :S
+
+What else can we see. The Julia version runs for longer, executes more instructions, executes more branches and reads memory more often. The branch-miss rate and cache-miss rate are very similar to the Rust version.
+
+But the Julia version has waaaay more context-switches: 18,070 vs 407. Where are they coming from?
+
+```
+jamie@wanderer:~/code/imp/src$ sudo perf record -e context-switches --call-graph dwarf -B julia Hamt.jl
+...
+jamie@wanderer:~/code/imp/src$ sudo perf report -g graph --no-children
+
+-   99.57%  julia          [kernel.kallsyms]  [k] schedule                                           
+   - schedule                                                                                        
+      - 70.90% retint_careful                                                                        
+           9.08% 0x7f80f5a386bc                                                                      
+           9.03% 0x7f80f4aa715f                                                                      
+           7.37% 0x7f80f4aa7d85                                                                      
+           6.09% 0x7f80f4aa8964                                                                      
+           3.19% 0x7f80f5a383c5                                                                      
+           2.85% 0x7f80f5a38a8d                                                                      
+           2.47% 0x7f80f5a387fb                                                                      
+           2.47% 0x7f80f5a383fa                                                                      
+           2.23% 0x7f80f5a387f4                                                                      
+           2.23% 0x7f80f5a383f3   
+    etc...        
+```
+
+Gee, thanks perf.
+
+```
+jamie@wanderer:~/code/imp/src$ strace -c julia Hamt.jl
+% time     seconds  usecs/call     calls    errors syscall
+------ ----------- ----------- --------- --------- ----------------
+ 87.15    0.008217          74       111           read
+ 12.74    0.001201           0    206532           madvise
+  0.12    0.000011           0       116           mmap
+...
+```
+
+The only place that madvise is called in the Julia repo is in [gc.c](https://github.com/JuliaLang/julia/blob/6cc48dcd24322976bdc193b3c578acb924f0b8e9/src/gc.c#L952). It looks like something to do with the allocation pools that Julia uses for small allocations. If I disable the gc I still get lots of context switches but no madvise. In fact, without gc I have ~12k context switches and only ~4k system calls. Mysterious.
+
+Let's try something different. I'll start up Julia, compile everything and run through the benchmark once, then attach perf and run through it again. Just to see if those context switches are actually coming from my code or are all from compilation.
+
+```
+jamie@wanderer:~$ perf stat -e cycles,instructions,branches,branch-misses,context-switches,cache-references,cache-misses -p 6315
+^C
+ Performance counter stats for process id '6315':
+
+   363,276,940,351      cycles                                                        (66.67%)
+   163,202,516,794      instructions              #    0.45  insns per cycle          (83.33%)
+    28,053,778,030      branches                                                      (83.33%)
+       418,751,631      branch-misses             #    1.49% of all branches          (83.33%)
+               848      context-switches                                            
+     4,859,874,620      cache-references                                              (83.33%)
+     2,563,913,645      cache-misses              #   52.757 % of all cache refs      (83.33%)
+
+     173.421545858 seconds time elapsed
+```
+
+So it was a red herring. Bad benchmarking again :S
+
+But we can see now that the numbers are very similar, with the Julia version just doing more work overall and nothing in particular standing out.
+
+If we run without gc...
+
+```
+julia> f()
+  5.709961 seconds (15.30 M allocations: 766.156 MB)
+  3.705573 seconds (2 allocations: 9.537 MB)
+
+  6.067698 seconds (15.30 M allocations: 766.156 MB)
+  3.800082 seconds (2 allocations: 9.537 MB)
+
+  5.877812 seconds (15.30 M allocations: 766.156 MB)
+  3.573286 seconds (2 allocations: 9.537 MB)
+
+  5.663457 seconds (15.30 M allocations: 766.156 MB)
+  3.539182 seconds (2 allocations: 9.537 MB)
+
+  5.710040 seconds (15.30 M allocations: 766.156 MB)
+  3.711398 seconds (2 allocations: 9.537 MB)
+
+  6.102098 seconds (15.30 M allocations: 766.156 MB)
+  3.679805 seconds (2 allocations: 9.537 MB)
+
+  6.603569 seconds (15.30 M allocations: 766.156 MB)
+  3.722283 seconds (2 allocations: 9.537 MB)
+
+Killed
+```
+
+..it's actually faster than the Rust version. It looks like the Rust version isn't generating popcnt. Cargo won't let me pass options to LLVM so we have this monstrousity instead:
+
+```
+jamie@wanderer:~/code/imp$ rustc src/main.rs --crate-name imp --crate-type bin -C opt-level=3 -g --out-dir /home/jamie/code/imp/target/release --emit=dep-info,link -L dependency=/home/jamie/code/imp/target/release -L dependency=/home/jamie/code/imp/target/release/deps --extern time=/home/jamie/code/imp/target/release/deps/libtime-22c21fe32894ddad.rlib --extern regex=/home/jamie/code/imp/target/release/deps/libregex-ca23fbfc498b741a.rlib --extern peg_syntax_ext=/home/jamie/code/imp/target/release/deps/libpeg_syntax_ext-3094fcce08564e8c.so --extern rand=/home/jamie/code/imp/target/release/deps/librand-12e778fcd5eb28e9.rlib -C target-cpu=native
+
+jamie@wanderer:~/code/imp$ perf stat -e cycles,instructions,branches,branch-misses,context-switches,cache-references,cache-misses target/release/imp
+3.5112703029999466s for insert
+2.288155586999892s for lookup
+5.355302826999832s for insert
+2.946845485999802s for lookup
+5.500407145000281s for insert
+2.9404805889998897s for lookup
+5.594997771000635s for insert
+3.302149258999634s for lookup
+5.507628701000613s for insert
+3.064086700000189s for lookup
+5.822303377000026s for insert
+3.465523935999954s for lookup
+5.836835606000022s for insert
+3.4077694679999695s for lookup
+6.276327544000196s for insert
+3.469119299999875s for lookup
+5.55367445399952s for insert
+2.969313937000152s for lookup
+5.593115818000115s for insert
+3.053487084000153s for lookup
+
+ Performance counter stats for 'target/release/imp':
+
+   329,000,811,832      cycles                                                        (66.66%)
+   120,350,860,733      instructions              #    0.37  insns per cycle          (83.33%)
+    19,325,072,668      branches                                                      (83.33%)
+       328,275,527      branch-misses             #    1.70% of all branches          (83.34%)
+               855      context-switches                                            
+     3,829,953,580      cache-references                                              (83.34%)
+     2,075,840,379      cache-misses              #   54.200 % of all cache refs      (83.34%)
+
+     111.281388975 seconds time elapsed
+```
+
+Sure makes a difference.
+
+Finally, I realized that the Rust version isn't counting the time taken to free the tree after the benchmark, while the Julia version is paying that cost in gc during insert. So I'll time the Rust drop and the Julia gc separately after each run, and disable the gc otherwise.
+
+```
+julia> f()
+  5.098385 seconds (15.30 M allocations: 765.923 MB)
+  2.972040 seconds (2 allocations: 9.537 MB)
+  1.975303 seconds, 100.00% gc time
+
+  6.835982 seconds (15.30 M allocations: 765.923 MB)
+  4.519367 seconds (2 allocations: 9.537 MB)
+  2.255991 seconds, 100.00% gc time
+
+  7.356767 seconds (15.30 M allocations: 765.923 MB)
+  4.709045 seconds (2 allocations: 9.537 MB)
+  2.694803 seconds, 100.00% gc time
+
+  8.482212 seconds (15.30 M allocations: 765.923 MB)
+  4.322303 seconds (2 allocations: 9.537 MB)
+  2.330776 seconds, 100.00% gc time
+
+  7.022945 seconds (15.30 M allocations: 765.923 MB)
+  4.480007 seconds (2 allocations: 9.537 MB)
+  2.261318 seconds, 100.00% gc time
+
+  6.858507 seconds (15.30 M allocations: 765.923 MB)
+  4.340702 seconds (2 allocations: 9.537 MB)
+  2.283254 seconds, 100.00% gc time
+
+  7.039293 seconds (15.30 M allocations: 765.923 MB)
+  4.427812 seconds (2 allocations: 9.537 MB)
+  2.270358 seconds, 100.00% gc time
+
+  6.904196 seconds (15.30 M allocations: 765.923 MB)
+  4.305911 seconds (2 allocations: 9.537 MB)
+  2.345520 seconds, 100.00% gc time
+
+  6.593265 seconds (15.30 M allocations: 765.923 MB)
+  4.251790 seconds (2 allocations: 9.537 MB)
+  2.277189 seconds, 100.00% gc time
+
+  6.617482 seconds (15.30 M allocations: 765.923 MB)
+  4.410888 seconds (2 allocations: 9.537 MB)
+  2.478191 seconds, 100.00% gc time
+
+jamie@wanderer:~/code/imp$ perf stat -e cycles,instructions,branches,branch-misses,context-switches,cache-references,cache-misses -p 8445
+^C
+ Performance counter stats for process id '8445':
+
+   398,054,461,640      cycles                                                        (66.66%)
+   132,453,050,158      instructions              #    0.33  insns per cycle          (83.33%)
+    21,660,806,420      branches                                                      (83.33%)
+       375,102,742      branch-misses             #    1.73% of all branches          (83.34%)
+             1,341      context-switches                                            
+     3,932,521,463      cache-references                                              (83.34%)
+     2,337,178,854      cache-misses              #   59.432 % of all cache refs      (83.33%)
+```
+
+```
+jamie@wanderer:~/code/imp$ perf stat -e cycles,instructions,branches,branch-misses,context-switches,cache-references,cache-misses target/release/imp
+3.5180486560002464s for insert
+2.8689307719996577s for lookup
+2.254919785000311s for drop
+6.634633460000259s for insert
+3.2209488700000293s for lookup
+2.691355521999867s for drop
+5.714246575999823s for insert
+3.3670170309997047s for lookup
+2.601664489999166s for drop
+6.162275493000379s for insert
+4.827575713999977s for lookup
+2.969592765000016s for drop
+6.158259736000218s for insert
+3.1756934750001165s for lookup
+2.7672535319998133s for drop
+5.674778747000346s for insert
+3.1917649069991967s for lookup
+2.652667846999975s for drop
+5.5488982560000295s for insert
+3.4133420640000622s for lookup
+2.7529494509999495s for drop
+5.82873814300001s for insert
+3.2499250539995046s for lookup
+2.7247443930000372s for drop
+5.960908308000398s for insert
+3.437930901999607s for lookup
+2.88357682700007s for drop
+5.899732896999922s for insert
+3.095586663999711s for lookup
+2.583231364999847s for drop
+
+ Performance counter stats for 'target/release/imp':
+
+   344,024,562,305      cycles                                                        (66.66%)
+   120,094,681,100      instructions              #    0.35  insns per cycle          (83.32%)
+    19,321,743,906      branches                                                      (83.33%)
+       329,449,114      branch-misses             #    1.71% of all branches          (83.33%)
+             1,915      context-switches                                            
+     3,868,027,630      cache-references                                              (83.34%)
+     2,160,131,618      cache-misses              #   55.846 % of all cache refs      (83.34%)
+```
+
+Julia is still slower. I have a version lying around that I compiled from source with debug symbols. Let's run that through the profiler and see if anything in the runtime looks suspicious.
+
+```
+jamie@wanderer:~/code/imp$ sudo perf record -p 10205
+...
+jamie@wanderer:~/code/imp$ sudo perf report
+11.14%  julia    libjulia-debug.so  [.] gc_push_root
+10.37%  julia    perf-10205.map     [.] 0x00007fd5ff08ba5c
+10.03%  julia    perf-10205.map     [.] 0x00007fd5ff08b52d
+ 6.94%  julia    perf-10205.map     [.] 0x00007fd5ff08ba97
+ 6.62%  julia    perf-10205.map     [.] 0x00007fd5ff08b564
+ 4.77%  julia    perf-10205.map     [.] 0x00007fd5ff08b2fb
+ 4.53%  julia    perf-10205.map     [.] 0x00007fd5ff08ba90
+ 4.45%  julia    perf-10205.map     [.] 0x00007fd5ff08b55d
+ 3.14%  julia    libc-2.21.so       [.] __memmove_avx_unaligned
+ 3.04%  julia    libjulia-debug.so  [.] sweep_page
+ 2.95%  julia    libjulia-debug.so  [.] gc_setmark_pool
+ 2.93%  julia    libjulia-debug.so  [.] __pool_alloc
+ 2.81%  julia    libjulia-debug.so  [.] gc_setmark_buf
+ 1.85%  julia    libjulia-debug.so  [.] push_root
+ 1.78%  julia    perf-10205.map     [.] 0x00007fd5ff08bbcd
+ 1.71%  julia    perf-10205.map     [.] 0x00007fd5ff08bbc0
+ 1.39%  julia    perf-10205.map     [.] 0x00007fd5ff08b5cc
+ 1.34%  julia    libjulia-debug.so  [.] _new_array_
+ 1.32%  julia    perf-10205.map     [.] 0x00007fd5ff08b5c5
+ 0.97%  julia    perf-10205.map     [.] 0x00007fd5ff08adf6
+ 0.93%  julia    libc-2.21.so       [.] __memcpy_avx_unaligned
+ 0.74%  julia    libjulia-debug.so  [.] jl_array_grow_end
+ 0.58%  julia    libjulia-debug.so  [.] find_region
+ 0.55%  julia    perf-10205.map     [.] 0x00007fd5ff08b247
+...
+```
+
+Not really. We already knew gc was about 20% of the cost. The hex values are jitted code ie not part of the runtime. Nothing else is that expensive.
+
+Eugh, I forgot to remove one of the hashes in the Julia version. Julia's lookup is actually as slow as it's insert. That puts Julia at 2x slower even with Rust crippled by using the same layout. There must be something wrong in there somewhere.

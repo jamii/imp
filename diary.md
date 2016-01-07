@@ -3179,4 +3179,546 @@ jamie@wanderer:~/code/imp$ sudo perf report
 
 Not really. We already knew gc was about 20% of the cost. The hex values are jitted code ie not part of the runtime. Nothing else is that expensive.
 
-Eugh, I forgot to remove one of the hashes in the Julia version. Julia's lookup is actually as slow as it's insert. That puts Julia at 2x slower even with Rust crippled by using the same layout. There must be something wrong in there somewhere.
+Eugh, I forgot to remove one of the hashes in the Julia version. Julia's lookup is actually as slow as its insert, and 2x as slow as Rust's lookup. There must be something wrong in there somewhere.
+
+Let's look at the ast for the lookup:
+
+```
+julia> @code_warntype in((UInt64(1),), tree)
+Variables:
+  row::Tuple{UInt64}
+  tree::Tree{Tuple{UInt64}}
+  node::Node{Tuple{UInt64}}
+  #s4::Int64
+  column::Int64
+  value::UInt64
+  key::UInt64
+  #s1::Int64
+  ix::Int64
+  chunk::UInt64
+  mask::Int64
+  node_ix::Int64
+  leaf_ix::Int64
+  leaf::Tuple{UInt64}
+
+Body:
+  begin  # /home/jamie/code/imp/src/Hamt.jl, line 72: # /home/jamie/code/imp/src/Hamt.jl, line 73:
+      node = (top(getfield))(tree::Tree{Tuple{UInt64}},:root)::Node{Tuple{UInt64}} # /home/jamie/code/imp/src/Hamt.jl, line 74:
+      GenSym(4) = (Base.nfields)(row::Tuple{UInt64})::Int64
+      GenSym(0) = $(Expr(:new, UnitRange{Int64}, 1, :(((top(getfield))(Base.Intrinsics,:select_value)::I)((Base.sle_int)(1,GenSym(4))::Bool,GenSym(4),(Base.box)(Int64,(Base.sub_int)(1,1)))::Int64)))
+      #s4 = (top(getfield))(GenSym(0),:start)::Int64
+      unless (Base.box)(Base.Bool,(Base.not_int)(#s4::Int64 === (Base.box)(Base.Int,(Base.add_int)((top(getfield))(GenSym(0),:stop)::Int64,1))::Bool)) goto 1
+      2:
+      GenSym(6) = #s4::Int64
+      GenSym(7) = (Base.box)(Base.Int,(Base.add_int)(#s4::Int64,1))
+      column = GenSym(6)
+      #s4 = GenSym(7) # /home/jamie/code/imp/src/Hamt.jl, line 75:
+      value = (Base.getfield)(row::Tuple{UInt64},column::Int64)::UInt64 # /home/jamie/code/imp/src/Hamt.jl, line 76:
+      key = value::UInt64 # /home/jamie/code/imp/src/Hamt.jl, line 77:
+      GenSym(5) = (Base.box)(Int64,(Base.sub_int)(Main.key_length,1))
+      GenSym(2) = $(Expr(:new, UnitRange{Int64}, 0, :(((top(getfield))(Base.Intrinsics,:select_value)::I)((Base.sle_int)(0,GenSym(5))::Bool,GenSym(5),(Base.box)(Int64,(Base.sub_int)(0,1)))::Int64)))
+      #s1 = (top(getfield))(GenSym(2),:start)::Int64
+      unless (Base.box)(Base.Bool,(Base.not_int)(#s1::Int64 === (Base.box)(Base.Int,(Base.add_int)((top(getfield))(GenSym(2),:stop)::Int64,1))::Bool)) goto 5
+      6:
+      NewvarNode(:node_ix)
+      NewvarNode(:leaf_ix)
+      NewvarNode(:leaf)
+      GenSym(8) = #s1::Int64
+      GenSym(9) = (Base.box)(Base.Int,(Base.add_int)(#s1::Int64,1))
+      ix = GenSym(8)
+      #s1 = GenSym(9) # /home/jamie/code/imp/src/Hamt.jl, line 78:
+      chunk = (Base.box)(UInt64,(Base.and_int)((Base.box)(UInt64,(Base.lshr_int)(key::UInt64,(Base.box)(Int64,(Base.mul_int)(ix::Int64,5)))),(Base.box)(UInt64,(Base.zext_int)(UInt64,0x1f)))) # /home/jamie/code/imp/src/Hamt.jl, line 79:
+      mask = (Base.box)(Int64,(Base.shl_int)(1,chunk::UInt64)) # /home/jamie/code/imp/src/Hamt.jl, line 80:
+      unless (Base.slt_int)(0,(Base.box)(Int64,(Base.and_int)((Base.box)(Int64,(Base.zext_int)(Int64,(top(getfield))(node::Node{Tuple{UInt64}},:node_bitmap)::UInt32)),mask::Int64)))::Bool goto 8 # /home/jamie/code/imp/src/Hamt.jl, line 81:
+      node_ix = (Base.box)(Base.Int,(Base.add_int)(1,(Base.box)(Int64,(Base.zext_int)(Int64,(Base.box)(UInt32,(Base.ctpop_int)((Base.box)(UInt32,(Base.shl_int)((top(getfield))(node::Node{Tuple{UInt64}},:node_bitmap)::UInt32,(Base.box)(UInt64,(Base.sub_int)((Base.box)(UInt64,(Base.check_top_bit)(32)),chunk::UInt64)))))))))) # /home/jamie/code/imp/src/Hamt.jl, line 82:
+      node = (Base.arrayref)((top(getfield))(node::Node{Tuple{UInt64}},:nodes)::Array{Node{Tuple{UInt64}},1},node_ix::Int64)::Node{Tuple{UInt64}}
+      goto 10
+      8:  # /home/jamie/code/imp/src/Hamt.jl, line 84:
+      unless (Base.slt_int)(0,(Base.box)(Int64,(Base.and_int)((Base.box)(Int64,(Base.zext_int)(Int64,(top(getfield))(node::Node{Tuple{UInt64}},:leaf_bitmap)::UInt32)),mask::Int64)))::Bool goto 9 # /home/jamie/code/imp/src/Hamt.jl, line 85:
+      leaf_ix = (Base.box)(Base.Int,(Base.add_int)(1,(Base.box)(Int64,(Base.zext_int)(Int64,(Base.box)(UInt32,(Base.ctpop_int)((Base.box)(UInt32,(Base.shl_int)((top(getfield))(node::Node{Tuple{UInt64}},:leaf_bitmap)::UInt32,(Base.box)(UInt64,(Base.sub_int)((Base.box)(UInt64,(Base.check_top_bit)(32)),chunk::UInt64)))))))))) # /home/jamie/code/imp/src/Hamt.jl, line 86:
+      leaf = (Base.arrayref)((top(getfield))(node::Node{Tuple{UInt64}},:leaves)::Array{Tuple{UInt64},1},leaf_ix::Int64)::Tuple{UInt64} # /home/jamie/code/imp/src/Hamt.jl, line 87:
+      return row::Tuple{UInt64} == leaf::Tuple{UInt64}::Bool
+      goto 10
+      9:  # /home/jamie/code/imp/src/Hamt.jl, line 89:
+      return false
+      10:
+      7:
+      unless (Base.box)(Base.Bool,(Base.not_int)((Base.box)(Base.Bool,(Base.not_int)(#s1::Int64 === (Base.box)(Base.Int,(Base.add_int)((top(getfield))(GenSym(2),:stop)::Int64,1))::Bool)))) goto 6
+      5:
+      4:
+      3:
+      unless (Base.box)(Base.Bool,(Base.not_int)((Base.box)(Base.Bool,(Base.not_int)(#s4::Int64 === (Base.box)(Base.Int,(Base.add_int)((top(getfield))(GenSym(0),:stop)::Int64,1))::Bool)))) goto 2
+      1:
+      0:  # /home/jamie/code/imp/src/Hamt.jl, line 93:
+      return (Base.throw)(((top(getfield))((top(getfield))(Base.Main,:Base)::Any,:call)::Any)((top(getfield))((top(getfield))(Base.Main,:Base)::Any,:ErrorException)::Any,"Out of bits!")::Any)::Union{}
+  end::Bool
+```
+
+All the types are correctly derived. There is a lot of boxing going on, but it disappears by the time we reach LLVM IR:
+
+```
+define i1 @julia_in_22401([1 x i64]*, %jl_value_t*) {
+pass:
+  %row = alloca [1 x i64], align 8
+  %leaf = alloca [1 x i64], align 8
+  %2 = alloca [6 x %jl_value_t*], align 8
+  %.sub = getelementptr inbounds [6 x %jl_value_t*]* %2, i64 0, i64 0
+  %3 = getelementptr [6 x %jl_value_t*]* %2, i64 0, i64 2
+  %4 = getelementptr [6 x %jl_value_t*]* %2, i64 0, i64 3
+  store %jl_value_t* inttoptr (i64 8 to %jl_value_t*), %jl_value_t** %.sub, align 8
+  %5 = getelementptr [6 x %jl_value_t*]* %2, i64 0, i64 1
+  %6 = load %jl_value_t*** @jl_pgcstack, align 8
+  %.c = bitcast %jl_value_t** %6 to %jl_value_t*
+  store %jl_value_t* %.c, %jl_value_t** %5, align 8
+  store %jl_value_t** %.sub, %jl_value_t*** @jl_pgcstack, align 8
+  store %jl_value_t* null, %jl_value_t** %3, align 8
+  store %jl_value_t* null, %jl_value_t** %4, align 8
+  %7 = getelementptr [6 x %jl_value_t*]* %2, i64 0, i64 4
+  store %jl_value_t* null, %jl_value_t** %7, align 8
+  %8 = getelementptr [6 x %jl_value_t*]* %2, i64 0, i64 5
+  store %jl_value_t* null, %jl_value_t** %8, align 8
+  %9 = load [1 x i64]* %0, align 8
+  store [1 x i64] %9, [1 x i64]* %row, align 8
+  %10 = getelementptr inbounds %jl_value_t* %1, i64 0, i32 0
+  %11 = load %jl_value_t** %10, align 8
+  store %jl_value_t* %11, %jl_value_t** %3, align 8
+  %12 = getelementptr [1 x i64]* %0, i64 0, i64 0
+  %13 = load i64* %12, align 8
+  br label %L2
+
+L2:                                               ; preds = %pass5, %pass
+  %14 = phi %jl_value_t* [ %11, %pass ], [ %45, %pass5 ]
+  %"#s1.0" = phi i64 [ 0, %pass ], [ %48, %pass5 ]
+  %15 = mul i64 %"#s1.0", 5
+  %16 = ashr i64 %13, %15
+  %17 = and i64 %16, 31
+  %18 = shl i64 1, %17
+  %19 = bitcast %jl_value_t* %14 to i8*
+  %20 = getelementptr i8* %19, i64 4
+  %21 = bitcast i8* %20 to i32*
+  %22 = load i32* %21, align 4
+  %23 = zext i32 %22 to i64
+  %24 = and i64 %18, %23
+  %25 = icmp eq i64 %24, 0
+  br i1 %25, label %L6, label %if3
+
+if3:                                              ; preds = %L2
+  %26 = sub i64 32, %17
+  %27 = trunc i64 %26 to i32
+  %28 = shl i32 %22, %27
+  %29 = icmp ugt i64 %26, 31
+  %30 = select i1 %29, i32 0, i32 %28
+  %31 = call i32 @llvm.ctpop.i32(i32 %30)
+  %32 = zext i32 %31 to i64
+  %33 = getelementptr inbounds %jl_value_t* %14, i64 2, i32 0
+  %34 = load %jl_value_t** %33, align 8
+  %35 = getelementptr inbounds %jl_value_t* %34, i64 1
+  %36 = bitcast %jl_value_t* %35 to i64*
+  %37 = load i64* %36, align 8
+  %38 = icmp ult i64 %32, %37
+  br i1 %38, label %idxend, label %oob
+
+oob:                                              ; preds = %if3
+  %39 = add i64 %32, 1
+  %40 = alloca i64, align 8
+  store i64 %39, i64* %40, align 8
+  call void @jl_bounds_error_ints(%jl_value_t* %34, i64* %40, i64 1)
+  unreachable
+
+idxend:                                           ; preds = %if3
+  %41 = bitcast %jl_value_t* %34 to i8**
+  %42 = load i8** %41, align 8
+  %43 = bitcast i8* %42 to %jl_value_t**
+  %44 = getelementptr %jl_value_t** %43, i64 %32
+  %45 = load %jl_value_t** %44, align 8
+  %46 = icmp eq %jl_value_t* %45, null
+  br i1 %46, label %fail4, label %pass5
+
+fail4:                                            ; preds = %idxend
+  %47 = load %jl_value_t** @jl_undefref_exception, align 8
+  call void @jl_throw_with_superfluous_argument(%jl_value_t* %47, i32 82)
+  unreachable
+
+pass5:                                            ; preds = %idxend
+  %48 = add i64 %"#s1.0", 1
+  store %jl_value_t* %45, %jl_value_t** %3, align 8
+  %49 = icmp eq i64 %"#s1.0", 12
+  br i1 %49, label %L17, label %L2
+
+L6:                                               ; preds = %L2
+  %50 = bitcast %jl_value_t* %14 to i32*
+  %51 = load i32* %50, align 16
+  %52 = zext i32 %51 to i64
+  %53 = and i64 %52, %18
+  %54 = icmp eq i64 %53, 0
+  br i1 %54, label %L11, label %if7
+
+if7:                                              ; preds = %L6
+  %55 = sub i64 32, %17
+  %56 = trunc i64 %55 to i32
+  %57 = shl i32 %51, %56
+  %58 = icmp ugt i64 %55, 31
+  %59 = select i1 %58, i32 0, i32 %57
+  %60 = call i32 @llvm.ctpop.i32(i32 %59)
+  %61 = zext i32 %60 to i64
+  %62 = getelementptr inbounds %jl_value_t* %14, i64 1, i32 0
+  %63 = load %jl_value_t** %62, align 8
+  %64 = getelementptr inbounds %jl_value_t* %63, i64 1
+  %65 = bitcast %jl_value_t* %64 to i64*
+  %66 = load i64* %65, align 8
+  %67 = icmp ult i64 %61, %66
+  br i1 %67, label %idxend9, label %oob8
+
+oob8:                                             ; preds = %if7
+  %68 = add i64 %61, 1
+  %69 = alloca i64, align 8
+  store i64 %68, i64* %69, align 8
+  call void @jl_bounds_error_ints(%jl_value_t* %63, i64* %69, i64 1)
+  unreachable
+
+idxend9:                                          ; preds = %if7
+  %70 = bitcast %jl_value_t* %63 to i8**
+  %71 = load i8** %70, align 8
+  %72 = bitcast i8* %71 to [1 x i64]*
+  %73 = getelementptr [1 x i64]* %72, i64 %61
+  %74 = load [1 x i64]* %73, align 8
+  store [1 x i64] %74, [1 x i64]* %leaf, align 8
+  %75 = call i1 @"julia_==540"([1 x i64]* %row, [1 x i64]* %leaf)
+  %76 = load %jl_value_t** %5, align 8
+  %77 = getelementptr inbounds %jl_value_t* %76, i64 0, i32 0
+  store %jl_value_t** %77, %jl_value_t*** @jl_pgcstack, align 8
+  ret i1 %75
+
+L11:                                              ; preds = %L6
+  %78 = load %jl_value_t** %5, align 8
+  %79 = getelementptr inbounds %jl_value_t* %78, i64 0, i32 0
+  store %jl_value_t** %79, %jl_value_t*** @jl_pgcstack, align 8
+  ret i1 false
+
+L17:                                              ; preds = %pass5
+  %80 = load %jl_value_t** inttoptr (i64 139773691732392 to %jl_value_t**), align 8
+  store %jl_value_t* %80, %jl_value_t** %4, align 8
+  store %jl_value_t* inttoptr (i64 139782383826328 to %jl_value_t*), %jl_value_t** %7, align 8
+  %81 = call %jl_value_t* @jl_f_get_field(%jl_value_t* null, %jl_value_t** %4, i32 2)
+  store %jl_value_t* %81, %jl_value_t** %4, align 8
+  store %jl_value_t* inttoptr (i64 139782383820776 to %jl_value_t*), %jl_value_t** %7, align 8
+  %82 = call %jl_value_t* @jl_f_get_field(%jl_value_t* null, %jl_value_t** %4, i32 2)
+  store %jl_value_t* %82, %jl_value_t** %4, align 8
+  %83 = load %jl_value_t** inttoptr (i64 139773691732392 to %jl_value_t**), align 8
+  store %jl_value_t* %83, %jl_value_t** %7, align 8
+  store %jl_value_t* inttoptr (i64 139782383826328 to %jl_value_t*), %jl_value_t** %8, align 8
+  %84 = call %jl_value_t* @jl_f_get_field(%jl_value_t* null, %jl_value_t** %7, i32 2)
+  store %jl_value_t* %84, %jl_value_t** %7, align 8
+  store %jl_value_t* inttoptr (i64 139782383893576 to %jl_value_t*), %jl_value_t** %8, align 8
+  %85 = call %jl_value_t* @jl_f_get_field(%jl_value_t* null, %jl_value_t** %7, i32 2)
+  store %jl_value_t* %85, %jl_value_t** %7, align 8
+  store %jl_value_t* inttoptr (i64 139773758179264 to %jl_value_t*), %jl_value_t** %8, align 8
+  %86 = getelementptr inbounds %jl_value_t* %82, i64 -1, i32 0
+  %87 = load %jl_value_t** %86, align 8
+  %88 = ptrtoint %jl_value_t* %87 to i64
+  %89 = and i64 %88, -16
+  %90 = inttoptr i64 %89 to %jl_value_t*
+  %91 = icmp eq %jl_value_t* %90, inttoptr (i64 139773691822656 to %jl_value_t*)
+  br i1 %91, label %isf, label %notf
+
+isf:                                              ; preds = %L17
+  %92 = bitcast %jl_value_t* %82 to %jl_value_t* (%jl_value_t*, %jl_value_t**, i32)**
+  %93 = load %jl_value_t* (%jl_value_t*, %jl_value_t**, i32)** %92, align 8
+  %94 = call %jl_value_t* %93(%jl_value_t* %82, %jl_value_t** %7, i32 2)
+  br label %fail18
+
+notf:                                             ; preds = %L17
+  %95 = call %jl_value_t* @jl_apply_generic(%jl_value_t* inttoptr (i64 139773716284272 to %jl_value_t*), %jl_value_t** %4, i32 3)
+  br label %fail18
+
+fail18:                                           ; preds = %notf, %isf
+  %96 = phi %jl_value_t* [ %94, %isf ], [ %95, %notf ]
+  call void @jl_throw_with_superfluous_argument(%jl_value_t* %96, i32 93)
+  unreachable
+}
+```
+
+That's a lot of code. I learned a lot more llvm commands today than I planned to.
+
+First thing I notice:
+
+```
+julia> x = UInt32(0)
+0x00000000
+
+julia> @code_llvm (x << 32)
+
+define i32 @"julia_<<_21947"(i32, i64) {
+top:
+  %2 = trunc i64 %1 to i32
+  %3 = shl i32 %0, %2
+  %4 = icmp ugt i64 %1, 31
+  %5 = select i1 %4, i32 0, i32 %3
+  ret i32 %5
+}
+
+julia> @code_native (x << 32)
+	.text
+Filename: int.jl
+Source line: 109
+	pushq	%rbp
+	movq	%rsp, %rbp
+Source line: 109
+	movb	%sil, %cl
+	shll	%cl, %edi
+	xorl	%eax, %eax
+	cmpq	$31, %rsi
+	cmovbel	%edi, %eax
+	popq	%rbp
+	ret
+```
+
+There is some extra logic in [shl_int](https://github.com/JuliaLang/julia/blob/15cae8649392195e6c5cb5a31eac87b4b49b2a85/src/intrinsics.cpp#L1332-L1339) to handle the case where the shift amount is more than the number of bits. Compare this to js:
+
+```
+jamie@wanderer:~$ nodejs
+> 42 << 64
+42
+```
+
+That was a nasty surprise earlier this year - js just masks off all but the bottom 5 bits. [Apparently C is free to do this too](http://stackoverflow.com/questions/7401888/why-doesnt-left-bit-shift-for-32-bit-integers-work-as-expected-when-used).
+
+```
+%46 = icmp eq %jl_value_t* %45, null
+br i1 %46, label %fail4, label %pass5
+
+fail4:                                            ; preds = %idxend
+%47 = load %jl_value_t** @jl_undefref_exception, align 8
+call void @jl_throw_with_superfluous_argument(%jl_value_t* %47, i32 82)
+unreachable
+```
+
+Null check on `node = node.nodes[node_ix]`. Can I put nulls in arrays?
+
+```
+julia> Vector(3)
+3-element Array{Any,1}:
+ #undef
+ #undef
+ #undef
+```
+
+Yep.
+
+```
+%row = alloca [1 x i64], align 8
+%leaf = alloca [1 x i64], align 8
+%2 = alloca [6 x %jl_value_t*], align 8
+%.sub = getelementptr inbounds [6 x %jl_value_t*]* %2, i64 0, i64 0
+%3 = getelementptr [6 x %jl_value_t*]* %2, i64 0, i64 2
+%4 = getelementptr [6 x %jl_value_t*]* %2, i64 0, i64 3
+store %jl_value_t* inttoptr (i64 8 to %jl_value_t*), %jl_value_t** %.sub, align 8
+%5 = getelementptr [6 x %jl_value_t*]* %2, i64 0, i64 1
+%6 = load %jl_value_t*** @jl_pgcstack, align 8
+%.c = bitcast %jl_value_t** %6 to %jl_value_t*
+store %jl_value_t* %.c, %jl_value_t** %5, align 8
+store %jl_value_t** %.sub, %jl_value_t*** @jl_pgcstack, align 8
+store %jl_value_t* null, %jl_value_t** %3, align 8
+store %jl_value_t* null, %jl_value_t** %4, align 8
+%7 = getelementptr [6 x %jl_value_t*]* %2, i64 0, i64 4
+store %jl_value_t* null, %jl_value_t** %7, align 8
+%8 = getelementptr [6 x %jl_value_t*]* %2, i64 0, i64 5
+store %jl_value_t* null, %jl_value_t** %8, align 8
+```
+
+Embedding a linked list in the stack, I think? It allocates stack space for the row and leaf tuples, and then for 6 pointers. The first pointer is set to 8 (ie the size of this stack frame), the second pointer is set to jl_pgcstack and jl_pgcstack is set to point at the first pointer.
+
+```
+%75 = call i1 @"julia_==540"([1 x i64]* %row, [1 x i64]* %leaf)
+```
+
+`chunk_at` was inlined but `row == leaf` was not. Maybe llvm will decide to inline it later? Replacing it with `row[1] == leaf[1]` has little impact.
+
+The IR for the Rust version (with debug info stripped) is:
+
+```
+define internal fastcc zeroext i1 @"_ZN3map15Tree$LT$u64$GT$8contains20h0b90de763b72ec39YnaE"(%"map::Tree<u64>"* noalias nocapture readonly dereferenceable(8), i64* noalias nonnull readonly, i64) unnamed_addr #9 {
+entry-block:
+  %3 = icmp eq i64 %2, 0, !dbg !50185
+  br i1 %3, label %clean_ast_26544_25, label %match_case.lr.ph, !dbg !50187
+
+match_case.lr.ph:                                 ; preds = %entry-block
+  %4 = getelementptr inbounds %"map::Tree<u64>", %"map::Tree<u64>"* %0, i64 0, i32 0, !dbg !50173
+  br label %"_ZN5slice36_$u5b$T$u5d$.ops..Index$LT$usize$GT$5index5index21h17911719332607156456E.exit", !dbg !50187
+
+loop_body.loopexit:                               ; preds = %"_ZN3vec31Vec$LT$T$GT$.Index$LT$usize$GT$5index5index20h7209727245129996211E.exit"
+  %.lcssa227 = phi %"map::Node<u64>"** [ %29, %"_ZN3vec31Vec$LT$T$GT$.Index$LT$usize$GT$5index5index20h7209727245129996211E.exit" ]
+  %5 = icmp ult i64 %6, %2, !dbg !50185
+  br i1 %5, label %"_ZN5slice36_$u5b$T$u5d$.ops..Index$LT$usize$GT$5index5index21h17911719332607156456E.exit", label %clean_ast_26544_25.loopexit, !dbg !50187
+
+"_ZN5slice36_$u5b$T$u5d$.ops..Index$LT$usize$GT$5index5index21h17911719332607156456E.exit": ; preds = %loop_body.loopexit, %match_case.lr.ph
+  %node.0167 = phi %"map::Node<u64>"** [ %4, %match_case.lr.ph ], [ %.lcssa227, %loop_body.loopexit ]
+  %.sroa.0125.0..val.i145166 = phi i64 [ 0, %match_case.lr.ph ], [ %6, %loop_body.loopexit ]
+  %6 = add nuw i64 %.sroa.0125.0..val.i145166, 1, !dbg !50191
+  %7 = getelementptr inbounds i64, i64* %1, i64 %.sroa.0125.0..val.i145166, !dbg !50212
+  %8 = load i64, i64* %7, align 8, !dbg !50213
+  br label %match_case13, !dbg !50218
+
+match_case13:                                     ; preds = %"_ZN5slice36_$u5b$T$u5d$.ops..Index$LT$usize$GT$5index5index21h17911719332607156456E.exit", %"_ZN3vec31Vec$LT$T$GT$.Index$LT$usize$GT$5index5index20h7209727245129996211E.exit"
+  %node.1165 = phi %"map::Node<u64>"** [ %node.0167, %"_ZN5slice36_$u5b$T$u5d$.ops..Index$LT$usize$GT$5index5index21h17911719332607156456E.exit" ], [ %29, %"_ZN3vec31Vec$LT$T$GT$.Index$LT$usize$GT$5index5index20h7209727245129996211E.exit" ]
+  %.sroa.0105.0..val.i.80141164 = phi i64 [ 0, %"_ZN5slice36_$u5b$T$u5d$.ops..Index$LT$usize$GT$5index5index21h17911719332607156456E.exit" ], [ %9, %"_ZN3vec31Vec$LT$T$GT$.Index$LT$usize$GT$5index5index20h7209727245129996211E.exit" ]
+  %9 = add nuw nsw i64 %.sroa.0105.0..val.i.80141164, 1, !dbg !50222
+  %10 = mul nuw nsw i64 %.sroa.0105.0..val.i.80141164, 5, !dbg !50229
+  %11 = lshr i64 %8, %10, !dbg !50229
+  %.tr.i = trunc i64 %11 to i32, !dbg !50229
+  %12 = and i32 %.tr.i, 31, !dbg !50229
+  %13 = shl i32 1, %12, !dbg !50231
+  %14 = load %"map::Node<u64>"*, %"map::Node<u64>"** %node.1165, align 8, !dbg !50232, !nonnull !361
+  %15 = getelementptr inbounds %"map::Node<u64>", %"map::Node<u64>"* %14, i64 0, i32 2, !dbg !50232
+  %16 = load i32, i32* %15, align 4, !dbg !50232
+  %17 = and i32 %16, %13, !dbg !50232
+  %18 = icmp eq i32 %17, 0, !dbg !50232
+  br i1 %18, label %else-block, label %then-block-921-, !dbg !50232
+
+then-block-921-:                                  ; preds = %match_case13
+  %19 = zext i32 %16 to i64, !dbg !50235
+  %20 = sub nsw i32 32, %12, !dbg !50235
+  %21 = zext i32 %20 to i64, !dbg !50235
+  %22 = shl i64 %19, %21, !dbg !50235
+  %23 = trunc i64 %22 to i32, !dbg !50235
+  %24 = tail call i32 @llvm.ctpop.i32(i32 %23) #1, !dbg !50238
+  %25 = zext i32 %24 to i64, !dbg !50239
+  %26 = getelementptr inbounds %"map::Node<u64>", %"map::Node<u64>"* %14, i64 0, i32 4, !dbg !50240
+  %27 = load %"map::JuliaArray<Box<map::Node<u64>>>"*, %"map::JuliaArray<Box<map::Node<u64>>>"** %26, align 8, !dbg !50240, !nonnull !361
+  %.idx79 = getelementptr %"map::JuliaArray<Box<map::Node<u64>>>", %"map::JuliaArray<Box<map::Node<u64>>>"* %27, i64 0, i32 1, i32 1
+  %.idx79.val = load i64, i64* %.idx79, align 8, !alias.scope !50242
+  %28 = icmp ugt i64 %.idx79.val, %25, !dbg !50253
+  br i1 %28, label %"_ZN3vec31Vec$LT$T$GT$.Index$LT$usize$GT$5index5index20h7209727245129996211E.exit", label %cond.i, !dbg !50240, !prof !47339
+
+cond.i:                                           ; preds = %then-block-921-
+  %.idx79.val.lcssa = phi i64 [ %.idx79.val, %then-block-921- ]
+  %.lcssa224 = phi i64 [ %25, %then-block-921- ]
+  tail call void @_ZN9panicking18panic_bounds_check20h2760eb7b4877ebd5RmKE({ %str_slice, i32 }* noalias nonnull readonly dereferenceable(24) @panic_bounds_check_loc12605, i64 %.lcssa224, i64 %.idx79.val.lcssa), !dbg !50253
+  unreachable, !dbg !50253
+
+"_ZN3vec31Vec$LT$T$GT$.Index$LT$usize$GT$5index5index20h7209727245129996211E.exit": ; preds = %then-block-921-
+  %.idx78 = getelementptr %"map::JuliaArray<Box<map::Node<u64>>>", %"map::JuliaArray<Box<map::Node<u64>>>"* %27, i64 0, i32 1, i32 0, i32 0, i32 0, i32 0
+  %.idx78.val = load %"map::Node<u64>"**, %"map::Node<u64>"*** %.idx78, align 8, !alias.scope !50254
+  %29 = getelementptr inbounds %"map::Node<u64>"*, %"map::Node<u64>"** %.idx78.val, i64 %25, !dbg !50253
+  %30 = icmp ult i64 %9, 13, !dbg !50259
+  br i1 %30, label %match_case13, label %loop_body.loopexit, !dbg !50218
+
+else-block:                                       ; preds = %match_case13
+  %.lcssa221 = phi %"map::Node<u64>"* [ %14, %match_case13 ]
+  %.lcssa218 = phi i32 [ %13, %match_case13 ]
+  %.lcssa = phi i32 [ %12, %match_case13 ]
+  %31 = getelementptr inbounds %"map::Node<u64>", %"map::Node<u64>"* %.lcssa221, i64 0, i32 1, !dbg !50261
+  %32 = load i32, i32* %31, align 4, !dbg !50261
+  %33 = and i32 %32, %.lcssa218, !dbg !50261
+  %34 = icmp eq i32 %33, 0, !dbg !50261
+  br i1 %34, label %clean_ast_897_, label %then-block-951-, !dbg !50261
+
+then-block-951-:                                  ; preds = %else-block
+  %35 = zext i32 %32 to i64, !dbg !50272
+  %36 = sub nsw i32 32, %.lcssa, !dbg !50272
+  %37 = zext i32 %36 to i64, !dbg !50272
+  %38 = shl i64 %35, %37, !dbg !50272
+  %39 = trunc i64 %38 to i32, !dbg !50272
+  %40 = tail call i32 @llvm.ctpop.i32(i32 %39) #1, !dbg !50275
+  %41 = zext i32 %40 to i64, !dbg !50276
+  %42 = mul i64 %41, %2, !dbg !50276
+  %43 = getelementptr inbounds %"map::Node<u64>", %"map::Node<u64>"* %.lcssa221, i64 0, i32 3, !dbg !50277
+  %44 = load %"map::JuliaArray<u64>"*, %"map::JuliaArray<u64>"** %43, align 8, !dbg !50277, !nonnull !361
+  %45 = add i64 %42, %2, !dbg !50277
+  %.idx = getelementptr %"map::JuliaArray<u64>", %"map::JuliaArray<u64>"* %44, i64 0, i32 1, i32 0, i32 0, i32 0, i32 0
+  %.idx.val = load i64*, i64** %.idx, align 8
+  %.idx75 = getelementptr %"map::JuliaArray<u64>", %"map::JuliaArray<u64>"* %44, i64 0, i32 1, i32 1
+  %.idx75.val = load i64, i64* %.idx75, align 8
+  %46 = icmp ult i64 %45, %42, !dbg !50295
+  br i1 %46, label %then-block-37390-.i.i, label %else-block.i.i, !dbg !50295
+
+then-block-37390-.i.i:                            ; preds = %then-block-951-
+  tail call void @_ZN5slice22slice_index_order_fail20h86e0cbc11bd0c115C8NE(i64 %42, i64 %45), !dbg !50296, !noalias !50298
+  unreachable, !dbg !50296
+
+else-block.i.i:                                   ; preds = %then-block-951-
+  %47 = icmp ugt i64 %45, %.idx75.val, !dbg !50309
+  br i1 %47, label %then-block-37404-.i.i, label %"_ZN3vec54Vec$LT$T$GT$.ops..Index$LT$ops..Range$LT$usize$GT$$GT$5index5index21h10954783785114391776E.exit", !dbg !50309
+
+then-block-37404-.i.i:                            ; preds = %else-block.i.i
+  tail call void @_ZN5slice20slice_index_len_fail20h0426121f8200b444C7NE(i64 %45, i64 %.idx75.val), !dbg !50316, !noalias !50298
+  unreachable, !dbg !50316
+
+"_ZN3vec54Vec$LT$T$GT$.ops..Index$LT$ops..Range$LT$usize$GT$$GT$5index5index21h10954783785114391776E.exit": ; preds = %else-block.i.i
+  %48 = getelementptr inbounds i64, i64* %.idx.val, i64 %42, !dbg !50325
+  br label %loop_body.i.i, !dbg !50343
+
+loop_body.i.i:                                    ; preds = %"_ZN3vec54Vec$LT$T$GT$.ops..Index$LT$ops..Range$LT$usize$GT$$GT$5index5index21h10954783785114391776E.exit", %next.i.i
+  %.sroa.037.0..val.i46.i.i = phi i64 [ %50, %next.i.i ], [ 0, %"_ZN3vec54Vec$LT$T$GT$.ops..Index$LT$ops..Range$LT$usize$GT$$GT$5index5index21h10954783785114391776E.exit" ], !dbg !50344
+  %49 = icmp ult i64 %.sroa.037.0..val.i46.i.i, %2, !dbg !50347
+  br i1 %49, label %next.i.i, label %clean_ast_897_.loopexit, !dbg !50349
+
+next.i.i:                                         ; preds = %loop_body.i.i
+  %50 = add i64 %.sroa.037.0..val.i46.i.i, 1, !dbg !50353
+  %51 = getelementptr inbounds i64, i64* %1, i64 %.sroa.037.0..val.i46.i.i, !dbg !50374
+  %52 = getelementptr inbounds i64, i64* %48, i64 %.sroa.037.0..val.i46.i.i, !dbg !50375
+  %.val.i.i = load i64, i64* %51, align 8, !dbg !50344, !alias.scope !50376, !noalias !50379
+  %.val26.i.i = load i64, i64* %52, align 8, !dbg !50344, !alias.scope !50379, !noalias !50376
+  %53 = icmp eq i64 %.val.i.i, %.val26.i.i, !dbg !50381
+  br i1 %53, label %loop_body.i.i, label %clean_ast_897_.loopexit, !dbg !50375
+
+clean_ast_897_.loopexit:                          ; preds = %loop_body.i.i, %next.i.i
+  %sret_slot.0.ph = phi i1 [ false, %next.i.i ], [ true, %loop_body.i.i ]
+  br label %clean_ast_897_, !dbg !50383
+
+clean_ast_897_:                                   ; preds = %clean_ast_897_.loopexit, %else-block
+  %sret_slot.0 = phi i1 [ false, %else-block ], [ %sret_slot.0.ph, %clean_ast_897_.loopexit ]
+  ret i1 %sret_slot.0, !dbg !50383
+
+clean_ast_26544_25.loopexit:                      ; preds = %loop_body.loopexit
+  br label %clean_ast_26544_25, !dbg !50384
+
+clean_ast_26544_25:                               ; preds = %clean_ast_26544_25.loopexit, %entry-block
+  tail call fastcc void @_ZN10sys_common6unwind12begin_unwind12begin_unwind20h7713200070592497824E(i8* noalias nonnull readonly getelementptr inbounds ([12 x i8], [12 x i8]* @str12911, i64 0, i64 0), i64 12, { %str_slice, i32 }* noalias readonly dereferenceable(24) bitcast ({ %str_slice, i32, [4 x i8] }* @"_ZN3map15Tree$LT$u64$GT$8contains10_FILE_LINE20h198f9582d21749b0fqaE" to { %str_slice, i32 }*)), !dbg !50384
+  unreachable, !dbg !50384
+}
+```
+
+The first thing that jumps out at me is that it's way more typed. The Julia AST had all the types it needed, but discards them by the time it reaches LLVM eg:
+
+```
+Rust
+%26 = getelementptr inbounds %"map::Node<u64>", %"map::Node<u64>"* %14, i64 0, i32 4, !dbg !50240
+%27 = load %"map::JuliaArray<Box<map::Node<u64>>>"*, %"map::JuliaArray<Box<map::Node<u64>>>"** %26, align 8, !dbg !50240, !nonnull !361
+
+Julia
+%33 = getelementptr inbounds %jl_value_t* %14, i64 2, i32 0
+%34 = load %jl_value_t** %33, align 8
+```
+
+It also has a lot more metadata about aliasing, nulls, mutability etc.
+
+I don't know how much any of that makes a difference. If it generates better assembly, it's not showing up in the performance counters.
+
+So that's where I'm at for today. Both versions use similar data layouts, generate similar code, use similar amounts of memory and show similar numbers of instructions executed, branches taken/missed and cache references/misses. But one of them is consistently twice as fast as the other.
+
+```
+Performance counter stats for '../target/release/imp':
+
+  101,828,660,572      cycles                                                        (66.65%)
+   26,539,799,614      instructions              #    0.26  insns per cycle          (83.32%)
+    4,320,044,658      branches                                                      (83.33%)
+       59,527,376      branch-misses             #    1.38% of all branches          (83.34%)
+              326      context-switches                                            
+    1,250,325,036      cache-references                                              (83.33%)
+      926,747,895      cache-misses              #   74.121 % of all cache refs      (83.34%)
+
+     36.120043773 seconds time elapsed
+
+Performance counter stats for process id '16164':
+
+  150,210,926,888      cycles                                                        (66.66%)
+   31,434,058,110      instructions              #    0.21  insns per cycle          (83.33%)
+    4,811,978,240      branches                                                      (83.33%)
+       57,565,871      branch-misses             #    1.20% of all branches          (83.34%)
+              521      context-switches                                            
+    1,324,801,988      cache-references                                              (83.34%)
+      920,160,263      cache-misses              #   69.456 % of all cache refs      (83.33%)
+
+     59.871103895 seconds time elapsed
+```

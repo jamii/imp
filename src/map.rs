@@ -10,12 +10,12 @@ pub struct Node<T> {
     leaf_bitmap: u32,
     node_bitmap: u32,
     leaves: Box<JuliaArray<T>>,
-    nodes: Box<JuliaArray<Node<T>>>,
+    nodes: Box<JuliaArray<Box<Node<T>>>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Tree<T> {
-    root: Node<T>
+    root: Box<Node<T>>
 }
 
 impl<T> JuliaArray<T> {
@@ -66,13 +66,13 @@ impl Node<u64> {
 impl Tree<u64> {
     pub fn new() -> Self {
         Tree{
-            root: Node{
+            root: Box::new(Node{
                 metadata: [0; 1],
                 leaf_bitmap: 0,
                 node_bitmap: 0,
                 leaves: JuliaArray::new(vec![]),
                 nodes: JuliaArray::new(vec![]),
-            }
+            })
         }
     }
 
@@ -99,7 +99,7 @@ impl Tree<u64> {
                         node.leaf_bitmap ^= mask;
                         node.node_bitmap |= mask;
                         let node_ix = count_ones_after(node.node_bitmap, chunk);
-                        node.nodes.vec.insert(node_ix, child);
+                        node.nodes.vec.insert(node_ix, Box::new(child));
                         node = unsafe{ any_lifetime_mut(&mut node.nodes.vec[node_ix]) };
                         // continue loop
                     }
@@ -152,7 +152,7 @@ pub fn ids(seed: usize, n: usize) -> Vec<u64> {
 pub fn main() {
     for &n in [1_000_000, 10_000_000].iter() {
         let ids = ids(7, n);
-        let mut tree: Tree<u64> = Tree::new();
+        let mut tree = Box::new(Tree::new());
         time!("insert", {
             for ix in 0..ids.len() {
                 tree.insert(&ids[ix..ix+1]);

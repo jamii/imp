@@ -2785,3 +2785,33 @@ Huh. The memory usage is now similar but the Rust version is still much faster.
 The Julia insert spends ~20% of it's time in gc, which would still only bring the Rust version up to ~6s vs ~9s for Julia. The lookup doesn't report any allocations in Julia, so I think I can rule out the cost of allocation.
 
 So now I'm not sure what's going on. Let's try looking at the cpu performance counters. I [can't get line numbers for Julia](https://groups.google.com/forum/#!topic/julia-users/-qgRbw8AaaU) but I can still see if there is any difference in the overall pattern between the two.
+
+No, wait, before that - I forgot an extra overhead from Julia. Nodes are boxed too:
+
+``` rust
+#[derive(Clone, Debug)]
+pub struct JuliaArray<T> {
+    metadata: [u64; 5], // 7 words, but length/capactity are shared with Vector
+    vec: Vec<T>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Node<T> {
+    metadata: [u64; 1],
+    leaf_bitmap: u32,
+    node_bitmap: u32,
+    leaves: Box<JuliaArray<T>>,
+    nodes: Box<JuliaArray<Box<Node<T>>>>,
+}
+```
+
+```
+Julian Rust insert 1M - 0.36s
+Julian Rust lookup 1M - 0.24s
+Julian Rust insert 10M - 6.00
+Julian Rust lookup 10M - 4.83s
+
+Julia Rust insert 10M peak rss - 633MB
+```
+
+So now the lookup time is almost identical. The insert time is still short even if we add 20% gc. Let's break out the perf counters:

@@ -160,9 +160,9 @@ pub fn main() {
                 }
             });
             time!("lookup", {
-                (0..ids.len()).all(|ix|
+                println!("{:?}", (0..ids.len()).all(|ix|
                     tree.contains(&ids[ix..ix+1])
-                );
+                ));
             });
             time!("drop", {
                 drop(tree);

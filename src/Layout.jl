@@ -69,4 +69,22 @@ end
 
 print_graph(A{Vector{Tuple{Int64}}}([(1,), (2,)],0))
 
+
+view_raw(x, n) = begin
+  p = convert(Ptr{UInt}, pointer_from_objref(x))
+  for e in pointer_to_array(p, (n,), false)
+    println(e)
+  end
+end
+
+deref(p) = begin
+  unsafe_load(convert(Ptr{Ptr{Void}}, p), 1)
+end
+
+view_raw([], 20)
+view_raw([1], 20)
+view_raw([9,8,7], 20)
+view_raw(collect(999:1999), 20)
+view_raw([], 20)
+
 end

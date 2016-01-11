@@ -75,7 +75,7 @@ get_pos(bitmap::UInt32, ix::Integer) = begin
   1 + count_ones(bitmap << (32 - ix))
 end
 
-Base.getindex(node::Ptr{Node}, ix::Integer) = begin
+get_child_inner(node::Ptr{Node}, ix::Integer) = begin
   bitmap = get_bitmap(node)
   if (bitmap & (1 << ix)) == 0
     not_found
@@ -84,7 +84,7 @@ Base.getindex(node::Ptr{Node}, ix::Integer) = begin
   end
 end
 
-Base.setindex!(node::Ptr{Node}, val::ANY, ix::Integer) = begin
+set_child_inner!(node::Ptr{Node}, val::ANY, ix::Integer) = begin
   val_pointer = pointer_from_objref(val)
   bitmap = get_bitmap(node)
   pos = get_pos(bitmap, ix)
@@ -103,133 +103,130 @@ Base.setindex!(node::Ptr{Node}, val::ANY, ix::Integer) = begin
   node
 end
 
+@inline get_child(node::Node, ix::Integer) = begin
+  get_child_inner(convert(Ptr{Node}, pointer_from_objref(node)), ix)
+end
+
+@inline set_child!(node::Node, val::ANY, ix::Integer) = begin
+  unsafe_pointer_to_objref(set_child_inner!(convert(Ptr{Node}, pointer_from_objref(node)), val, ix))::Node
+end
+
+### NO UNSAFE BELOW THIS LINE ###
+
 n = Node0(0)
-p = convert(Ptr{Node}, pointer_from_objref(n))
-p = setindex!(p, 3, 3)
-p = setindex!(p, 5, 5)
-p = setindex!(p, 1, 1)
-p = setindex!(p, 0, 0)
-p = setindex!(p, 21, 21)
-p = setindex!(p, 99, 31)
-p = setindex!(p, 31, 31)
-n2 = unsafe_pointer_to_objref(p)
+n = set_child!(n, 3, 3)
+n = set_child!(n, 5, 5)
+n = set_child!(n, 1, 1)
+n = set_child!(n, 0, 0)
+n = set_child!(n, 21, 21)
+n = set_child!(n, 99, 31)
+n = set_child!(n, 31, 31)
 
+type Tree{T}
+  root::Node
+end
 
-  # type Tree{T}
-  #   root::Node{T}
-  # end
-  #
-  # Tree(T) = Tree(Node{T}(0, 0, T[], Node{T}[]))
-  #
-  # const key_length = Int64(ceil(sizeof(hash(0)) * 8.0 / 5.0))
-  #
-  # chunk_at(key, ix) = (key >> (ix*5)) & 0b11111
-  #
-  # singleton{T}(row::T, column, ix) = begin
-  #   if ix >= key_length
-  #     column += 1
-  #     ix = 0
-  #     if column > length(row)
-  #       error("Out of bits")
-  #     end
-  #   end
-  #   value = row[column]
-  #   key = value # key = hash(value)
-  #   chunk = chunk_at(key, ix)
-  #   Node{T}(1 << chunk, 0, T[row], Node{T}[])
-  # end
-  #
-  # Base.push!{T}(tree::Tree{T}, row::T) = begin
-  #   node = tree.root
-  #   for column in 1:length(row)
-  #     value = row[column]
-  #     key = value # key = hash(value)
-  #     for ix in 0:(key_length-1)
-  #       chunk = chunk_at(key, ix)
-  #       mask = 1 << chunk
-  #       if (node.node_bitmap & mask) > 0
-  #         node_ix = 1 + count_ones(node.node_bitmap << (32 - chunk))
-  #         node = node.nodes[node_ix]
-  #         # continue loop
-  #       elseif (node.leaf_bitmap & mask) > 0
-  #         leaf_ix = 1 + count_ones(node.leaf_bitmap << (32 - chunk))
-  #         leaf = node.leaves[leaf_ix]
-  #         if row == leaf
-  #           return tree # was a dupe
-  #         else
-  #           deleteat!(node.leaves, leaf_ix)
-  #           child = singleton(leaf, column, ix+1)
-  #           node.leaf_bitmap $= mask
-  #           node.node_bitmap |= mask
-  #           node_ix = 1 + count_ones(node.node_bitmap << (32 - chunk))
-  #           insert!(node.nodes, node_ix, child)
-  #           node = child
-  #           # continue loop
-  #         end
-  #       else
-  #         node.leaf_bitmap |= mask
-  #         leaf_ix = 1 + count_ones(node.leaf_bitmap << (32 - chunk))
-  #         insert!(node.leaves, leaf_ix, row)
-  #         return tree # inserted
-  #       end
-  #     end
-  #   end
-  #   error("Out of bits!")
-  # end
-  #
-  # Base.in{T}(row::T, tree::Tree{T}) = begin
-  #   node = tree.root
-  #   for column in 1:length(row)
-  #     value = row[column]
-  #     key = value # hash(value)
-  #     for ix in 0:(key_length-1)
-  #       chunk = chunk_at(key, ix)
-  #       mask = 1 << chunk
-  #       if (node.node_bitmap & mask) > 0
-  #         node_ix = 1 + count_ones(node.node_bitmap << (32 - chunk))
-  #         node = node.nodes[node_ix]
-  #         # continue loop
-  #       elseif (node.leaf_bitmap & mask) > 0
-  #         leaf_ix = 1 + count_ones(node.leaf_bitmap << (32 - chunk))
-  #         leaf = node.leaves[leaf_ix]
-  #         return row == leaf
-  #       else
-  #         return false
-  #       end
-  #     end
-  #   end
-  #   error("Out of bits!")
-  # end
-  #
-  # ids() = ids(1000000)
-  # ids(n) = rand(UInt64, n)
-  #
-  # f(ids) = begin
-  #   tree = Tree(Tuple{UInt64})
-  #   push!(tree, (UInt64(1),))
-  #   (UInt64(1),) in tree
-  #   rows = [(a,) for a in ids]
-  #   gc_enable(false)
-  #   for _ in 1:10
-  #     tree = Tree(Tuple{UInt64})
-  #     @time begin
-  #       for row in rows
-  #         push!(tree, row)
-  #       end
-  #     end
-  #     @time begin
-  #       all([(row in tree) for row in rows])
-  #     end
-  #     tree = Tree(Tuple{UInt64})
-  #     @time begin
-  #       gc_enable(true)
-  #       gc()
-  #       gc_enable(false)
-  #     end
-  #     println("")
-  #   end
-  # end
-  #
-  # f(ids(10000000))
+call{T}(::Type{Tree{T}}) = Tree{T}(Node0(0))
+
+const key_length = Int64(ceil(sizeof(hash(0)) * 8.0 / 5.0))
+
+chunk_at(key, ix) = (key >> (ix*5)) & 0b11111
+
+singleton(row, column, ix) = begin
+  if ix >= key_length
+    column += 1
+    ix = 0
+    if column > length(row)
+      error("Out of bits")
+    end
+  end
+  value = row[column]
+  key = value # key = hash(value)
+  chunk = chunk_at(key, ix)
+  node = Node0(0)
+  set_child!(node, row, ix)
+end
+
+Base.push!{T}(tree::Tree{T}, row::T) = begin
+  node::Node = tree.root
+  for column in 1:length(row)
+    value = row[column]
+    key = value # TODO key = hash(value)
+    for ix in 0:(key_length-1)
+      chunk = chunk_at(key, ix)
+      child = get_child(node, chunk)
+      if child === not_found
+        # empty slot
+        set_child!(node, row, chunk)
+        return tree
+      elseif typeof(child) !== t
+        node = child
+        # continue loop
+      elseif child == row
+        # dupe
+        return tree
+      else
+        # collision
+        new_node = singleton(leaf, column, ix+1)
+        set_child!(node, new_node, chunk) # TODO this calls popcnt again
+        node = new_node
+        # continue loop
+      end
+    end
+  end
+  error("Out of bits!")
+end
+
+Base.in{T}(row::T, tree::Tree{T}) = begin
+  node = tree.root
+  for column in 1:length(row)
+    value = row[column]
+    key = value # TODO key = hash(value)
+    for ix in 0:(key_length-1)
+      chunk = chunk_at(key, ix)
+      child = get_child(node, chunk)
+      if child === not_found
+        return false
+      elseif typeof(child) !== t
+        node = child
+        # continue loop
+      else
+        return child == row
+      end
+    end
+  end
+  error("Out of bits!")
+end
+
+ids() = ids(1000000)
+ids(n) = rand(UInt64, n)
+
+f(ids) = begin
+  tree = Tree{Tuple{UInt64}}()
+  push!(tree, (UInt64(1),))
+  (UInt64(1),) in tree
+  rows = Any[(a,) for a in ids] # forces boxing
+  gc_enable(false)
+  for _ in 1:10
+    tree = Tree{Tuple{UInt64}}()
+    @time begin
+      for row in rows
+        push!(tree, row)
+      end
+    end
+    @time begin
+      println(all([(row in tree) for row in rows]))
+    end
+    tree = Tree{Tuple{UInt64}}()
+    @time begin
+      gc_enable(true)
+      gc()
+      gc_enable(false)
+    end
+    println("")
+  end
+end
+
+f(ids(1))
 
 end

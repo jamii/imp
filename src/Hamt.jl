@@ -1,5 +1,18 @@
 module Hamt
 
+@inline is_marked(val_pointer::Ptr{Void}) = begin
+  (unsafe_load(convert(Ptr{UInt}, val_pointer), 0) & UInt(1)) == UInt(1)
+end
+
+@inline gc_write_barrier(parent_pointer::Ptr{Void}, child_pointer::Ptr{Void}) = begin
+  # println("parent is")
+  # println("parent is", unsafe_pointer_to_objref(parent_pointer))
+  # println((is_marked(parent_pointer), is_marked(child_pointer)))
+  if (is_marked(parent_pointer) && !is_marked(child_pointer))
+    ccall((:jl_gc_queue_root, :libjulia), Void, (Ptr{Void},), parent_pointer)
+  end
+end
+
 abstract Node
 
 macro node(n)
@@ -24,7 +37,7 @@ const nodes_offset = sizeof(Ptr)
 
 Base.call(::Type{Node2}) = Node2(0, unsafe_pointer_to_objref(C_NULL), unsafe_pointer_to_objref(C_NULL))
 
-grow(node_pointer::Ptr{Node}, size_before::Integer, size_after::Integer, type_after::Type) = begin
+grow(parent_pointer::Ptr{Void}, node_pointer::Ptr{Node}, size_before::Integer, size_after::Integer, type_after::Type) = begin
   node_before = unsafe_load(convert(Ptr{Ptr{UInt8}}, node_pointer))
   node_after = ccall((:jl_gc_allocobj, :libjulia), Ptr{UInt8}, (Csize_t,), size_after)
   unsafe_store!(convert(Ptr{Ptr{Void}}, node_after), pointer_from_objref(type_after), 0)
@@ -35,21 +48,22 @@ grow(node_pointer::Ptr{Node}, size_before::Integer, size_after::Integer, type_af
     unsafe_store!(node_after, 0, i)
   end
   unsafe_store!(convert(Ptr{Ptr{UInt8}}, node_pointer), node_after)
-  nothing
+  gc_write_barrier(parent_pointer, convert(Ptr{Void}, node_after))
+  return
 end
 
 # TODO figure out how to get a computed goto out of this
-maybe_grow(node_pointer::Ptr{Node}, length::Integer) = begin
+maybe_grow(parent_pointer::Ptr{Void}, node_pointer::Ptr{Node}, length::Integer) = begin
   if length == 2
-    grow(node_pointer, sizeof(Node2), sizeof(Node4), Node4)
+    grow(parent_pointer, node_pointer, sizeof(Node2), sizeof(Node4), Node4)
   elseif length == 4
-    grow(node_pointer, sizeof(Node4), sizeof(Node8), Node8)
+    grow(parent_pointer, node_pointer, sizeof(Node4), sizeof(Node8), Node8)
   elseif length == 8
-    grow(node_pointer, sizeof(Node8), sizeof(Node16), Node16)
+    grow(parent_pointer, node_pointer, sizeof(Node8), sizeof(Node16), Node16)
   elseif length == 16
-    grow(node_pointer, sizeof(Node16), sizeof(Node32), Node32)
+    grow(parent_pointer, node_pointer, sizeof(Node16), sizeof(Node32), Node32)
   end
-  nothing
+  return
 end
 
 @inline get_bitmap(node::Ptr{Void}) = begin
@@ -75,31 +89,32 @@ end
 get_child(node_pointer::Ptr{Node}, ix::Integer) = begin
   node = unsafe_load(convert(Ptr{Ptr{Void}}, node_pointer))
   bitmap = get_bitmap(node)
-  if (bitmap & (1 << ix)) == 0
+  if (bitmap & (UInt32(1) << ix)) == 0
     convert(Ptr{Node}, 0)
   else
     get_node(node, get_pos(bitmap, ix))
   end
 end
 
-set_child!(node_pointer::Ptr{Node}, val::ANY, ix::Integer) = begin
-  node = unsafe_load(convert(Ptr{Ptr{Void}}, node_pointer))
+set_child!(parent_pointer::Ptr{Void}, node_pointer::Ptr{Node}, val::ANY, ix::Integer) = begin
+  old_gc = gc_enable(false)
+  node::Ptr{Void} = unsafe_load(convert(Ptr{Ptr{Void}}, node_pointer))
   bitmap = get_bitmap(node)
   pos = get_pos(bitmap, ix)
-  if (bitmap & (1 << ix)) == 0
+  if (bitmap & (UInt32(1) << ix)) == 0
     length = count_ones(bitmap)
-    maybe_grow(node_pointer, length)
+    maybe_grow(parent_pointer, node_pointer, length)
     node = unsafe_load(convert(Ptr{Ptr{Void}}, node_pointer))
-    set_bitmap!(node, bitmap | (1 << ix))
+    set_bitmap!(node, bitmap | (UInt32(1) << ix))
     for i in length:-1:pos
       set_node!(node, unsafe_load(convert(Ptr{Ptr{Void}}, get_node(node, i))), i+1)
     end
   end
-  set_node!(node, pointer_from_objref(val), pos)
-  # TODO figure out how to link this
-  # ccall((:jl_gc_wb, :libjulia), Void, (Ptr{Void}, Ptr{Void}), node, val_pointer)
-  ccall((:jl_gc_queue_root, :libjulia), Void, (Ptr{Void},), node)
-  nothing
+  val_pointer = pointer_from_objref(val)
+  set_node!(node, val_pointer, pos)
+  gc_write_barrier(node, val_pointer)
+  gc_enable(old_gc)
+  return
 end
 
 type Tree{T}
@@ -116,7 +131,7 @@ chunk_at(key, ix) = (key >> (ix*5)) & 0b11111
 
 @noinline out_of_bits() = error("Out of bits!")
 
-reinsert{T}(node_pointer::Ptr{Node}, row::T, column::Integer, ix::Integer) = begin
+reinsert{T}(parent_pointer::Ptr{Void}, node_pointer::Ptr{Node}, row::T, column::Integer, ix::Integer) = begin
   if ix >= key_length
     column += 1
     ix = 0
@@ -125,37 +140,40 @@ reinsert{T}(node_pointer::Ptr{Node}, row::T, column::Integer, ix::Integer) = beg
     end
   end
   value = row[column]
-  key = value # key = hash(value)
+  key = hash(value)
   chunk = chunk_at(key, ix)
-  set_child!(node_pointer, row, chunk)
+  set_child!(parent_pointer, node_pointer, row, chunk)
 end
 
 Base.push!{T}(tree::Tree{T}, row::T) = begin
-  node_pointer = convert(Ptr{Node}, pointer_from_objref(tree) + root_offset)
+  parent_pointer = pointer_from_objref(tree)
+  node_pointer = convert(Ptr{Node}, parent_pointer + root_offset)
   for column in 1:length(row)
     value = row[column]
-    key = value # TODO key = hash(value)
+    key = hash(value)
     for ix in 0:(key_length-1)
       chunk = chunk_at(key, ix)
       child_pointer = get_child(node_pointer, chunk)
       if convert(UInt, child_pointer) === UInt(0)
         # empty slot
-        set_child!(node_pointer, row, chunk)
+        set_child!(parent_pointer, node_pointer, row, chunk)
         return tree
       else
         child = unsafe_pointer_to_objref(unsafe_load(convert(Ptr{Ptr{Any}}, child_pointer)))
         if typeof(child) !== T
+          parent_pointer = unsafe_load(convert(Ptr{Ptr{Void}}, node_pointer))
           node_pointer = child_pointer
           # continue loop
-        elseif child::T == row # TODO extra typeassert is annoying
+        elseif child::T == row # TODO extra typeassert is wasteful
           # dupe
           return tree
         else
           # collision
           # TODO this calls popcnt more than necessary
-          set_child!(node_pointer, Node2(), chunk)
+          set_child!(parent_pointer, node_pointer, Node2(), chunk)
+          parent_pointer = unsafe_load(convert(Ptr{Ptr{Void}}, node_pointer))
           node_pointer = get_child(node_pointer, chunk)
-          reinsert(node_pointer, child::T, column, ix+1) # TODO extra typeassert is annoying
+          reinsert(parent_pointer, node_pointer, child::T, column, ix+1) # TODO extra typeassert is wasteful
           # continue loop
         end
       end
@@ -168,7 +186,7 @@ Base.in{T}(row::T, tree::Tree{T}) = begin
   node_pointer = convert(Ptr{Node}, pointer_from_objref(tree) + root_offset)
   for column in 1:length(row)
     value = row[column]
-    key = value # TODO key = hash(value)
+    key = hash(value)
     for ix in 0:(key_length-1)
       chunk = chunk_at(key, ix)
       child_pointer = get_child(node_pointer, chunk)
@@ -180,7 +198,7 @@ Base.in{T}(row::T, tree::Tree{T}) = begin
           node_pointer = child_pointer
           # continue loop
         else
-          return child::T == row # TODO extra typeassert is annoying
+          return child::T == row # TODO extra typeassert is wasteful
         end
       end
     end
@@ -207,6 +225,8 @@ f(ids) = begin
     tree = Tree{A}()
     @time begin
       for row in rows
+        # gc()
+        # println(row)
         push!(tree, row)
       end
     end
@@ -228,7 +248,7 @@ f(ids) = begin
 end
 
 srand(999)
-f(ids(10000000))
+@time f(ids(10000000))
 # Profile.clear_malloc_data()
 # srand(999)
 # f(ids(1000000))

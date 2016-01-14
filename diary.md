@@ -3722,3 +3722,243 @@ Performance counter stats for process id '16164':
 
      59.871103895 seconds time elapsed
 ```
+
+## Unsafe nodes
+
+Julia has a bunch of limitations that are making this difficult:
+
+* No fixed-length mutable arrays
+* Pointerful types are not stored inline
+* Limited control over specialization
+* No shared layout between types (see the discussion on [struct inheritance in Rust](https://github.com/rust-lang/rfcs/issues/349))
+
+I work around the first two problems by generating custom types that have the layout I want:
+
+``` julia
+# equivalent to:
+# type Node{N}
+#   bitmap::UInt32
+#   nodes::NTuple{N, Node} # <- this needs to be stored inline
+# end
+
+abstract Node
+
+macro node(n)
+  :(begin
+  type $(symbol("Node", n)) <: Node
+    bitmap::UInt32
+    $([symbol("node", i) for i in 1:n]...)
+  end
+end)
+end
+
+# aims to fit into pool sizes - see https://github.com/JuliaLang/julia/blob/6cc48dcd24322976bdc193b3c578acb924f0b8e9/src/gc.c#L1308-L1336
+@node(2)
+@node(4)
+@node(8)
+@node(16)
+@node(32)
+```
+
+I work around the last two problems by hiding the type behind a raw pointer and using my own knowledge of the layout to manually access data:
+
+
+``` julia
+@inline get_node(node::Ptr{Void}, pos::Integer) = begin
+  convert(Ptr{Node}, node + nodes_offset + ((pos-1) * sizeof(Ptr)))
+end
+
+@inline set_node!(node::Ptr{Void}, val::Ptr{Void}, pos::Integer) = begin
+  unsafe_store!(convert(Ptr{Ptr{Void}}, get_node(node, pos)), val)
+end
+```
+
+I also have to allocate memory and manage write barriers myself, which took a while to get right:
+
+``` julia
+@inline is_marked(val_pointer::Ptr{Void}) = begin
+  (unsafe_load(convert(Ptr{UInt}, val_pointer), 0) & UInt(1)) == UInt(1)
+end
+
+@inline gc_write_barrier(parent_pointer::Ptr{Void}, child_pointer::Ptr{Void}) = begin
+  if (is_marked(parent_pointer) && !is_marked(child_pointer))
+    ccall((:jl_gc_queue_root, :libjulia), Void, (Ptr{Void},), parent_pointer)
+  end
+end
+
+grow(parent_pointer::Ptr{Void}, node_pointer::Ptr{Node}, size_before::Integer, size_after::Integer, type_after::Type) = begin
+  node_before = unsafe_load(convert(Ptr{Ptr{UInt8}}, node_pointer))
+  node_after = ccall((:jl_gc_allocobj, :libjulia), Ptr{UInt8}, (Csize_t,), size_after)
+  unsafe_store!(convert(Ptr{Ptr{Void}}, node_after), pointer_from_objref(type_after), 0)
+  for i in 1:size_before
+    unsafe_store!(node_after, unsafe_load(node_before, i), i)
+  end
+  for i in (size_before+1):size_after
+    unsafe_store!(node_after, 0, i)
+  end
+  unsafe_store!(convert(Ptr{Ptr{UInt8}}, node_pointer), node_after)
+  gc_write_barrier(parent_pointer, convert(Ptr{Void}, node_after))
+  return
+end
+```
+
+I could still inline rows into the node structure by generating custom nodes for each row type (bring on [generated types](https://github.com/JuliaLang/julia/issues/8472) already!) but for now I'm just leaving them individually boxed. I'm not happy with how much gc overhead that creates but it will do for now.
+
+The code is currently messy and gross because I just hacked on it until it worked, but it could be cleaned up if I decide to commit to this route. Writing unsafe code like this in Julia isn't actually that hard (except that I keep forgetting that most types in Julia are boxed). It's much easier to debug memory corruption when you can just poke around in the repl and view raw memory interactively.
+
+I had much more trouble with tracking down allocations in the safe code eg I started by using tuples for rows, but even when they were boxed initially and were going to be boxed in the tree, they were often unboxed in intervening code which causes extra allocations when they have to be reboxed. In the end I just gave up and created custom row types again. (Note to self: Julia tuples are for multiple return, not for data-structures. Stop putting them in data-structures.) I think at some point I would benefit from writing a linting macro that warns me if anootated functions contain allocations or generic dispatch.
+
+There were a few other minor problems. Julia does not have a switch statement and LLVM does not manage to turn this code into a computed goto:
+
+``` julia
+# TODO figure out how to get a computed goto out of this
+maybe_grow(parent_pointer::Ptr{Void}, node_pointer::Ptr{Node}, length::Integer) = begin
+  if length == 2
+    grow(parent_pointer, node_pointer, sizeof(Node2), sizeof(Node4), Node4)
+  elseif length == 4
+    grow(parent_pointer, node_pointer, sizeof(Node4), sizeof(Node8), Node8)
+  elseif length == 8
+    grow(parent_pointer, node_pointer, sizeof(Node8), sizeof(Node16), Node16)
+  elseif length == 16
+    grow(parent_pointer, node_pointer, sizeof(Node16), sizeof(Node32), Node32)
+  end
+  return
+end
+```
+
+```
+julia> code_llvm(Hamt.maybe_grow, (Ptr{Void}, Ptr{Hamt.Node}, Int))
+
+define void @julia_maybe_grow_21919(i8*, %jl_value_t**, i64) {
+top:
+  %3 = icmp eq i64 %2, 2
+  br i1 %3, label %if, label %L
+
+if:                                               ; preds = %top
+  %4 = load %jl_value_t** inttoptr (i64 140243957646200 to %jl_value_t**), align 8
+  call void @julia_grow_21920(i8* %0, %jl_value_t** %1, i64 24, i64 40, %jl_value_t* %4)
+  br label %L8
+
+L:                                                ; preds = %top
+  %5 = icmp eq i64 %2, 4
+  br i1 %5, label %if1, label %L3
+
+if1:                                              ; preds = %L
+  %6 = load %jl_value_t** inttoptr (i64 140243957646248 to %jl_value_t**), align 8
+  call void @julia_grow_21920(i8* %0, %jl_value_t** %1, i64 40, i64 72, %jl_value_t* %6)
+  br label %L8
+
+L3:                                               ; preds = %L
+  %7 = icmp eq i64 %2, 8
+  br i1 %7, label %if4, label %L6
+
+if4:                                              ; preds = %L3
+  %8 = load %jl_value_t** inttoptr (i64 140243957646296 to %jl_value_t**), align 8
+  call void @julia_grow_21920(i8* %0, %jl_value_t** %1, i64 72, i64 136, %jl_value_t* %8)
+  br label %L8
+
+L6:                                               ; preds = %L3
+  %9 = icmp eq i64 %2, 16
+  br i1 %9, label %if7, label %L8
+
+if7:                                              ; preds = %L6
+  %10 = load %jl_value_t** inttoptr (i64 140243957646344 to %jl_value_t**), align 8
+  call void @julia_grow_21920(i8* %0, %jl_value_t** %1, i64 136, i64 264, %jl_value_t* %10)
+  br label %L8
+
+L8:                                               ; preds = %if7, %L6, %if4, %if1, %if
+  ret void
+}
+```
+
+Complex ranges don't seem to inline very well eg this loop compiles to code which still has a function call handling the range:
+
+``` julia
+for i in length:-1:pos
+  set_node!(node, unsafe_load(convert(Ptr{Ptr{Void}}, get_node(node, i))), i+1)
+end
+```
+
+```
+pass:                                             ; preds = %if
+  %30 = add i64 %17, 1
+  %31 = load %jl_value_t** %0, align 1
+  %32 = bitcast %jl_value_t* %31 to i8*
+  %33 = trunc i64 %26 to i32
+  %34 = bitcast %jl_value_t* %31 to i32*
+  store i32 %33, i32* %34, align 1
+  %35 = call i64 @julia_steprange_last3371(i64 %25, i64 -1, i64 %30)
+  %36 = icmp slt i64 %25, %35
+  %37 = add i64 %35, -1
+  %38 = icmp eq i64 %25, %37
+  %39 = or i1 %36, %38
+  br i1 %39, label %L4, label %L.preheader.L.preheader.split_crit_edge
+```
+
+Apart from those two issues, and once I tracked down all the errant allocations, this approach compiles down to pretty tight assembly eg:
+
+``` julia
+get_child(node_pointer::Ptr{Node}, ix::Integer) = begin
+  node = unsafe_load(convert(Ptr{Ptr{Void}}, node_pointer))
+  bitmap = get_bitmap(node)
+  if (bitmap & (UInt32(1) << ix)) == 0
+    convert(Ptr{Node}, 0)
+  else
+    get_node(node, get_pos(bitmap, ix))
+  end
+end
+```
+
+```
+julia> code_native(Hamt.get_child, (Ptr{Hamt.Node}, Int))
+	.text
+Filename: /home/jamie/code/imp/src/Hamt.jl
+Source line: 98
+	pushq	%rbp
+	movq	%rsp, %rbp
+	movl	$1, %eax
+Source line: 98
+	movb	%sil, %cl
+	shll	%cl, %eax
+	xorl	%r8d, %r8d
+	cmpq	$31, %rsi
+	cmoval	%r8d, %eax
+Source line: 96
+	movq	(%rdi), %rdx
+Source line: 97
+	movl	(%rdx), %edi
+Source line: 98
+	testl	%eax, %edi
+	je	L67
+	movl	$32, %ecx
+Source line: 101
+	subq	%rsi, %rcx
+	shll	%cl, %edi
+	cmpq	$31, %rcx
+	cmoval	%r8d, %edi
+	popcntl	%edi, %eax
+	leaq	8(%rdx,%rax,8), %rax
+	popq	%rbp
+	ret
+L67:	xorl	%eax, %eax
+Source line: 99
+	popq	%rbp
+	ret
+```
+
+Performance-wise this has some interesting effects. The best Rust version so far does a full benchmark run in ~65s and peaks at 704MB RSS, or 115s and 1060MB RSS if I force it to use boxed rows. This Julia version takes 85s and peaks at 1279MB RSS, or 65s and 718MB RSS if I delay gc until after building (mutable trees seem to be a pessimal case for generational gcs - they are constantly creating pointers from the old generation into the new generation, requiring costly write barriers). Compare this to 32s for a Julia hashset or 51s for a sorted (and unboxed) Julia array, neither of which can handle prefix searches or persistence.
+
+I'm still a little concerned about the interaction with the gc, but the performance in these crude benchmarks is totally acceptable, especially once I take into account that the Rust version would have to add reference counts once I make the trees semi-persistent and allow sharing data between multiple indexes.
+
+I am frustrated by the amount of work this took. If Julia had fixed-size arrays and would inline pointerful types this could have just been:
+
+``` julia
+immutable Node
+  bitmap: UInt32
+  nodes: FixedArray{Node} # pointer to array of (bitmap, nodes pointer)
+end
+```
+
+If I end up using Julia heavily it's likely that I will try to improve inline storage. As far as I can tell there is no fundamental reason why this use case isn't supported - it just needs someone to do the work. Pointers are always word-aligned, so one possible implementation would be to change the 'is a pointer' metadata for each field from a boolean to a bitmap of pointer offsets.
+
+This work has taken longer than I expected. There are a few more things I would like to try out, but I'm going to timebox this to the end of the week and then next week just run with whatever has worked best so far.

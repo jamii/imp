@@ -13,6 +13,12 @@ end
   end
 end
 
+# equivalent to:
+# type Node{N}
+#   bitmap::UInt32
+#   nodes::NTuple{N, Node} # <- this needs to be stored inline
+# end
+
 abstract Node
 
 macro node(n)

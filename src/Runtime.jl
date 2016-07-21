@@ -11,7 +11,7 @@ macro row(name, types)
     end)
 end
 
-@generated cmp_by_key{R1 <: Row, R2 <: Row}(x::R1, y::R2, xkey, ykey) = begin
+@generated function cmp_by_key{R1 <: Row, R2 <: Row}(x::R1, y::R2, xkey, ykey)
   xkey = xkey.parameters[1].parameters[1]
   ykey = ykey.parameters[1].parameters[1]
   @assert(length(xkey) == length(ykey))
@@ -21,7 +21,7 @@ end
     end)
 end
 
-@generated Base.isless{R <: Row}(x::R, y::R) = begin
+@generated function Base.isless{R <: Row}(x::R, y::R)
   key = [symbol("f", i) for i in 1:length(fieldnames(R))]
   last = pop!(key)
   :(begin
@@ -30,7 +30,7 @@ end
     end)
 end
 
-@generated construct{C,K}(constructor::Type{C}, key::Type{Val{K}}, value) = begin
+@generated function construct{C,K}(constructor::Type{C}, key::Type{Val{K}}, value)
   constructor = constructor.parameters[1]
   fields = key.parameters[1].parameters[1]
   :(begin
@@ -38,7 +38,7 @@ end
     end)
 end
 
-@generated construct2{C,K1,K2}(constructor::Type{C}, key1::Type{Val{K1}}, key2::Type{Val{K2}}, value1, value2) = begin
+@generated function construct2{C,K1,K2}(constructor::Type{C}, key1::Type{Val{K1}}, key2::Type{Val{K2}}, value1, value2)
   constructor = constructor.parameters[1]
   fields1 = key1.parameters[1].parameters[1]
   fields2 = key2.parameters[1].parameters[1]
@@ -50,7 +50,7 @@ end
     end)
 end
 
-dedup_sorted{X}(xs::Vector{X}) = begin
+function dedup_sorted{X}(xs::Vector{X})
   ys = Vector{X}(0)
   last = xs[1]
   push!(ys, last)
@@ -63,23 +63,23 @@ dedup_sorted{X}(xs::Vector{X}) = begin
   ys
 end
 
-reshape{C,K}(xs, ys, ytype::Type{C}, ykey::Type{Val{K}}) = begin
+function reshape{C,K}(xs, ys, ytype::Type{C}, ykey::Type{Val{K}})
   for x in xs
     push!(ys, construct(ytype, ykey, x))
   end
 end
 
-project(xs, ytype, ykey) = begin
+function project(xs, ytype, ykey)
   ys = Vector{ytype}(0)
   reshape(xs, ys, ytype, Val{ykey})
   sort!(ys, alg=QuickSort)
   dedup_sorted(ys)
 end
 
-join_sorted_inner{X,Y,Z,XK,YK,ZK1,ZK2}(
+function join_sorted_inner{X,Y,Z,XK,YK,ZK1,ZK2}(
   xs::Vector{X}, ys::Vector{Y}, ztype::Type{Z},
   xkey::Type{Val{XK}}, ykey::Type{Val{YK}}, zkey1::Type{Val{ZK1}}, zkey2::Type{Val{ZK2}}
-  ) = begin
+  )
   zs = Vector{Z}(0)
   xi = 1
   yi = 1
@@ -112,13 +112,14 @@ join_sorted_inner{X,Y,Z,XK,YK,ZK1,ZK2}(
   zs
 end
 
-@inline join_sorted(xs, ys, ztype, xkey, ykey, zkey1, zkey2) =
+@inline function join_sorted(xs, ys, ztype, xkey, ykey, zkey1, zkey2)
   join_sorted_inner(xs, ys, ztype, Val{xkey}, Val{ykey}, Val{zkey1}, Val{zkey2})
+end
 
-semijoin_sorted_inner{X,Y,XK,YK}(
+function semijoin_sorted_inner{X,Y,XK,YK}(
   xs::Vector{X}, ys::Vector{Y},
   xkey::Type{Val{XK}}, ykey::Type{Val{YK}}
-  ) = begin
+  )
   zs = Vector{X}(0)
   xi = 1
   yi = 1
@@ -138,10 +139,11 @@ semijoin_sorted_inner{X,Y,XK,YK}(
   zs
 end
 
-@inline semijoin_sorted(xs, ys, xkey, ykey) =
+@inline function semijoin_sorted(xs, ys, xkey, ykey)
   semijoin_sorted_inner(xs, ys, Val{xkey}, Val{ykey})
+end
 
-read_tsv(rowtype, filename) = begin
+function read_tsv(rowtype, filename) 
   fieldtypes = [fieldtype(rowtype, fieldname) for fieldname in fieldnames(rowtype)]
   raw = readdlm(filename, '\t', UTF8String, header=true, quotes=false, comments=false)[1]
   results = Vector{rowtype}(0)
@@ -163,7 +165,7 @@ end
 @row(PlaylistTrack, [Int64, Int64])
 @row(Playlist, [Int64, UTF8String])
 
-chinook() = begin
+function chinook()
   (
     read_tsv(Artist, "/home/jamie/imp/data/Artist.csv"),
     read_tsv(Album, "/home/jamie/imp/data/Album.csv"),
@@ -186,7 +188,7 @@ end
 @row(I11, [Int64, UTF8String]) # playlist_id artist_name
 @row(I12, [UTF8String, UTF8String]) # playlist_name artist_name
 
-metal(data) = begin
+function metal(data)
   i0 = data[5] # filter(row -> row.f2 == "Heavy Metal Classic", data[5])
 
   i1 = project(i0, I1, (1,2))
@@ -219,7 +221,7 @@ end
 
 @row(I0, [Int64])
 
-my_search(v, x) = begin
+function my_search(v, x)
   lo = 0
   hi = length(v)
   @inbounds while lo < hi-1
@@ -233,7 +235,7 @@ my_search(v, x) = begin
   return hi
 end
 
-simple_sorted(i1,i2,i3,i4,i5) = begin
+function simple_sorted(i1,i2,i3,i4,i5)
   results = Int64[]
   for playlist in i5 
     if true # playlist.f1 == 13 
@@ -264,7 +266,7 @@ simple_sorted(i1,i2,i3,i4,i5) = begin
   dedup_sorted(results)
 end
 
-simple_sorted_pre(data) = begin
+function simple_sorted_pre(data)
   i1 = project(data[1], I0, (1,))
   i2 = project(data[2], I2, (1,3))
   i3 = project(data[3], I2, (1,3))
@@ -273,10 +275,9 @@ simple_sorted_pre(data) = begin
   (i1,i2,i3,i4,i5)
 end
 
-
 @row(I0, [Int64])
 
-simple_hashed(i1,i2,i3,i4,i5) = begin
+function simple_hashed(i1,i2,i3,i4,i5)
   results = Int64[]
   empty = Int64[]
   for playlist in i5 
@@ -297,7 +298,7 @@ simple_hashed(i1,i2,i3,i4,i5) = begin
   results
 end
 
-simple_hashed_pre(data) = begin
+function simple_hashed_pre(data)
   i1 = [row.f1 for row in data[1]]
   i2 = Dict{Int64, Vector{Int64}}()
   for row in data[2]
@@ -324,9 +325,67 @@ simple_hashed_pre(data) = begin
   (i1,i2,i3,i4,i5)
 end
 
+function simple_forward(i1,i2,i3,i4,i5)
+  tracks = Int64[]
+  for playlist in i5 
+    if true # playlist.f1 == 13 
+      playlist_id = playlist.f1
+      ix0 = my_search(i4, playlist_id)
+      while (ix0 < length(i4)) && (i4[ix0].f1 == playlist_id)
+        track_id = i4[ix0].f2
+        ix0 += 1
+        push!(tracks, track_id)
+      end
+    end
+  end 
+  sort!(tracks, alg=QuickSort)
+  dedup_sorted(tracks)
+  albums = Int64[]
+  for track_id in tracks 
+    ix1 = my_search(i3, track_id)
+    while (ix1 < length(i3)) && (i3[ix1].f1 == track_id)
+      album_id = i3[ix1].f2
+      ix1 += 1
+      push!(albums, album_id) 
+    end 
+  end
+  sort!(albums, alg=QuickSort)
+  dedup_sorted(albums)
+  artists = Int64[]
+  for album_id in albums
+    ix2 = my_search(i2, album_id)
+    while (ix2 < length(i2)) && (i2[ix2].f1 == album_id)
+      artist_id = i2[ix2].f2
+      ix2 += 1
+      push!(artists, artist_id)
+    end 
+  end
+  sort!(artists, alg=QuickSort)
+  dedup_sorted(artists)
+  results = Int64[]
+  for artist_id in artists
+    ix3 = my_search(i1, artist_id)
+    while (ix3 < length(i1)) && (i1[ix3].f1 == artist_id)
+      push!(results, i1[ix3].f1)
+      ix3 += 1
+    end
+  end
+  sort!(results, alg=QuickSort)
+  dedup_sorted(results)
+end
+
+function simple_forward_pre(data)
+  i1 = project(data[1], I0, (1,))
+  i2 = project(data[2], I2, (1,3))
+  i3 = project(data[3], I2, (1,3))
+  i4 = project(data[4], I2, (1,2))
+  i5 = project(data[5], I0, (1,))
+  (i1,i2,i3,i4,i5)
+end
+
 using Benchmark
 
-f() = begin
+function f()
   data = chinook()
   @time benchmark(()->metal(data), "", 1000)
   @time benchmark(()->simple_sorted_pre(data), "", 1000)
@@ -337,6 +396,10 @@ f() = begin
   (i1,i2,i3,i4,i5) = simple_hashed_pre(data)
   @time benchmark(()->simple_hashed(i1,i2,i3,i4,i5), "", 1000)
   simple_hashed(i1,i2,i3,i4,i5)
+  @time benchmark(()->simple_forward_pre(data), "", 1000)
+  (i1,i2,i3,i4,i5) = simple_forward_pre(data)
+  @time benchmark(()->simple_forward(i1,i2,i3,i4,i5), "", 1000)
+  simple_forward(i1,i2,i3,i4,i5)
 end
 
 end

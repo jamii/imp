@@ -165,11 +165,11 @@ end
 
 chinook() = begin
   (
-    read_tsv(Artist, "code/imp/data/Artist.csv"),
-    read_tsv(Album, "code/imp/data/Album.csv"),
-    read_tsv(Track, "code/imp/data/Track.csv"),
-    read_tsv(PlaylistTrack, "code/imp/data/PlaylistTrack.csv"),
-    read_tsv(Playlist, "code/imp/data/Playlist.csv"),
+    read_tsv(Artist, "/home/jamie/imp/data/Artist.csv"),
+    read_tsv(Album, "/home/jamie/imp/data/Album.csv"),
+    read_tsv(Track, "/home/jamie/imp/data/Track.csv"),
+    read_tsv(PlaylistTrack, "/home/jamie/imp/data/PlaylistTrack.csv"),
+    read_tsv(Playlist, "/home/jamie/imp/data/Playlist.csv"),
     )
 end
 
@@ -187,7 +187,7 @@ end
 @row(I12, [UTF8String, UTF8String]) # playlist_name artist_name
 
 metal(data) = begin
-  i0 = filter(row -> row.f2 == "Heavy Metal Classic", data[5])
+  i0 = data[5] # filter(row -> row.f2 == "Heavy Metal Classic", data[5])
 
   i1 = project(i0, I1, (1,2))
   i2 = project(data[4], I2, (1,2))
@@ -217,11 +217,112 @@ metal(data) = begin
   i12
 end
 
+@row(I0, [Int64])
+
+simple_sorted(i1,i2,i3,i4,i5) = begin
+  results = Int64[]
+  for playlist in i5 
+    if true # playlist.f1 == 13 
+      playlist_id = playlist.f1
+      ix0 = searchsortedfirst(i4, I2(playlist_id, 0), by = (row) -> row.f1)
+      while (ix0 < length(i4)) && (i4[ix0].f1 == playlist_id)
+        track_id = i4[ix0].f2
+        ix0 += 1
+        ix1 = searchsortedfirst(i3, I2(track_id, 0), by = (row) -> row.f1)
+        while (ix1 < length(i3)) && (i3[ix1].f1 == track_id)
+          album_id = i3[ix1].f2
+          ix1 += 1
+          ix2 = searchsortedfirst(i2, I2(album_id, 0), by = (row) -> row.f1)
+          while (ix2 < length(i2)) && (i2[ix2].f1 == album_id)
+            artist_id = i2[ix2].f2
+            ix2 += 1
+            ix3 = searchsortedfirst(i1, I0(artist_id), by = (row) -> row.f1)
+            while (ix3 < length(i1)) && (i1[ix3].f1 == artist_id)
+              push!(results, i1[ix3].f1)
+              ix3 += 1
+            end
+          end
+        end
+      end
+    end
+  end
+  sort!(results, alg=QuickSort)
+  dedup_sorted(results)
+end
+
+simple_sorted_pre(data) = begin
+  i1 = project(data[1], I0, (1,))
+  i2 = project(data[2], I2, (1,3))
+  i3 = project(data[3], I2, (1,3))
+  i4 = project(data[4], I2, (1,2))
+  i5 = project(data[5], I0, (1,))
+  (i1,i2,i3,i4,i5)
+end
+
+
+@row(I0, [Int64])
+
+simple_hashed(i1,i2,i3,i4,i5) = begin
+  results = Int64[]
+  empty = Int64[]
+  for playlist in i5 
+    if true # playlist.f1 == 13 
+      for track in get(i4, playlist, empty)
+        for album in get(i3, track, empty)
+          for artist in get(i2, album, empty)
+            if artist in i1
+              push!(results, artist)
+            end
+          end
+        end
+      end
+    end
+  end
+  sort!(results, alg=QuickSort)
+  dedup_sorted(results)
+  results
+end
+
+simple_hashed_pre(data) = begin
+  i1 = [row.f1 for row in data[1]]
+  i2 = Dict{Int64, Vector{Int64}}()
+  for row in data[2]
+    i2[row.f1] = Int64[]
+  end
+  for row in data[2]
+    push!(i2[row.f1], row.f3)
+  end
+  i3 = Dict{Int64, Vector{Int64}}()
+  for row in data[3]
+    i3[row.f1] = Int64[]
+  end
+  for row in data[3]
+    push!(i3[row.f1], row.f3)
+  end
+  i4 = Dict{Int64, Vector{Int64}}()
+  for row in data[4]
+    i4[row.f1] = Int64[]
+  end
+  for row in data[4]
+    push!(i4[row.f1], row.f2)
+  end
+  i5 = Set{Int64}([row.f1 for row in data[5]])
+  (i1,i2,i3,i4,i5)
+end
+
 using Benchmark
 
 f() = begin
   data = chinook()
   @time benchmark(()->metal(data), "", 1000)
+  @time benchmark(()->simple_sorted_pre(data), "", 1000)
+  (i1,i2,i3,i4,i5) = simple_sorted_pre(data)
+  @time benchmark(()->simple_sorted(i1,i2,i3,i4,i5), "", 1000)
+  simple_sorted(i1,i2,i3,i4,i5)
+  @time benchmark(()->simple_hashed_pre(data), "", 1000)
+  (i1,i2,i3,i4,i5) = simple_hashed_pre(data)
+  @time benchmark(()->simple_hashed(i1,i2,i3,i4,i5), "", 1000)
+  simple_hashed(i1,i2,i3,i4,i5)
 end
 
 end

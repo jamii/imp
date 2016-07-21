@@ -219,24 +219,38 @@ end
 
 @row(I0, [Int64])
 
+my_search(v, x) = begin
+  lo = 0
+  hi = length(v)
+  @inbounds while lo < hi-1
+    m = (lo+hi)>>>1
+    if v[m].f1 < x
+      lo = m
+    else
+      hi = m
+    end
+  end
+  return hi
+end
+
 simple_sorted(i1,i2,i3,i4,i5) = begin
   results = Int64[]
   for playlist in i5 
     if true # playlist.f1 == 13 
       playlist_id = playlist.f1
-      ix0 = searchsortedfirst(i4, I2(playlist_id, 0), by = (row) -> row.f1)
+      ix0 = my_search(i4, playlist_id)
       while (ix0 < length(i4)) && (i4[ix0].f1 == playlist_id)
         track_id = i4[ix0].f2
         ix0 += 1
-        ix1 = searchsortedfirst(i3, I2(track_id, 0), by = (row) -> row.f1)
+        ix1 = my_search(i3, track_id)
         while (ix1 < length(i3)) && (i3[ix1].f1 == track_id)
           album_id = i3[ix1].f2
           ix1 += 1
-          ix2 = searchsortedfirst(i2, I2(album_id, 0), by = (row) -> row.f1)
+          ix2 = my_search(i2, album_id)
           while (ix2 < length(i2)) && (i2[ix2].f1 == album_id)
             artist_id = i2[ix2].f2
             ix2 += 1
-            ix3 = searchsortedfirst(i1, I0(artist_id), by = (row) -> row.f1)
+            ix3 = my_search(i1, artist_id)
             while (ix3 < length(i1)) && (i1[ix3].f1 == artist_id)
               push!(results, i1[ix3].f1)
               ix3 += 1
@@ -266,7 +280,7 @@ simple_hashed(i1,i2,i3,i4,i5) = begin
   results = Int64[]
   empty = Int64[]
   for playlist in i5 
-    if true # playlist.f1 == 13 
+    if true # playlist == 13 
       for track in get(i4, playlist, empty)
         for album in get(i3, track, empty)
           for artist in get(i2, album, empty)

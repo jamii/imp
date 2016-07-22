@@ -240,20 +240,20 @@ function simple_sorted(i1,i2,i3,i4,i5)
   for playlist in i5 
     if true # playlist.f1 == 13 
       playlist_id = playlist.f1
-      ix0 = my_search(i4, playlist_id)
-      while (ix0 < length(i4)) && (i4[ix0].f1 == playlist_id)
+      ix0 = gallop(i4, playlist_id, 1)
+      while (ix0 <= length(i4)) && (i4[ix0].f1 == playlist_id)
         track_id = i4[ix0].f2
         ix0 += 1
-        ix1 = my_search(i3, track_id)
-        while (ix1 < length(i3)) && (i3[ix1].f1 == track_id)
+        ix1 = gallop(i3, track_id, 1)
+        while (ix1 <= length(i3)) && (i3[ix1].f1 == track_id)
           album_id = i3[ix1].f2
           ix1 += 1
-          ix2 = my_search(i2, album_id)
-          while (ix2 < length(i2)) && (i2[ix2].f1 == album_id)
+          ix2 = gallop(i2, album_id, 1)
+          while (ix2 <= length(i2)) && (i2[ix2].f1 == album_id)
             artist_id = i2[ix2].f2
             ix2 += 1
-            ix3 = my_search(i1, artist_id)
-            while (ix3 < length(i1)) && (i1[ix3].f1 == artist_id)
+            ix3 = gallop(i1, artist_id, 1)
+            while (ix3 <= length(i1)) && (i1[ix3].f1 == artist_id)
               push!(results, i1[ix3].f1)
               ix3 += 1
             end
@@ -295,7 +295,6 @@ function simple_hashed(i1,i2,i3,i4,i5)
   end
   sort!(results, alg=QuickSort)
   dedup_sorted(results)
-  results
 end
 
 function simple_hashed_pre(data)
@@ -327,11 +326,12 @@ end
 
 function simple_forward(i1,i2,i3,i4,i5)
   tracks = Int64[]
+  ix0 = 1
   for playlist in i5 
     if true # playlist.f1 == 13 
       playlist_id = playlist.f1
-      ix0 = my_search(i4, playlist_id)
-      while (ix0 < length(i4)) && (i4[ix0].f1 == playlist_id)
+      ix0 = gallop(i4, playlist_id, ix0)
+      while (ix0 <= length(i4)) && (i4[ix0].f1 == playlist_id)
         track_id = i4[ix0].f2
         ix0 += 1
         push!(tracks, track_id)
@@ -341,9 +341,10 @@ function simple_forward(i1,i2,i3,i4,i5)
   sort!(tracks, alg=QuickSort)
   dedup_sorted(tracks)
   albums = Int64[]
+  ix1 = 1
   for track_id in tracks 
-    ix1 = my_search(i3, track_id)
-    while (ix1 < length(i3)) && (i3[ix1].f1 == track_id)
+    ix1 = gallop(i3, track_id, ix1)
+    while (ix1 <= length(i3)) && (i3[ix1].f1 == track_id)
       album_id = i3[ix1].f2
       ix1 += 1
       push!(albums, album_id) 
@@ -352,9 +353,10 @@ function simple_forward(i1,i2,i3,i4,i5)
   sort!(albums, alg=QuickSort)
   dedup_sorted(albums)
   artists = Int64[]
+  ix2 = 1
   for album_id in albums
-    ix2 = my_search(i2, album_id)
-    while (ix2 < length(i2)) && (i2[ix2].f1 == album_id)
+    ix2 = gallop(i2, album_id, ix2)
+    while (ix2 <= length(i2)) && (i2[ix2].f1 == album_id)
       artist_id = i2[ix2].f2
       ix2 += 1
       push!(artists, artist_id)
@@ -363,9 +365,10 @@ function simple_forward(i1,i2,i3,i4,i5)
   sort!(artists, alg=QuickSort)
   dedup_sorted(artists)
   results = Int64[]
+  ix3 = 1
   for artist_id in artists
-    ix3 = my_search(i1, artist_id)
-    while (ix3 < length(i1)) && (i1[ix3].f1 == artist_id)
+    ix3 = gallop(i1, artist_id, ix3)
+    while (ix3 <= length(i1)) && (i1[ix3].f1 == artist_id)
       push!(results, i1[ix3].f1)
       ix3 += 1
     end
@@ -383,23 +386,50 @@ function simple_forward_pre(data)
   (i1,i2,i3,i4,i5)
 end
 
+function gallop(v, x, lo) 
+  hi = length(v) + 1
+  if (lo < hi) && (v[lo].f1 < x)
+    step = 1
+    while (lo + step < hi) && (v[lo + step].f1 < x)
+      lo = lo + step 
+      step = step << 1
+    end
+    
+    step = step >> 1
+    while step > 0
+      if (lo + step < hi) && v[lo + step].f1 < x
+        lo = lo + step 
+      end
+      step = step >> 1
+    end
+    
+    lo += 1
+  end
+  lo 
+end 
+
 using Benchmark
 
 function f()
   data = chinook()
-  @time benchmark(()->metal(data), "", 1000)
+  # @time benchmark(()->metal(data), "", 1000)
   @time benchmark(()->simple_sorted_pre(data), "", 1000)
   (i1,i2,i3,i4,i5) = simple_sorted_pre(data)
   @time benchmark(()->simple_sorted(i1,i2,i3,i4,i5), "", 1000)
-  simple_sorted(i1,i2,i3,i4,i5)
+  s = simple_sorted(i1,i2,i3,i4,i5)
   @time benchmark(()->simple_hashed_pre(data), "", 1000)
   (i1,i2,i3,i4,i5) = simple_hashed_pre(data)
   @time benchmark(()->simple_hashed(i1,i2,i3,i4,i5), "", 1000)
-  simple_hashed(i1,i2,i3,i4,i5)
+  h = simple_hashed(i1,i2,i3,i4,i5)
   @time benchmark(()->simple_forward_pre(data), "", 1000)
   (i1,i2,i3,i4,i5) = simple_forward_pre(data)
   @time benchmark(()->simple_forward(i1,i2,i3,i4,i5), "", 1000)
-  simple_forward(i1,i2,i3,i4,i5)
+  f = simple_forward(i1,i2,i3,i4,i5)
+  println(s)
+  println(h)
+  println(f)
+  assert(s == h)
+  assert(h == f)
 end
 
 end

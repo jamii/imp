@@ -44,7 +44,7 @@ function define_columns(n)
   end
   end
   
-  # sorting cribbed from Base.sort
+  # sorting cribbed from Base.Sort
   
   function insertion_sort!($(cs...), lo::Int, hi::Int)
       @inbounds for i = lo+1:hi
@@ -121,30 +121,4 @@ end
 
 for i in 1:10
   eval(define_columns(i))
-end
-
-# n = Int64(1E6)
-# make_ids() = rand(1:n, n)
-# 
-# ids = make_ids()
-# @time sort!(ids, alg=QuickSort)
-# 
-# eval(:(while true
-#     break
-#   end))
-# 
-# c2 = (make_ids(), [1 for _ in ids])
-# @time quicksort!(c2)
-# println(c2[1][1:100])
-# as = copy(c2[1])
-# sort!(as, alg=QuickSort)
-# println(as[1:100])
-# for i in 1:length(c2[1])
-#   if (as[i] != c2[1][i])
-#     println("at ", i, " ", as[i], " ", c2[1][i])
-#     break
-#   end
-# end
-# assert(c2[1] == as)
-
 end

@@ -3962,3 +3962,209 @@ end
 If I end up using Julia heavily it's likely that I will try to improve inline storage. As far as I can tell there is no fundamental reason why this use case isn't supported - it just needs someone to do the work. Pointers are always word-aligned, so one possible implementation would be to change the 'is a pointer' metadata for each field from a boolean to a bitmap of pointer offsets.
 
 This work has taken longer than I expected. There are a few more things I would like to try out, but I'm going to timebox this to the end of the week and then next week just run with whatever has worked best so far.
+
+# Encore 
+
+I quit my job and wandered around looking lost for a while. Now I'm back.
+
+I don't want to get bogged down in performance again, especially when I don't have a real program to benchmark. But on the other hand, benchmarking is fun.
+
+## Sorting and columns
+
+I have a plan and it starts with some sorted arrays.
+
+Ideally I would just throw some tuples or structs into an array and sort it. Unfortunately, Julia still has this restriction on structs that contain pointers. Everything is happy as long as I stick to PODs but as soon as I want to have, say, a string column, I suddenly end up with an array of pointers to heap-allocated rows. Which is not what I want at all. 
+
+``` julia 
+r2 = [(id::Int64, id::Int64) for id in ids]
+@time sort!(r2, alg=QuickSort)
+# 0.056419 seconds (5 allocations: 240 bytes)
+
+r2 = [(id::Int64, string(id)::ASCIIString) for id in ids]
+@time sort!(r2, alg=QuickSort)
+# 2.340892 seconds (34.94 M allocations: 533.120 MB)
+# heap-allocated *and* pass-by-value! tuples are weird!
+
+r2 = [Row(id::Int64, id::Int64) for id in ids]
+@time sort!(r2, alg=QuickSort)
+# 0.058970 seconds (5 allocations: 240 bytes)
+
+r2 = [Row(id::Int64, string(id)::ASCIIString) for id in ids]
+@time sort!(r2, alg=QuickSort)
+# 0.124810 seconds (5 allocations: 240 bytes)
+```
+
+We can get round this by flipping the layout into columns, but we still need to sort it. Julia's standard sort function only requires length, getindex and setindex:
+
+``` julia 
+type Columns2{A,B} <: Columns{Row2{A,B}}
+  as::Vector{A}
+  bs::Vector{B}
+end
+
+function Base.length{A,B}(c2::Columns2{A,B}) 
+  length(c2.as)
+end
+
+@inline function Base.getindex{A,B}(c2::Columns2{A,B}, ix)
+  Row2(c2.as[ix], c2.bs[ix])
+end
+
+@inline function Base.setindex!{A,B}(c2::Columns2{A,B}, val::Row2{A,B}, ix)
+  c2.as[ix] = val.a
+  c2.bs[ix] = val.b
+end
+```
+
+But these still have to return something row-like which leaves us with exactly the same problem:
+
+``` julia 
+c2 = Columns2([id::Int64 for id in ids], [id::Int64 for id in ids])
+@time sort!(c2, alg=QuickSort)
+# 0.056417 seconds (5 allocations: 240 bytes)
+
+c2 = Columns2([id::Int64 for id in ids], [string(id)::ASCIIString for id in ids])
+@time sort!(c2, alg=QuickSort)
+# 0.542212 seconds (19.06 M allocations: 582.780 MB, 46.45% gc time)
+```
+
+I would enjoy Julia a lot more if this wasn't a thing.
+
+So, let's just brute-force a workaround. I'll copy the sorting code from the base library and generate different versions of it for every number of columns, using multiple variables to hold the values instead of tuples or structs.
+
+``` julia 
+function define_columns(n)
+  cs = [symbol("c", c) for c in 1:n]
+  ts = [symbol("C", c) for c in 1:n]
+  tmps = [symbol("tmp", c) for c in 1:n]
+  
+  :(begin
+  
+  @inline function lt($(cs...), i, j) 
+    @inbounds begin 
+      $([:(if !isequal($(cs[c])[i], $(cs[c])[j]); return isless($(cs[c])[i], $(cs[c])[j]); end) for c in 1:(n-1)]...)
+      return isless($(cs[n])[i], $(cs[n])[j])
+    end
+  end
+  
+  @inline function lt2($(cs...), $(tmps...), j) 
+    @inbounds begin 
+      $([:(if !isequal($(tmps[c]), $(cs[c])[j]); return isless($(tmps[c]), $(cs[c])[j]); end) for c in 1:(n-1)]...)
+      return isless($(tmps[n]), $(cs[n])[j])
+    end
+  end
+  
+  @inline function swap2($(cs...), i, j)
+    @inbounds begin
+      $([:(begin
+      $(tmps[c]) = $(cs[c])[j]
+      $(cs[c])[j] = $(cs[c])[i]
+      $(cs[c])[i] = $(tmps[c])
+    end) for c in 1:n]...)
+  end
+  end
+
+  @inline function swap3($(cs...), i, j, k)
+    @inbounds begin
+      $([:(begin
+      $(tmps[c]) = $(cs[c])[k]
+      $(cs[c])[k] = $(cs[c])[j]
+      $(cs[c])[j] = $(cs[c])[i]
+      $(cs[c])[i] = $(tmps[c])
+    end) for c in 1:n]...)
+  end
+  end
+  
+  # sorting cribbed from Base.Sort
+  
+  function insertion_sort!($(cs...), lo::Int, hi::Int)
+      @inbounds for i = lo+1:hi
+        j = i
+        $([:($(tmps[c]) = $(cs[c])[i]) for c in 1:n]...)
+        while j > lo
+            if lt2($(cs...), $(tmps...), j-1)
+              $([:($(cs[c])[j] = $(cs[c])[j-1]) for c in 1:n]...)
+              j -= 1
+              continue
+            end
+            break
+        end
+        $([:($(cs[c])[j] = $(tmps[c])) for c in 1:n]...)
+    end
+  end
+
+  @inline function select_pivot!($(cs...), lo::Int, hi::Int)
+      @inbounds begin
+          mi = (lo+hi)>>>1
+          if lt($(cs...), mi, lo)
+              swap2($(cs...), lo, mi)
+          end
+          if lt($(cs...), hi, mi)
+              if lt($(cs...), hi, lo)
+                  swap3($(cs...), lo, mi, hi)
+              else
+                  swap2($(cs...), mi, hi)
+              end
+          end
+          swap2($(cs...), lo, mi)
+      end
+      return lo
+  end
+
+  function partition!($(cs...), lo::Int, hi::Int)
+      pivot = select_pivot!($(cs...), lo, hi)
+      i, j = lo, hi
+      @inbounds while true
+          i += 1; j -= 1
+          while lt($(cs...), i, pivot); i += 1; end;
+          while lt($(cs...), pivot, j); j -= 1; end;
+          i >= j && break
+          swap2($(cs...), i, j)
+      end
+      swap2($(cs...), pivot, j)
+      return j
+  end
+
+  function quicksort!($(cs...), lo::Int, hi::Int)
+      @inbounds while lo < hi
+          if hi-lo <= 20 
+            insertion_sort!($(cs...), lo, hi)
+            return 
+          end
+          j = partition!($(cs...), lo, hi)
+          if j-lo < hi-j
+              lo < (j-1) && quicksort!($(cs...), lo, j-1)
+              lo = j+1
+          else
+              j+1 < hi && quicksort!($(cs...), j+1, hi)
+              hi = j-1
+          end
+      end
+      return
+  end
+  
+  function quicksort!{$(ts...)}(cs::Tuple{$(ts...)})
+    quicksort!($([:(cs[$c]) for c in 1:n]...), 1, length(cs[1]))
+    return cs
+  end
+  end)
+end
+
+for i in 1:10
+  eval(define_columns(i))
+end
+```
+
+It's not pretty. But...
+
+``` julia 
+c2 = ([id::Int64 for id in ids], [id::Int64 for id in ids])
+@time quicksort!(c2)
+# 0.017385 seconds (4 allocations: 160 bytes)
+
+c2 = ([id::Int64 for id in ids], [string(id)::ASCIIString for id in ids])
+@time quicksort!(c2)
+# 0.053001 seconds (4 allocations: 160 bytes)
+```
+
+Onwards.

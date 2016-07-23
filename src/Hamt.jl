@@ -254,7 +254,7 @@ f(ids) = begin
 end
 
 srand(999)
-@time f(ids(10000000))
+@time f(ids(Int64(1E6)))
 # Profile.clear_malloc_data()
 # srand(999)
 # f(ids(1000000))

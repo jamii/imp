@@ -4243,4 +4243,4 @@ function f()
 end
 ```
 
-It needed a bit of help typing `value` for some reason, and it insists on boxing it, but the code for `f` looks good otherwise. No generic calls.
+It needed a bit of help typing `value` for some reason, and it insists on boxing it, but the code for `f` looks good otherwise. No generic calls and all the intersections are inlined.

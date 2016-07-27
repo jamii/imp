@@ -4168,3 +4168,79 @@ c2 = ([id::Int64 for id in ids], [string(id)::ASCIIString for id in ids])
 ```
 
 Onwards.
+
+## Intersection 
+
+I kinda thought that Julia specialized on closures, but this turns out not to be true in the current release. So I upgraded to v0.5-rc0 and then spent most of the day persuading Juno to cooperate. I lost a lot of time before realizing that the Ubuntu 'nightly' PPA hasn't been updated in two months. After switching to the generic linux build and patching Juno in a few places it mostly works now, apart from a weird issue where displaying results inline in Atom sometimes leaves Julia spinning for minutes. 
+
+But with that out of the way, we can write a really cute version of leapfrog triejoin:
+
+``` julia 
+# gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
+function gallop{T}(column::Vector{T}, value::T, lo::Int64, hi::Int64, cmp) 
+  if (lo < hi) && cmp(column[lo], value)
+    step = 1
+    while (lo + step < hi) && cmp(column[lo + step], value)
+      lo = lo + step 
+      step = step << 1
+    end
+    
+    step = step >> 1
+    while step > 0
+      if (lo + step < hi) && cmp(column[lo + step], value)
+        lo = lo + step 
+      end
+      step = step >> 1
+    end
+    
+    lo += 1
+  end
+  lo 
+end 
+
+@inline function intersect{T,N}(handler, cols::NTuple{N, Vector{T}}, los::Vector{Int64}, his::Vector{Int64})
+  # assume los/his are valid 
+  # los inclusive, his exclusive
+  n = length(cols)
+  local value::T
+  value = cols[n][los[n]]
+  inited = false
+  while true 
+    for c in 1:n 
+      if inited && (cols[c][los[c]] == value)
+        matching_his = [gallop(cols[c], value, los[c], his[c], <=) for c in 1:n]
+        handler(value, los, matching_his)
+        los[c] = matching_his[c]
+        # TODO can we set los = matching_his without breaking the stop condition?
+      else 
+        los[c] = gallop(cols[c], value, los[c], his[c], <)
+      end
+      if los[c] >= his[c]
+        return 
+      else 
+        value = cols[c][los[c]]
+      end
+    end
+    inited = true
+  end
+end
+```
+
+It's really unoptimised at the moment - I need to reuse allocations, remove bounds/null checks, unroll loops etc. But it seems to work:
+
+``` julia 
+function f() 
+  edges_x = [[1, 2, 3, 3, 4], [2, 3, 1, 4, 2]]
+  edges_y = [[1, 2, 3, 3, 4], [2, 3, 1, 4, 2]]
+  edges_z = [[1, 2, 2, 3, 4], [3, 1, 4, 2, 3]]
+  intersect((edges_x[1]::Vector{Int64}, edges_z[1]), [1,1], [6,6]) do x, x_los, x_his
+    intersect((edges_x[2], edges_y[1]), [x_los[1],1], [x_his[1],6]) do y, y_los, y_his
+      intersect((edges_y[2], edges_z[2]), [y_los[2], x_los[2]], [y_his[2], x_his[2]]) do z, z_los, z_his
+        println(x,y,z)
+      end
+    end
+  end
+end
+```
+
+It needed a bit of help typing `value` for some reason, and it insists on boxing it, but the code for `f` looks good otherwise. No generic calls.

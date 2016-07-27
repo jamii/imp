@@ -124,7 +124,7 @@ for n in 1:10
 end
 
 # gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
-function gallop(column, value, lo, hi, cmp) 
+function gallop{T}(column::Vector{T}, value::T, lo::Int64, hi::Int64, cmp) 
   if (lo < hi) && cmp(column[lo], value)
     step = 1
     while (lo + step < hi) && cmp(column[lo + step], value)
@@ -145,16 +145,16 @@ function gallop(column, value, lo, hi, cmp)
   lo 
 end 
 
-function intersect(handler, cols, los, his)
+@inline function intersect{T,N}(handler, cols::NTuple{N, Vector{T}}, los::Vector{Int64}, his::Vector{Int64})
   # assume los/his are valid 
   # los inclusive, his exclusive
   n = length(cols)
-  los = copy(los)
+  local value::T
   value = cols[n][los[n]]
   inited = false
   while true 
     for c in 1:n 
-      if inited && cols[c][los[c]] == value
+      if inited && (cols[c][los[c]] == value)
         matching_his = [gallop(cols[c], value, los[c], his[c], <=) for c in 1:n]
         handler(value, los, matching_his)
         los[c] = matching_his[c]

@@ -1,7 +1,5 @@
 module Relation
 
-abstract Columns{T} <: AbstractVector{T}
-
 function define_columns(n)
   cs = [symbol("c", c) for c in 1:n]
   ts = [symbol("C", c) for c in 1:n]
@@ -116,9 +114,78 @@ function define_columns(n)
     quicksort!($([:(cs[$c]) for c in 1:n]...), 1, length(cs[1]))
     return cs
   end
-  end)
+  
+end)
+  
 end
 
-for i in 1:10
-  eval(define_columns(i))
+for n in 1:10
+  eval(define_columns(n))
+end
+
+# gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
+function gallop(column, value, lo, hi, cmp) 
+  if (lo < hi) && cmp(column[lo], value)
+    step = 1
+    while (lo + step < hi) && cmp(column[lo + step], value)
+      lo = lo + step 
+      step = step << 1
+    end
+    
+    step = step >> 1
+    while step > 0
+      if (lo + step < hi) && cmp(column[lo + step], value)
+        lo = lo + step 
+      end
+      step = step >> 1
+    end
+    
+    lo += 1
+  end
+  lo 
+end 
+
+function intersect(handler, cols, los, his)
+  # assume los/his are valid 
+  # los inclusive, his exclusive
+  n = length(cols)
+  los = copy(los)
+  value = cols[n][los[n]]
+  inited = false
+  while true 
+    for c in 1:n 
+      if inited && cols[c][los[c]] == value
+        matching_his = [gallop(cols[c], value, los[c], his[c], <=) for c in 1:n]
+        handler(value, los, matching_his)
+        los[c] = matching_his[c]
+        # TODO can we set los = matching_his without breaking the stop condition?
+      else 
+        los[c] = gallop(cols[c], value, los[c], his[c], <)
+      end
+      if los[c] >= his[c]
+        return 
+      else 
+        value = cols[c][los[c]]
+      end
+    end
+    inited = true
+  end
+end
+
+intersect(println, [[1,2,3,4,5],[2,5,7,9]], [1,1], [6, 5])
+
+edges_x = [[1, 2, 3, 3, 4], [2, 3, 1, 4, 2]]
+edges_y = [[1, 2, 3, 3, 4], [2, 3, 1, 4, 2]]
+edges_z = [[1, 2, 2, 3, 4], [3, 1, 4, 2, 3]]
+
+function f() 
+  intersect([edges_x[1], edges_z[1]], [1,1], [6,6]) do x, x_los, x_his
+    intersect([edges_x[2], edges_y[1]], [x_los[1],1], [x_his[1],6]) do y, y_los, y_his
+      intersect([edges_y[2], edges_z[2]], [y_los[2], x_los[2]], [y_his[2], x_his[2]]) do z, z_los, z_his
+        println(x,y,z)
+      end
+    end
+  end
+end
+
 end

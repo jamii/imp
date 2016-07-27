@@ -4233,7 +4233,7 @@ function f()
   edges_x = [[1, 2, 3, 3, 4], [2, 3, 1, 4, 2]]
   edges_y = [[1, 2, 3, 3, 4], [2, 3, 1, 4, 2]]
   edges_z = [[1, 2, 2, 3, 4], [3, 1, 4, 2, 3]]
-  intersect((edges_x[1]::Vector{Int64}, edges_z[1]), [1,1], [6,6]) do x, x_los, x_his
+  intersect((edges_x[1], edges_z[1]), [1,1], [6,6]) do x, x_los, x_his
     intersect((edges_x[2], edges_y[1]), [x_los[1],1], [x_his[1],6]) do y, y_los, y_his
       intersect((edges_y[2], edges_z[2]), [y_los[2], x_los[2]], [y_his[2], x_his[2]]) do z, z_los, z_his
         println(x,y,z)

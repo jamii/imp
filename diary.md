@@ -4244,3 +4244,94 @@ end
 ```
 
 It needed a bit of help typing `value` for some reason, and it insists on boxing it, but the code for `f` looks good otherwise. No generic calls and all the intersections are inlined.
+
+## Closures and sadness
+
+Ooops, the anonymous functions aren't inlined. Can fix that pretty easily:
+
+``` julia 
+@time intersect((edges_x[1], edges_z[1]), (1,1), (n,n), @inline function (x, x_los, x_his)
+  intersect((edges_x[2], edges_y[1]), (x_los[1],1), (x_his[1],n), @inline function (y, y_los, y_his)
+    intersect((edges_y[2], edges_z[2]), (y_los[2], x_los[2]), (y_his[2], x_his[2]), @inline function (z, z_los, z_his)
+      println(x,y,z)
+    end)
+  end)
+end)
+```
+
+I had to change the syntax because `@inline` is fussy about about what it accepts. I guess it wasn't intended for use with anonymous functions, because they were specialized on there was no opportunity to inline them anyway.
+
+I cleaned up most of the obvious allocations by changing arrays to tuples, and unpacking them in the function body. That requires unrolling the inner loops too, which is probably not harmful. 
+
+``` julia 
+@generated function intersect{T,N}(cols::NTuple{N, Vector{T}}, los::NTuple{N, Int64}, his::NTuple{N, Int64}, handler)
+  # assume los/his are valid 
+  # los inclusive, his exclusive
+  quote
+    $(Expr(:meta, :inline))
+    @inbounds begin 
+      local value::$T
+      @nextract $N col cols
+      @nextract $N lo los 
+      @nextract $N hi his 
+      value = col_1[lo_1]
+      inited = false
+      while true 
+        @nexprs $N c->
+        begin
+          if inited && (col_c[lo_c] == value)
+            @nexprs $N c2-> matching_hi_c2 = gallop(col_c2, value, lo_c2, hi_c2, <=)
+            handler(value, (@ntuple $N lo), (@ntuple $N matching_hi))
+            lo_c = matching_hi_c
+            # TODO can we set los = matching_his without breaking the stop condition?
+          else 
+            lo_c = gallop(col_c, value, lo_c, hi_c, <)
+          end
+          if lo_c >= hi_c
+            return 
+          else 
+            value = col_c[lo_c]
+          end
+          inited = true
+        end
+      end
+    end
+  end
+end
+```
+
+It's nice that the facilities exist to do this kind of code rewriting, but I wouldn't have to do it in the first place if I could just mutate some stack-allocated tuple-like thing. Like a grownup.
+
+Annoyingly, there is still a lot of allocation going on. Looking at the generated code it seems that, while all the anonymous functions have been inlined, the closures are still being created. And heap-allocated :(
+  
+It also looks like any values that are closed over become boxed, presumably because Julia can't guarantee that the closure doesn't escape the lifetime of the current stackframe. But the box doesn't get a type and that messed up downsteam inference - note the return type of `f` is `ANY` rather than `Int64`.
+
+``` julia 
+function f(xs)
+  t = 0
+  foreach(xs) do x
+    t += x
+  end
+  t
+end
+```
+
+``` julia 
+Variables:
+  #self#::Relation.#f
+  xs::Array{Int64,1}
+  t::CORE.BOX
+  #62::Relation.##62#63
+
+Body:
+  begin 
+      t::CORE.BOX = $(Expr(:new, :(Core.Box)))
+      (Core.setfield!)(t::CORE.BOX,:contents,0)::Int64 # line 235:
+      #62::Relation.##62#63 = $(Expr(:new, :(Relation.##62#63), :(t)))
+      SSAValue(0) = #62::Relation.##62#63
+      $(Expr(:invoke, LambdaInfo for foreach(::Relation.##62#63, ::Array{Int64,1}), :(Relation.foreach), SSAValue(0), :(xs))) # line 238:
+      return (Core.getfield)(t::CORE.BOX,:contents)::ANY
+  end::ANY
+```
+
+It looks like Julia's closures just aren't there yet.

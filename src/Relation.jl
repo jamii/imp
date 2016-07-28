@@ -147,36 +147,57 @@ function gallop{T}(column::Vector{T}, value::T, lo::Int64, hi::Int64, cmp)
   lo 
 end 
 
-@generated function intersect{T,N}(cols::NTuple{N, Vector{T}}, los::NTuple{N, Int64}, his::NTuple{N, Int64}, handler)
-  # assume los/his are valid 
-  # los inclusive, his exclusive
+x = quote (a,2,3) end
+fieldnames(x)
+y = x.args[2]
+y.head
+typeof(y.args[1])
+
+function unpack(expr)
+  assert(expr.head == :tuple)
+  for value in expr.args
+    assert(typeof(value) == Symbol)
+  end
+  expr.args
+end
+
+macro intersect(cols, los, his, next_los, next_his, handler)
+  cols = unpack(cols)
+  los = unpack(los)
+  his = unpack(his)
+  next_los = unpack(next_los)
+  next_his = unpack(next_his)
+  n = length(cols)
   quote
-    $(Expr(:meta, :inline))
+    # assume los/his are valid 
+    # los inclusive, his exclusive
     @inbounds begin 
-      local value::$T
-      @nextract $N col cols
-      @nextract $N lo los 
-      @nextract $N hi his 
-      value = col_1[lo_1]
+      value = $(esc(cols[n]))[$(esc(los[n]))]
       inited = false
-      while true 
-        @nexprs $N c->
-        begin
-          if inited && (col_c[lo_c] == value)
-            @nexprs $N c2-> matching_hi_c2 = gallop(col_c2, value, lo_c2, hi_c2, <=)
-            handler(value, (@ntuple $N lo), (@ntuple $N matching_hi))
-            lo_c = matching_hi_c
-            # TODO can we set los = matching_his without breaking the stop condition?
+      finished = false
+      while !finished
+        $([
+        quote
+          if inited && ($(esc(cols[c]))[$(esc(los[c]))] == value)
+            $([
+            quote
+              $(esc(next_los[c2])) = $(esc(los[c2]))
+              $(esc(next_his[c2])) = gallop($(esc(cols[c2])), value, $(esc(los[c2])), $(esc(his[c2])), <=)
+            end
+            for c2 in 1:n]...)
+            $handler # TODO huge code duplication
+            $(esc(los[c])) = $(esc(next_his[c]))
           else 
-            lo_c = gallop(col_c, value, lo_c, hi_c, <)
+            $(esc(los[c])) = gallop($(esc(cols[c])), value, $(esc(los[c])), $(esc(his[c])), <)
           end
-          if lo_c >= hi_c
-            return 
+          if $(esc(los[c])) >= $(esc(his[c]))
+            finished = true
           else 
-            value = col_c[lo_c]
+            value = $(esc(cols[c]))[$(esc(los[c]))]
           end
           inited = true
         end
+        for c in 1:n]...)
       end
     end
   end
@@ -184,38 +205,49 @@ end
 
 # TODO count stationary, reset to 0 on jump
 
-intersect(([1,2,3,4,5],[2,5,7,9]), (1,1), (6, 5), println)
-
 srand(999)
-edges_x = ([i for i in 1:100000], shuffle([i for i in 1:100000]))
-edges_y = deepcopy(edges_x)
-edges_z = (copy(edges_x[2]), copy(edges_x[1]))
-quicksort!(edges_x)
-quicksort!(edges_y)
-quicksort!(edges_z)
+edges_xy = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
+# edges_xy = ([1, 2, 3, 3, 4], [2, 3, 1, 4, 2])
+edges_yz = deepcopy(edges_xy)
+edges_xz = (copy(edges_xy[2]), copy(edges_xy[1]))
+quicksort!(edges_xy)
+quicksort!(edges_yz)
+quicksort!(edges_xz)
 
-function f(edges_x, edges_y, edges_z) 
-  n = length(edges_x[1])
+function f(edges_xy::Tuple{Vector{Int64}, Vector{Int64}}, edges_yz::Tuple{Vector{Int64}, Vector{Int64}}, edges_xz::Tuple{Vector{Int64}, Vector{Int64}}) 
+  edges_xy_1, edges_xy_2 = edges_xy 
+  edges_yz_1, edges_yz_2 = edges_yz 
+  edges_xz_1, edges_xz_2 = edges_xz 
+  xy_lo_1 = 1; xy_lo_2 = 1; xy_hi_1 = length(edges_xy_1); xy_hi_2 = length(edges_xy_2);
+  yz_lo_1 = 1; yz_lo_2 = 1; yz_hi_1 = length(edges_yz_1); yz_hi_2 = length(edges_yz_2);
+  xz_lo_1 = 1; xz_lo_2 = 1; xz_hi_1 = length(edges_xz_1); xz_hi_2 = length(edges_xz_2);
+  xy_end = 1; yz_end = 1; xz_end = 1;
+  ignore = 1;
   a = 0
   b = 0
   c = 0
-  @time intersect((edges_x[1], edges_z[1]), (1,1), (n,n), @inline function (x, x_los, x_his)
+  
+  xy_lo_1 = 1; xy_hi_1 = length(edges_xy_1); 
+  xz_lo_1 = 1; xz_hi_1 = length(edges_xz_1); 
+  @time @intersect((edges_xy_1, edges_xz_1), (xy_lo_1, xz_lo_1), (xy_hi_1, xz_hi_1), (xy_lo_2, xz_lo_2), (xy_hi_2, xz_hi_2), begin
     a += 1
-    intersect((edges_x[2], edges_y[1]), (x_los[1],1), (x_his[1],n), @inline function (y, y_los, y_his)
+    # println("x=", edges_xy_1[xy_lo_1])
+    yz_lo_1 = 1; yz_hi_1 = length(edges_yz_1)
+    @intersect((edges_xy_2, edges_yz_1), (xy_lo_2, yz_lo_1), (xy_hi_2, yz_hi_1), (xy_end, yz_lo_2), (ignore, yz_hi_2), begin
+      # println("  y=", edges_xy_2[xy_lo_2])
       b += 1
-      intersect((edges_y[2], edges_z[2]), (y_los[2], x_los[2]), (y_his[2], x_his[2]), @inline function (z, z_los, z_his)
+      @intersect((edges_yz_2, edges_xz_2), (yz_lo_2, xz_lo_2), (yz_hi_2, xz_hi_2), (yz_end, xz_end), (ignore, ignore), begin
         c += 1
+        # println("    z=", edges_xz_2[xz_lo_2])
       end)
     end)
   end)
-  (a + b + c)
+  (a, b, c)
 end
 
-# @code_warntype 
-  
-  f(edges_x::Tuple{Vector{Int64}, Vector{Int64}}, 
-  edges_y::Tuple{Vector{Int64}, Vector{Int64}}, 
-  edges_z::Tuple{Vector{Int64}, Vector{Int64}})
+@time f(edges_xy, edges_yz, edges_xz)
+
+# @code_warntype f(edges_xy, edges_yz, edges_xz)
 # @code_llvm gallop(edges_x[1], 3, 1, 3, <)
 
 # readcsv(open("/home/jamie/soc-LiveJournal1.txt"))

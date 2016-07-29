@@ -4516,7 +4516,7 @@ end
 
 This is only slightly slower than the macro version.
 
-Belatedly, I realise that now the state is kept outside the function I could just have avoided the closures all together:
+Belatedly, I realise that now that the state is kept outside the function I could just have avoided the closures all together:
 
 ``` julia 
 function start_intersect(cols, los, ats, his, ixes)

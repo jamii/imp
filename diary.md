@@ -4306,8 +4306,6 @@ Annoyingly, there is still a lot of allocation going on. Looking at the generate
   
 It also looks like any values that are closed over become boxed, presumably because Julia can't guarantee that the closure doesn't escape the lifetime of the current stackframe. But the box doesn't get a type and that messed up downsteam inference - note the return type of `f` is `ANY` rather than `Int64`.
 
-
-
 ``` julia 
 function f(xs)
   const t = 0
@@ -4338,14 +4336,23 @@ Body:
 
 It looks like Julia's closures just aren't there yet.
 
-## TODO 
+## Working around closures
 
 I managed a macro-y version that does the trick, producing zero allocations in the main body. The nice `@nexprs` macro I was using before doesn't interact well with the macro hygienisation so I have to do stuff by hand, with much additional syntax.
 
 ``` julia 
-macro intersect(cols, los, his, next_los, next_his, handler)
+function unpack(expr)
+  assert(expr.head == :tuple)
+  for value in expr.args
+    assert(typeof(value) == Symbol)
+  end
+  expr.args
+end
+
+macro intersect(cols, los, ats, his, next_los, next_his, handler)
   cols = unpack(cols)
   los = unpack(los)
+  ats = unpack(ats)
   his = unpack(his)
   next_los = unpack(next_los)
   next_his = unpack(next_his)
@@ -4354,28 +4361,35 @@ macro intersect(cols, los, his, next_los, next_his, handler)
     # assume los/his are valid 
     # los inclusive, his exclusive
     @inbounds begin 
-      value = $(esc(cols[n]))[$(esc(los[n]))]
-      inited = false
+      $([
+      quote
+        $(esc(ats[c])) = $(esc(los[c]))
+      end
+      for c in 1:n]...)
+      value = $(esc(cols[n]))[$(esc(ats[n]))]
+      fixed = 1
       finished = false
       while !finished
         $([
         quote
-          if inited && ($(esc(cols[c]))[$(esc(los[c]))] == value)
+          if fixed == $n 
             $([
             quote
-              $(esc(next_los[c2])) = $(esc(los[c2]))
-              $(esc(next_his[c2])) = gallop($(esc(cols[c2])), value, $(esc(los[c2])), $(esc(his[c2])), <=)
+              $(esc(next_los[c2])) = $(esc(ats[c2]))
+              $(esc(next_his[c2])) = gallop($(esc(cols[c2])), value, $(esc(ats[c2])), $(esc(his[c2])), <=)
+              $(esc(ats[c2])) = $(esc(next_his[c2]))
             end
             for c2 in 1:n]...)
             $handler # TODO huge code duplication
-            $(esc(los[c])) = $(esc(next_his[c]))
           else 
-            $(esc(los[c])) = gallop($(esc(cols[c])), value, $(esc(los[c])), $(esc(his[c])), <)
+            $(esc(ats[c])) = gallop($(esc(cols[c])), value, $(esc(ats[c])), $(esc(his[c])), <)
           end
-          if $(esc(los[c])) >= $(esc(his[c]))
+          if $(esc(ats[c])) >= $(esc(his[c]))
             finished = true
           else 
-            value = $(esc(cols[c]))[$(esc(los[c]))]
+            next_value = $(esc(cols[c]))[$(esc(ats[c]))]
+            fixed = (value == next_value) ? fixed+1 : 1
+            value = next_value
           end
           inited = true
         end
@@ -4499,3 +4513,7 @@ function intersect(next, cols, los, ats, his, ixes)
   end
 end
 ```
+
+This is only slightly slower than the macro version. 
+
+I had thought about also rewriting `intersect` as an iterator, but it doesn't seem worthwhile right now.

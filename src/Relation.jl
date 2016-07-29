@@ -147,32 +147,39 @@ function gallop{T}(column::Vector{T}, value::T, lo::Int64, hi::Int64, cmp)
   lo 
 end 
 
-function intersect(next, cols, los, ats, his, ixes)
+@inline function start_intersect(cols, los, ats, his, ixes)
   # assume los/his are valid 
   # los inclusive, his exclusive
   @inbounds begin
     for ix in ixes
       ats[ix] = los[ix]
     end
-    n = length(ixes)
-    value = cols[ixes[n]][ats[ixes[n]]]
+  end
+end
+
+@inline function next_intersect(cols, los, ats, his, ixes)
+  @inbounds begin
     fixed = 1
+    n = length(ixes)
+    value = cols[n][ats[ixes[n]]]
     while true 
-      for ix in ixes
+      for c in 1:n
+        ix = ixes[c]
         if fixed == n
-          for ix2 in ixes
+          for c2 in 1:n
+            ix2 = ixes[c2]
             los[ix2+1] = ats[ix2]
-            his[ix2+1] = gallop(cols[ix2], value, ats[ix2], his[ix2], <=)
+            his[ix2+1] = gallop(cols[c2], value, ats[ix2], his[ix2], <=)
             ats[ix2] = his[ix2+1]
           end
-          next()
+          return true
         else 
-          ats[ix] = gallop(cols[ix], value, ats[ix], his[ix], <)
+          ats[ix] = gallop(cols[c], value, ats[ix], his[ix], <)
         end
         if ats[ix] >= his[ix]
-          return 
+          return false
         else 
-          next_value = cols[ix][ats[ix]]
+          next_value = cols[c][ats[ix]]
           fixed = (value == next_value) ? fixed+1 : 1
           value = next_value
         end
@@ -186,25 +193,42 @@ edges_xy = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
 # edges_xy = ([1, 2, 3, 3, 4], [2, 3, 1, 4, 2])
 edges_yz = deepcopy(edges_xy)
 edges_xz = (copy(edges_xy[2]), copy(edges_xy[1]))
-quicksort!(edges_xy)
-quicksort!(edges_yz)
-quicksort!(edges_xz)
+@time begin 
+  quicksort!(edges_xy)
+  quicksort!(edges_yz)
+  quicksort!(edges_xz)
+end
 
 function f(edges_xy::Tuple{Vector{Int64}, Vector{Int64}}, edges_yz::Tuple{Vector{Int64}, Vector{Int64}}, edges_xz::Tuple{Vector{Int64}, Vector{Int64}}) 
-  cols = (edges_xy[1], edges_xy[2], Int64[], edges_yz[1], edges_yz[2], Int64[], edges_xz[1], edges_xz[2], Int64[])
-  los = [1 for _ in 1:length(cols)]
-  ats = [1 for _ in 1:length(cols)]
-  his = [length(cols[i])+1 for i in 1:length(cols)]
-  count = [0]
+  cols_x = [edges_xy[1], edges_xz[1]]
+  cols_y = [edges_xy[2], edges_yz[1]]
+  cols_z = [edges_yz[2], edges_xz[2]]
+  ixes_x = [1,7]
+  ixes_y = [2,4]
+  ixes_z = [5,8]
+  los = [1 for _ in 1:9]
+  ats = [1 for _ in 1:9]
+  his = [length(cols_x[1])+1 for i in 1:9]
+  count = 0
   
-  cont4 = () -> count[1] += 1
-  cont3 = () -> intersect(cont4, cols, los, ats, his, (5, 8))
-  cont2 = () -> intersect(cont3, cols, los, ats, his, (2, 4))
-  cont1 = () -> intersect(cont2, cols, los, ats, his, (1, 7))
+  @time begin
+    start_intersect(cols_x, los, ats, his, ixes_x)
+    while next_intersect(cols_x, los, ats, his, ixes_x)
+      x = cols_x[1][los[2]]
+      start_intersect(cols_y, los, ats, his, ixes_y)
+      while next_intersect(cols_y, los, ats, his, ixes_y)
+        y = cols_y[1][los[3]]
+        start_intersect(cols_z, los, ats, his, ixes_z)
+        while next_intersect(cols_z, los, ats, his, ixes_z)
+          z = cols_z[1][los[6]]
+          # println((x,y,z))
+          count += 1
+        end
+      end
+    end
+  end
   
-  @time cont1()
-  
-  count[1]
+  count
 end
 
 f(edges_xy, edges_yz, edges_xz)

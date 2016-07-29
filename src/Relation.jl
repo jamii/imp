@@ -208,22 +208,7 @@ function f(edges_xy::Tuple{Vector{Int64}, Vector{Int64}}, edges_yz::Tuple{Vector
 end
 
 f(edges_xy, edges_yz, edges_xz)
-(@code_warntype f(edges_xy, edges_yz, edges_xz))
-  
-function f(xs)
-  t = [0]
-  foreach(xs) do x
-    t[1] += x
-  end
-  t[1]
-end
-
-xs = collect(1:100000)
-@time f(xs)
-@code_warntype(f(xs))
-
 # @code_warntype f(edges_xy, edges_yz, edges_xz)
-# @code_llvm gallop(edges_x[1], 3, 1, 3, <)
 
 # readcsv(open("/home/jamie/soc-LiveJournal1.txt"))
 

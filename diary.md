@@ -4306,9 +4306,11 @@ Annoyingly, there is still a lot of allocation going on. Looking at the generate
   
 It also looks like any values that are closed over become boxed, presumably because Julia can't guarantee that the closure doesn't escape the lifetime of the current stackframe. But the box doesn't get a type and that messed up downsteam inference - note the return type of `f` is `ANY` rather than `Int64`.
 
+
+
 ``` julia 
 function f(xs)
-  t = 0
+  const t = 0
   foreach(xs) do x
     t += x
   end
@@ -4316,22 +4318,184 @@ function f(xs)
 end
 ```
 
-``` julia 
+``` julia
 Variables:
   #self#::Relation.#f
   xs::Array{Int64,1}
   t::CORE.BOX
-  #62::Relation.##62#63
+  #43::Relation.##43#44
 
 Body:
   begin 
       t::CORE.BOX = $(Expr(:new, :(Core.Box)))
-      (Core.setfield!)(t::CORE.BOX,:contents,0)::Int64 # line 235:
-      #62::Relation.##62#63 = $(Expr(:new, :(Relation.##62#63), :(t)))
-      SSAValue(0) = #62::Relation.##62#63
-      $(Expr(:invoke, LambdaInfo for foreach(::Relation.##62#63, ::Array{Int64,1}), :(Relation.foreach), SSAValue(0), :(xs))) # line 238:
+      (Core.setfield!)(t::CORE.BOX,:contents,0)::Int64 # line 213:
+      #43::Relation.##43#44 = $(Expr(:new, :(Relation.##43#44), :(t)))
+      SSAValue(0) = #43::Relation.##43#44
+      $(Expr(:invoke, LambdaInfo for foreach(::Relation.##43#44, ::Array{Int64,1}), :(Relation.foreach), SSAValue(0), :(xs))) # line 216:
       return (Core.getfield)(t::CORE.BOX,:contents)::ANY
   end::ANY
 ```
 
 It looks like Julia's closures just aren't there yet.
+
+## TODO 
+
+I managed a macro-y version that does the trick, producing zero allocations in the main body. The nice `@nexprs` macro I was using before doesn't interact well with the macro hygienisation so I have to do stuff by hand, with much additional syntax.
+
+``` julia 
+macro intersect(cols, los, his, next_los, next_his, handler)
+  cols = unpack(cols)
+  los = unpack(los)
+  his = unpack(his)
+  next_los = unpack(next_los)
+  next_his = unpack(next_his)
+  n = length(cols)
+  quote
+    # assume los/his are valid 
+    # los inclusive, his exclusive
+    @inbounds begin 
+      value = $(esc(cols[n]))[$(esc(los[n]))]
+      inited = false
+      finished = false
+      while !finished
+        $([
+        quote
+          if inited && ($(esc(cols[c]))[$(esc(los[c]))] == value)
+            $([
+            quote
+              $(esc(next_los[c2])) = $(esc(los[c2]))
+              $(esc(next_his[c2])) = gallop($(esc(cols[c2])), value, $(esc(los[c2])), $(esc(his[c2])), <=)
+            end
+            for c2 in 1:n]...)
+            $handler # TODO huge code duplication
+            $(esc(los[c])) = $(esc(next_his[c]))
+          else 
+            $(esc(los[c])) = gallop($(esc(cols[c])), value, $(esc(los[c])), $(esc(his[c])), <)
+          end
+          if $(esc(los[c])) >= $(esc(his[c]))
+            finished = true
+          else 
+            value = $(esc(cols[c]))[$(esc(los[c]))]
+          end
+          inited = true
+        end
+        for c in 1:n]...)
+      end
+    end
+  end
+end
+```
+
+This is fast but awful to look at, so I played around with closures some more. I discovered that boxing of closed-over variables only happens if a stack-allocated thing is mutated. Heap-allocated things propagate their types just fine. (I'm sure I had a case where a stack-allocated thing got boxed without being mutated. Not sure if I imagined it or if the nest of closures was confusing the mutation analysis.)
+
+``` julia 
+function f(xs)
+  t = [0]
+  foreach(xs) do x
+    t[1] += x
+  end
+  t[1]
+end
+```
+
+``` julia 
+Variables:
+  #self#::Relation.#f
+  xs::Array{Int64,1}
+  t::Array{Int64,1}
+  #267::Relation.##267#268{Array{Int64,1}}
+
+Body:
+  begin 
+      t::Array{Int64,1} = $(Expr(:invoke, LambdaInfo for vect(::Int64, ::Vararg{Int64,N}), :(Base.vect), 0)) # line 215:
+      #267::Relation.##267#268{Array{Int64,1}} = $(Expr(:new, Relation.##267#268{Array{Int64,1}}, :(t)))
+      SSAValue(0) = #267::Relation.##267#268{Array{Int64,1}}
+      $(Expr(:invoke, LambdaInfo for foreach(::Relation.##267#268{Array{Int64,1}}, ::Array{Int64,1}), :(Relation.foreach), SSAValue(0), :(xs))) # line 218:
+      return (Base.arrayref)(t::Array{Int64,1},1)::Int64
+  end::Int64
+```
+
+This is reflected in the emitted code - the non-boxed version has a constant 6 allocations whereas the boxed version allocates for each x in xs. 
+
+To avoid having to create closures on each nexted iteration, I moved all the state variables to heap-allocated arrays at the top of the query.
+
+``` julia
+function f(edges_xy::Tuple{Vector{Int64}, Vector{Int64}}, edges_yz::Tuple{Vector{Int64}, Vector{Int64}}, edges_xz::Tuple{Vector{Int64}, Vector{Int64}}) 
+  cols = (edges_xy[1], edges_xy[2], Int64[], edges_yz[1], edges_yz[2], Int64[], edges_xz[1], edges_xz[2], Int64[])
+  los = [1 for _ in 1:length(cols)]
+  ats = [1 for _ in 1:length(cols)]
+  his = [length(cols[i])+1 for i in 1:length(cols)]
+  count = [0]
+
+  @time begin
+    intersect(cols, los, ats, his, (1, 7)) do
+      intersect(cols, los, ats, his, (2, 4)) do 
+        intersect(cols, los, ats, his, (5, 8)) do
+          count[1] += 1
+        end 
+      end 
+    end
+  end
+  
+  count[1]
+end
+```
+
+Those nested closures still get created every time though (even though they are all identical) causing many many heap allocations. Rewriting like this fixed the problem:
+
+``` julia 
+function f(edges_xy::Tuple{Vector{Int64}, Vector{Int64}}, edges_yz::Tuple{Vector{Int64}, Vector{Int64}}, edges_xz::Tuple{Vector{Int64}, Vector{Int64}}) 
+  cols = (edges_xy[1], edges_xy[2], Int64[], edges_yz[1], edges_yz[2], Int64[], edges_xz[1], edges_xz[2], Int64[])
+  los = [1 for _ in 1:length(cols)]
+  ats = [1 for _ in 1:length(cols)]
+  his = [length(cols[i])+1 for i in 1:length(cols)]
+  count = [0]
+  
+  cont4 = () -> count[1] += 1
+  cont3 = () -> intersect(cont4, cols, los, ats, his, (5, 8))
+  cont2 = () -> intersect(cont3, cols, los, ats, his, (2, 4))
+  cont1 = () -> intersect(cont2, cols, los, ats, his, (1, 7))
+  
+  @time cont1()
+  
+  count[1]
+end
+```
+
+Now `intersect` gets to be a normal function again.
+
+``` julia 
+function intersect(next, cols, los, ats, his, ixes)
+  # assume los/his are valid 
+  # los inclusive, his exclusive
+  @inbounds begin
+    for ix in ixes
+      ats[ix] = los[ix]
+    end
+    n = length(ixes)
+    value = cols[ixes[n]][ats[ixes[n]]]
+    fixed = 1
+    while true 
+      for ix in ixes
+        if fixed == n
+          for ix2 in ixes
+            los[ix2+1] = ats[ix2]
+            his[ix2+1] = gallop(cols[ix2], value, ats[ix2], his[ix2], <=)
+            ats[ix2] = his[ix2+1]
+          end
+          next()
+        else 
+          ats[ix] = gallop(cols[ix], value, ats[ix], his[ix], <)
+        end
+        if ats[ix] >= his[ix]
+          return 
+        else 
+          next_value = cols[ix][ats[ix]]
+          fixed = (value == next_value) ? fixed+1 : 1
+          value = next_value
+        end
+      end
+    end
+  end
+end
+```

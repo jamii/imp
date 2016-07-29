@@ -147,67 +147,39 @@ function gallop{T}(column::Vector{T}, value::T, lo::Int64, hi::Int64, cmp)
   lo 
 end 
 
-x = quote (a,2,3) end
-fieldnames(x)
-y = x.args[2]
-y.head
-typeof(y.args[1])
-
-function unpack(expr)
-  assert(expr.head == :tuple)
-  for value in expr.args
-    assert(typeof(value) == Symbol)
+@inline function intersect(handler, cols, los, ats, his, ixes)
+  # assume los/his are valid 
+  # los inclusive, his exclusive
+  n = length(ixes)
+  for ix in ixes
+    ats[ix] = los[ix]
   end
-  expr.args
-end
-
-macro intersect(cols, los, his, next_los, next_his, handler)
-  cols = unpack(cols)
-  los = unpack(los)
-  his = unpack(his)
-  next_los = unpack(next_los)
-  next_his = unpack(next_his)
-  n = length(cols)
-  quote
-    # assume los/his are valid 
-    # los inclusive, his exclusive
-    @inbounds begin 
-      value = $(esc(cols[n]))[$(esc(los[n]))]
-      inited = false
-      finished = false
-      while !finished
-        $([
-        quote
-          if inited && ($(esc(cols[c]))[$(esc(los[c]))] == value)
-            $([
-            quote
-              $(esc(next_los[c2])) = $(esc(los[c2]))
-              $(esc(next_his[c2])) = gallop($(esc(cols[c2])), value, $(esc(los[c2])), $(esc(his[c2])), <=)
-            end
-            for c2 in 1:n]...)
-            $handler # TODO huge code duplication
-            $(esc(los[c])) = $(esc(next_his[c]))
-          else 
-            $(esc(los[c])) = gallop($(esc(cols[c])), value, $(esc(los[c])), $(esc(his[c])), <)
-          end
-          if $(esc(los[c])) >= $(esc(his[c]))
-            finished = true
-          else 
-            value = $(esc(cols[c]))[$(esc(los[c]))]
-          end
-          inited = true
+  value = cols[last(ixes)][ats[last(ixes)]]
+  fixed = 1
+  while true 
+    for ix in ixes
+      ats[ix] = gallop(cols[ix], value, ats[ix], his[ix], <)
+      fixed = (cols[ix][ats[ix]] == value) ? fixed+1 : 0
+      if fixed == n
+        for ix2 in ixes
+          los[ix2+1] = ats[ix2]
+          his[ix2+1] = gallop(cols[ix2], value, ats[ix2], his[ix2], <=)
+          ats[ix2] = his[ix2+1]
         end
-        for c in 1:n]...)
+        fixed = 1
+        handler()
       end
+      if ats[ix] >= his[ix]
+        return 
+      end
+      value = cols[ix][ats[ix]]
     end
   end
 end
 
-# TODO count stationary, reset to 0 on jump
-
 srand(999)
-edges_xy = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
-# edges_xy = ([1, 2, 3, 3, 4], [2, 3, 1, 4, 2])
+# edges_xy = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
+edges_xy = ([1, 2, 3, 3, 4], [2, 3, 1, 4, 2])
 edges_yz = deepcopy(edges_xy)
 edges_xz = (copy(edges_xy[2]), copy(edges_xy[1]))
 quicksort!(edges_xy)
@@ -215,37 +187,44 @@ quicksort!(edges_yz)
 quicksort!(edges_xz)
 
 function f(edges_xy::Tuple{Vector{Int64}, Vector{Int64}}, edges_yz::Tuple{Vector{Int64}, Vector{Int64}}, edges_xz::Tuple{Vector{Int64}, Vector{Int64}}) 
-  edges_xy_1, edges_xy_2 = edges_xy 
-  edges_yz_1, edges_yz_2 = edges_yz 
-  edges_xz_1, edges_xz_2 = edges_xz 
-  xy_lo_1 = 1; xy_lo_2 = 1; xy_hi_1 = length(edges_xy_1); xy_hi_2 = length(edges_xy_2);
-  yz_lo_1 = 1; yz_lo_2 = 1; yz_hi_1 = length(edges_yz_1); yz_hi_2 = length(edges_yz_2);
-  xz_lo_1 = 1; xz_lo_2 = 1; xz_hi_1 = length(edges_xz_1); xz_hi_2 = length(edges_xz_2);
-  xy_end = 1; yz_end = 1; xz_end = 1;
-  ignore = 1;
+  cols = (edges_xy[1], edges_xy[2], [], edges_yz[1], edges_yz[2], [], edges_xz[1], edges_xz[2], [])
+  xy_1, xy_2, _, yz_1, yz_2, _, xz_1, xz_2, _ = 1:length(cols)
+  los = [1 for _ in 1:length(cols)]
+  ats = [1 for _ in 1:length(cols)]
+  his = [length(cols[i])+1 for i in 1:length(cols)]
   a = 0
   b = 0
   c = 0
   
-  xy_lo_1 = 1; xy_hi_1 = length(edges_xy_1); 
-  xz_lo_1 = 1; xz_hi_1 = length(edges_xz_1); 
-  @time @intersect((edges_xy_1, edges_xz_1), (xy_lo_1, xz_lo_1), (xy_hi_1, xz_hi_1), (xy_lo_2, xz_lo_2), (xy_hi_2, xz_hi_2), begin
+  function cont1()
+    intersect(cont2, cols, los, ats, his, (xy_1, xz_1))
+  end
+  
+  function cont2() 
     a += 1
-    # println("x=", edges_xy_1[xy_lo_1])
-    yz_lo_1 = 1; yz_hi_1 = length(edges_yz_1)
-    @intersect((edges_xy_2, edges_yz_1), (xy_lo_2, yz_lo_1), (xy_hi_2, yz_hi_1), (xy_end, yz_lo_2), (ignore, yz_hi_2), begin
-      # println("  y=", edges_xy_2[xy_lo_2])
-      b += 1
-      @intersect((edges_yz_2, edges_xz_2), (yz_lo_2, xz_lo_2), (yz_hi_2, xz_hi_2), (yz_end, xz_end), (ignore, ignore), begin
-        c += 1
-        # println("    z=", edges_xz_2[xz_lo_2])
-      end)
-    end)
-  end)
+    println(los)
+    println("x=", edges_xy[1][los[xy_1+1]]) 
+    intersect(cont3, cols, los, ats, his, (xy_2, yz_1))
+  end
+  
+  function cont3()
+     b += 1
+     println(los)
+     println("  y=", edges_yz[1][los[yz_1+1]])
+     intersect(cont4, cols, los, ats, his, (yz_2, xz_2))
+   end
+   
+   function cont4()
+     c += 1
+     println(los)
+     println("    z=", edges_xz[2][los[xz_2+1]])
+  end
+  
+  @time cont1()
   (a, b, c)
 end
 
-@time f(edges_xy, edges_yz, edges_xz)
+f(edges_xy, edges_yz, edges_xz)
 
 # @code_warntype f(edges_xy, edges_yz, edges_xz)
 # @code_llvm gallop(edges_x[1], 3, 1, 3, <)

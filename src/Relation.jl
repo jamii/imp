@@ -147,7 +147,7 @@ function gallop{T}(column::Vector{T}, value::T, lo::Int64, hi::Int64, cmp)
   lo 
 end 
 
-@inline function start_intersect(cols, los, ats, his, ixes)
+function start_intersect(cols, los, ats, his, ixes)
   # assume los/his are valid 
   # los inclusive, his exclusive
   @inbounds begin
@@ -157,7 +157,7 @@ end
   end
 end
 
-@inline function next_intersect(cols, los, ats, his, ixes)
+function next_intersect(cols, los, ats, his, ixes)
   @inbounds begin
     fixed = 1
     n = length(ixes)
@@ -186,17 +186,6 @@ end
       end
     end
   end
-end
-
-srand(999)
-edges_xy = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
-# edges_xy = ([1, 2, 3, 3, 4], [2, 3, 1, 4, 2])
-edges_yz = deepcopy(edges_xy)
-edges_xz = (copy(edges_xy[2]), copy(edges_xy[1]))
-@time begin 
-  quicksort!(edges_xy)
-  quicksort!(edges_yz)
-  quicksort!(edges_xz)
 end
 
 function f(edges_xy::Tuple{Vector{Int64}, Vector{Int64}}, edges_yz::Tuple{Vector{Int64}, Vector{Int64}}, edges_xz::Tuple{Vector{Int64}, Vector{Int64}}) 
@@ -229,6 +218,17 @@ function f(edges_xy::Tuple{Vector{Int64}, Vector{Int64}}, edges_yz::Tuple{Vector
   end
   
   count
+end
+
+srand(999)
+edges_xy = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
+# edges_xy = ([1, 2, 3, 3, 4], [2, 3, 1, 4, 2])
+edges_yz = deepcopy(edges_xy)
+edges_xz = (copy(edges_xy[2]), copy(edges_xy[1]))
+@time begin 
+  quicksort!(edges_xy)
+  quicksort!(edges_yz)
+  quicksort!(edges_xz)
 end
 
 f(edges_xy, edges_yz, edges_xz)

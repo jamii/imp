@@ -4514,6 +4514,87 @@ function intersect(next, cols, los, ats, his, ixes)
 end
 ```
 
-This is only slightly slower than the macro version. 
+This is only slightly slower than the macro version.
 
-I had thought about also rewriting `intersect` as an iterator, but it doesn't seem worthwhile right now.
+Belatedly, I realise that now the state is kept outside the function I could just have avoided the closures all together:
+
+``` julia 
+function start_intersect(cols, los, ats, his, ixes)
+  # assume los/his are valid 
+  # los inclusive, his exclusive
+  @inbounds begin
+    for ix in ixes
+      ats[ix] = los[ix]
+    end
+  end
+end
+
+function next_intersect(cols, los, ats, his, ixes)
+  @inbounds begin
+    fixed = 1
+    n = length(ixes)
+    value = cols[n][ats[ixes[n]]]
+    while true 
+      for c in 1:n
+        ix = ixes[c]
+        if fixed == n
+          for c2 in 1:n
+            ix2 = ixes[c2]
+            los[ix2+1] = ats[ix2]
+            his[ix2+1] = gallop(cols[c2], value, ats[ix2], his[ix2], <=)
+            ats[ix2] = his[ix2+1]
+          end
+          return true
+        else 
+          ats[ix] = gallop(cols[c], value, ats[ix], his[ix], <)
+        end
+        if ats[ix] >= his[ix]
+          return false
+        else 
+          next_value = cols[c][ats[ix]]
+          fixed = (value == next_value) ? fixed+1 : 1
+          value = next_value
+        end
+      end
+    end
+  end
+end
+```
+
+Wish I had thought of that two days ago.
+
+The setup is now kind of ugly, but the query compiler is going to be handling this anyway.
+
+``` julia 
+function f(edges_xy::Tuple{Vector{Int64}, Vector{Int64}}, edges_yz::Tuple{Vector{Int64}, Vector{Int64}}, edges_xz::Tuple{Vector{Int64}, Vector{Int64}}) 
+  cols_x = [edges_xy[1], edges_xz[1]]
+  cols_y = [edges_xy[2], edges_yz[1]]
+  cols_z = [edges_yz[2], edges_xz[2]]
+  ixes_x = [1,7]
+  ixes_y = [2,4]
+  ixes_z = [5,8]
+  los = [1 for _ in 1:9]
+  ats = [1 for _ in 1:9]
+  his = [length(cols_x[1])+1 for i in 1:9]
+  count = 0
+  
+  @time begin
+    start_intersect(cols_x, los, ats, his, ixes_x)
+    while next_intersect(cols_x, los, ats, his, ixes_x)
+      x = cols_x[1][los[2]]
+      start_intersect(cols_y, los, ats, his, ixes_y)
+      while next_intersect(cols_y, los, ats, his, ixes_y)
+        y = cols_y[1][los[3]]
+        start_intersect(cols_z, los, ats, his, ixes_z)
+        while next_intersect(cols_z, los, ats, his, ixes_z)
+          z = cols_z[1][los[6]]
+          # println((x,y,z))
+          count += 1
+        end
+      end
+    end
+  end
+  
+  count
+end
+```

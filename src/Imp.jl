@@ -1,6 +1,4 @@
-module Relation
-
-using Base.Cartesian
+module Imp
 
 function define_columns(n)
   cs = [symbol("c", c) for c in 1:n]

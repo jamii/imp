@@ -150,6 +150,7 @@ function start_intersect(cols, los, ats, his, ixes)
   # los inclusive, his exclusive
   @inbounds begin
     for ix in ixes
+      assert(los[ix] < his[ix])
       ats[ix] = los[ix]
     end
   end
@@ -159,8 +160,13 @@ function next_intersect(cols, los, ats, his, ixes)
   @inbounds begin
     fixed = 1
     n = length(ixes)
-    value = cols[n][ats[ixes[n]]]
+    if ats[ixes[n]] >= his[ixes[n]]
+      return false
+    else
+      value = cols[n][ats[ixes[n]]]
+    end
     while true 
+      # println(value)
       for c in 1:n
         ix = ixes[c]
         if fixed == n
@@ -194,8 +200,9 @@ function plan(query, variables)
     if line.head != :line
       assert(line.head == :call)
       for (column, variable) in enumerate(line.args[2:end])
-        assert(variable in variables)
-        push!(get!(()->[], sources, variable), (clause,column))
+        if variable in variables
+          push!(get!(()->[], sources, variable), (clause,column))
+        end
       end
     end
   end
@@ -267,8 +274,10 @@ function plan(query, variables)
       quote
         start_intersect($variable_columns, los, ats, his, $variable_ixes)
         while next_intersect($variable_columns, los, ats, his, $variable_ixes)
-          $(esc(variable)) = columns[$result_column][los[$(result_column+1)]]
-          $(body(variable_ix + 1))
+          let $(esc(variable)) = columns[$result_column][los[$(result_column+1)]]
+            # println($(repeat("  ", variable_ix)), $(string(variable)), "=", $(esc(variable)))
+            $(body(variable_ix + 1))
+          end
         end
       end
     else 
@@ -290,8 +299,8 @@ macro query(variables, query)
 end
 
 srand(999)
-edge = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
-# edge = ([1, 2, 3, 3, 4], [2, 3, 1, 4, 2])
+# edge = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
+edge = ([1, 2, 3, 3, 4], [2, 3, 1, 4, 2])
 
 macroexpand(:(@query([a,b,c], begin
   edge(a,b)
@@ -308,9 +317,60 @@ function f(edge)
   end)
 end
 
-@code_warntype f(edge)
+# @code_warntype f(edge)
+# f(edge)
+# f(edge)
 
-f(edge)
-f(edge)
+macroexpand(quote
+@query([a,b,c,d,e,f], 
+begin
+  edge(a,b)
+  edge(b,c)
+  edge(c,d)
+  edge(d,e)
+  edge(e,f)
+  edge(f,a)
+end)
+end)
+
+function read_columns(filename, types)
+  rows, _ = readdlm(open(filename), '\t', header=true, quotes=false, comments=false)
+  n = length(types)
+  columns = tuple([Vector{types[c]}() for c in 1:n]...)
+  for r in 1:size(rows)[1]
+    for c in 1:n
+      if types[c] == String
+        push!(columns[c], string(rows[r, c]))
+      else
+        push!(columns[c], rows[r, c])
+      end
+    end
+  end
+  columns
+end
+
+album = read_columns("data/Album.csv", [Int64, String, Int64])
+artist = read_columns("data/Artist.csv", [Int64, String])
+track = read_columns("data/Track.csv", [Int64, String, Int64])
+playlist_track = read_columns("data/PlaylistTrack.csv", [Int64, Int64])
+playlist = read_columns("data/Playlist.csv", [Int64, String])
+
+metal = read_columns("data/Metal.csv", [String])
+
+function who_is_metal(album, artist, track, playlist_track, playlist, metal)
+  @query([pn, p, t, al, a, an],
+  begin
+    metal(pn)
+    playlist(p, pn)
+    playlist_track(p, t)
+    track(t, _, al)
+    album(al, _, a)
+    artist(a, an)
+  end
+  )
+end
+
+# @code_warntype who_is_metal(album, artist, track, playlist_track, playlist, metal)
+println(who_is_metal(album, artist, track, playlist_track, playlist, metal))
 
 end

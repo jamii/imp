@@ -4598,3 +4598,185 @@ function f(edges_xy::Tuple{Vector{Int64}, Vector{Int64}}, edges_yz::Tuple{Vector
   count
 end
 ```
+
+## 2016 Jul 31
+
+Section titles are a global namespace, so I'm switching to dates :)
+
+I had some time this evening so I hashed out the core codegen.
+
+To write code I have to figure out what data to compute, how to compute it, how to store it, in what order to compute it, how to organise the code, what to name things etc. I find that if I just sit down with an editor and try to do this all at once I spend a lot of time context switching, which manifests as these mental stack overflows where I just go blank for a while. 
+
+Over the last year or so, I gradually started to batch these tasks together. I start by choosing a couple of examples and writing down the inputs and outputs. Then I sketch out what data will help me to get from input to output.
+
+``` julia
+q = quote 
+  edge(a,b)
+  edge(b,c)
+  edge(c,a)
+end
+
+fieldnames(q)
+q.head
+q.args
+q.args[2].head
+q.args[2].args
+
+a => (r1, c1), (r3, c2)
+b => ...
+c => ...
+
+var order 
+
+indexes
+r1 => (1,2)
+...
+
+ixes 
+r1, c1 => 1
+r1, c2 => 2
+r1, end => 3
+...
+r3, c2 => 7
+r3, c1 => 8
+r3, end => 9
+
+cols = [r1, ...]
+quicksort!((cols[1][2], cols[1][1]))
+...
+cols_a = (cols[1][2], cols[1][1])
+ixes_a = (1, 7)
+...
+los, ats = 1
+his = length(cols[r][c])
+results = []
+
+start_intersect 
+while next_intersect 
+  a = cols[1][2][los[3]]
+  ...
+     push!(results, (a,b,c))
+end
+```
+
+Then I pick names and topo-sort the chunks of data. That whole plan then goes on one side of the screen and I can start cranking out code on the other side of the screen. The plan fills in my patchy short-term memory so the code flows smoothly. I didn't quite manage to type the compiler without hitting backspace, but it was close.
+
+``` julia
+function plan(query, variables)
+  relations = [line.args[1] for line in query.args if line.head != :line]
+  
+  sources = Dict()
+  for (clause, line) in enumerate(query.args) 
+    if line.head != :line
+      assert(line.head == :call)
+      for (column, variable) in enumerate(line.args[2:end])
+        assert(variable in variables)
+        push!(get!(()->[], sources, variable), (clause,column))
+      end
+    end
+  end
+  
+  sort_orders = Dict()
+  for variable in variables 
+    for (clause, column) in sources[variable]
+      push!(get!(()->[], sort_orders, clause), column)
+    end
+  end
+  
+  ixes = Dict()
+  next_ix = 1
+  for (clause, columns) in sort_orders
+    for column in columns
+      ixes[(clause, column)] = next_ix
+      next_ix += 1
+    end
+    ixes[(clause, :buffer)] = next_ix
+    next_ix += 1
+  end
+  
+  column_inits = Vector(length(ixes))
+  for ((clause, column), ix) in ixes
+    if column == :buffer
+      column_inits[ix] = :()
+    else
+      clause_name = query.args[clause].args[1]
+      column_inits[ix] = :(copy($(esc(clause_name))[$column]))
+    end
+  end
+  
+  sorts = []
+  for (clause, columns) in sort_orders
+    sort_ixes = [ixes[(clause, column)] for column in columns]
+    sort_args = [:(columns[$ix]) for ix in sort_ixes]
+    sort = :(quicksort!(tuple($(sort_args...))))
+    push!(sorts, sort)
+  end
+  
+  variable_inits = []
+  for variable in variables 
+    clauses_and_columns = sources[variable]
+    variable_ixes = [ixes[(clause, column)] for (clause, column) in clauses_and_columns]
+    variable_columns = [:(columns[$ix]) for ix in variable_ixes]
+    variable_init = quote
+      $(symbol("columns_", variable)) = [$(variable_columns...)]
+      $(symbol("ixes_", variable)) = [$(variable_ixes...)]
+    end
+    push!(variable_inits, variable_init)
+  end
+  
+  setup = quote
+    columns = tuple($(column_inits...))
+    $(sorts...)
+    los = Int64[1 for i in 1:$(length(ixes))]
+    ats = Int64[1 for i in 1:$(length(ixes))]
+    his = Int64[length(columns[i]) for i in 1:$(length(ixes))]
+    $(variable_inits...)
+    results = []
+  end
+  
+  function body(variable_ix)
+    if variable_ix <= length(variables)
+      variable = variables[variable_ix]
+      variable_columns = symbol("columns_", variable)
+      variable_ixes = symbol("ixes_", variable)
+      result_column = ixes[sources[variable][1]]
+      quote
+        start_intersect($variable_columns, los, ats, his, $variable_ixes)
+        while next_intersect($variable_columns, los, ats, his, $variable_ixes)
+          $(esc(variable)) = columns[$result_column][los[$(result_column+1)]]
+          $(body(variable_ix + 1))
+        end
+      end
+    else 
+      quote
+        push!(results, tuple($([esc(variable) for variable in variables]...)))
+      end 
+    end
+  end
+          
+  quote 
+    $setup
+    @time $(body(1))
+    results
+  end
+end
+```
+
+With a crappy little macro we can now write the previous query as:
+
+``` julia 
+macro query(variables, query)
+  plan(query, variables.args)
+end
+
+function f(edge) 
+  @query([a,b,c], 
+  begin
+    edge(a,b)
+    edge(b,c)
+    edge(c,a)
+  end)
+end
+```
+
+Thats the basics. The next big steps are embedding an expression language and choosing the variable ordering automatically.  

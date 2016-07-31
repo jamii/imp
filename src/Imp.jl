@@ -186,52 +186,131 @@ function next_intersect(cols, los, ats, his, ixes)
   end
 end
 
-function f(edges_xy::Tuple{Vector{Int64}, Vector{Int64}}, edges_yz::Tuple{Vector{Int64}, Vector{Int64}}, edges_xz::Tuple{Vector{Int64}, Vector{Int64}}) 
-  cols_x = [edges_xy[1], edges_xz[1]]
-  cols_y = [edges_xy[2], edges_yz[1]]
-  cols_z = [edges_yz[2], edges_xz[2]]
-  ixes_x = [1,7]
-  ixes_y = [2,4]
-  ixes_z = [5,8]
-  los = [1 for _ in 1:9]
-  ats = [1 for _ in 1:9]
-  his = [length(cols_x[1])+1 for i in 1:9]
-  count = 0
+function plan(query, variables)
+  relations = [line.args[1] for line in query.args if line.head != :line]
   
-  @time begin
-    start_intersect(cols_x, los, ats, his, ixes_x)
-    while next_intersect(cols_x, los, ats, his, ixes_x)
-      x = cols_x[1][los[2]]
-      start_intersect(cols_y, los, ats, his, ixes_y)
-      while next_intersect(cols_y, los, ats, his, ixes_y)
-        y = cols_y[1][los[3]]
-        start_intersect(cols_z, los, ats, his, ixes_z)
-        while next_intersect(cols_z, los, ats, his, ixes_z)
-          z = cols_z[1][los[6]]
-          # println((x,y,z))
-          count += 1
-        end
+  sources = Dict()
+  for (clause, line) in enumerate(query.args) 
+    if line.head != :line
+      assert(line.head == :call)
+      for (column, variable) in enumerate(line.args[2:end])
+        assert(variable in variables)
+        push!(get!(()->[], sources, variable), (clause,column))
       end
     end
   end
   
-  count
+  sort_orders = Dict()
+  for variable in variables 
+    for (clause, column) in sources[variable]
+      push!(get!(()->[], sort_orders, clause), column)
+    end
+  end
+  
+  ixes = Dict()
+  next_ix = 1
+  for (clause, columns) in sort_orders
+    for column in columns
+      ixes[(clause, column)] = next_ix
+      next_ix += 1
+    end
+    ixes[(clause, :buffer)] = next_ix
+    next_ix += 1
+  end
+  
+  column_inits = Vector(length(ixes))
+  for ((clause, column), ix) in ixes
+    if column == :buffer
+      column_inits[ix] = :()
+    else
+      clause_name = query.args[clause].args[1]
+      column_inits[ix] = :(copy($(esc(clause_name))[$column]))
+    end
+  end
+  
+  sorts = []
+  for (clause, columns) in sort_orders
+    sort_ixes = [ixes[(clause, column)] for column in columns]
+    sort_args = [:(columns[$ix]) for ix in sort_ixes]
+    sort = :(quicksort!(tuple($(sort_args...))))
+    push!(sorts, sort)
+  end
+  
+  variable_inits = []
+  for variable in variables 
+    clauses_and_columns = sources[variable]
+    variable_ixes = [ixes[(clause, column)] for (clause, column) in clauses_and_columns]
+    variable_columns = [:(columns[$ix]) for ix in variable_ixes]
+    variable_init = quote
+      $(symbol("columns_", variable)) = [$(variable_columns...)]
+      $(symbol("ixes_", variable)) = [$(variable_ixes...)]
+    end
+    push!(variable_inits, variable_init)
+  end
+  
+  setup = quote
+    columns = tuple($(column_inits...))
+    $(sorts...)
+    los = Int64[1 for i in 1:$(length(ixes))]
+    ats = Int64[1 for i in 1:$(length(ixes))]
+    his = Int64[length(columns[i])+1 for i in 1:$(length(ixes))]
+    $(variable_inits...)
+    results = []
+  end
+  
+  function body(variable_ix)
+    if variable_ix <= length(variables)
+      variable = variables[variable_ix]
+      variable_columns = symbol("columns_", variable)
+      variable_ixes = symbol("ixes_", variable)
+      result_column = ixes[sources[variable][1]]
+      quote
+        start_intersect($variable_columns, los, ats, his, $variable_ixes)
+        while next_intersect($variable_columns, los, ats, his, $variable_ixes)
+          $(esc(variable)) = columns[$result_column][los[$(result_column+1)]]
+          $(body(variable_ix + 1))
+        end
+      end
+    else 
+      quote
+        push!(results, tuple($([esc(variable) for variable in variables]...)))
+      end 
+    end
+  end
+          
+  quote 
+    $setup
+    @time $(body(1))
+    results
+  end
+end
+
+macro query(variables, query)
+  plan(query, variables.args)
 end
 
 srand(999)
-edges_xy = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
-# edges_xy = ([1, 2, 3, 3, 4], [2, 3, 1, 4, 2])
-edges_yz = deepcopy(edges_xy)
-edges_xz = (copy(edges_xy[2]), copy(edges_xy[1]))
-@time begin 
-  quicksort!(edges_xy)
-  quicksort!(edges_yz)
-  quicksort!(edges_xz)
+edge = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
+# edge = ([1, 2, 3, 3, 4], [2, 3, 1, 4, 2])
+
+macroexpand(:(@query([a,b,c], begin
+  edge(a,b)
+  edge(b,c)
+  edge(c,a)
+end)))
+
+function f(edge) 
+  @query([a,b,c], 
+  begin
+    edge(a,b)
+    edge(b,c)
+    edge(c,a)
+  end)
 end
 
-f(edges_xy, edges_yz, edges_xz)
-# @code_warntype f(edges_xy, edges_yz, edges_xz)
+@code_warntype f(edge)
 
-# readcsv(open("/home/jamie/soc-LiveJournal1.txt"))
+f(edge)
+f(edge)
 
 end

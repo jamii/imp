@@ -231,7 +231,7 @@ function plan(query, variables)
       column_inits[ix] = :()
     else
       clause_name = query.args[clause].args[1]
-      column_inits[ix] = :(copy($(esc(clause_name))[$column]))
+      column_inits[ix] = :($(esc(clause_name))[$column])
     end
   end
   
@@ -251,18 +251,18 @@ function plan(query, variables)
     variable_init = quote
       $(symbol("columns_", variable)) = [$(variable_columns...)]
       $(symbol("ixes_", variable)) = [$(variable_ixes...)]
+      $(symbol("results_", variable)) = []
     end
     push!(variable_inits, variable_init)
   end
   
   setup = quote
     columns = tuple($(column_inits...))
-    $(sorts...)
+    # $(sorts...)
     los = Int64[1 for i in 1:$(length(ixes))]
     ats = Int64[1 for i in 1:$(length(ixes))]
     his = Int64[length(columns[i])+1 for i in 1:$(length(ixes))]
     $(variable_inits...)
-    results = []
   end
   
   function body(variable_ix)
@@ -282,15 +282,17 @@ function plan(query, variables)
       end
     else 
       quote
-        push!(results, tuple($([esc(variable) for variable in variables]...)))
+        $([
+        :(push!($(symbol("results_", variable)), $(esc(variable))))
+        for variable in variables]...)
       end 
     end
   end
           
   quote 
     $setup
-    @time $(body(1))
-    results
+    $(body(1))
+    tuple($([symbol("results_", variable) for variable in variables]...))
   end
 end
 
@@ -367,10 +369,12 @@ function who_is_metal(album, artist, track, playlist_track, playlist, metal)
     album(al, _, a)
     artist(a, an)
   end
-  )
+  )[6]
 end
 
 # @code_warntype who_is_metal(album, artist, track, playlist_track, playlist, metal)
-println(who_is_metal(album, artist, track, playlist_track, playlist, metal))
+println(@time who_is_metal(album, artist, track, playlist_track, playlist, metal))
+
+@time [who_is_metal(album, artist, track, playlist_track, playlist, metal) for n in 1:100000]
 
 end

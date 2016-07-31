@@ -4780,3 +4780,30 @@ end
 ```
 
 Thats the basics. The next big steps are embedding an expression language and choosing the variable ordering automatically.  
+
+EDIT: I found a little more time, so here is the chinook query from earlier in the year:
+
+``` julia
+album = read_columns("data/Album.csv", [Int64, String, Int64])
+artist = read_columns("data/Artist.csv", [Int64, String])
+track = read_columns("data/Track.csv", [Int64, String, Int64])
+playlist_track = read_columns("data/PlaylistTrack.csv", [Int64, Int64])
+playlist = read_columns("data/Playlist.csv", [Int64, String])
+
+metal = read_columns("data/Metal.csv", [String])
+
+function who_is_metal(album, artist, track, playlist_track, playlist, metal)
+  @query([pn, p, t, al, a, an],
+  begin
+    metal(pn)
+    playlist(p, pn)
+    playlist_track(p, t)
+    track(t, _, al)
+    album(al, _, a)
+    artist(a, an)
+  end
+  )[6]
+end
+```
+
+Runs in 0.37ms, of which only about 0.01ms is solving the query and the rest is copying and sorting the inputs. My notes say the rust version took 0.8ms all together and SQLite took 1.2ms just to solve the query (both on an older machine). I won't bother benchmarking properly until the compiler is feature complete and I have tests, but looks like I'm inside my performance budget so far.

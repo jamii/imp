@@ -4899,3 +4899,5 @@ begin
   artist(a, an)
 end
 ```
+
+What next? I have some ideas about variable ordering, but I need a lot more examples to see if they are realistic. Maybe projection/aggreation? I need to think a bit about how I want to handle that.

@@ -428,7 +428,7 @@ track = read_columns("data/Track.csv", [Int64, String, Int64])
 playlist_track = read_columns("data/PlaylistTrack.csv", [Int64, Int64])
 playlist = read_columns("data/Playlist.csv", [Int64, String])
 
-function who_is_metal(album, artist, track, playlist_track, playlist, metal)
+function who_is_metal(album, artist, track, playlist_track, playlist)
   @query([pn, p, t, al, a, an],
   begin
     pn = "Heavy Metal Classic"
@@ -442,7 +442,7 @@ function who_is_metal(album, artist, track, playlist_track, playlist, metal)
 end
 
 # @code_warntype who_is_metal(album, artist, track, playlist_track, playlist, metal)
-println(@time who_is_metal(album, artist, track, playlist_track, playlist, metal))
+println(@time who_is_metal(album, artist, track, playlist_track, playlist))
 
-@time [who_is_metal(album, artist, track, playlist_track, playlist, metal) for n in 1:1000]
+@time [who_is_metal(album, artist, track, playlist_track, playlist) for n in 1:1000]
 end

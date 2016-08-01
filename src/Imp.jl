@@ -148,6 +148,7 @@ end
 function start_intersect(cols, los, ats, his, ixes)
   # assume los/his are valid 
   # los inclusive, his exclusive
+  # println(cols)
   @inbounds begin
     for ix in ixes
       assert(los[ix] < his[ix])
@@ -192,17 +193,45 @@ function next_intersect(cols, los, ats, his, ixes)
   end
 end
 
+function collect_variables(expr, variables)
+  if isa(expr, Symbol)
+    push!(variables, expr)
+  elseif isa(expr, Expr) && expr.head != :quote
+    for arg in expr.args
+      collect_variables(arg, variables)
+    end
+  end
+end
+
+function collect_variables(expr)
+  variables = []
+  collect_variables(expr, variables)
+  variables
+end
+
 function plan(query, variables)
   relations = [line.args[1] for line in query.args if line.head != :line]
   
-  sources = Dict()
+  relation_clauses = []
+  expression_clauses = []
   for (clause, line) in enumerate(query.args) 
-    if line.head != :line
-      assert(line.head == :call)
-      for (column, variable) in enumerate(line.args[2:end])
-        if variable in variables
-          push!(get!(()->[], sources, variable), (clause,column))
-        end
+    if line.head == :call
+      if line.args[1] in [:<, :>, :(==), :<=, :>=]
+        push!(expression_clauses, clause)
+      else
+        push!(relation_clauses, clause)
+      end
+    else
+      assert(line.head == :line)
+    end
+  end
+  
+  sources = Dict()
+  for clause in relation_clauses
+    line = query.args[clause]
+    for (column, variable) in enumerate(line.args[2:end])
+      if variable in variables
+        push!(get!(()->[], sources, variable), (clause,column))
       end
     end
   end
@@ -231,7 +260,7 @@ function plan(query, variables)
       column_inits[ix] = :()
     else
       clause_name = query.args[clause].args[1]
-      column_inits[ix] = :($(esc(clause_name))[$column])
+      column_inits[ix] = :(copy($(esc(clause_name))[$column]))
     end
   end
   
@@ -258,11 +287,30 @@ function plan(query, variables)
   
   setup = quote
     columns = tuple($(column_inits...))
-    # $(sorts...)
+    $(sorts...)
     los = Int64[1 for i in 1:$(length(ixes))]
     ats = Int64[1 for i in 1:$(length(ixes))]
     his = Int64[length(columns[i])+1 for i in 1:$(length(ixes))]
     $(variable_inits...)
+  end
+  
+  filters = [[] for _ in variables]
+  for clause in expression_clauses
+    line = query.args[clause]
+    callable_at = maximum(indexin(collect_variables(line), variables))
+    push!(filters[callable_at], line)
+  end
+  
+  function filter(filters, tail)
+    if length(filters) == 0
+      tail
+    else 
+      quote 
+        if $(filters[1])
+          $(filter(filters[2:end], tail))
+        end
+      end
+    end
   end
   
   function body(variable_ix)
@@ -274,16 +322,16 @@ function plan(query, variables)
       quote
         start_intersect($variable_columns, los, ats, his, $variable_ixes)
         while next_intersect($variable_columns, los, ats, his, $variable_ixes)
-          let $(esc(variable)) = columns[$result_column][los[$(result_column+1)]]
-            # println($(repeat("  ", variable_ix)), $(string(variable)), "=", $(esc(variable)))
-            $(body(variable_ix + 1))
+          let $variable = columns[$result_column][los[$(result_column+1)]]
+            # println($(repeat("  ", variable_ix)), $(string(variable)), "=", $variable)
+            $(filter(filters[variable_ix], body(variable_ix + 1)))
           end
         end
       end
     else 
       quote
         $([
-        :(push!($(symbol("results_", variable)), $(esc(variable))))
+        :(push!($(symbol("results_", variable)), $variable))
         for variable in variables]...)
       end 
     end
@@ -301,20 +349,24 @@ macro query(variables, query)
 end
 
 srand(999)
-# edge = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
-edge = ([1, 2, 3, 3, 4], [2, 3, 1, 4, 2])
+edge = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
+# edge = ([1, 2, 3, 3, 4], [2, 3, 1, 4, 2])
 
-macroexpand(:(@query([a,b,c], begin
+println(macroexpand(:(@query([a,b,c], begin
   edge(a,b)
+  a < b
   edge(b,c)
+  b < c
   edge(c,a)
-end)))
+end))))
 
 function f(edge) 
   @query([a,b,c], 
   begin
     edge(a,b)
+    a < b
     edge(b,c)
+    b < c
     edge(c,a)
   end)
 end
@@ -322,18 +374,6 @@ end
 # @code_warntype f(edge)
 # f(edge)
 # f(edge)
-
-macroexpand(quote
-@query([a,b,c,d,e,f], 
-begin
-  edge(a,b)
-  edge(b,c)
-  edge(c,d)
-  edge(d,e)
-  edge(e,f)
-  edge(f,a)
-end)
-end)
 
 function read_columns(filename, types)
   rows, _ = readdlm(open(filename), '\t', header=true, quotes=false, comments=false)
@@ -373,8 +413,8 @@ function who_is_metal(album, artist, track, playlist_track, playlist, metal)
 end
 
 # @code_warntype who_is_metal(album, artist, track, playlist_track, playlist, metal)
-println(@time who_is_metal(album, artist, track, playlist_track, playlist, metal))
+# println(@time who_is_metal(album, artist, track, playlist_track, playlist, metal))
 
-@time [who_is_metal(album, artist, track, playlist_track, playlist, metal) for n in 1:100000]
+# @time [who_is_metal(album, artist, track, playlist_track, playlist, metal) for n in 1:100000]
 
 end

@@ -4807,3 +4807,44 @@ end
 ```
 
 Runs in 0.37ms, of which only about 0.01ms is solving the query and the rest is copying and sorting the inputs. My notes say the rust version took 0.8ms all together and SQLite took 1.2ms just to solve the query (both on an older machine). I won't bother benchmarking properly until the compiler is feature complete and I have tests, but looks like I'm inside my performance budget so far.
+
+## 2016 Aug 1
+
+Expressions just act as extra filters on results, so I can write things like:
+
+``` julia
+edge(a,b)
+a < b
+edge(b,c)
+b < c
+edge(c,a)
+```
+
+Evaluating them is pretty straightforward. I grab all the variables in the expression, assume any that aren't in the variable order are external constants, and figure out the earliest time when the remainder have been assigned.
+
+``` julia
+filters = [[] for _ in variables]
+for clause in expression_clauses
+  line = query.args[clause]
+  callable_at = maximum(indexin(collect_variables(line), variables))
+  push!(filters[callable_at], line)
+end
+
+function filter(filters, tail)
+  if length(filters) == 0
+    tail
+  else 
+    quote 
+      if $(filters[1])
+        $(filter(filters[2:end], tail))
+      end
+    end
+  end
+end
+
+function body(variable_ix)
+  ...
+          $(filter(filters[variable_ix], body(variable_ix + 1)))
+  ...
+end
+```

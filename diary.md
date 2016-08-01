@@ -4899,15 +4899,3 @@ begin
   artist(a, an)
 end
 ```
-
-A trivial rewrite pass would allow equations inside clauses:
-
-``` julia 
-begin
-  playlist(p, "Heavy Metal Classic")
-  playlist_track(p, t)
-  track(t, _, al)
-  album(al, _, a)
-  artist(a, an)
-end
-```

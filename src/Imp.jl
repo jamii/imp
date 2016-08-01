@@ -193,6 +193,21 @@ function next_intersect(cols, los, ats, his, ixes)
   end
 end
 
+function assign(cols, los, ats, his, ixes, value)
+  @inbounds begin
+    n = length(ixes)
+    for c in 1:n
+      ix = ixes[c]
+      los[ix+1] = gallop(cols[c], value, los[ix], his[ix], <)
+      if los[ix+1] >= his[ix]
+        return false
+      end
+      his[ix+1] = gallop(cols[c], value, los[ix+1], his[ix], <=)
+    end
+    return true
+  end
+end
+
 function collect_variables(expr, variables)
   if isa(expr, Symbol)
     push!(variables, expr)
@@ -214,13 +229,17 @@ function plan(query, variables)
   
   relation_clauses = []
   expression_clauses = []
+  assignment_clauses = Dict()
   for (clause, line) in enumerate(query.args) 
-    if line.head == :call
-      if line.args[1] in [:<, :>, :(==), :<=, :>=]
-        push!(expression_clauses, clause)
-      else
-        push!(relation_clauses, clause)
-      end
+    if line.head == :call && line.args[1] in [:<, :>, :(==), :<=, :>=]
+      push!(expression_clauses, clause)
+    elseif line.head == :call
+      push!(relation_clauses, clause)
+    elseif line.head == :(=)
+      variable = line.args[1]
+      assert(isa(variable, Symbol)) # single assignment only, no unpacking yet
+      assert(get(assignment_clauses, variable, nothing) == nothing) # only one assignment per var
+      assignment_clauses[variable] = line.args[2]
     else
       assert(line.head == :line)
     end
@@ -319,12 +338,24 @@ function plan(query, variables)
       variable_columns = symbol("columns_", variable)
       variable_ixes = symbol("ixes_", variable)
       result_column = ixes[sources[variable][1]]
-      quote
-        start_intersect($variable_columns, los, ats, his, $variable_ixes)
-        while next_intersect($variable_columns, los, ats, his, $variable_ixes)
-          let $variable = columns[$result_column][los[$(result_column+1)]]
-            # println($(repeat("  ", variable_ix)), $(string(variable)), "=", $variable)
-            $(filter(filters[variable_ix], body(variable_ix + 1)))
+      tail = filter(filters[variable_ix], body(variable_ix + 1))
+      if haskey(assignment_clauses, variable)
+        quote
+          let $variable = $(assignment_clauses[variable])
+            if assign($variable_columns, los, ats, his, $variable_ixes, $variable)
+              # println($(repeat("  ", variable_ix)), $(string(variable)), "=", $variable)
+              $tail
+            end
+          end
+        end
+      else
+        quote
+          start_intersect($variable_columns, los, ats, his, $variable_ixes)
+          while next_intersect($variable_columns, los, ats, his, $variable_ixes)
+            let $variable = columns[$result_column][los[$(result_column+1)]]
+              # println($(repeat("  ", variable_ix)), $(string(variable)), "=", $variable)
+              $tail
+            end
           end
         end
       end
@@ -352,13 +383,13 @@ srand(999)
 edge = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
 # edge = ([1, 2, 3, 3, 4], [2, 3, 1, 4, 2])
 
-println(macroexpand(:(@query([a,b,c], begin
-  edge(a,b)
-  a < b
-  edge(b,c)
-  b < c
-  edge(c,a)
-end))))
+# println(macroexpand(:(@query([a,b,c], begin
+#   edge(a,b)
+#   a < b
+#   edge(b,c)
+#   b < c
+#   edge(c,a)
+# end))))
 
 function f(edge) 
   @query([a,b,c], 
@@ -372,8 +403,8 @@ function f(edge)
 end
 
 # @code_warntype f(edge)
-# f(edge)
-# f(edge)
+f(edge)
+f(edge)
 
 function read_columns(filename, types)
   rows, _ = readdlm(open(filename), '\t', header=true, quotes=false, comments=false)
@@ -397,12 +428,10 @@ track = read_columns("data/Track.csv", [Int64, String, Int64])
 playlist_track = read_columns("data/PlaylistTrack.csv", [Int64, Int64])
 playlist = read_columns("data/Playlist.csv", [Int64, String])
 
-metal = read_columns("data/Metal.csv", [String])
-
 function who_is_metal(album, artist, track, playlist_track, playlist, metal)
   @query([pn, p, t, al, a, an],
   begin
-    metal(pn)
+    pn = "Heavy Metal Classic"
     playlist(p, pn)
     playlist_track(p, t)
     track(t, _, al)
@@ -413,8 +442,7 @@ function who_is_metal(album, artist, track, playlist_track, playlist, metal)
 end
 
 # @code_warntype who_is_metal(album, artist, track, playlist_track, playlist, metal)
-# println(@time who_is_metal(album, artist, track, playlist_track, playlist, metal))
+println(@time who_is_metal(album, artist, track, playlist_track, playlist, metal))
 
-# @time [who_is_metal(album, artist, track, playlist_track, playlist, metal) for n in 1:100000]
-
+@time [who_is_metal(album, artist, track, playlist_track, playlist, metal) for n in 1:1000]
 end

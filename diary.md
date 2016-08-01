@@ -4848,3 +4848,66 @@ function body(variable_ix)
   ...
 end
 ```
+
+Equations are a bit trickier. An expression like `a == b + 1` could be treated as a filter on the results, but in many cases it would be much better to run it as soon as `b` is assigned, before wasting time generating many `a`s. On the other hand, that limits the compiler to variable orders where `b` comes before `a`, which may be inefficient. 
+
+One of my core goals is to make performance predictable, so rather than deciding this in the compiler with some heuristic I'm going to have the programmer communicate intent directly. `a == b + 1` is a filter that will be run once `a` and `b` are both defined. `a = b + 1` is an assignment that forces `b` to be assigned before `a` and that will be run just before the intersection for `a`. In a true relational language this distinction wouldn't exist, but I want to be pragmatic for now.
+
+``` julia
+function assign(cols, los, ats, his, ixes, value)
+  @inbounds begin
+    n = length(ixes)
+    for c in 1:n
+      ix = ixes[c]
+      los[ix+1] = gallop(cols[c], value, los[ix], his[ix], <)
+      if los[ix+1] >= his[ix]
+        return false
+      end
+      his[ix+1] = gallop(cols[c], value, los[ix+1], his[ix], <=)
+    end
+    return true
+  end
+end
+
+function body(variable_ix)
+  ...
+    if haskey(assignment_clauses, variable)
+      quote
+        let $variable = $(assignment_clauses[variable])
+          if assign($variable_columns, los, ats, his, $variable_ixes, $variable)
+            # println($(repeat("  ", variable_ix)), $(string(variable)), "=", $variable)
+            $tail
+          end
+        end
+      end
+    else
+      ...
+    end
+  ...
+end
+```
+
+Now we can do:
+
+``` julia 
+begin
+  pn = "Heavy Metal Classic"
+  playlist(p, pn)
+  playlist_track(p, t)
+  track(t, _, al)
+  album(al, _, a)
+  artist(a, an)
+end
+```
+
+A trivial rewrite pass would allow equations inside clauses:
+
+``` julia 
+begin
+  playlist(p, "Heavy Metal Classic")
+  playlist_track(p, t)
+  track(t, _, al)
+  album(al, _, a)
+  artist(a, an)
+end
+```

@@ -4901,3 +4901,88 @@ end
 ```
 
 What next? I have some ideas about variable ordering, but I need a lot more examples to see if they are realistic. Maybe projection/aggreation? I need to think a bit about how I want to handle that.
+
+## 2016 Aug 4
+
+I decided to start by just handling projection/aggregation at the end of the query. Projection is really easy - we can just reuse the same building blocks:
+
+``` julia 
+metal = @query([pn, p, t, al, a, an],
+begin
+  pn = "Heavy Metal Classic"
+  playlist(p, pn)
+  playlist_track(p, t)
+  track(t, _, al)
+  album(al, _, a)
+  artist(a, an)
+end
+)
+
+metal_projected = @query([an], 
+begin
+  metal(_, _, _, _, _, an)
+end)
+```
+
+While I was doing that, I noticed that I'm returning columns of type `Any`. Fixing that is pretty tricky, because I don't actually know the type of the variables when I generate the query code. I'm relying on Julia's type inference, but type inference only happens after I generate code. I could wait until the first result to initialize the columns, but that doesn't work for queries with no results. 
+
+Let's just work around it for now by allowing the user to specify the types in the query eg:
+
+``` julia 
+function plan(query, typed_variables)
+  variables = []
+  variable_types = []
+  for typed_variable in typed_variables
+    if isa(typed_variable, Symbol)
+      push!(variables, typed_variable)
+      push!(variable_types, :Any)
+    elseif isa(typed_variable, Expr) && typed_variable.head == :(::)
+      push!(variables, typed_variable.args[1])
+      push!(variable_types, typed_variable.args[2])
+    else 
+      throw("Variable must be a symbol (with optional type annotation)")
+    end
+  end 
+  ... 
+     $(symbol("results_", variable)) = Vector{$(variable_type)}()
+  ...
+end
+```
+
+We can also do Yannakis-style queries:
+
+``` julia 
+function who_is_metal2(album, artist, track, playlist_track, playlist)
+  i1 = @query([pn::String, p::Int64],
+  begin
+    pn = "Heavy Metal Classic"
+    playlist(p, pn)
+  end)
+  i2 = @query([p::Int64, t::Int64],
+  begin 
+    i1(_, p)
+    playlist_track(p, t)
+  end)
+  i3 = @query([t::Int64, al::Int64],
+  begin 
+    i2(_, t)
+    track(t, _, al)
+  end)
+  i4 = @query([al::Int64, a::Int64],
+  begin 
+    i3(_, al)
+    album(al, _, a)
+  end)
+  i5 = @query([a::Int64, an::String],
+  begin 
+    i4(_, a)
+    artist(a, an)
+  end)
+  @query([an::String],
+  begin
+    i5(_, an)
+  end)
+end
+```
+
+If I just handle aggregation naively, we can use this as a building block to do FAQ-style variable factorisation.

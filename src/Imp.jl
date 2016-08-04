@@ -224,7 +224,21 @@ function collect_variables(expr)
   variables
 end
 
-function plan(query, variables)
+function plan(query, typed_variables)
+  variables = []
+  variable_types = []
+  for typed_variable in typed_variables
+    if isa(typed_variable, Symbol)
+      push!(variables, typed_variable)
+      push!(variable_types, :Any)
+    elseif isa(typed_variable, Expr) && typed_variable.head == :(::)
+      push!(variables, typed_variable.args[1])
+      push!(variable_types, typed_variable.args[2])
+    else 
+      throw("Variable must be a symbol (with optional type annotation)")
+    end
+  end 
+  
   relations = [line.args[1] for line in query.args if line.head != :line]
   
   relation_clauses = []
@@ -292,14 +306,14 @@ function plan(query, variables)
   end
   
   variable_inits = []
-  for variable in variables 
+  for (variable, variable_type) in zip(variables, variable_types)
     clauses_and_columns = sources[variable]
     variable_ixes = [ixes[(clause, column)] for (clause, column) in clauses_and_columns]
     variable_columns = [:(columns[$ix]) for ix in variable_ixes]
     variable_init = quote
       $(symbol("columns_", variable)) = [$(variable_columns...)]
       $(symbol("ixes_", variable)) = [$(variable_ixes...)]
-      $(symbol("results_", variable)) = []
+      $(symbol("results_", variable)) = Vector{$(variable_type)}()
     end
     push!(variable_inits, variable_init)
   end
@@ -429,7 +443,7 @@ playlist_track = read_columns("data/PlaylistTrack.csv", [Int64, Int64])
 playlist = read_columns("data/Playlist.csv", [Int64, String])
 
 function who_is_metal(album, artist, track, playlist_track, playlist)
-  @query([pn, p, t, al, a, an],
+  metal = @query([pn::String, p::Int64, t::Int64, al::Int64, a::Int64, an::String],
   begin
     pn = "Heavy Metal Classic"
     playlist(p, pn)
@@ -437,12 +451,48 @@ function who_is_metal(album, artist, track, playlist_track, playlist)
     track(t, _, al)
     album(al, _, a)
     artist(a, an)
-  end
-  )[6]
+  end)
+  @query([an::String], 
+  begin
+    metal(_, _, _, _, _, an)
+  end)
 end
 
-# @code_warntype who_is_metal(album, artist, track, playlist_track, playlist, metal)
-println(@time who_is_metal(album, artist, track, playlist_track, playlist))
+function who_is_metal2(album, artist, track, playlist_track, playlist)
+  i1 = @query([pn::String, p::Int64],
+  begin
+    pn = "Heavy Metal Classic"
+    playlist(p, pn)
+  end)
+  i2 = @query([p::Int64, t::Int64],
+  begin 
+    i1(_, p)
+    playlist_track(p, t)
+  end)
+  i3 = @query([t::Int64, al::Int64],
+  begin 
+    i2(_, t)
+    track(t, _, al)
+  end)
+  i4 = @query([al::Int64, a::Int64],
+  begin 
+    i3(_, al)
+    album(al, _, a)
+  end)
+  i5 = @query([a::Int64, an::String],
+  begin 
+    i4(_, a)
+    artist(a, an)
+  end)
+  @query([an::String],
+  begin
+    i5(_, an)
+  end)
+end
 
-@time [who_is_metal(album, artist, track, playlist_track, playlist) for n in 1:1000]
+@code_warntype who_is_metal(album, artist, track, playlist_track, playlist)
+
+@time [who_is_metal(album, artist, track, playlist_track, playlist) for n in 1:10000]
+@time [who_is_metal2(album, artist, track, playlist_track, playlist) for n in 1:10000]
+
 end

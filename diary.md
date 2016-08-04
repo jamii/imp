@@ -4985,6 +4985,120 @@ function who_is_metal2(album, artist, track, playlist_track, playlist)
 end
 ```
 
-There's an obvious optimisation where if we only care about `p` we don't need to enumerate all the matching `t`s, just stop after one. I won't bother with that just yet, but I did add an extra arg that controls which columns are returned, so it will still produce a bunch of duplicate `p`s but it won't bother making the corresponding `t` column.
+Onto aggregation. I have a planner that turns this:
 
-Now let's do some naive aggregation.
+``` julia
+@join([pn],
+[p::Int64, pn::String, t::Int64, al::Int64, price::Float64],
+(0.0,+,price::Float64),
+begin
+  playlist(p, pn)
+  playlist_track(p, t)
+  track(t, _, al, _, _, _, _, _, price)
+end)
+```
+
+Into:
+
+``` 
+begin  # /home/jamie/imp/src/Imp.jl, line 586:
+    begin  # /home/jamie/imp/src/Imp.jl, line 411:
+        begin  # /home/jamie/imp/src/Imp.jl, line 333:
+            #11256#columns = tuple(copy(playlist_track[1]),copy(playlist_track[2]),(),copy(playlist[1]),copy(playlist[2]),(),copy(track[1]),copy(track[3]),copy(track[9]),()) # /home/jamie/imp/src/Imp.jl, line 334:
+            quicksort!(tuple(#11256#columns[1],#11256#columns[2]))
+            quicksort!(tuple(#11256#columns[4],#11256#columns[5]))
+            quicksort!(tuple(#11256#columns[7],#11256#columns[8],#11256#columns[9])) # /home/jamie/imp/src/Imp.jl, line 335:
+            #11257#los = Int64[1 for #11258#i = 1:10] # /home/jamie/imp/src/Imp.jl, line 336:
+            #11259#ats = Int64[1 for #11258#i = 1:10] # /home/jamie/imp/src/Imp.jl, line 337:
+            #11260#his = Int64[length(#11256#columns[#11258#i]) + 1 for #11258#i = 1:10] # /home/jamie/imp/src/Imp.jl, line 338:
+            begin  # /home/jamie/imp/src/Imp.jl, line 323:
+                #11261#columns_p = [#11256#columns[4],#11256#columns[1]] # /home/jamie/imp/src/Imp.jl, line 324:
+                #11262#ixes_p = [4,1] # /home/jamie/imp/src/Imp.jl, line 325:
+                nothing
+            end
+            begin  # /home/jamie/imp/src/Imp.jl, line 323:
+                #11263#columns_pn = [#11256#columns[5]] # /home/jamie/imp/src/Imp.jl, line 324:
+                #11264#ixes_pn = [5] # /home/jamie/imp/src/Imp.jl, line 325:
+                #11265#results_pn = Vector{String}()
+            end
+            begin  # /home/jamie/imp/src/Imp.jl, line 323:
+                #11266#columns_t = [#11256#columns[2],#11256#columns[7]] # /home/jamie/imp/src/Imp.jl, line 324:
+                #11267#ixes_t = [2,7] # /home/jamie/imp/src/Imp.jl, line 325:
+                nothing
+            end
+            begin  # /home/jamie/imp/src/Imp.jl, line 323:
+                #11268#columns_al = [#11256#columns[8]] # /home/jamie/imp/src/Imp.jl, line 324:
+                #11269#ixes_al = [8] # /home/jamie/imp/src/Imp.jl, line 325:
+                nothing
+            end
+            begin  # /home/jamie/imp/src/Imp.jl, line 323:
+                #11270#columns_price = [#11256#columns[9]] # /home/jamie/imp/src/Imp.jl, line 324:
+                #11271#ixes_price = [9] # /home/jamie/imp/src/Imp.jl, line 325:
+                nothing
+            end # /home/jamie/imp/src/Imp.jl, line 339:
+            #11272#results_aggregate = Vector{Float64}()
+        end # /home/jamie/imp/src/Imp.jl, line 412:
+        begin  # /home/jamie/imp/src/Imp.jl, line 392:
+            start_intersect(#11261#columns_p,#11257#los,#11259#ats,#11260#his,#11262#ixes_p) # /home/jamie/imp/src/Imp.jl, line 393:
+            while next_intersect(#11261#columns_p,#11257#los,#11259#ats,#11260#his,#11262#ixes_p) # /home/jamie/imp/src/Imp.jl, line 394:
+                #11273#p = (#11256#columns[4])[#11257#los[5]] # /home/jamie/imp/src/Imp.jl, line 395:
+                begin  # /home/jamie/imp/src/Imp.jl, line 392:
+                    start_intersect(#11263#columns_pn,#11257#los,#11259#ats,#11260#his,#11264#ixes_pn) # /home/jamie/imp/src/Imp.jl, line 393:
+                    while next_intersect(#11263#columns_pn,#11257#los,#11259#ats,#11260#his,#11264#ixes_pn) # /home/jamie/imp/src/Imp.jl, line 394:
+                        #11274#pn = (#11256#columns[5])[#11257#los[6]] # /home/jamie/imp/src/Imp.jl, line 395:
+                        begin  # /home/jamie/imp/src/Imp.jl, line 364:
+                            #11275#aggregate = 0.0 # /home/jamie/imp/src/Imp.jl, line 365:
+                            begin  # /home/jamie/imp/src/Imp.jl, line 392:
+                                start_intersect(#11266#columns_t,#11257#los,#11259#ats,#11260#his,#11267#ixes_t) # /home/jamie/imp/src/Imp.jl, line 393:
+                                while next_intersect(#11266#columns_t,#11257#los,#11259#ats,#11260#his,#11267#ixes_t) # /home/jamie/imp/src/Imp.jl, line 394:
+                                    #11276#t = (#11256#columns[2])[#11257#los[3]] # /home/jamie/imp/src/Imp.jl, line 395:
+                                    begin  # /home/jamie/imp/src/Imp.jl, line 392:
+                                        start_intersect(#11268#columns_al,#11257#los,#11259#ats,#11260#his,#11269#ixes_al) # /home/jamie/imp/src/Imp.jl, line 393:
+                                        while next_intersect(#11268#columns_al,#11257#los,#11259#ats,#11260#his,#11269#ixes_al) # /home/jamie/imp/src/Imp.jl, line 394:
+                                            #11277#al = (#11256#columns[8])[#11257#los[9]] # /home/jamie/imp/src/Imp.jl, line 395:
+                                            begin  # /home/jamie/imp/src/Imp.jl, line 392:
+                                                start_intersect(#11270#columns_price,#11257#los,#11259#ats,#11260#his,#11271#ixes_price) # /home/jamie/imp/src/Imp.jl, line 393:
+                                                while next_intersect(#11270#columns_price,#11257#los,#11259#ats,#11260#his,#11271#ixes_price) # /home/jamie/imp/src/Imp.jl, line 394:
+                                                    #11278#price = (#11256#columns[9])[#11257#los[10]] # /home/jamie/imp/src/Imp.jl, line 395:
+                                                    #11275#aggregate = #11275#aggregate + #11278#price::Float64
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end # /home/jamie/imp/src/Imp.jl, line 366:
+                            if #11275#aggregate != 0.0 # /home/jamie/imp/src/Imp.jl, line 367:
+                                push!(#11265#results_pn,#11274#pn) # /home/jamie/imp/src/Imp.jl, line 370:
+                                push!(#11272#results_aggregate,#11275#aggregate)
+                            end
+                        end
+                    end
+                end
+            end
+        end # /home/jamie/imp/src/Imp.jl, line 413:
+        tuple(#11265#results_pn,#11272#results_aggregate)
+    end
+end
+```
+
+It only aggregates after the last variable in the ordering that is returned, so to handle aggregation over variables that are earlier in the ordering I need to apply another join to the result.
+
+``` julia 
+result = @join([p, pn, t],
+[p::Int64, pn::String, t::Int64, al::Int64, price::Float64],
+(0.0,+,price::Float64),
+begin
+  playlist(p, pn)
+  playlist_track(p, t)
+  track(t, _, al, _, _, _, _, _, price)
+end)
+
+@join([t],
+[t::Int64, p::Int64, pn::String, price::Float64],
+(0.0,+,price::Float64),
+begin
+  result(p, pn, t, price)
+end)
+```
+
+I want to wrap that up in another ugly macro but right now I'm just flailing and nothing works. Tomorrow...

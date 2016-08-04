@@ -4985,4 +4985,6 @@ function who_is_metal2(album, artist, track, playlist_track, playlist)
 end
 ```
 
-If I just handle aggregation naively, we can use this as a building block to do FAQ-style variable factorisation.
+There's an obvious optimisation where if we only care about `p` we don't need to enumerate all the matching `t`s, just stop after one. I won't bother with that just yet, but I did add an extra arg that controls which columns are returned, so it will still produce a bunch of duplicate `p`s but it won't bother making the corresponding `t` column.
+
+Now let's do some naive aggregation.

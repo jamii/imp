@@ -224,7 +224,7 @@ function collect_variables(expr)
   variables
 end
 
-function plan(query, typed_variables)
+function plan(returned_variables, typed_variables, query)
   variables = []
   variable_types = []
   for typed_variable in typed_variables
@@ -313,7 +313,9 @@ function plan(query, typed_variables)
     variable_init = quote
       $(symbol("columns_", variable)) = [$(variable_columns...)]
       $(symbol("ixes_", variable)) = [$(variable_ixes...)]
-      $(symbol("results_", variable)) = Vector{$(variable_type)}()
+      $(if variable in returned_variables
+          :($(symbol("results_", variable)) = Vector{$(variable_type)}())
+        end)
     end
     push!(variable_inits, variable_init)
   end
@@ -377,7 +379,7 @@ function plan(query, typed_variables)
       quote
         $([
         :(push!($(symbol("results_", variable)), $variable))
-        for variable in variables]...)
+        for variable in returned_variables]...)
       end 
     end
   end
@@ -385,12 +387,12 @@ function plan(query, typed_variables)
   quote 
     $setup
     $(body(1))
-    tuple($([symbol("results_", variable) for variable in variables]...))
+    tuple($([symbol("results_", variable) for variable in returned_variables]...))
   end
 end
 
-macro query(variables, query)
-  plan(query, variables.args)
+macro query(returned_variables, typed_variables, query)
+  plan(returned_variables.args, typed_variables.args, query)
 end
 
 srand(999)
@@ -406,7 +408,7 @@ edge = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
 # end))))
 
 function f(edge) 
-  @query([a,b,c], 
+  @query([a,b,c], [a,b,c], 
   begin
     edge(a,b)
     a < b
@@ -443,7 +445,8 @@ playlist_track = read_columns("data/PlaylistTrack.csv", [Int64, Int64])
 playlist = read_columns("data/Playlist.csv", [Int64, String])
 
 function who_is_metal(album, artist, track, playlist_track, playlist)
-  metal = @query([pn::String, p::Int64, t::Int64, al::Int64, a::Int64, an::String],
+  metal = @query([an],
+  [pn::String, p::Int64, t::Int64, al::Int64, a::Int64, an::String],
   begin
     pn = "Heavy Metal Classic"
     playlist(p, pn)
@@ -452,43 +455,52 @@ function who_is_metal(album, artist, track, playlist_track, playlist)
     album(al, _, a)
     artist(a, an)
   end)
-  @query([an::String], 
+  @query([an],
+  [an::String], 
   begin
-    metal(_, _, _, _, _, an)
+    metal(an)
   end)
 end
 
 function who_is_metal2(album, artist, track, playlist_track, playlist)
-  i1 = @query([pn::String, p::Int64],
+  i1 = @query([p],
+  [pn::String, p::Int64],
   begin
     pn = "Heavy Metal Classic"
     playlist(p, pn)
   end)
-  i2 = @query([p::Int64, t::Int64],
+  i2 = @query([t],
+  [p::Int64, t::Int64],
   begin 
-    i1(_, p)
+    i1(p)
     playlist_track(p, t)
   end)
-  i3 = @query([t::Int64, al::Int64],
+  i3 = @query([al],
+  [t::Int64, al::Int64],
   begin 
-    i2(_, t)
+    i2(t)
     track(t, _, al)
   end)
-  i4 = @query([al::Int64, a::Int64],
+  i4 = @query([a],
+  [al::Int64, a::Int64],
   begin 
-    i3(_, al)
+    i3(al)
     album(al, _, a)
   end)
-  i5 = @query([a::Int64, an::String],
+  i5 = @query([an],
+  [a::Int64, an::String],
   begin 
-    i4(_, a)
+    i4(a)
     artist(a, an)
   end)
-  @query([an::String],
+  @query([an],
+  [an::String],
   begin
-    i5(_, an)
+    i5(an)
   end)
 end
+
+assert(who_is_metal(album, artist, track, playlist_track, playlist) == who_is_metal2(album, artist, track, playlist_track, playlist))
 
 @code_warntype who_is_metal(album, artist, track, playlist_track, playlist)
 

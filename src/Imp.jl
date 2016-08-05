@@ -148,7 +148,6 @@ end
 function start_intersect(cols, los, ats, his, ixes)
   # assume los/his are valid 
   # los inclusive, his exclusive
-  # println(cols)
   @inbounds begin
     for ix in ixes
       assert(los[ix] < his[ix])
@@ -167,7 +166,6 @@ function next_intersect(cols, los, ats, his, ixes)
       value = cols[n][ats[ixes[n]]]
     end
     while true 
-      # println(value)
       for c in 1:n
         ix = ixes[c]
         if fixed == n
@@ -224,9 +222,9 @@ function collect_variables(expr)
   variables
 end
 
-function plan(returned_variables, typed_variables, aggregate, query)
-  @show(returned_variables, typed_variables, aggregate, query)
+function analyse(returned_variables, typed_variables, aggregate)
   aggregate_zero, aggregate_add, aggregate_expr = aggregate
+  
   if isa(aggregate_expr, Expr) && aggregate_expr.head == :(::)
     aggregate_type = aggregate_expr.args[2]
   else 
@@ -248,6 +246,12 @@ function plan(returned_variables, typed_variables, aggregate, query)
   end 
   
   return_ix = 1 + maximum(push!(indexin(returned_variables, variables), 0))
+  
+  (aggregate_type, variables, variable_types, return_ix)
+end
+
+function plan_join(returned_variables, aggregate, aggregate_type, variables, variable_types, return_ix, query)
+  aggregate_zero, aggregate_add, aggregate_expr = aggregate
   
   relations = [line.args[1] for line in query.args if line.head != :line]
   
@@ -287,6 +291,7 @@ function plan(returned_variables, typed_variables, aggregate, query)
   end
   
   ixes = Dict()
+  buffer_ixes = []
   next_ix = 1
   for (clause, columns) in sort_orders
     for column in columns
@@ -294,6 +299,7 @@ function plan(returned_variables, typed_variables, aggregate, query)
       next_ix += 1
     end
     ixes[(clause, :buffer)] = next_ix
+    push!(buffer_ixes, next_ix)
     next_ix += 1
   end
   
@@ -347,99 +353,101 @@ function plan(returned_variables, typed_variables, aggregate, query)
     push!(filters[callable_at], line)
   end
   
-  function make_filter(filters, tail)
-    if length(filters) == 0
-      tail
-    else 
-      quote 
-        if $(filters[1])
-          $(make_filter(filters[2:end], tail))
-        end
+  function make_return(returned_variables, tail) 
+    quote
+      aggregate = $aggregate_zero
+      $tail 
+      if aggregate != $aggregate_zero
+        $([
+        :(push!($(symbol("results_", variable)), $variable))
+        for variable in returned_variables]...)
+        push!(results_aggregate, aggregate)
       end
     end
   end
   
-  function make_return(variable_ix, tail) 
-    if variable_ix == return_ix
-      quote
-        aggregate = $aggregate_zero
-        $tail 
-        if aggregate != $aggregate_zero
-          $([
-          :(push!($(symbol("results_", variable)), $variable))
-          for variable in returned_variables]...)
-          push!(results_aggregate, aggregate)
-        end
-      end
-    else
-      tail
-    end
+  repeats = 1
+  for buffer_ix in buffer_ixes
+    repeats = :($repeats * (his[$buffer_ix] - los[$buffer_ix]))
   end
-  
-  function make_intersect(variable_ix, tail)
+  body = :(aggregate = $(aggregate_add)(aggregate, $aggregate_expr, $repeats))
+  if return_ix == length(variables) + 1
+    body = make_return(returned_variables, body)
+  end
+  for variable_ix in length(variables):-1:1
     variable = variables[variable_ix]
     variable_columns = symbol("columns_", variable)
     variable_ixes = symbol("ixes_", variable)
     result_column = ixes[sources[variable][1]]
+    for filter in filters[variable_ix]
+      body = :(if $filter; $body; end)
+    end
     if haskey(assignment_clauses, variable)
-      quote
+      body = quote
         $variable = $(assignment_clauses[variable])
         if assign($variable_columns, los, ats, his, $variable_ixes, $variable)
-          $tail
+          $body
         end
       end
     else
-      quote
+      body = quote
         start_intersect($variable_columns, los, ats, his, $variable_ixes)
         while next_intersect($variable_columns, los, ats, his, $variable_ixes)
           $variable = columns[$result_column][los[$(result_column+1)]]
-          $tail
+          $body
         end
-      end
+      end 
     end
-  end
-  
-  function body(variable_ix)
-    if variable_ix < length(variables)
-      tail = body(variable_ix + 1)
-    else 
-      tail = make_return(variable_ix + 1, :(aggregate = $(aggregate_add)(aggregate, $aggregate_expr)))
+    if return_ix == variable_ix 
+      body = make_return(returned_variables, body)
     end
-    make_return(variable_ix, make_intersect(variable_ix, make_filter(filters[variable_ix], tail)))
   end
           
   quote 
     $setup
-    $(body(1))
+    $body
     tuple($([symbol("results_", variable) for variable in returned_variables]...), results_aggregate)
   end
 end
 
+function plan_query(returned_variables, typed_variables, aggregate, query)
+  aggregate_type, variables, variable_types, return_ix = analyse(returned_variables, typed_variables, aggregate)
+  join = plan_join(returned_variables, aggregate, aggregate_type, variables, variable_types, return_ix, query)
+  project_variables = Any[variable for (variable, variable_type) in zip(variables, variable_types) if variable in returned_variables]
+  project_variable_types = Any[variable_type for (variable, variable_type) in zip(variables, variable_types) if variable in returned_variables]
+  push!(project_variables, :prev_aggregate)
+  push!(project_variable_types, aggregate_type)
+  project_aggregate = [aggregate[1], aggregate[2], :prev_aggregate]
+  project_query = quote 
+    intermediate($(project_variables...))
+  end
+  project_return_ix = length(returned_variables) + 1
+  project = plan_join(returned_variables, project_aggregate, aggregate_type, project_variables, project_variable_types, project_return_ix, project_query)
+  quote 
+    let $(esc(:intermediate)) = let; $join; end
+      $project
+    end
+  end
+end
+
+@inline add_exp(a, b, n) = a + (b * n)
+@inline mul_exp(a, b, n) = a * (b ^ n)
+
 macro join(returned_variables, typed_variables, query)
-  plan(returned_variables.args, typed_variables.args, :(0, +, 1::Int64).args, query)
+  :(@join($returned_variables, $typed_variables, (0, add_exp, 1::Int64), $query))
 end
 
 macro join(returned_variables, typed_variables, aggregate, query)
-  plan(returned_variables.args, typed_variables.args, aggregate.args, query)
+  aggregate_type, variables, variable_types, return_ix = analyse(returned_variables.args, typed_variables.args, aggregate.args)
+  plan_join(returned_variables.args, aggregate.args, aggregate_type, variables, variable_types, return_ix, query)
 end
 
-# TODO relies on ordering in returned/typed being the same
-# TODO only accepts typed variables
+macro query(returned_variables, typed_variables, query)
+  :(@query($returned_variables, $typed_variables, (0, add_exp, 1::Int64), $query))
+end
+
 macro query(returned_variables, typed_variables, aggregate, query)
-  result_aggregate = [aggregate.args[1], aggregate.args[2], :(aggregate::$(aggregate.args[3].args[2]))]
-  variables = [v.args[1] for v in typed_variables.args]
-  last_returned_ix = maximum(push!(indexin(returned_variables.args, variables), 0))
-  result_typed_variables = copy(typed_variables.args[1:last_returned_ix])
-  push!(result_typed_variables, :(aggregate::$(aggregate.args[3].args[2])))
-  result_query_variables = [v.args[1] for v in result_typed_variables]
-  quote 
-    let $(esc(:result)) = $(plan(returned_variables.args, typed_variables.args, aggregate.args, query))
-      $(plan(returned_variables.args, result_typed_variables, result_aggregate, 
-      quote
-        result($(result_query_variables...))
-      end))
-    end
-  end
+  plan_query(returned_variables.args, typed_variables.args, aggregate.args, query)
 end
 
 srand(999)
@@ -565,7 +573,7 @@ end
 
 who_is_metal(album, artist, track, playlist_track, playlist)
 
-assert(who_is_metal(album, artist, track, playlist_track, playlist) == who_is_metal2(album, artist, track, playlist_track, playlist))
+# assert(who_is_metal(album, artist, track, playlist_track, playlist) == who_is_metal2(album, artist, track, playlist_track, playlist))
 
 # @code_warntype who_is_metal(album, artist, track, playlist_track, playlist)
 
@@ -590,7 +598,7 @@ end
 function cost_of_playlist(album, artist, track, playlist_track, playlist)
   @join([pn],
   [p::Int64, pn::String, t::Int64, al::Int64, price::Float64],
-  (0.0,+,price::Float64),
+  (0.0,add_exp,price::Float64),
   begin
     playlist(p, pn)
     playlist_track(p, t)
@@ -603,7 +611,7 @@ end
 function revenue_per_track(album, artist, track, playlist_track, playlist)
   result = @join([p, pn, t],
   [p::Int64, pn::String, t::Int64, al::Int64, price::Float64],
-  (0.0,+,price::Float64),
+  (0.0,add_exp,price::Float64),
   begin
     playlist(p, pn)
     playlist_track(p, t)
@@ -611,7 +619,7 @@ function revenue_per_track(album, artist, track, playlist_track, playlist)
   end)
   @join([t],
   [t::Int64, p::Int64, pn::String, price::Float64],
-  (0.0,+,price::Float64),
+  (0.0,add_exp,price::Float64),
   begin
     result(p, pn, t, price)
   end)
@@ -620,7 +628,7 @@ end
 function revenue_per_track2(album, artist, track, playlist_track, playlist)
   @query([t],
   [p::Int64, pn::String, t::Int64, al::Int64, price::Float64],
-  (0.0,+,price::Float64),
+  (0.0,add_exp,price::Float64),
   begin
     playlist(p, pn)
     playlist_track(p, t)
@@ -630,5 +638,17 @@ end
 
 @time revenue_per_track(album, artist, track, playlist_track, playlist)
 @time revenue_per_track2(album, artist, track, playlist_track, playlist)
+
+assert(revenue_per_track(album, artist, track, playlist_track, playlist) == revenue_per_track2(album, artist, track, playlist_track, playlist))
+
+@query([pn, an],
+[pn::String, p::Int64, t::Int64, al::Int64, a::Int64, an::String],
+begin
+  playlist(p, pn)
+  playlist_track(p, t)
+  track(t, _, al)
+  album(al, _, a)
+  artist(a, an)
+end)
 
 end

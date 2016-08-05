@@ -5113,3 +5113,156 @@ end)
 ```
 
 I want to wrap that up in another ugly macro but right now I'm just flailing and nothing works. Tomorrow...
+
+## 2016 Aug 5
+
+Ok, I finally got this nailed down. There were a bunch of little things I had to fix.
+
+The inputs to queries are sets, but the query effectively projects out the columns it cares about. That didn't matter before, but for aggregates we care about the number of results, not just the values. Now I count the number of repeated solutions:
+
+``` julia 
+repeats = 1
+for buffer_ix in buffer_ixes
+  repeats = :($repeats * (his[$buffer_ix] - los[$buffer_ix]))
+end
+body = :(aggregate = $(aggregate_add)(aggregate, $aggregate_expr, $repeats))
+```
+
+The `aggregate_add` is now required to take a third argument that gives an exponent to the operation.
+
+``` julia 
+@inline add_exp(a, b, n) = a + (b * n)
+@inline mul_exp(a, b, n) = a * (b ^ n)
+```
+
+I split the old `plan` into `analyse` and `plan_join` so that I could reuse the parts:
+
+``` julia
+function plan_query(returned_variables, typed_variables, aggregate, query)
+  aggregate_zero, aggregate_add, aggregate_expr = aggregate
+  aggregate_type, variables, variable_types, return_ix = analyse(returned_variables, typed_variables, aggregate)
+  join = plan_join(returned_variables, aggregate, aggregate_type, variables, variable_types, return_ix, query)
+  project_variables = Any[variable for (variable, variable_type) in zip(variables, variable_types) if variable in returned_variables]
+  project_variable_types = Any[variable_type for (variable, variable_type) in zip(variables, variable_types) if variable in returned_variables]
+  push!(project_variables, :prev_aggregate)
+  push!(project_variable_types, aggregate_type)
+  project_aggregate = [aggregate_zero, aggregate_add, :prev_aggregate]
+  project_query = quote 
+    intermediate($(project_variables...))
+  end
+  project_return_ix = length(returned_variables) + 1
+  project = plan_join(returned_variables, project_aggregate, aggregate_type, project_variables, project_variable_types, project_return_ix, project_query)
+  quote 
+    let $(esc(:intermediate)) = let; $join; end
+      $project
+    end
+  end
+end
+```
+
+The default aggregate just counts the number of results:
+
+``` julia 
+macro query(returned_variables, typed_variables, query)
+  :(@query($returned_variables, $typed_variables, (0, add_exp, 1::Int64), $query))
+end
+
+macro query(returned_variables, typed_variables, aggregate, query)
+  plan_query(returned_variables.args, typed_variables.args, aggregate.args, query)
+end
+```
+
+Now we can ask questions like how many times each artist appears on a given playlist:
+
+``` julia 
+@query([pn, an],
+[pn::String, p::Int64, t::Int64, al::Int64, a::Int64, an::String],
+begin
+  playlist(p, pn)
+  playlist_track(p, t)
+  track(t, _, al)
+  album(al, _, a)
+  artist(a, an)
+end)
+```
+
+I've been putting off dealing with hygiene in the planner, but I spent about an hour on a hygiene bug today so I suppose I should move that up the todo list. 
+
+I also have to do something about caching sorted relations, and then I think I have enough to try the [Join Order Benchmark](http://www.vldb.org/pvldb/vol9/p204-leis.pdf). It uses the IMDB dataset (which is about 3.6GB of strings) and asks questions such as:
+
+``` sql
+SELECT MIN(cn1.name) AS first_company,
+       MIN(cn2.name) AS second_company,
+       MIN(mi_idx1.info) AS first_rating,
+       MIN(mi_idx2.info) AS second_rating,
+       MIN(t1.title) AS first_movie,
+       MIN(t2.title) AS second_movie
+FROM company_name AS cn1,
+     company_name AS cn2,
+     info_type AS it1,
+     info_type AS it2,
+     kind_type AS kt1,
+     kind_type AS kt2,
+     link_type AS lt,
+     movie_companies AS mc1,
+     movie_companies AS mc2,
+     movie_info_idx AS mi_idx1,
+     movie_info_idx AS mi_idx2,
+     movie_link AS ml,
+     title AS t1,
+     title AS t2
+WHERE cn1.country_code != '[us]'
+  AND it1.info = 'rating'
+  AND it2.info = 'rating'
+  AND kt1.kind IN ('tv series',
+                   'episode')
+  AND kt2.kind IN ('tv series',
+                   'episode')
+  AND lt.link IN ('sequel',
+                  'follows',
+                  'followed by')
+  AND mi_idx2.info < '3.5'
+  AND t2.production_year BETWEEN 2000 AND 2010
+  AND lt.id = ml.link_type_id
+  AND t1.id = ml.movie_id
+  AND t2.id = ml.linked_movie_id
+  AND it1.id = mi_idx1.info_type_id
+  AND t1.id = mi_idx1.movie_id
+  AND kt1.id = t1.kind_id
+  AND cn1.id = mc1.company_id
+  AND t1.id = mc1.movie_id
+  AND ml.movie_id = mi_idx1.movie_id
+  AND ml.movie_id = mc1.movie_id
+  AND mi_idx1.movie_id = mc1.movie_id
+  AND it2.id = mi_idx2.info_type_id
+  AND t2.id = mi_idx2.movie_id
+  AND kt2.id = t2.kind_id
+  AND cn2.id = mc2.company_id
+  AND t2.id = mc2.movie_id
+  AND ml.linked_movie_id = mi_idx2.movie_id
+  AND ml.linked_movie_id = mc2.movie_id
+  AND mi_idx2.movie_id = mc2.movie_id;
+``` 
+
+Or:
+
+``` sql 
+SELECT MIN(mc.note) AS production_note,
+       MIN(t.title) AS movie_title,
+       MIN(t.production_year) AS movie_year
+FROM company_type AS ct,
+     info_type AS it,
+     movie_companies AS mc,
+     movie_info_idx AS mi_idx,
+     title AS t
+WHERE ct.kind = 'production companies'
+  AND it.info = 'top 250 rank'
+  AND mc.note NOT LIKE '%(as Metro-Goldwyn-Mayer Pictures)%'
+  AND (mc.note LIKE '%(co-production)%'
+       OR mc.note LIKE '%(presents)%')
+  AND ct.id = mc.company_type_id
+  AND t.id = mc.movie_id
+  AND t.id = mi_idx.movie_id
+  AND mc.movie_id = mi_idx.movie_id
+  AND it.id = mi_idx.info_type_id;
+```

@@ -4904,7 +4904,7 @@ What next? I have some ideas about variable ordering, but I need a lot more exam
 
 ## 2016 Aug 4
 
-I decided to start by just handling projection/aggregation at the end of the query. Projection is really easy - we can just reuse the same building blocks:
+Projection is really easy - we can just reuse the same building blocks:
 
 ``` julia 
 metal = @query([pn, p, t, al, a, an],
@@ -4926,7 +4926,7 @@ end)
 
 While I was doing that, I noticed that I'm returning columns of type `Any`. Fixing that is pretty tricky, because I don't actually know the type of the variables when I generate the query code. I'm relying on Julia's type inference, but type inference only happens after I generate code. I could wait until the first result to initialize the columns, but that doesn't work for queries with no results. 
 
-Let's just work around it for now by allowing the user to specify the types in the query eg:
+Let's just work around it for now by allowing the user to specify the types in the query:
 
 ``` julia 
 function plan(query, typed_variables)
@@ -4947,6 +4947,17 @@ function plan(query, typed_variables)
      $(symbol("results_", variable)) = Vector{$(variable_type)}()
   ...
 end
+```
+
+``` julia
+@join([a,b,c], [a::Int64,b::Int64,c::Int64], 
+begin
+  edge(a,b)
+  a < b
+  edge(b,c)
+  b < c
+  edge(c,a)
+end)
 ```
 
 We can also do Yannakis-style queries:
@@ -4985,7 +4996,7 @@ function who_is_metal2(album, artist, track, playlist_track, playlist)
 end
 ```
 
-Onto aggregation. I have a planner that turns this:
+On to aggregation. I have a planner that turns this:
 
 ``` julia
 @join([pn],
@@ -4998,7 +5009,7 @@ begin
 end)
 ```
 
-Into:
+Into this:
 
 ``` 
 begin  # /home/jamie/imp/src/Imp.jl, line 586:
@@ -5081,7 +5092,7 @@ begin  # /home/jamie/imp/src/Imp.jl, line 586:
 end
 ```
 
-It only aggregates after the last variable in the ordering that is returned, so to handle aggregation over variables that are earlier in the ordering I need to apply another join to the result.
+It only aggregates after the last variable in the ordering that is returned, so if I want to aggregate over variables that are earlier in the ordering I need to apply another join to the result.
 
 ``` julia 
 result = @join([p, pn, t],

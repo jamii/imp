@@ -5266,3 +5266,30 @@ WHERE ct.kind = 'production companies'
   AND mc.movie_id = mi_idx.movie_id
   AND it.id = mi_idx.info_type_id;
 ```
+
+## 2016 Aug 6
+
+Ok, so we're gonna store the columns in some object that caches various sort orders.
+
+``` julia
+type Relation{T <: Tuple} # where T is a tuple of columns
+  columns::T
+  indexes::Dict{Vector{Int64},T}
+end
+
+function Relation{T}(columns::T)
+  Relation(columns, Dict{Vector{Int64},T}())
+end
+
+function index{T}(relation::Relation{T}, order::Vector{Int64})
+  get!(relation.indexes, order) do
+    index::T = tuple([(ix in order) ? copy(column) : Vector{eltype(column)}() for (ix, column) in enumerate(relation.columns)]...)
+    quicksort!(tuple([index[ix] for ix in order]...))
+    index
+  end
+end
+```
+
+Note that when we create a new index, we return sort the columns in the order specified but return them in the original order, with any unsorted columns emptied out. This ensures that the return type of the function doesn't depend on the order. Eventually I'll get around to wrapping the entire query in a function to create a dispatch point and then it won't matter, but for now this helps Julia correctly infer the types of columns.
+
+Note that we're not being very smart about sharing indexes. If we request [1,2] and there is already an index for [1,2,3] we could just return that, but instead we make a new and pointless index. I'll fix that one day.

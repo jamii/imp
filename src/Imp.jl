@@ -123,6 +123,23 @@ for n in 1:10
   eval(define_columns(n))
 end
 
+type Relation{T <: Tuple} # where T is a tuple of columns
+  columns::T
+  indexes::Dict{Vector{Int64},T}
+end
+
+function Relation{T}(columns::T)
+  Relation(columns, Dict{Vector{Int64},T}())
+end
+
+function index{T}(relation::Relation{T}, order::Vector{Int64})
+  get!(relation.indexes, order) do
+    index::T = tuple([(ix in order) ? copy(column) : Vector{eltype(column)}() for (ix, column) in enumerate(relation.columns)]...)
+    quicksort!(tuple([index[ix] for ix in order]...))
+    index
+  end
+end
+
 # gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
 function gallop{T}(column::Vector{T}, value::T, lo::Int64, hi::Int64, cmp) 
   @inbounds if (lo < hi) && cmp(column[lo], value)
@@ -303,22 +320,21 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
     next_ix += 1
   end
   
+  index_inits = []
+  for (clause, columns) in sort_orders
+    clause_name = query.args[clause].args[1]
+    index_init = :($clause_name = index($(esc(clause_name)), [$(columns...)]))
+    push!(index_inits, index_init)
+  end
+  
   column_inits = Vector(length(ixes))
   for ((clause, column), ix) in ixes
     if column == :buffer
       column_inits[ix] = :()
     else
       clause_name = query.args[clause].args[1]
-      column_inits[ix] = :(copy($(esc(clause_name))[$column]))
+      column_inits[ix] = :($clause_name[$column])
     end
-  end
-  
-  sorts = []
-  for (clause, columns) in sort_orders
-    sort_ixes = [ixes[(clause, column)] for column in columns]
-    sort_args = [:(columns[$ix]) for ix in sort_ixes]
-    sort = :(quicksort!(tuple($(sort_args...))))
-    push!(sorts, sort)
   end
   
   variable_inits = []
@@ -337,8 +353,8 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
   end
   
   setup = quote
+    $(index_inits...)
     columns = tuple($(column_inits...))
-    $(sorts...)
     los = Int64[1 for i in 1:$(length(ixes))]
     ats = Int64[1 for i in 1:$(length(ixes))]
     his = Int64[length(columns[i])+1 for i in 1:$(length(ixes))]
@@ -406,7 +422,7 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
   quote 
     $setup
     $body
-    tuple($([symbol("results_", variable) for variable in returned_variables]...), results_aggregate)
+    Relation(tuple($([symbol("results_", variable) for variable in returned_variables]...), results_aggregate))
   end
 end
 
@@ -452,7 +468,7 @@ end
 
 srand(999)
 # edge = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
-edge = ([1, 2, 3, 3, 4], [2, 3, 1, 4, 2])
+edge = Relation(([1, 2, 3, 3, 4], [2, 3, 1, 4, 2]))
 
 function f(edge) 
   @join([a,b,c], [a::Int64,b::Int64,c::Int64], 
@@ -493,7 +509,7 @@ function read_columns(filename, types)
       end
     end
   end
-  columns
+  Relation(columns)
 end
 
 album = read_columns("data/Album.csv", [Int64, String, Int64])
@@ -572,6 +588,7 @@ function who_is_metal2(album, artist, track, playlist_track, playlist)
 end
 
 who_is_metal(album, artist, track, playlist_track, playlist)
+who_is_metal2(album, artist, track, playlist_track, playlist)
 
 # assert(who_is_metal(album, artist, track, playlist_track, playlist) == who_is_metal2(album, artist, track, playlist_track, playlist))
 
@@ -639,7 +656,7 @@ end
 @time revenue_per_track(album, artist, track, playlist_track, playlist)
 @time revenue_per_track2(album, artist, track, playlist_track, playlist)
 
-assert(revenue_per_track(album, artist, track, playlist_track, playlist) == revenue_per_track2(album, artist, track, playlist_track, playlist))
+assert(revenue_per_track(album, artist, track, playlist_track, playlist).columns == revenue_per_track2(album, artist, track, playlist_track, playlist).columns)
 
 @query([pn, an],
 [pn::String, p::Int64, t::Int64, al::Int64, a::Int64, an::String],
@@ -649,6 +666,6 @@ begin
   track(t, _, al)
   album(al, _, a)
   artist(a, an)
-end)
+end).columns
 
 end

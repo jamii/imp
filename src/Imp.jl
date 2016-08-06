@@ -466,9 +466,33 @@ macro query(returned_variables, typed_variables, aggregate, query)
   plan_query(returned_variables.args, typed_variables.args, aggregate.args, query)
 end
 
+function read_columns(filename, types; comments=false)
+  rows, _ = readdlm(open(filename), '\t', header=true, quotes=false, comments=comments)
+  n = length(types)
+  columns = tuple([Vector{types[c]}() for c in 1:n]...)
+  for r in 1:size(rows)[1]
+    for c in 1:n
+      if types[c] == String
+        push!(columns[c], string(rows[r, c]))
+      elseif isa(rows[r, c], SubString)
+        @show r c rows[r, c]
+      else
+        push!(columns[c], rows[r, c])
+      end
+    end
+  end
+  Relation(columns)
+end
+
+import Atom
+function Atom.render(editor::Atom.Editor, relation::Relation)
+  Atom.render(editor, relation.columns)
+end
+
 srand(999)
 # edge = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
 edge = Relation(([1, 2, 3, 3, 4], [2, 3, 1, 4, 2]))
+# edge = read_columns("/home/jamie/soc-LiveJournal1.txt", [Int32, Int32], comments=true)
 
 function f(edge) 
   @join([a,b,c], [a::Int64,b::Int64,c::Int64], 
@@ -495,22 +519,6 @@ end)
 # @code_warntype f(edge)
 f(edge)
 f(edge)
-
-function read_columns(filename, types)
-  rows, _ = readdlm(open(filename), '\t', header=true, quotes=false, comments=false)
-  n = length(types)
-  columns = tuple([Vector{types[c]}() for c in 1:n]...)
-  for r in 1:size(rows)[1]
-    for c in 1:n
-      if types[c] == String
-        push!(columns[c], string(rows[r, c]))
-      else
-        push!(columns[c], rows[r, c])
-      end
-    end
-  end
-  Relation(columns)
-end
 
 album = read_columns("data/Album.csv", [Int64, String, Int64])
 artist = read_columns("data/Artist.csv", [Int64, String])

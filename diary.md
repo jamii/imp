@@ -5290,6 +5290,55 @@ function index{T}(relation::Relation{T}, order::Vector{Int64})
 end
 ```
 
-Note that when we create a new index, we return sort the columns in the order specified but return them in the original order, with any unsorted columns emptied out. This ensures that the return type of the function doesn't depend on the order. Eventually I'll get around to wrapping the entire query in a function to create a dispatch point and then it won't matter, but for now this helps Julia correctly infer the types of columns.
+We're not being very smart about sharing indexes. If we request [1,2] and there is already an index for [1,2,3] we could just return that, but instead we make a new and pointless index. I'll fix that one day.
 
-Note that we're not being very smart about sharing indexes. If we request [1,2] and there is already an index for [1,2,3] we could just return that, but instead we make a new and pointless index. I'll fix that one day.
+When we create a new index, we sort the columns in the order specified but return them in the original order, with any unsorted columns emptied out. This ensures that the return type of the function doesn't depend on the order. Eventually I'll get around to wrapping each query in a function to create a dispatch point and then it won't matter, but for now this helps Julia correctly infer types downstream.
+
+I currently have IMDbPY inserting data into postgres. That reportedly takes about 8 hours (although the hardware described in the readme is anaemic) but as a side-effect it will spit out csv versions of all the tables that I can use in Imp.
+
+One hour later:
+
+```
+loading CSV files into the database
+ * LOADING CSV FILE imdb/csv/imdb/csv/complete_cast.csv...
+ERROR: unable to import CSV file imdb/csv/imdb/csv/complete_cast.csv: could not open file "imdb/csv/imdb/csv/complete_cast.csv" for reading: No such file or directory
+```
+
+It created all the csv files just fine and then somehow mangled the filenames before trying to load them. Trying to just run the csv->db step ran into a different set of errors (which I lost by closing the wrong window :), so let's run it again with the row-by-row insert option. 
+
+In the meantime, I tried to load the livejournal dataset into Julia, which caused the atom plugin to blowup:
+
+``` 
+/home/jamie/.atom/packages/julia-client/lib/connection/local.coffee:16
+RangeError: Invalid string length
+    at Socket.<anonymous> (/home/jamie/.atom/packages/julia-client/lib/connection/local.coffee:16:26)
+    at emitOne (events.js:77:13)
+    at Socket.emit (events.js:169:7)
+    at readableAddChunk (_stream_readable.js:146:16)
+    at Socket.Readable.push (_stream_readable.js:110:10)
+    at TCP.onread (net.js:523:20)
+```
+
+Maybe the problem is that it displays relations by printing the entire contents, rather than just showing the head and tail like it does with large arrays. I poked around inside the source code, found the function that controls rendering and added an override for relations:
+
+``` julia
+import Atom
+function Atom.render(editor::Atom.Editor, relation::Relation)
+  Atom.render(editor, relation.columns)
+end
+```
+
+I checked with a smaller relation that it does affect the rendering. Does it fix the bug? Nope:
+
+```
+/home/jamie/.atom/packages/julia-client/lib/connection/local.coffee:16
+RangeError: Invalid string length
+    at Socket.<anonymous> (/home/jamie/.atom/packages/julia-client/lib/connection/local.coffee:16:26)
+    at emitOne (events.js:77:13)
+    at Socket.emit (events.js:169:7)
+    at readableAddChunk (_stream_readable.js:146:16)
+    at Socket.Readable.push (_stream_readable.js:110:10)
+    at TCP.onread (net.js:523:20)
+```
+
+Debugging by guessing - not a thing.

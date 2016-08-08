@@ -1,144 +1,6 @@
-module Imp
+module Query
 
-function define_columns(n)
-  cs = [symbol("c", c) for c in 1:n]
-  ts = [symbol("C", c) for c in 1:n]
-  tmps = [symbol("tmp", c) for c in 1:n]
-  
-  quote
-    
-    @inline function lt($(cs...), i, j) 
-      @inbounds begin 
-        $([:(if !isequal($(cs[c])[i], $(cs[c])[j]); return isless($(cs[c])[i], $(cs[c])[j]); end) for c in 1:(n-1)]...)
-        return isless($(cs[n])[i], $(cs[n])[j])
-      end
-    end
-    
-    @inline function lt2($(cs...), $(tmps...), j) 
-      @inbounds begin 
-        $([:(if !isequal($(tmps[c]), $(cs[c])[j]); return isless($(tmps[c]), $(cs[c])[j]); end) for c in 1:(n-1)]...)
-        return isless($(tmps[n]), $(cs[n])[j])
-      end
-    end
-    
-    @inline function swap2($(cs...), i, j)
-      @inbounds begin
-        $([quote
-          $(tmps[c]) = $(cs[c])[j]
-          $(cs[c])[j] = $(cs[c])[i]
-          $(cs[c])[i] = $(tmps[c])
-        end for c in 1:n]...)
-      end
-    end
-  
-    @inline function swap3($(cs...), i, j, k)
-      @inbounds begin
-        $([quote
-          $(tmps[c]) = $(cs[c])[k]
-          $(cs[c])[k] = $(cs[c])[j]
-          $(cs[c])[j] = $(cs[c])[i]
-          $(cs[c])[i] = $(tmps[c])
-        end for c in 1:n]...)
-      end
-    end
-
-    # sorting cribbed from Base.Sort
-
-    function insertion_sort!($(cs...), lo::Int, hi::Int)
-      @inbounds for i = lo+1:hi
-        j = i
-        $([:($(tmps[c]) = $(cs[c])[i]) for c in 1:n]...)
-        while j > lo
-          if lt2($(cs...), $(tmps...), j-1)
-            $([:($(cs[c])[j] = $(cs[c])[j-1]) for c in 1:n]...)
-            j -= 1
-            continue
-          end
-          break
-        end
-        $([:($(cs[c])[j] = $(tmps[c])) for c in 1:n]...)
-      end
-    end
-
-    @inline function select_pivot!($(cs...), lo::Int, hi::Int)
-      @inbounds begin
-        mi = (lo+hi)>>>1
-        if lt($(cs...), mi, lo)
-          swap2($(cs...), lo, mi)
-        end
-        if lt($(cs...), hi, mi)
-          if lt($(cs...), hi, lo)
-            swap3($(cs...), lo, mi, hi)
-          else
-            swap2($(cs...), mi, hi)
-          end
-        end
-        swap2($(cs...), lo, mi)
-      end
-      return lo
-    end
-
-    function partition!($(cs...), lo::Int, hi::Int)
-      pivot = select_pivot!($(cs...), lo, hi)
-      i, j = lo, hi
-      @inbounds while true
-        i += 1; j -= 1
-        while lt($(cs...), i, pivot); i += 1; end;
-        while lt($(cs...), pivot, j); j -= 1; end;
-        i >= j && break
-        swap2($(cs...), i, j)
-      end
-      swap2($(cs...), pivot, j)
-      return j
-    end
-
-    function quicksort!($(cs...), lo::Int, hi::Int)
-      @inbounds while lo < hi
-        if hi-lo <= 20 
-          insertion_sort!($(cs...), lo, hi)
-          return 
-        end
-        j = partition!($(cs...), lo, hi)
-        if j-lo < hi-j
-          lo < (j-1) && quicksort!($(cs...), lo, j-1)
-          lo = j+1
-        else
-          j+1 < hi && quicksort!($(cs...), j+1, hi)
-          hi = j-1
-        end
-      end
-      return
-    end
-
-    function quicksort!{$(ts...)}(cs::Tuple{$(ts...)})
-      quicksort!($([:(cs[$c]) for c in 1:n]...), 1, length(cs[1]))
-      return cs
-    end
-
-  end
-
-end
-
-for n in 1:10
-  eval(define_columns(n))
-end
-
-type Relation{T <: Tuple} # where T is a tuple of columns
-  columns::T
-  indexes::Dict{Vector{Int64},T}
-end
-
-function Relation{T}(columns::T)
-  Relation(columns, Dict{Vector{Int64},T}())
-end
-
-function index{T}(relation::Relation{T}, order::Vector{Int64})
-  get!(relation.indexes, order) do
-    index::T = tuple([(ix in order) ? copy(column) : Vector{eltype(column)}() for (ix, column) in enumerate(relation.columns)]...)
-    quicksort!(tuple([index[ix] for ix in order]...))
-    index
-  end
-end
+using Data
 
 # gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
 function gallop{T}(column::Vector{T}, value::T, lo::Int64, hi::Int64, cmp) 
@@ -266,6 +128,8 @@ function analyse(returned_variables, typed_variables, aggregate)
   
   (aggregate_type, variables, variable_types, return_ix)
 end
+
+query_number = 0
 
 function plan_join(returned_variables, aggregate, aggregate_type, variables, variable_types, return_ix, query)
   aggregate_zero, aggregate_add, aggregate_expr = aggregate
@@ -414,15 +278,17 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
       body = make_return(returned_variables, body)
     end
   end
+  
+  global query_number += 1
           
   quote 
     # TODO pass through any external vars too to avoid closure boxing grossness
-    function query($([symbol("relation_", clause) for clause in relation_clauses]...))
+    function $(symbol("query_", query_number))($([symbol("relation_", clause) for clause in relation_clauses]...))
       $setup
       $body
       Relation(tuple($([symbol("results_", variable) for variable in returned_variables]...), results_aggregate))
     end
-    query($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
+    $(symbol("query_", query_number))($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
   end
 end
 
@@ -448,6 +314,7 @@ end
 
 @inline add_exp(a, b, n) = a + (b * n)
 @inline mul_exp(a, b, n) = a * (b ^ n)
+@inline min_exp(a, b, n) = min(a,b)
 
 macro join(returned_variables, typed_variables, query)
   aggregate = :(0, add_exp, 1::Int64)
@@ -474,6 +341,6 @@ function Atom.render(editor::Atom.Editor, relation::Relation)
   Atom.render(editor, relation.columns)
 end
 
-export Relation, @query, @join
+export @query, @join
 
 end

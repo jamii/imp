@@ -5342,3 +5342,415 @@ RangeError: Invalid string length
 ```
 
 Debugging by guessing - not a thing.
+
+## 2016 Aug 8
+
+Still working through various problems getting IMDbPY to work.
+
+``` 
+ERROR: unable to import CSV file /home/jamie/imdb/csv/movie_link.csv: null value in column "movie_id" violates not-null constraint
+DETAIL:  Failing row contains (15021, null, 101237, 12).
+CONTEXT:  COPY movie_link, line 15021: "15021,NULL,101237,12"
+
+ * LOADING CSV FILE /home/jamie/imdb/csv/char_name.csv...
+# TIME loadCSVFiles() : 6min, 24sec (wall) 0min, 0sec (user) 0min, 0sec (system)
+# TIME TOTAL TIME TO INSERT/WRITE DATA : 28min, 42sec (wall) 21min, 52sec (user) 0min, 23sec (system)
+building database indexes (this may take a while)
+# TIME createIndexes() : 8min, 44sec (wall) 0min, 0sec (user) 0min, 0sec (system)
+adding foreign keys (this may take a while)
+ERROR caught exception creating a foreign key: insert or update on table "aka_title" violates foreign key constraint "movie_id_exists"
+DETAIL:  Key (movie_id)=(0) is not present in table "title".
+```
+
+Instead, I found a [link](http://homepages.cwi.nl/~boncz/job/imdb.tgz) to the CSV files the authors of the paper used, and loaded those directly into postgres myself. Which took about 5 minutes.
+
+```
+\i job/schema.sql
+
+\copy aka_name from 'imdb/aka_name.csv' csv escape '\'
+\copy aka_title from 'imdb/aka_title.csv' csv escape '\'
+\copy cast_info from 'imdb/cast_info.csv' csv escape '\'
+\copy char_name from 'imdb/char_name.csv' csv escape '\'
+\copy comp_cast_type from 'imdb/comp_cast_type.csv' csv escape '\'
+\copy company_name from 'imdb/company_name.csv' csv escape '\'
+\copy company_type from 'imdb/company_type.csv' csv escape '\'
+\copy complete_cast from 'imdb/complete_cast.csv' csv escape '\'
+\copy info_type from 'imdb/info_type.csv' csv escape '\'
+\copy keyword from 'imdb/keyword.csv' csv escape '\'
+\copy kind_type from 'imdb/kind_type.csv' csv escape '\'
+\copy link_type from 'imdb/link_type.csv' csv escape '\'
+\copy movie_companies from 'imdb/movie_companies.csv' csv escape '\'
+\copy movie_info from 'imdb/movie_info.csv' csv escape '\'
+\copy movie_info_idx from 'imdb/movie_info_idx.csv' csv escape '\'
+\copy movie_keyword from 'imdb/movie_keyword.csv' csv escape '\'
+\copy movie_link from 'imdb/movie_link.csv' csv escape '\'
+\copy name from 'imdb/name.csv' csv escape '\'
+\copy person_info from 'imdb/person_info.csv' csv escape '\'
+\copy role_type from 'imdb/role_type.csv' csv escape '\'
+\copy title from 'imdb/title.csv' csv escape '\'
+
+\i job/fkindexes.sql
+```
+
+Now let's dump the schema in a way that's easy for Imp to read:
+
+```
+copy (select table_name, ordinal_position, column_name, data_type from information_schema.columns) to '/home/jamie/imp/data/job_schema.csv' with csv delimiter ',';
+```
+
+Eugh, and the csv files themselves have backslash-escaped strings that Julia can't read, so let's re-export those.
+
+```
+\copy aka_name to 'job/aka_name.csv' csv escape '"'
+\copy aka_title to 'job/aka_title.csv' csv escape '"'
+\copy cast_info to 'job/cast_info.csv' csv escape '"'
+\copy char_name to 'job/char_name.csv' csv escape '"'
+\copy comp_cast_type to 'job/comp_cast_type.csv' csv escape '"'
+\copy company_name to 'job/company_name.csv' csv escape '"'
+\copy company_type to 'job/company_type.csv' csv escape '"'
+\copy complete_cast to 'job/complete_cast.csv' csv escape '"'
+\copy info_type to 'job/info_type.csv' csv escape '"'
+\copy keyword to 'job/keyword.csv' csv escape '"'
+\copy kind_type to 'job/kind_type.csv' csv escape '"'
+\copy link_type to 'job/link_type.csv' csv escape '"'
+\copy movie_companies to 'job/movie_companies.csv' csv escape '"'
+\copy movie_info to 'job/movie_info.csv' csv escape '"'
+\copy movie_info_idx to 'job/movie_info_idx.csv' csv escape '"'
+\copy movie_keyword to 'job/movie_keyword.csv' csv escape '"'
+\copy movie_link to 'job/movie_link.csv' csv escape '"'
+\copy name to 'job/name.csv' csv escape '"'
+\copy person_info to 'job/person_info.csv' csv escape '"'
+\copy role_type to 'job/role_type.csv' csv escape '"'
+\copy title to 'job/title.csv' csv escape '"' 
+```
+
+Let's grab the first query from the benchmark and get a feel for long it takes.
+
+```
+postgres=# prepare q1a as SELECT MIN(mc.note) AS production_note, MIN(t.title) AS movie_title, MIN(t.production_year) AS movie_year FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info_idx AS mi_idx, title AS t WHERE ct.kind = 'production companies' AND it.info = 'top 250 rank' AND mc.note  not like '%(as Metro-Goldwyn-Mayer Pictures)%' and (mc.note like '%(co-production)%' or mc.note like '%(presents)%') AND ct.id = mc.company_type_id AND t.id = mc.movie_id AND t.id = mi_idx.movie_id AND mc.movie_id = mi_idx.movie_id AND it.id = mi_idx.info_type_id;
+ERROR:  prepared statement "q1a" already exists
+Time: 0.356 ms
+postgres=# execute q1a;
+             production_note             |    movie_title     | movie_year 
+-----------------------------------------+--------------------+------------
+ (as Indo-British Films Ltd.) (presents) | A Clockwork Orange |       1934
+(1 row)
+
+Time: 6.213 ms
+postgres=# execute q1a;
+             production_note             |    movie_title     | movie_year 
+-----------------------------------------+--------------------+------------
+ (as Indo-British Films Ltd.) (presents) | A Clockwork Orange |       1934
+(1 row)
+
+Time: 6.578 ms
+postgres=# execute q1a;
+             production_note             |    movie_title     | movie_year 
+-----------------------------------------+--------------------+------------
+ (as Indo-British Films Ltd.) (presents) | A Clockwork Orange |       1934
+(1 row)
+
+Time: 6.109 ms
+postgres=# execute q1a;
+             production_note             |    movie_title     | movie_year 
+-----------------------------------------+--------------------+------------
+ (as Indo-British Films Ltd.) (presents) | A Clockwork Orange |       1934
+(1 row)
+
+Time: 6.317 ms
+postgres=# execute q1a;
+             production_note             |    movie_title     | movie_year 
+-----------------------------------------+--------------------+------------
+ (as Indo-British Films Ltd.) (presents) | A Clockwork Orange |       1934
+(1 row)
+
+Time: 6.187 ms
+postgres=# execute q1a;
+             production_note             |    movie_title     | movie_year 
+-----------------------------------------+--------------------+------------
+ (as Indo-British Films Ltd.) (presents) | A Clockwork Orange |       1934
+(1 row)
+
+Time: 5.794 ms
+postgres=# execute q1a;
+             production_note             |    movie_title     | movie_year 
+-----------------------------------------+--------------------+------------
+ (as Indo-British Films Ltd.) (presents) | A Clockwork Orange |       1934
+(1 row)
+
+Time: 5.536 ms
+postgres=# execute q1a;
+             production_note             |    movie_title     | movie_year 
+-----------------------------------------+--------------------+------------
+ (as Indo-British Films Ltd.) (presents) | A Clockwork Orange |       1934
+(1 row)
+
+Time: 5.981 ms
+postgres=# execute q1a;
+             production_note             |    movie_title     | movie_year 
+-----------------------------------------+--------------------+------------
+ (as Indo-British Films Ltd.) (presents) | A Clockwork Orange |       1934
+(1 row)
+
+Time: 6.122 ms
+```
+
+So around 6ms. 
+
+```
+postgres=# EXPLAIN ANALYZE execute q1a;
+                                                                                 QUERY PLAN                                                                                 
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=30010.08..30010.09 rows=1 width=45) (actual time=5.704..5.704 rows=1 loops=1)
+   ->  Nested Loop  (cost=6482.03..30010.06 rows=3 width=45) (actual time=0.098..5.658 rows=142 loops=1)
+         Join Filter: (mc.movie_id = t.id)
+         ->  Hash Join  (cost=6481.60..30008.29 rows=3 width=32) (actual time=0.092..5.225 rows=142 loops=1)
+               Hash Cond: (mc.company_type_id = ct.id)
+               ->  Nested Loop  (cost=6462.68..29987.21 rows=566 width=36) (actual time=0.071..5.173 rows=147 loops=1)
+                     ->  Nested Loop  (cost=6462.25..22168.36 rows=12213 width=4) (actual time=0.036..0.091 rows=250 loops=1)
+                           ->  Seq Scan on info_type it  (cost=0.00..2.41 rows=1 width=4) (actual time=0.012..0.013 rows=1 loops=1)
+                                 Filter: ((info)::text = 'top 250 rank'::text)
+                                 Rows Removed by Filter: 112
+                           ->  Bitmap Heap Scan on movie_info_idx mi_idx  (cost=6462.25..18715.86 rows=345009 width=8) (actual time=0.022..0.036 rows=250 loops=1)
+                                 Recheck Cond: (info_type_id = it.id)
+                                 Heap Blocks: exact=2
+                                 ->  Bitmap Index Scan on info_type_id_movie_info_idx  (cost=0.00..6375.99 rows=345009 width=0) (actual time=0.015..0.015 rows=250 loops=1)
+                                       Index Cond: (info_type_id = it.id)
+                     ->  Index Scan using movie_id_movie_companies on movie_companies mc  (cost=0.43..0.63 rows=1 width=32) (actual time=0.020..0.020 rows=1 loops=250)
+                           Index Cond: (movie_id = mi_idx.movie_id)
+                           Filter: ((note !~~ '%(as Metro-Goldwyn-Mayer Pictures)%'::text) AND ((note ~~ '%(co-production)%'::text) OR (note ~~ '%(presents)%'::text)))
+                           Rows Removed by Filter: 33
+               ->  Hash  (cost=18.88..18.88 rows=4 width=4) (actual time=0.017..0.017 rows=1 loops=1)
+                     Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                     ->  Seq Scan on company_type ct  (cost=0.00..18.88 rows=4 width=4) (actual time=0.011..0.011 rows=1 loops=1)
+                           Filter: ((kind)::text = 'production companies'::text)
+                           Rows Removed by Filter: 3
+         ->  Index Scan using title_pkey on title t  (cost=0.43..0.58 rows=1 width=25) (actual time=0.003..0.003 rows=1 loops=142)
+               Index Cond: (id = mi_idx.movie_id)
+ Execution time: 5.757 ms
+```
+
+The overwhelming majority of the time is attributed to the final aggregate, which is weird. I don't know much about how it calculates these times, but I would expect producing the data to take at lesat as much time as reducing it.
+
+Let's get some data into Imp!
+
+``` julia
+function read_job()
+  schema = readdlm(open("data/job_schema.csv"), ',', header=false, quotes=true, comments=false)
+  tables = Dict()
+  for column in 1:size(schema)[1]
+    table_name, ix, column_name, column_type = schema[column, 1:4]
+    push!(get!(tables, table_name, []), (ix, column_name, column_type))
+  end
+  relations = []
+  names = []
+  for (table_name, columns) in tables
+    if isfile("../job/$(table_name).csv")
+      rows = readdlm(open("../job/$(table_name).csv"), ',', header=false, quotes=true, comments=false)
+      n = size(rows)[1]
+      ids = Int64[rows[r,1] for r in 1:n]
+      push!(names, symbol(table_name))
+      push!(relations, Relation((ids,)))
+      for (ix, column_name, column_type) in columns[2:end]
+        @show table_name ix column_name column_type
+        if column_type == "integer"
+          ids = Int64[]
+          column = Int64[]
+          for r in 1:n
+            if !(rows[r, ix] in ("", "null", "NULL"))
+              push!(ids, rows[r, 1])
+              push!(column, rows[r, ix])
+            end
+          end
+        else
+          ids = Int64[]
+          column = String[]
+          for r in 1:n
+            if !(rows[r, ix] in ("", "null", "NULL"))
+              push!(ids, rows[r, 1])
+              push!(column, string(rows[r, ix]))
+            end
+          end
+        end
+        push!(names, symbol(table_name, "_", column_name))
+        push!(relations, Relation((ids, column)))
+      end
+    end
+  end
+  (names, relations)
+end
+```
+
+This reads the schema I dumped out of postgres and builds a normalized set of relations (taking advantage of the fact that every table in the dataset has a single integer as it's primary key). I'm normalizing it this way to avoid having to represent with null entries directly. Possible future feature.
+
+I'm using the stdlib csv reading function, which generates a single big array containing all the data, meaning that if there are any strings then all the integers have to be boxed too and everything goes to poop.  
+
+The csv reading code also returns `SubString`s - pointers to slices of the mmaped file - rather than allocating individual strings. But this seems unrealistic - I don't actually expect real-world data to arrive all in one nice contiguous file. So I'm reallocating them all as individual strings.
+
+All of this means that loading the data takes FOREVER, but the final representation is pretty sensible. Later I'll have to find a faster way of doing this. Maybe DataFrames.jl is better?
+
+``` julia
+using DataFrames
+
+function read_job()
+  schema = readdlm(open("data/job_schema.csv"), ',', header=false, quotes=true, comments=false)
+  table_column_names = Dict()
+  table_column_types = Dict()
+  for column in 1:size(schema)[1]
+    table_name, ix, column_name, column_type = schema[column, 1:4]
+    push!(get!(table_column_names, table_name, []), column_name)
+    push!(get!(table_column_types, table_name, []), (column_type == "integer" ? Int64 : String))
+  end
+  relations = []
+  names = []
+  for (table_name, column_names) in table_column_names
+    if isfile("../job/$(table_name).csv")
+      column_types = table_column_types[table_name]
+      @show table_name column_names column_types
+      frame = readtable(open("../imdb/$(table_name).csv"), header=false, eltypes=column_types)
+      n = length(frame[1])
+      ids = copy(frame[1].data)
+      for (ix, (column_name, column_type)) in enumerate(zip(column_names, column_types))
+        @show table_name ix column_name column_type
+        data_array = frame[ix]
+        if ix == 1
+          push!(names, symbol(table_name))
+          push!(relations, Relation((ids,)))
+        else
+          column_ids = Int64[id for (ix, id) in enumerate(ids) if !(data_array.na[ix])]
+          local column
+          if isa(data_array, DataArray{Int64})
+            let data::Vector{Int64} = data_array.data
+              column = Int64[d for (ix, d) in enumerate(data) if !(data_array.na[ix])]
+            end
+          elseif isa(data_array, DataArray{String})
+            let data::Vector{String} = data_array.data
+              column = String[d for (ix, d) in enumerate(data_array.data) if !(data_array.na[ix])]
+            end
+          end
+          push!(names, symbol(table_name, "_", column_name))
+          push!(relations, Relation((column_ids, column)))
+        end
+      end
+    end
+  end
+  (names, relations)
+end
+```
+
+Woah, way way faster. 
+
+Weirdly, unpacking the results into individual variable names blows up with an out-of-memory error.
+
+``` julia 
+person_info,person_info_person_id,person_info_info_type_id,person_info_info,person_info_note,title,title_title,title_imdb_index,title_kind_id,title_production_year,title_imdb_id,title_phonetic_code,title_episode_of_id,title_season_nr,title_episode_nr,title_series_years,title_md5sum,link_type,link_type_link,cast_info,cast_info_person_id,cast_info_movie_id,cast_info_person_role_id,cast_info_note,cast_info_nr_order,cast_info_role_id,movie_info_idx,movie_info_idx_movie_id,movie_info_idx_info_type_id,movie_info_idx_info,movie_info_idx_note,name,name_name,name_imdb_index,name_imdb_id,name_gender,name_name_pcode_cf,name_name_pcode_nf,name_surname_pcode,name_md5sum,info_type,info_type_info,aka_name,aka_name_person_id,aka_name_name,aka_name_imdb_index,aka_name_name_pcode_cf,aka_name_name_pcode_nf,aka_name_surname_pcode,aka_name_md5sum,movie_info,movie_info_movie_id,movie_info_info_type_id,movie_info_info,movie_info_note,role_type,role_type_role,aka_title,aka_title_movie_id,aka_title_title,aka_title_imdb_index,aka_title_kind_id,aka_title_production_year,aka_title_phonetic_code,aka_title_episode_of_id,aka_title_season_nr,aka_title_episode_nr,aka_title_note,aka_title_md5sum,complete_cast,complete_cast_movie_id,complete_cast_subject_id,complete_cast_status_id,movie_keyword,movie_keyword_movie_id,movie_keyword_keyword_id,kind_type,kind_type_kind,movie_link,movie_link_movie_id,movie_link_linked_movie_id,movie_link_link_type_id,company_name,company_name_name,company_name_country_code,company_name_imdb_id,company_name_name_pcode_nf,company_name_name_pcode_sf,company_name_md5sum,keyword,keyword_keyword,keyword_phonetic_code,comp_cast_type,comp_cast_type_kind,char_name,char_name_name,char_name_imdb_index,char_name_imdb_id,char_name_name_pcode_nf,char_name_surname_pcode,char_name_md5sum,movie_companies,movie_companies_movie_id,movie_companies_company_id,movie_companies_company_type_id,movie_companies_note,company_type,company_type_kind = relations
+```
+
+I have no idea why. At a guess, unpacking 100-odd variables at once triggers some weird corner case in the compiler.
+
+But now the julia process is dead and I have to load all that data into memory again. Sigh...
+
+The reason I wanted to unpack everything is that the query compiler currently can't handle non-symbol relation names eg `person_info_person_id(p, pi)` works but `db[:person_info, :person_id](p, pi)` does not. But I can fix that pretty easily - let's finally get around to wrapping the query in a function.
+
+``` julia
+function plan(...)
+  ...
+  quote 
+    # TODO pass through any external vars too to avoid closure boxing grossness
+    function query($([symbol("relation_", clause) for clause in relation_clauses]...))
+      $setup
+      $body
+      Relation(tuple($([symbol("results_", variable) for variable in returned_variables]...), results_aggregate))
+    end
+    query($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
+  end
+end
+```
+
+So the generated code will look like:
+
+``` julia 
+function query(relation_1, ...)
+  ...
+end
+query(db[:person_info, :person_id], ...)
+```
+
+Now I'll load the imdb data into a dict of relations, and then try to serialize it so I don't have to do it again:
+
+``` julia 
+job = @time read_job()
+
+open("../job/imp.bin", "w") do f
+    @time serialize(f, job)
+end
+
+# 743.572276 seconds (4.92 G allocations: 139.663 GB, 65.42% gc time)
+# 42.551220 seconds (92.15 M allocations: 1.384 GB, 7.74% gc time)
+```
+
+140GB of temporary allocations. Something in there is still a mess.
+
+``` julia 
+job = @time deserialize(open("../job/imp.bin"))
+# 700.359796 seconds (943.00 M allocations: 50.969 GB, 78.30% gc time)
+# OutOfMemoryError()
+```
+
+So that's weird. It made a big mess of allocations deserializing the data, finished, then about 3 seconds later threw an out of memory error. 
+
+Later, trying to rebuild the dataset, Julia dies with:
+
+```
+Julia has stopped: null, SIGKILL
+```
+
+This is frustrating. Reading a 6gb dataset on a machine with 32gb of ram should not be difficult.
+
+After several attempts, JLD manages to both save and load the dataset without exploding, although never both sequentially. After gc, top shows:
+
+```
+13908 jamie     20   0 22.560g 0.017t  64752 S  61.4 54.2   2:03.90 julia
+```
+
+I asked to see the results (bearing in mind that the representation is truncated) and...
+
+``` 
+OutOfMemoryError()
+ in resize!(::Array{UInt8,1}, ::UInt64) at ./array.jl:470
+ in ensureroom at ./iobuffer.jl:194 [inlined]
+ in unsafe_write(::Base.AbstractIOBuffer{Array{UInt8,1}}, ::Ptr{UInt8}, ::UInt64) at ./iobuffer.jl:275
+ in write(::IOContext{Base.AbstractIOBuffer{Array{UInt8,1}}}, ::Array{UInt8,1}) at ./io.jl:161
+ in show at ./show.jl:234 [inlined]
+ in show_delim_array(::IOContext{Base.AbstractIOBuffer{Array{UInt8,1}}}, ::Array{Int64,1}, ::String, ::String, ::String, ::Bool, ::Int64, ::Int64) at ./show.jl:318
+ in show_delim_array(::IOContext{Base.AbstractIOBuffer{Array{UInt8,1}}}, ::Array{Int64,1}, ::String, ::String, ::String, ::Bool) at ./show.jl:300
+ in show_vector(::IOContext{Base.AbstractIOBuffer{Array{UInt8,1}}}, ::Array{Int64,1}, ::String, ::String) at ./show.jl:1666
+ in #showarray#252(::Bool, ::Function, ::IOContext{Base.AbstractIOBuffer{Array{UInt8,1}}}, ::Array{Int64,1}, ::Bool) at ./show.jl:1585
+ in show_delim_array(::IOContext{Base.AbstractIOBuffer{Array{UInt8,1}}}, ::Tuple{Array{Int64,1},Array{Int64,1}}, ::Char, ::Char, ::Char, ::Bool, ::Int64, ::Int64) at ./show.jl:355
+ in show(::IOContext{Base.AbstractIOBuffer{Array{UInt8,1}}}, ::Tuple{Array{Int64,1},Array{Int64,1}}) at ./show.jl:376
+ in show_default(::IOContext{Base.AbstractIOBuffer{Array{UInt8,1}}}, ::Any) at ./show.jl:130
+ in show(::IOContext{Base.AbstractIOBuffer{Array{UInt8,1}}}, ::Any) at ./show.jl:116
+ in show(::IOContext{Base.AbstractIOBuffer{Array{UInt8,1}}}, ::MIME{Symbol("text/plain")}, ::Dict{Any,Any}) at ./replutil.jl:94
+ in verbose_show(::Base.AbstractIOBuffer{Array{UInt8,1}}, ::MIME{Symbol("text/plain")}, ::Dict{Any,Any}) at ./multimedia.jl:50
+ in #sprint#226(::Void, ::Function, ::Int64, ::Function, ::MIME{Symbol("text/plain")}, ::Vararg{Any,N}) at ./strings/io.jl:37
+ in Type at /home/jamie/.julia/v0.5/Atom/src/display/view.jl:78 [inlined]
+ in Type at /home/jamie/.julia/v0.5/Atom/src/display/view.jl:79 [inlined]
+ in render(::Atom.Editor, ::Dict{Any,Any}) at /home/jamie/.julia/v0.5/Atom/src/display/display.jl:23
+ in (::Atom.##91#95)(::Dict{String,Any}) at /home/jamie/.julia/v0.5/Atom/src/eval.jl:62
+ in handlemsg(::Dict{String,Any}, ::Dict{String,Any}, ::Vararg{Dict{String,Any},N}) at /home/jamie/.julia/v0.5/Atom/src/comm.jl:71
+ in (::Atom.##5#8)() at ./event.jl:46
+```
+
+But if I treat it with kid gloves and never ask to see the actual result, I can write my first tiny query against the dataset:
+
+``` julia
+@query([cid, cn],
+[cid::Int64, cn::String],
+begin 
+  job["company_name", "name"](cid, cn)
+end)
+```
+
+That works fine.
+
+But if I wrap it in a function and run the function I get a bounds error (which takes a long time to generate because Julia prints the entire relation in the error). I think inside a function scope, functions are all defined up top, but globally the definitions are executed sequentially. So if the function names collide, behaviour in each scope is different. I added a counter just uniquefies each function name and the problem went away.

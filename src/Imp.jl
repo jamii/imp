@@ -270,8 +270,6 @@ end
 function plan_join(returned_variables, aggregate, aggregate_type, variables, variable_types, return_ix, query)
   aggregate_zero, aggregate_add, aggregate_expr = aggregate
   
-  relations = [line.args[1] for line in query.args if line.head != :line]
-  
   relation_clauses = []
   expression_clauses = []
   assignment_clauses = Dict()
@@ -288,6 +286,12 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
     else
       assert(line.head == :line)
     end
+  end
+  
+  relation_names = Dict()
+  for clause in relation_clauses
+    relation_name = query.args[clause].args[1]
+    relation_names[clause] = relation_name
   end
   
   sources = Dict()
@@ -322,8 +326,8 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
   
   index_inits = []
   for (clause, columns) in sort_orders
-    clause_name = query.args[clause].args[1]
-    index_init = :($clause_name = index($(esc(clause_name)), [$(columns...)]))
+    relation_name = relation_names[clause]
+    index_init = :($(symbol("index_", relation_name)) = index($relation_name, [$(columns...)]))
     push!(index_inits, index_init)
   end
   
@@ -332,8 +336,8 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
     if column == :buffer
       column_inits[ix] = :()
     else
-      clause_name = query.args[clause].args[1]
-      column_inits[ix] = :($clause_name[$column])
+      relation_name = relation_names[clause]
+      column_inits[ix] = :($(symbol("index_", relation_name))[$column])
     end
   end
   
@@ -418,13 +422,20 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
       body = make_return(returned_variables, body)
     end
   end
+  
+  escaped_names = Set(values(relation_names))
           
   quote 
-    $setup
-    $body
-    Relation(tuple($([symbol("results_", variable) for variable in returned_variables]...), results_aggregate))
+    # TODO pass through any external vars too to avoid closure boxing grossness
+    function query($(escaped_names...))
+      $setup
+      $body
+      Relation(tuple($([symbol("results_", variable) for variable in returned_variables]...), results_aggregate))
+    end
+    query($([esc(name) for name in escaped_names]...))
   end
 end
+
 
 function plan_query(returned_variables, typed_variables, aggregate, query)
   aggregate_type, variables, variable_types, return_ix = analyse(returned_variables, typed_variables, aggregate)

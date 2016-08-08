@@ -246,7 +246,7 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
   for buffer_ix in buffer_ixes
     repeats = :($repeats * (his[$buffer_ix] - los[$buffer_ix]))
   end
-  body = :(aggregate = $(aggregate_add)(aggregate, $aggregate_expr, $repeats))
+  body = :(aggregate = $(aggregate_add)(aggregate, $(esc(aggregate_expr)), $repeats))
   if return_ix == length(variables) + 1
     body = make_return(returned_variables, body)
   end
@@ -256,12 +256,12 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
     variable_ixes = symbol("ixes_", variable)
     result_column = ixes[sources[variable][1]]
     for filter in filters[variable_ix]
-      body = :(if $filter; $body; end)
+      body = :(if $(esc(filter)); $body; end)
     end
     if haskey(assignment_clauses, variable)
       body = quote
-        $variable = $(assignment_clauses[variable])
-        if assign($variable_columns, los, ats, his, $variable_ixes, $variable)
+        $(esc(variable)) = $(esc(assignment_clauses[variable]))
+        if assign($variable_columns, los, ats, his, $variable_ixes, $(esc(variable)))
           $body
         end
       end
@@ -269,7 +269,7 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
       body = quote
         start_intersect($variable_columns, los, ats, his, $variable_ixes)
         while next_intersect($variable_columns, los, ats, his, $variable_ixes)
-          $variable = columns[$result_column][los[$(result_column+1)]]
+          $(esc(variable)) = columns[$result_column][los[$(result_column+1)]]
           $body
         end
       end 
@@ -288,7 +288,7 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
       $body
       Relation(tuple($([symbol("results_", variable) for variable in returned_variables]...), results_aggregate))
     end
-    # @code_warntype $(symbol("query_", query_number))($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
+    # @code_llvm $(symbol("query_", query_number))($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
     $(symbol("query_", query_number))($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
   end
 end

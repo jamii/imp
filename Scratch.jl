@@ -225,7 +225,7 @@ end).columns
 function f()
   @query([],
   [ct_kind::String, ct_id::Int64, mc_id::Int64, mc_note::String, t_id::Int64, mii_id::Int64, it_id::Int64, it_info::String, t_production_year::Int64],
-  (3000, min_exp, t_production_year),
+  (3000, min_exp, t_production_year::Int64),
   begin 
     ct_kind = "production companies"
     it_info = "top 250 rank"

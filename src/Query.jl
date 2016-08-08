@@ -288,6 +288,7 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
       $body
       Relation(tuple($([symbol("results_", variable) for variable in returned_variables]...), results_aggregate))
     end
+    # @code_warntype $(symbol("query_", query_number))($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
     $(symbol("query_", query_number))($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
   end
 end
@@ -299,7 +300,7 @@ function plan_query(returned_variables, typed_variables, aggregate, query)
   project_variable_types = Any[variable_type for (variable, variable_type) in zip(variables, variable_types) if variable in returned_variables]
   push!(project_variables, :prev_aggregate)
   push!(project_variable_types, aggregate_type)
-  project_aggregate = [aggregate[1], aggregate[2], :prev_aggregate]
+  project_aggregate = [aggregate[1], aggregate[2], :(prev_aggregate::$aggregate_type)]
   project_query = quote 
     intermediate($(project_variables...))
   end

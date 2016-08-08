@@ -140,6 +140,6 @@ function index{T}(relation::Relation{T}, order::Vector{Int64})
   end
 end
 
-export Relation
+export Relation, index
 
 end

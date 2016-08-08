@@ -5754,3 +5754,56 @@ end)
 That works fine.
 
 But if I wrap it in a function and run the function I get a bounds error (which takes a long time to generate because Julia prints the entire relation in the error). I think inside a function scope, functions are all defined up top, but globally the definitions are executed sequentially. So if the function names collide, behaviour in each scope is different. I added a counter just uniquefies each function name and the problem went away.
+
+Let's have a go at query 1a.
+
+``` julia 
+# SELECT MIN(mc.note) AS production_note,
+#        MIN(t.title) AS movie_title,
+#        MIN(t.production_year) AS movie_year
+# FROM company_type AS ct,
+#      info_type AS it,
+#      movie_companies AS mc,
+#      movie_info_idx AS mi_idx,
+#      title AS t
+# WHERE ct.kind = 'production companies'
+#   AND it.info = 'top 250 rank'
+#   AND mc.note NOT LIKE '%(as Metro-Goldwyn-Mayer Pictures)%'
+#   AND (mc.note LIKE '%(co-production)%'
+#        OR mc.note LIKE '%(presents)%')
+#   AND ct.id = mc.company_type_id
+#   AND t.id = mc.movie_id
+#   AND t.id = mi_idx.movie_id
+#   AND mc.movie_id = mi_idx.movie_id
+#   AND it.id = mi_idx.info_type_id;
+
+function f()
+  @query([],
+  [ct_kind::String, ct_id::Int64, mc_id::Int64, mc_note::String, t_id::Int64, mii_id::Int64, it_id::Int64, it_info::String, t_production_year::Int64],
+  (3000, min_exp, t_production_year),
+  begin 
+    ct_kind = "production companies"
+    it_info = "top 250 rank"
+    job["company_type", "kind"](ct_id, ct_kind)
+    job["info_type", "info"](it_id, it_info)
+    job["movie_companies", "note"](mc_id, mc_note)
+    ismatch(r".*as Metro-Goldwyn-Mayer Pictures.*", mc_note) == false
+    (ismatch(r".*co-production.*", mc_note) || ismatch(r".*presents.*", mc_note)) == true
+    job["movie_companies", "company_type_id"](mc_id, ct_id)
+    job["title", "production_year"](t_id, t_production_year)
+    job["movie_companies", "movie_id"](mc_id, t_id)
+    job["movie_info_idx", "movie_id"](mii_id, t_id)
+    job["movie_info_idx", "info_type_id"](mii_id, it_id)
+  end)
+end
+
+# first run (indexing + compilation)
+# 7.278131 seconds (479.39 k allocations: 192.071 MB, 82.77% gc time)
+
+# second run
+# 0.118113 seconds (292.96 k allocations: 4.476 MB)
+```
+
+118ms. Not going to knock postgres off any pedastals just yet. 
+
+I want to know what's going on with those allocations. There should barely be any. I squelched a few type-inference failures but it didn't change the number of allocations at all, which is weird.

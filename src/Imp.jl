@@ -288,12 +288,6 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
     end
   end
   
-  relation_names = Dict()
-  for clause in relation_clauses
-    relation_name = query.args[clause].args[1]
-    relation_names[clause] = relation_name
-  end
-  
   sources = Dict()
   for clause in relation_clauses
     line = query.args[clause]
@@ -326,8 +320,7 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
   
   index_inits = []
   for (clause, columns) in sort_orders
-    relation_name = relation_names[clause]
-    index_init = :($(symbol("index_", relation_name)) = index($relation_name, [$(columns...)]))
+    index_init = :($(symbol("index_", clause)) = index($(symbol("relation_", clause)), [$(columns...)]))
     push!(index_inits, index_init)
   end
   
@@ -336,8 +329,7 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
     if column == :buffer
       column_inits[ix] = :()
     else
-      relation_name = relation_names[clause]
-      column_inits[ix] = :($(symbol("index_", relation_name))[$column])
+      column_inits[ix] = :($(symbol("index_", clause))[$column])
     end
   end
   
@@ -422,20 +414,17 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
       body = make_return(returned_variables, body)
     end
   end
-  
-  escaped_names = Set(values(relation_names))
           
   quote 
     # TODO pass through any external vars too to avoid closure boxing grossness
-    function query($(escaped_names...))
+    function query($([symbol("relation_", clause) for clause in relation_clauses]...))
       $setup
       $body
       Relation(tuple($([symbol("results_", variable) for variable in returned_variables]...), results_aggregate))
     end
-    query($([esc(name) for name in escaped_names]...))
+    query($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
   end
 end
-
 
 function plan_query(returned_variables, typed_variables, aggregate, query)
   aggregate_type, variables, variable_types, return_ix = analyse(returned_variables, typed_variables, aggregate)
@@ -461,7 +450,9 @@ end
 @inline mul_exp(a, b, n) = a * (b ^ n)
 
 macro join(returned_variables, typed_variables, query)
-  :(@join($returned_variables, $typed_variables, (0, add_exp, 1::Int64), $query))
+  aggregate = :(0, add_exp, 1::Int64)
+  aggregate_type, variables, variable_types, return_ix = analyse(returned_variables.args, typed_variables.args, aggregate.args)
+  plan_join(returned_variables.args, aggregate.args, aggregate_type, variables, variable_types, return_ix, query)
 end
 
 macro join(returned_variables, typed_variables, aggregate, query)
@@ -470,29 +461,12 @@ macro join(returned_variables, typed_variables, aggregate, query)
 end
 
 macro query(returned_variables, typed_variables, query)
-  :(@query($returned_variables, $typed_variables, (0, add_exp, 1::Int64), $query))
+  aggregate = :(0, add_exp, 1::Int64)
+  plan_query(returned_variables.args, typed_variables.args, aggregate.args, query)
 end
 
 macro query(returned_variables, typed_variables, aggregate, query)
   plan_query(returned_variables.args, typed_variables.args, aggregate.args, query)
-end
-
-function read_columns(filename, types; comments=false)
-  rows, _ = readdlm(open(filename), '\t', header=true, quotes=false, comments=comments)
-  n = length(types)
-  columns = tuple([Vector{types[c]}() for c in 1:n]...)
-  for r in 1:size(rows)[1]
-    for c in 1:n
-      if types[c] == String
-        push!(columns[c], string(rows[r, c]))
-      elseif isa(rows[r, c], SubString)
-        @show r c rows[r, c]
-      else
-        push!(columns[c], rows[r, c])
-      end
-    end
-  end
-  Relation(columns)
 end
 
 import Atom
@@ -500,191 +474,6 @@ function Atom.render(editor::Atom.Editor, relation::Relation)
   Atom.render(editor, relation.columns)
 end
 
-srand(999)
-# edge = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
-edge = Relation(([1, 2, 3, 3, 4], [2, 3, 1, 4, 2]))
-# edge = read_columns("/home/jamie/soc-LiveJournal1.txt", [Int32, Int32], comments=true)
-
-function f(edge) 
-  @join([a,b,c], [a::Int64,b::Int64,c::Int64], 
-  begin
-    edge(a,b)
-    a < b
-    edge(b,c)
-    b < c
-    edge(c,a)
-  end)
-end
-
-macroexpand(quote 
-@join([a,b,c], [a::Int64,b::Int64,c::Int64], 
-begin
-  edge(a,b)
-  a < b
-  edge(b,c)
-  b < c
-  edge(c,a)
-end)
-end)
-
-# @code_warntype f(edge)
-f(edge)
-f(edge)
-
-album = read_columns("data/Album.csv", [Int64, String, Int64])
-artist = read_columns("data/Artist.csv", [Int64, String])
-track = read_columns("data/Track.csv", [Int64, String, Int64, Int64, Int64, String, Int64, Int64, Float64])
-playlist_track = read_columns("data/PlaylistTrack.csv", [Int64, Int64])
-playlist = read_columns("data/Playlist.csv", [Int64, String])
-
-macroexpand(quote
-@join([an],
-[pn::String, p::Int64, t::Int64, al::Int64, a::Int64, an::String],
-begin
-  pn = "Heavy Metal Classic"
-  playlist(p, pn)
-  playlist_track(p, t)
-  track(t, _, al)
-  album(al, _, a)
-  artist(a, an)
-end)
-end)
-
-function who_is_metal(album, artist, track, playlist_track, playlist)
-  metal = @join([an],
-  [pn::String, p::Int64, t::Int64, al::Int64, a::Int64, an::String],
-  begin
-    pn = "Heavy Metal Classic"
-    playlist(p, pn)
-    playlist_track(p, t)
-    track(t, _, al)
-    album(al, _, a)
-    artist(a, an)
-  end)
-  @join([an],
-  [an::String], 
-  begin
-    metal(an)
-  end)
-end
-
-function who_is_metal2(album, artist, track, playlist_track, playlist)
-  i1 = @join([p],
-  [pn::String, p::Int64],
-  begin
-    pn = "Heavy Metal Classic"
-    playlist(p, pn)
-  end)
-  i2 = @join([t],
-  [p::Int64, t::Int64],
-  begin 
-    i1(p)
-    playlist_track(p, t)
-  end)
-  i3 = @join([al],
-  [t::Int64, al::Int64],
-  begin 
-    i2(t)
-    track(t, _, al)
-  end)
-  i4 = @join([a],
-  [al::Int64, a::Int64],
-  begin 
-    i3(al)
-    album(al, _, a)
-  end)
-  i5 = @join([an],
-  [a::Int64, an::String],
-  begin 
-    i4(a)
-    artist(a, an)
-  end)
-  @join([an],
-  [an::String],
-  begin
-    i5(an)
-  end)
-end
-
-who_is_metal(album, artist, track, playlist_track, playlist)
-who_is_metal2(album, artist, track, playlist_track, playlist)
-
-# assert(who_is_metal(album, artist, track, playlist_track, playlist) == who_is_metal2(album, artist, track, playlist_track, playlist))
-
-# @code_warntype who_is_metal(album, artist, track, playlist_track, playlist)
-
-# @time [who_is_metal(album, artist, track, playlist_track, playlist) for n in 1:10000]
-# @time [who_is_metal2(album, artist, track, playlist_track, playlist) for n in 1:10000]
-
-function how_metal(album, artist, track, playlist_track, playlist)
-  metal = @join([],
-  [pn::String, p::Int64, t::Int64, al::Int64, a::Int64, an::String],
-  begin
-    pn = "Heavy Metal Classic"
-    playlist(p, pn)
-    playlist_track(p, t)
-    track(t, _, al)
-    album(al, _, a)
-    artist(a, an)
-  end)
-end
-
-@time how_metal(album, artist, track, playlist_track, playlist)
-
-function cost_of_playlist(album, artist, track, playlist_track, playlist)
-  @join([pn],
-  [p::Int64, pn::String, t::Int64, al::Int64, price::Float64],
-  (0.0,add_exp,price::Float64),
-  begin
-    playlist(p, pn)
-    playlist_track(p, t)
-    track(t, _, al, _, _, _, _, _, price)
-  end)
-end
-
-@time cost_of_playlist(album, artist, track, playlist_track, playlist)
-
-function revenue_per_track(album, artist, track, playlist_track, playlist)
-  result = @join([p, pn, t],
-  [p::Int64, pn::String, t::Int64, al::Int64, price::Float64],
-  (0.0,add_exp,price::Float64),
-  begin
-    playlist(p, pn)
-    playlist_track(p, t)
-    track(t, _, al, _, _, _, _, _, price)
-  end)
-  @join([t],
-  [t::Int64, p::Int64, pn::String, price::Float64],
-  (0.0,add_exp,price::Float64),
-  begin
-    result(p, pn, t, price)
-  end)
-end
-
-function revenue_per_track2(album, artist, track, playlist_track, playlist)
-  @query([t],
-  [p::Int64, pn::String, t::Int64, al::Int64, price::Float64],
-  (0.0,add_exp,price::Float64),
-  begin
-    playlist(p, pn)
-    playlist_track(p, t)
-    track(t, _, al, _, _, _, _, _, price)
-  end)
-end
-
-@time revenue_per_track(album, artist, track, playlist_track, playlist)
-@time revenue_per_track2(album, artist, track, playlist_track, playlist)
-
-assert(revenue_per_track(album, artist, track, playlist_track, playlist).columns == revenue_per_track2(album, artist, track, playlist_track, playlist).columns)
-
-@query([pn, an],
-[pn::String, p::Int64, t::Int64, al::Int64, a::Int64, an::String],
-begin
-  playlist(p, pn)
-  playlist_track(p, t)
-  track(t, _, al)
-  album(al, _, a)
-  artist(a, an)
-end).columns
+export Relation, @query, @join
 
 end

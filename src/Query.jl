@@ -235,7 +235,7 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
       $tail 
       if aggregate != $aggregate_zero
         $([
-        :(push!($(symbol("results_", variable)), $variable))
+        :(push!($(symbol("results_", variable)), $(esc(variable))))
         for variable in returned_variables]...)
         push!(results_aggregate, aggregate)
       end
@@ -288,14 +288,14 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
       $body
       Relation(tuple($([symbol("results_", variable) for variable in returned_variables]...), results_aggregate))
     end
-    # @code_llvm $(symbol("query_", query_number))($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
+    # @code_warntype $(symbol("query_", query_number))($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
     $(symbol("query_", query_number))($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
   end
 end
 
 function plan_query(returned_variables, typed_variables, aggregate, query)
   aggregate_type, variables, variable_types, return_ix = analyse(returned_variables, typed_variables, aggregate)
-  join = plan_join(returned_variables, aggregate, aggregate_type, variables, variable_types, return_ix, query)
+  join = @show plan_join(returned_variables, aggregate, aggregate_type, variables, variable_types, return_ix, query)
   project_variables = Any[variable for (variable, variable_type) in zip(variables, variable_types) if variable in returned_variables]
   project_variable_types = Any[variable_type for (variable, variable_type) in zip(variables, variable_types) if variable in returned_variables]
   push!(project_variables, :prev_aggregate)
@@ -305,7 +305,7 @@ function plan_query(returned_variables, typed_variables, aggregate, query)
     intermediate($(project_variables...))
   end
   project_return_ix = length(returned_variables) + 1
-  project = plan_join(returned_variables, project_aggregate, aggregate_type, project_variables, project_variable_types, project_return_ix, project_query)
+  project = @show plan_join(returned_variables, project_aggregate, aggregate_type, project_variables, project_variable_types, project_return_ix, project_query)
   quote 
     let $(esc(:intermediate)) = let; $join; end
       $project

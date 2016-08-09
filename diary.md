@@ -5807,3 +5807,320 @@ end
 118ms. Not going to knock postgres off any pedastals just yet. 
 
 I want to know what's going on with those allocations. There should barely be any. I squelched a few type-inference failures but it didn't change the number of allocations at all, which is weird.
+
+## 2016 Aug 09
+
+Looks like `ismatch` causes a single heap allocation on each call. So nothing wrong with my compiler.
+
+Let's pick a query with no regexes.
+
+``` julia
+# SELECT MIN(t.title) AS movie_title
+# FROM company_name AS cn,
+#      keyword AS k,
+#      movie_companies AS mc,
+#      movie_keyword AS mk,
+#      title AS t
+# WHERE cn.country_code ='[de]'
+#   AND k.keyword ='character-name-in-title'
+#   AND cn.id = mc.company_id
+#   AND mc.movie_id = t.id
+#   AND t.id = mk.movie_id
+#   AND mk.keyword_id = k.id
+#   AND mc.movie_id = mk.movie_id;
+
+function q2a()
+  @query([],
+  [cnit::String, k_id::Int64, mk_id::Int64, t_id::Int64, mc_id::Int64, cn_id::Int64, de::String, title::String],
+  ("zzzzzzzzzzz", min_exp, title::String),
+  begin
+    de = "[de]"
+    job["company_name", "country_code"](cn_id, de) 
+    cnit = "character-name-in-title"
+    job["keyword", "keyword"](k_id, cnit)
+    job["movie_companies", "company_id"](mc_id, cn_id)
+    job["movie_companies", "movie_id"](mc_id, t_id)
+    job["movie_keyword", "movie_id"](mk_id, t_id)
+    job["movie_keyword", "keyword_id"](mk_id, k_id)
+    job["title", "title"](t_id, title)
+  end)
+end
+
+@time q2a()
+
+# 1.998575 seconds (142.43 k allocations: 44.412 MB, 63.25% gc time)
+# 0.126513 seconds (108 allocations: 7.250 KB)
+# 0.125623 seconds (108 allocations: 7.250 KB)
+```
+
+``` 
+postgres=# execute q2a;
+       movie_title        
+--------------------------
+ 008 - Agent wider Willen
+(1 row)
+
+Time: 2388.770 ms
+postgres=# execute q2a;
+       movie_title        
+--------------------------
+ 008 - Agent wider Willen
+(1 row)
+
+Time: 449.339 ms
+postgres=# execute q2a;
+       movie_title        
+--------------------------
+ 008 - Agent wider Willen
+(1 row)
+
+Time: 449.340 ms
+```
+
+Not worth reading too much into that, because I'm getting a different answer to postgres.
+
+Man, where do I even start debugging something like that. I guess, break the query down into pieces and find where it starts to diverge.
+
+``` julia
+function q2a()
+  @query([cnit, k_id],
+  [cnit::String, k_id::Int64], #, mk_id::Int64, t_id::Int64, mc_id::Int64, cn_id::Int64, de::String, title::String],
+  begin
+    # de = "[de]"
+    # job["company_name", "country_code"](cn_id, de) 
+    cnit = "character-name-in-title"
+    job["keyword", "keyword"](k_id, cnit)
+    # job["movie_companies", "company_id"](mc_id, cn_id)
+    # job["movie_companies", "movie_id"](mc_id, t_id)
+    # job["movie_keyword", "movie_id"](mk_id, t_id)
+    # job["movie_keyword", "keyword_id"](mk_id, k_id)
+    # job["title", "title"](t_id, title)
+  end)
+end
+
+function q2a()
+  @query([mk_id],
+  [cnit::String, k_id::Int64, mk_id::Int64], # t_id::Int64, mc_id::Int64, cn_id::Int64, de::String, title::String],
+  begin
+    # de = "[de]"
+    # job["company_name", "country_code"](cn_id, de) 
+    cnit = "character-name-in-title"
+    job["keyword", "keyword"](k_id, cnit)
+    # job["movie_companies", "company_id"](mc_id, cn_id)
+    # job["movie_companies", "movie_id"](mc_id, t_id)
+    # job["movie_keyword", "movie_id"](mk_id, t_id)
+    job["movie_keyword", "keyword_id"](mk_id, k_id)
+    # job["title", "title"](t_id, title)
+  end)
+end
+
+function q2a()
+  @query([t_id],
+  [cnit::String, k_id::Int64, mk_id::Int64, t_id::Int64], #, mc_id::Int64, cn_id::Int64, de::String, title::String],
+  begin
+    # de = "[de]"
+    # job["company_name", "country_code"](cn_id, de) 
+    cnit = "character-name-in-title"
+    job["keyword", "keyword"](k_id, cnit)
+    # job["movie_companies", "company_id"](mc_id, cn_id)
+    # job["movie_companies", "movie_id"](mc_id, t_id)
+    job["movie_keyword", "movie_id"](mk_id, t_id)
+    job["movie_keyword", "keyword_id"](mk_id, k_id)
+    # job["title", "title"](t_id, title)
+  end)
+end
+
+function q2a()
+  @query([mc_id],
+  [cnit::String, k_id::Int64, mk_id::Int64, t_id::Int64, mc_id::Int64], # cn_id::Int64, de::String, title::String],
+  begin
+    # de = "[de]"
+    # job["company_name", "country_code"](cn_id, de) 
+    cnit = "character-name-in-title"
+    job["keyword", "keyword"](k_id, cnit)
+    # job["movie_companies", "company_id"](mc_id, cn_id)
+    job["movie_companies", "movie_id"](mc_id, t_id)
+    job["movie_keyword", "movie_id"](mk_id, t_id)
+    job["movie_keyword", "keyword_id"](mk_id, k_id)
+    # job["title", "title"](t_id, title)
+  end)
+end
+
+function q2a()
+  @query([cn_id],
+  [cnit::String, k_id::Int64, mk_id::Int64, t_id::Int64, mc_id::Int64, cn_id::Int64], #, de::String, title::String],
+  begin
+    # de = "[de]"
+    # job["company_name", "country_code"](cn_id, de) 
+    cnit = "character-name-in-title"
+    job["keyword", "keyword"](k_id, cnit)
+    job["movie_companies", "company_id"](mc_id, cn_id)
+    job["movie_companies", "movie_id"](mc_id, t_id)
+    job["movie_keyword", "movie_id"](mk_id, t_id)
+    job["movie_keyword", "keyword_id"](mk_id, k_id)
+    # job["title", "title"](t_id, title)
+  end)
+end
+
+function q2a()
+  @query([title],
+  [cnit::String, k_id::Int64, mk_id::Int64, t_id::Int64, mc_id::Int64, cn_id::Int64, de::String, title::String],
+  begin
+    de = "[de]"
+    job["company_name", "country_code"](cn_id, de) 
+    cnit = "character-name-in-title"
+    job["keyword", "keyword"](k_id, cnit)
+    job["movie_companies", "company_id"](mc_id, cn_id)
+    job["movie_companies", "movie_id"](mc_id, t_id)
+    job["movie_keyword", "movie_id"](mk_id, t_id)
+    job["movie_keyword", "keyword_id"](mk_id, k_id)
+    job["title", "title"](t_id, title)
+  end)
+end
+```
+
+Eugh, that was tedious. Turns out that the query is correct, but `min` in sql uses a different ordering and I forget to use `count(distinct ...)` when I double-checked the total results.
+
+So let's have sql return the distinct count and Imp return the column of results, which seems roughly fair.
+
+```
+postgres=# execute q2a_all;
+Time: 443.249 ms
+postgres=# prepare q2a_distinct as select count(distinct t.title) AS movie_title FROM company_name AS cn, keyword AS k, movie_companies AS mc, movie_keyword AS mk, title AS t WHERE cn.country_code ='[de]' AND k.keyword ='character-name-in-title' AND cn.id = mc.company_id AND mc.movie_id = t.id AND t.id = mk.movie_id AND mk.keyword_id = k.id AND mc.movie_id = mk.movie_id;
+PREPARE
+Time: 0.468 ms
+postgres=# execute q2a_distinct
+postgres-# ;
+ movie_title 
+-------------
+        4127
+(1 row)
+
+Time: 455.719 ms
+postgres=# execute q2a_distinct;
+ movie_title 
+-------------
+        4127
+(1 row)
+
+Time: 450.318 ms
+postgres=# execute q2a_distinct;
+ movie_title 
+-------------
+        4127
+(1 row)
+
+Time: 441.992 ms
+```
+
+``` julia
+function q2a()
+  @query([title],
+  [cnit::String, k_id::Int64, mk_id::Int64, t_id::Int64, mc_id::Int64, cn_id::Int64, de::String, title::String],
+  begin
+    de = "[de]"
+    job["company_name", "country_code"](cn_id, de) 
+    cnit = "character-name-in-title"
+    job["keyword", "keyword"](k_id, cnit)
+    job["movie_companies", "company_id"](mc_id, cn_id)
+    job["movie_companies", "movie_id"](mc_id, t_id)
+    job["movie_keyword", "movie_id"](mk_id, t_id)
+    job["movie_keyword", "keyword_id"](mk_id, k_id)
+    job["title", "title"](t_id, title)
+  end)
+end
+
+@time q2a()
+
+# 0.128545 seconds (197 allocations: 646.297 KB)
+# 0.140465 seconds (197 allocations: 646.297 KB)
+# 0.138893 seconds (197 allocations: 646.297 KB)
+```
+
+Score. Faster than postgres on q2a, with the first variable ordering I tried.
+
+Let's go back to q1a and steal the execution plan from postgres.
+
+```
+postgres=# prepare q1a_distinct as SELECT count(distinct t.production_year) AS movie_year FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info_idx AS mi_idx, title AS t WHERE ct.kind = 'production companies' AND it.info = 'top 250 rank' AND mc.note  not like '%(as Metro-Goldwyn-Mayer Pictures)%' and (mc.note like '%(co-production)%' or mc.note like '%(presents)%') AND ct.id = mc.company_type_id AND t.id = mc.movie_id AND t.id = mi_idx.movie_id AND mc.movie_id = mi_idx.movie_id AND it.id = mi_idx.info_type_id;
+ERROR:  prepared statement "q1a_distinct" already exists
+Time: 0.715 ms
+postgres=# explain analyze execute q1a_distinct;
+                                                                                 QUERY PLAN                                                                                 
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=30010.06..30010.07 rows=1 width=4) (actual time=9.987..9.987 rows=1 loops=1)
+   ->  Nested Loop  (cost=6482.03..30010.06 rows=3 width=4) (actual time=0.314..9.934 rows=142 loops=1)
+         Join Filter: (mc.movie_id = t.id)
+         ->  Hash Join  (cost=6481.60..30008.29 rows=3 width=8) (actual time=0.302..9.292 rows=142 loops=1)
+               Hash Cond: (mc.company_type_id = ct.id)
+               ->  Nested Loop  (cost=6462.68..29987.21 rows=566 width=12) (actual time=0.266..9.193 rows=147 loops=1)
+                     ->  Nested Loop  (cost=6462.25..22168.36 rows=12213 width=4) (actual time=0.137..0.243 rows=250 loops=1)
+                           ->  Seq Scan on info_type it  (cost=0.00..2.41 rows=1 width=4) (actual time=0.031..0.033 rows=1 loops=1)
+                                 Filter: ((info)::text = 'top 250 rank'::text)
+                                 Rows Removed by Filter: 112
+                           ->  Bitmap Heap Scan on movie_info_idx mi_idx  (cost=6462.25..18715.86 rows=345009 width=8) (actual time=0.100..0.160 rows=250 loops=1)
+                                 Recheck Cond: (info_type_id = it.id)
+                                 Heap Blocks: exact=2
+                                 ->  Bitmap Index Scan on info_type_id_movie_info_idx  (cost=0.00..6375.99 rows=345009 width=0) (actual time=0.070..0.070 rows=250 loops=1)
+                                       Index Cond: (info_type_id = it.id)
+                     ->  Index Scan using movie_id_movie_companies on movie_companies mc  (cost=0.43..0.63 rows=1 width=8) (actual time=0.035..0.035 rows=1 loops=250)
+                           Index Cond: (movie_id = mi_idx.movie_id)
+                           Filter: ((note !~~ '%(as Metro-Goldwyn-Mayer Pictures)%'::text) AND ((note ~~ '%(co-production)%'::text) OR (note ~~ '%(presents)%'::text)))
+                           Rows Removed by Filter: 33
+               ->  Hash  (cost=18.88..18.88 rows=4 width=4) (actual time=0.023..0.023 rows=1 loops=1)
+                     Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                     ->  Seq Scan on company_type ct  (cost=0.00..18.88 rows=4 width=4) (actual time=0.017..0.019 rows=1 loops=1)
+                           Filter: ((kind)::text = 'production companies'::text)
+                           Rows Removed by Filter: 3
+         ->  Index Scan using title_pkey on title t  (cost=0.43..0.58 rows=1 width=8) (actual time=0.004..0.004 rows=1 loops=142)
+               Index Cond: (id = mi_idx.movie_id)
+ Execution time: 10.158 ms
+(27 rows)
+
+Time: 10.551 ms
+postgres=# execute q1a_distinct;
+ movie_year 
+------------
+         57
+(1 row)
+
+Time: 20.732 ms
+postgres=# execute q1a_distinct;
+ movie_year 
+------------
+         57
+(1 row)
+
+Time: 18.280 ms
+```
+
+``` julia 
+function q1a()
+  @query([t_production_year],
+  [it_info::String, it_id::Int64, mii_id::Int64, t_id::Int64, ct_id::Int64, ct_kind::String, mc_id::Int64, mc_note::String, t_production_year::Int64],
+  begin 
+    ct_kind = "production companies"
+    it_info = "top 250 rank"
+    job["company_type", "kind"](ct_id, ct_kind)
+    job["info_type", "info"](it_id, it_info)
+    job["movie_companies", "note"](mc_id, mc_note)
+    ismatch(r".*as Metro-Goldwyn-Mayer Pictures.*", mc_note) == false
+    (ismatch(r".*co-production.*", mc_note) || ismatch(r".*presents.*", mc_note)) == true
+    job["movie_companies", "company_type_id"](mc_id, ct_id)
+    job["title", "production_year"](t_id, t_production_year)
+    job["movie_companies", "movie_id"](mc_id, t_id)
+    job["movie_info_idx", "movie_id"](mii_id, t_id)
+    job["movie_info_idx", "info_type_id"](mii_id, it_id)
+  end)
+end
+
+@time q1a()
+
+# 0.004359 seconds (1.05 k allocations: 35.516 KB)
+# 0.002895 seconds (1.05 k allocations: 35.516 KB)
+# 0.003321 seconds (1.05 k allocations: 35.516 KB)
+```
+
+So my code is fine, I'm just a crappy query planner.
+
+I only had an hour or two to work on this today, but I'm glad I got to see some exciting numbers.

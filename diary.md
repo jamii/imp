@@ -6094,6 +6094,8 @@ postgres=# execute q1a_distinct;
 Time: 18.280 ms
 ```
 
+The execution plan is a bit bushy so I can't copy it perfectly without caching or factorisation, but I can approximate it with this ordering.
+
 ``` julia 
 function q1a()
   @query([t_production_year],

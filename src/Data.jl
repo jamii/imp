@@ -30,17 +30,6 @@ function define_columns(n)
         end for c in 1:n]...)
       end
     end
-  
-    @inline function swap3($(cs...), i, j, k)
-      @inbounds begin
-        $([quote
-          $(tmps[c]) = $(cs[c])[k]
-          $(cs[c])[k] = $(cs[c])[j]
-          $(cs[c])[j] = $(cs[c])[i]
-          $(cs[c])[i] = $(tmps[c])
-        end for c in 1:n]...)
-      end
-    end
 
     # sorting cribbed from Base.Sort
 
@@ -60,52 +49,32 @@ function define_columns(n)
       end
     end
 
-    @inline function select_pivot!($(cs...), lo::Int, hi::Int)
-      @inbounds begin
-        mi = (lo+hi)>>>1
-        if lt($(cs...), mi, lo)
-          swap2($(cs...), lo, mi)
-        end
-        if lt($(cs...), hi, mi)
-          if lt($(cs...), hi, lo)
-            swap3($(cs...), lo, mi, hi)
-          else
-            swap2($(cs...), mi, hi)
-          end
-        end
-        swap2($(cs...), lo, mi)
-      end
-      return lo
-    end
-
     function partition!($(cs...), lo::Int, hi::Int)
-      pivot = select_pivot!($(cs...), lo, hi)
-      i, j = lo, hi
-      @inbounds while true
-        i += 1; j -= 1
-        while lt($(cs...), i, pivot); i += 1; end;
-        while lt($(cs...), pivot, j); j -= 1; end;
-        i >= j && break
-        swap2($(cs...), i, j)
+      @inbounds begin
+        pivot = rand(lo:hi)
+        swap2($(cs...), pivot, lo)
+        i, j = lo+1, hi
+        while true
+          while lt($(cs...), i, lo); i += 1; end;
+          while lt($(cs...), lo, j); j -= 1; end;
+          i >= j && break
+          swap2($(cs...), i, j)
+          i += 1; j -= 1
+        end
+        swap2($(cs...), lo, j)
+        return j
       end
-      swap2($(cs...), pivot, j)
-      return j
     end
 
     function quicksort!($(cs...), lo::Int, hi::Int)
-      @inbounds while lo < hi
-        if hi-lo <= 20 
-          insertion_sort!($(cs...), lo, hi)
-          return 
-        end
+      @inbounds if hi-lo <= 0
+        return
+      elseif hi-lo <= 20 
+        insertion_sort!($(cs...), lo, hi)
+      else
         j = partition!($(cs...), lo, hi)
-        if j-lo < hi-j
-          lo < (j-1) && quicksort!($(cs...), lo, j-1)
-          lo = j+1
-        else
-          j+1 < hi && quicksort!($(cs...), j+1, hi)
-          hi = j-1
-        end
+        quicksort!($(cs...), lo, j-1)
+        quicksort!($(cs...), j+1, hi)
       end
       return
     end
@@ -138,6 +107,11 @@ function index{T}(relation::Relation{T}, order::Vector{Int64})
     quicksort!(tuple([index[ix] for ix in order]...))
     index
   end
+end
+
+import Atom
+function Atom.render(editor::Atom.Editor, relation::Relation)
+  Atom.render(editor, relation.columns)
 end
 
 export Relation, index

@@ -295,7 +295,7 @@ end
 
 function plan_query(returned_variables, typed_variables, aggregate, query)
   aggregate_type, variables, variable_types, return_ix = analyse(returned_variables, typed_variables, aggregate)
-  join = @show plan_join(returned_variables, aggregate, aggregate_type, variables, variable_types, return_ix, query)
+  join = plan_join(returned_variables, aggregate, aggregate_type, variables, variable_types, return_ix, query)
   project_variables = Any[variable for (variable, variable_type) in zip(variables, variable_types) if variable in returned_variables]
   project_variable_types = Any[variable_type for (variable, variable_type) in zip(variables, variable_types) if variable in returned_variables]
   push!(project_variables, :prev_aggregate)
@@ -305,7 +305,7 @@ function plan_query(returned_variables, typed_variables, aggregate, query)
     intermediate($(project_variables...))
   end
   project_return_ix = length(returned_variables) + 1
-  project = @show plan_join(returned_variables, project_aggregate, aggregate_type, project_variables, project_variable_types, project_return_ix, project_query)
+  project = plan_join(returned_variables, project_aggregate, aggregate_type, project_variables, project_variable_types, project_return_ix, project_query)
   quote 
     let $(esc(:intermediate)) = let; $join; end
       $project
@@ -335,11 +335,6 @@ end
 
 macro query(returned_variables, typed_variables, aggregate, query)
   plan_query(returned_variables.args, typed_variables.args, aggregate.args, query)
-end
-
-import Atom
-function Atom.render(editor::Atom.Editor, relation::Relation)
-  Atom.render(editor, relation.columns)
 end
 
 export @query, @join

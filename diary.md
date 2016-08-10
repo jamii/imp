@@ -6126,3 +6126,291 @@ end
 So my code is fine, I'm just a crappy query planner.
 
 I only had an hour or two to work on this today, but I'm glad I got to see some exciting numbers.
+
+## 2016 Aug 10
+
+So here is q3a:
+
+``` julia
+
+function q3a()
+  # "Denish" is in original too
+  mi_infos = Set(["Sweden", "Norway", "Germany", "Denmark", "Swedish", "Denish", "Norwegian", "German"])
+  @query([t_title],
+  [mi_info::String, mi_id::Int64, k_keyword::String, k_id::Int64, mk_id::Int64, t_id::Int64, t_production_year::Int64, t_title::String],
+  begin 
+    job["keyword", "keyword"](k_id, k_keyword)
+    contains(k_keyword, "sequel") == true
+    job["movie_info", "info"](mi_id, mi_info)
+    (mi_info in mi_infos) == true
+    job["title", "production_year"](t_id, t_production_year)
+    t_production_year > 2005
+    job["movie_info", "movie_id"](mi_id, t_id)
+    job["movie_keyword", "movie_id"](mk_id, t_id)
+    job["movie_keyword", "keyword_id"](mk_id, k_id)
+    job["title", "title"](t_id, t_title)
+  end)
+end
+```
+
+It touches `movie_info` which is one of the biggest tables in the dataset at ~15m rows. This takes forever to index, so long that I haven't succesfully waited it out yet.
+
+But if I index a similarly-sized relation full of random integers:
+
+``` julia 
+edge = Relation((rand(1:Int64(1E5), Int64(15E6)), rand(1:Int64(1E5), Int64(15E6))))
+@time index(edge, [1,2])
+# 2.178177 seconds (146.18 k allocations: 235.030 MB, 0.84% gc time)
+```
+
+Even if I put in a string column and force it so touch all the strings:
+
+``` julia
+edge = Relation(([1 for _ in 1:Int64(15E6)], String[string(i) for i in rand(1:Int64(1E5), Int64(15E6))]))
+@time index(edge, [1,2])
+# 17.183060 seconds (59 allocations: 228.885 MB)
+```
+
+Sorting the text version of movie_info at the terminal works ok:
+
+``` 
+jamie@machine:~$ time sort job/movie_info.csv > /dev/null
+
+real	0m8.972s
+user	0m30.316s
+sys	0m4.148s
+```
+
+So what's the deal? Why does this take seconds when `movie_info` takes hours or more? 
+
+Maybe there's a bug in my quicksort? Let's print the lo/hi for each recursive call and see if it's getting stuck somewhere.
+
+Eugh, atom crashed. Maybe let's print to a file then.
+
+```
+...
+14431187 14431188
+14431184 14431185
+14431181 14431182
+14431178 14431179
+14431175 14431176
+14431172 14431173
+14431169 14431170
+14431166 14431167
+14431163 14431164
+14431160 14431161
+14431157 14431158
+14431154 14431155
+14431151 14431152
+14431148 14431149
+14431145 14431146
+14431142 14431143
+14431139 14431140
+14431136 14431137
+14431133 14431134
+14431130 14431131
+14431127 14431128
+14431124 14431125
+14431121 14431122
+14431118 14431119
+14431115 14431116
+14431112 14431113
+...
+```
+
+Look at that, recursive calls to `quicksort!` on a bunch of single element subarrays, spaced out by exactly 3 each time. Something funky is going on.
+
+Let's look at the function. There is some weirdness in here where it sorts the smallest partition first and then recurs on the larger partition.
+
+``` julia 
+function quicksort!($(cs...), lo::Int, hi::Int)
+  write(test, string(lo, " ", hi, "\n"))
+  @inbounds while lo < hi
+    if hi-lo <= 20 
+      insertion_sort!($(cs...), lo, hi)
+      return 
+    end
+    j = partition!($(cs...), lo, hi)
+    if j-lo < hi-j
+      lo < (j-1) && quicksort!($(cs...), lo, j-1)
+      lo = j+1
+    else
+      j+1 < hi && quicksort!($(cs...), j+1, hi)
+      hi = j-1
+    end
+  end
+  return
+end
+```
+
+It also does something funky to get lo/mid/hi in the right order before partitioning:
+
+``` julia
+@inline function select_pivot!($(cs...), lo::Int, hi::Int)
+  @inbounds begin
+    mi = (lo+hi)>>>1
+    if lt($(cs...), mi, lo)
+      swap2($(cs...), lo, mi)
+    end
+    if lt($(cs...), hi, mi)
+      if lt($(cs...), hi, lo)
+        swap3($(cs...), lo, mi, hi)
+      else
+        swap2($(cs...), mi, hi)
+      end
+    end
+    swap2($(cs...), lo, mi)
+  end
+  return lo
+end
+```
+
+Let's try just picking pivots at random. 
+
+``` julia
+xs = collect(1:100)
+@time quicksort!((xs,))
+# 0.000524 seconds (140 allocations: 6.734 KB)
+```
+
+140 allocations!
+
+Oh, yeah, I'm still writing to disk. Take that out and it's fine.
+
+Sorting with random midpoints is slightly slower, maybe around 10%, not enough to make me care, because:
+
+``` julia 
+@time index(job["movie_info", "info"], [1,2])
+# 1.450726 seconds (210.51 k allocations: 235.458 MB)
+```
+
+(I have to restart Julia if something gets stuck in a loop or is taking too long, which means reloading the IMDB dataset. Sometimes Atom gets stuck and can't restart Julia, so I have to restart Atom too. Sometimes Atom forgets my project settings, so I have to reopen and reorganize all the files I'm working with. This costs me a significant proportion of the day and the endless context switches are a huge problem. What can I improve?)
+
+``` julia
+function q3a()
+  # "Denish" is in original too
+  mi_infos = Set(["Sweden", "Norway", "Germany", "Denmark", "Swedish", "Denish", "Norwegian", "German"])
+  @query([t_title],
+  [k_keyword::String, k_id::Int64, mk_id::Int64, t_id::Int64, t_title::String, t_production_year::Int64, mi_id::Int64, mi_info::String],
+  # [mi_info::String, mi_id::Int64, t_id::Int64, mk_id::Int64, k_id::Int64, k_keyword::String, t_production_year::Int64, t_title::String],
+  begin 
+    job["keyword", "keyword"](k_id, k_keyword)
+    contains(k_keyword, "sequel") == true
+    job["movie_info", "info"](mi_id, mi_info)
+    (mi_info in mi_infos) == true
+    job["title", "production_year"](t_id, t_production_year)
+    t_production_year > 2005
+    job["movie_info", "movie_id"](mi_id, t_id)
+    job["movie_keyword", "movie_id"](mk_id, t_id)
+    job["movie_keyword", "keyword_id"](mk_id, k_id)
+    job["title", "title"](t_id, t_title)
+  end)
+end
+
+# Job.q3a x1 (+compilation +indexing)
+#  5.088275 seconds (545.92 k allocations: 692.371 MB)
+# Job.q3a x20
+#  2.178364 seconds (3.60 k allocations: 510.625 KB)
+```
+
+```
+postgres=# prepare q3a_distinct as SELECT count(distinct t.title) AS movie_title FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t WHERE k.keyword  like '%sequel%' AND mi.info  IN ('Sweden', 'Norway', 'Germany', 'Denmark', 'Swedish', 'Denish', 'Norwegian', 'German') AND t.production_year > 2005 AND t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id;
+PREPARE
+Time: 5.955 ms
+postgres=# execute q3a_distinct;
+ movie_title 
+-------------
+         105
+(1 row)
+
+Time: 2596.093 ms
+postgres=# execute q3a_distinct;
+ movie_title 
+-------------
+         105
+(1 row)
+
+Time: 220.938 ms
+postgres=# execute q3a_distinct;
+ movie_title 
+-------------
+         105
+(1 row)
+
+Time: 187.519 ms
+postgres=# execute q3a_distinct;
+ movie_title 
+-------------
+         105
+(1 row)
+
+Time: 177.598 ms
+```
+
+About 2x faster than postgres on this one.
+
+I wrote q4a early while waiting on q3a, so let's try that too.
+
+``` julia 
+function q4a()
+  @query([mii_info],
+  [k_keyword::String, k_id::Int64, mk_id::Int64, t_id::Int64, t_production_year::Int64, it_info::String, it_id::Int64, mii_id::Int64, mii_info::String],
+  begin
+    job["info_type", "info"](it_id, it_info)
+    it_info = "rating"
+    job["keyword", "keyword"](k_id, k_keyword)
+    contains(k_keyword, "sequel") == true
+    job["movie_info_idx", "info"](mii_id, mii_info)
+    mii_info > "5.0"
+    job["title", "production_year"](t_id, t_production_year)
+    t_production_year > 2005
+    job["movie_info_idx", "movie_id"](mii_id, t_id)
+    job["movie_keyword", "movie_id"](mk_id, t_id)
+    job["movie_keyword", "keyword_id"](mk_id, k_id)
+    job["title", "title"](t_id, t_title)
+    job["movie_info_idx", "info_type_id"](mii_id, it_id)
+    job["movie_info_idx", "movie_id"](mii_id, t_id)
+  end)
+end
+
+# Job.q4a x1 (+compilation +indexing)
+#   0.552385 seconds (63.57 k allocations: 43.060 MB)
+# Job.q4a x100
+#   5.834656 seconds (24.30 k allocations: 5.669 MB)
+```
+
+```
+postgres=# prepare q4a_distinct as SELECT count(distinct mi_idx.info) AS rating, MIN(t.title) AS movie_title FROM info_type AS it, keyword AS k, movie_info_idx AS mi_idx, movie_keyword AS mk, title AS t WHERE it.info ='rating' AND k.keyword  like '%sequel%' AND mi_idx.info  > '5.0' AND t.production_year > 2005 AND t.id = mi_idx.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi_idx.movie_id AND k.id = mk.keyword_id AND it.id = mi_idx.info_type_id;
+PREPARE
+Time: 0.420 ms
+postgres=# execute q4a_distinct;
+ rating |                movie_title                 
+--------+--------------------------------------------
+     45 | 20-seiki shônen: Dai 2 shô - Saigo no kibô
+(1 row)
+
+Time: 226.453 ms
+postgres=# execute q4a_distinct;
+ rating |                movie_title                 
+--------+--------------------------------------------
+     45 | 20-seiki shônen: Dai 2 shô - Saigo no kibô
+(1 row)
+
+Time: 123.440 ms
+postgres=# execute q4a_distinct;
+ rating |                movie_title                 
+--------+--------------------------------------------
+     45 | 20-seiki shônen: Dai 2 shô - Saigo no kibô
+(1 row)
+
+Time: 119.281 ms
+postgres=# execute q4a_distinct;
+ rating |                movie_title                 
+--------+--------------------------------------------
+     45 | 20-seiki shônen: Dai 2 shô - Saigo no kibô
+(1 row)
+
+Time: 123.111 ms
+```
+
+A little over 2x faster than postgres. 

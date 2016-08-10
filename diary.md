@@ -6155,6 +6155,8 @@ end
 
 It touches `movie_info` which is one of the biggest tables in the dataset at ~15m rows. This takes forever to index, so long that I haven't succesfully waited it out yet.
 
+(I have to restart Julia if something gets stuck in a loop or is taking too long, which means reloading the IMDB dataset. Sometimes Atom gets stuck and can't restart Julia, so I have to restart Atom too. Sometimes Atom forgets my project settings, so I have to reopen and reorganize all the files I'm working with. This costs me a significant proportion of the day and the endless context switches are a huge problem. What can I improve?)
+
 But if I index a similarly-sized relation full of random integers:
 
 ``` julia 
@@ -6306,8 +6308,6 @@ Sorting becomes slightly slower, maybe around 10%, not enough to make me care, b
 @time index(job["movie_info", "info"], [1,2])
 # 1.450726 seconds (210.51 k allocations: 235.458 MB)
 ```
-
-(I have to restart Julia if something gets stuck in a loop or is taking too long, which means reloading the IMDB dataset. Sometimes Atom gets stuck and can't restart Julia, so I have to restart Atom too. Sometimes Atom forgets my project settings, so I have to reopen and reorganize all the files I'm working with. This costs me a significant proportion of the day and the endless context switches are a huge problem. What can I improve?)
 
 ``` julia
 function q3a()

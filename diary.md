@@ -6300,7 +6300,7 @@ end
 
 Not totally sure that's correct, but I haven't found any mis-sorts so far. 
 
-Sorting becomes slightly slightly slower, maybe around 10%, not enough to make me care, because:
+Sorting becomes slightly slower, maybe around 10%, not enough to make me care, because:
 
 ``` julia 
 @time index(job["movie_info", "info"], [1,2])

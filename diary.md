@@ -6220,7 +6220,7 @@ Eugh, atom crashed. Maybe let's print to a file then.
 
 Look at that, recursive calls to `quicksort!` on a bunch of single element subarrays, spaced out by exactly 3 each time. Something funky is going on.
 
-Let's look at the function. There is some weirdness in here where it sorts the smallest partition first and then recurs on the larger partition.
+Let's look at the function I copied from the stdlib. There is some weirdness in here where it sorts the smallest partition first and then recurs on the larger partition.
 
 ``` julia 
 function quicksort!($(cs...), lo::Int, hi::Int)
@@ -6265,19 +6265,42 @@ It also does something funky to get lo/mid/hi in the right order before partitio
 end
 ```
 
-Let's try just picking pivots at random. 
+Let's try just picking pivots at random.
 
-``` julia
-xs = collect(1:100)
-@time quicksort!((xs,))
-# 0.000524 seconds (140 allocations: 6.734 KB)
+``` julia 
+function partition!($(cs...), lo::Int, hi::Int)
+  @inbounds begin
+    pivot = rand(lo:hi)
+    swap2($(cs...), pivot, lo)
+    i, j = lo+1, hi
+    while true
+      while lt($(cs...), i, lo); i += 1; end;
+      while lt($(cs...), lo, j); j -= 1; end;
+      i >= j && break
+      swap2($(cs...), i, j)
+      i += 1; j -= 1
+    end
+    swap2($(cs...), lo, j)
+    return j
+  end
+end
+
+function quicksort!($(cs...), lo::Int, hi::Int)
+  @inbounds if hi-lo <= 0
+    return
+  elseif hi-lo <= 20 
+    insertion_sort!($(cs...), lo, hi)
+  else
+    j = partition!($(cs...), lo, hi)
+    quicksort!($(cs...), lo, j-1)
+    quicksort!($(cs...), j+1, hi)
+  end
+end
 ```
 
-140 allocations!
+Not totally sure that's correct, but I haven't found any mis-sorts so far. 
 
-Oh, yeah, I'm still writing to disk. Take that out and it's fine.
-
-Sorting with random midpoints is slightly slower, maybe around 10%, not enough to make me care, because:
+Sorting becomes slightly slightly slower, maybe around 10%, not enough to make me care, because:
 
 ``` julia 
 @time index(job["movie_info", "info"], [1,2])
@@ -6292,7 +6315,6 @@ function q3a()
   mi_infos = Set(["Sweden", "Norway", "Germany", "Denmark", "Swedish", "Denish", "Norwegian", "German"])
   @query([t_title],
   [k_keyword::String, k_id::Int64, mk_id::Int64, t_id::Int64, t_title::String, t_production_year::Int64, mi_id::Int64, mi_info::String],
-  # [mi_info::String, mi_id::Int64, t_id::Int64, mk_id::Int64, k_id::Int64, k_keyword::String, t_production_year::Int64, t_title::String],
   begin 
     job["keyword", "keyword"](k_id, k_keyword)
     contains(k_keyword, "sequel") == true
@@ -6347,7 +6369,7 @@ postgres=# execute q3a_distinct;
 Time: 177.598 ms
 ```
 
-About 2x faster than postgres on this one.
+About 2x faster than postgres on this one. Imp is a bit handicapped atm because it can't turn that `in` into a join, and instead gets stuck with a table scan. Should be an easy optimisation to add though.
 
 I wrote q4a early while waiting on q3a, so let's try that too.
 
@@ -6414,3 +6436,7 @@ Time: 123.111 ms
 ```
 
 A little over 2x faster than postgres. 
+
+That's all I have time for today. What next? I could keep going with these benchmarks and setup proper harnesses and tune postgres properly so they are, you know, actual benchmarks and not just a for loop and some guess work. I could fix the query syntax, which is painful and error-prone and would be nice to fix before writing out 100-odd queries. I could add some automated tests instead of hand-checking things against sql.
+
+I have two more days before I go climbing, so maybe I'll see if I can come up with a nicer syntax in that time. Adding more benchmark queries is something that's easy to do with little chunks of time while travelling, but figuring out the syntax requires some concentration.

@@ -118,7 +118,6 @@ function q3a()
   mi_infos = Set(["Sweden", "Norway", "Germany", "Denmark", "Swedish", "Denish", "Norwegian", "German"])
   @query([t_title],
   [k_keyword::String, k_id::Int64, mk_id::Int64, t_id::Int64, t_title::String, t_production_year::Int64, mi_id::Int64, mi_info::String],
-  # [mi_info::String, mi_id::Int64, t_id::Int64, mk_id::Int64, k_id::Int64, k_keyword::String, t_production_year::Int64, t_title::String],
   begin 
     job["keyword", "keyword"](k_id, k_keyword)
     contains(k_keyword, "sequel") == true

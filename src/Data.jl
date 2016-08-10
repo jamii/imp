@@ -76,7 +76,6 @@ function define_columns(n)
         quicksort!($(cs...), lo, j-1)
         quicksort!($(cs...), j+1, hi)
       end
-      return
     end
 
     function quicksort!{$(ts...)}(cs::Tuple{$(ts...)})

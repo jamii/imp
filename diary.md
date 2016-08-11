@@ -6440,3 +6440,243 @@ A little over 2x faster than postgres.
 That's all I have time for today. What next? I could keep going with these benchmarks and setup proper harnesses and tune postgres properly so they are, you know, actual benchmarks and not just a for loop and some guess work. I could fix the query syntax, which is painful and error-prone and would be nice to fix before writing out 100-odd queries. I could add some automated tests instead of hand-checking things against sql.
 
 I have two more days before I go climbing, so maybe I'll see if I can come up with a nicer syntax in that time. Adding more benchmark queries is something that's easy to do with little chunks of time while travelling, but figuring out the syntax requires some concentration.
+
+## 2016 Aug 11
+
+There are two problems I want to fix with the syntax.
+
+First, naming the tables is verbose and error prone eg `job["company_type", "kind"]`. It would be nice to just call this `kind` and somehow resolve the ambiguity with other similary named tables.
+
+Second, the bulk of each the queries so far consists of chains of lookups which are difficult to follow in this form (and in sql too). Compare:
+
+``` sql 
+FROM company_type AS ct,
+     info_type AS it,
+     movie_companies AS mc,
+     movie_info_idx AS mi_idx,
+     title AS t
+WHERE ct.kind = 'production companies'
+  AND it.info = 'top 250 rank'
+  AND mc.note NOT LIKE '%(as Metro-Goldwyn-Mayer Pictures)%'
+  AND (mc.note LIKE '%(co-production)%'
+       OR mc.note LIKE '%(presents)%')
+  AND ct.id = mc.company_type_id
+  AND t.id = mc.movie_id
+  AND t.id = mi_idx.movie_id
+  AND mc.movie_id = mi_idx.movie_id
+  AND it.id = mi_idx.info_type_id;
+```
+
+```
+title.movie_info.info_type.info = 'top 250 rank'
+title.movie_companies.company_type.kind = 'production_companies'
+title.movie_companies.note = note
+!note.like('%(as Metro-Goldwyn-Mayer Pictures)%') and 
+  (note.like('%(co-production)%') || note.like('%(presents)%'))
+```
+
+The structure and intent of the query is so much more obvious in the latter (made-up) syntax.
+
+SQL handles the first problem by using tables as namespaces. This has the disadvantage that the namespace is closed - if I want to add more information about, say, `title`, I have to do so with a new table that refers to `title` with a foreign key, and I'm back to the chaining problem.
+
+LogicBlox has a neat syntax where relations are reduced to sixth normal form and treated as finite functions, so one can write:
+
+```
+info(info_type(movie_info(title))) = 'top 250 rank'
+```
+
+It doesn't have any disambiguation mechanism other than namespaces though, so in practice that might be something like:
+
+```
+movei_info.info(movie_info.info_type(title.movie_info(title))) = 'top 250 rank'
+```
+
+Datomic (and I think Eve?) has an alternative option - rather than disambiguating several `name` relations, you just emit `7 :name "Best Film Ever"` and ensure that the entity `7` is not used anywhere else. Effectively the disambiguation is done by whatever constructs the entity ids, rather than by the relation name.
+
+The main thing I dislike about this is the existence of unique entity ids. Creating unique identities is easy enough in an imperative model - just generate something random at transaction time. But in a timeless model, identity is much trickier. I don't really have a firm enough grasp on what I mean by that to explain it, but I have a fuzzy sort of intuition that it's an important problem and that existing programming models handle it in a way that causes problems. Certainly, it's a problem I run into in many different areas. I don't have a good idea of what I'm going to do about it, so I don't want to pick a model that railroads me into any particular notion of identity.
+
+So, back to the problem. I could make this nicer with a combination of foreign key declarations and type inference, so that we can have many relations called `name` but each must have a different schema.
+
+```
+name(title.id) -> string
+name(company.id) -> string
+
+t::title 
+t.name # resolves to name(title.id) -> string
+```
+
+This is really appealing because it recovers the SQL-style namespacing, but allows open additions, doesn't require ids to be globally unique and can handle multi-column keys. The use of foreign key constraints in the schema also allows for auto-completing such lookups in the future.
+
+A year or two ago I would probably have jumped in and started working on this. These days I'm a bit warier.
+
+This system requires a database schema, which is known at compile time. I have to write a type-inference algorithm. There needs to be some way to report ambiguous names to the user. It only works for foreign-key joins, so there needs to be some separate system for disambiguating other joins. It's not obviously open to extension. And all I get for that effort is slightly less typing. 
+
+A mistake I used to make far too often is to make design decisions like these based only on how the value of the outcome, rather than on the effort-value ratio.
+
+Let's do something much simpler. We can clean up the chaining by switching the syntax from `relation(x,y,z)` to `(x,y,z) > relation`, and allowing prefixes such as `(x,y) > relation = z` and `x.relation > (y,z)`, and similarly `(x,y,z) < relation`, `(y,z) < relation = x`, `z < relation = (x,y)`. This allows writing chains like `title < movie_info_title > movie_info_type < info_type_info = 'top 250 rank'` in most cases, but without losing the full generality of relations.
+
+We'll still allow arbitrary Julia expressions as relation names,. So depending on how the relations are stored in Julia we could write any one of:
+
+``` 
+title < movie_info_title > movie_info_type < info_type_info = "top 250 rank"
+title < Job.movie_info.title > Job.movie_info.type < Job.info_type.info = "top 250 rank"
+title < job["movie_info", "title"] > job["movie_info", "type"] < job["info_type", "info"] = "top 250 rank"
+```
+
+i.e. rather than writing our own namespace system for Imp, just call out to Julia and let the user do whatever.
+
+We also need a way to execute Julia functions and filters. Let's use `=` to signify that the RHS is arbitrary Julia code to be run on each tuple, rather than a relational Imp expression:
+
+```
+x::Int64 = y + 1 # assignment
+true = x > y # filter
+```
+
+This is becoming a theme in Imp - handling only the core value-adding parts myself and fobbing everything else off on Julia. It's very similar to how [Terra](http://terralang.org/) handles low-level coding but delegates namespaces, packaging, macros, polymorphism etc to Lua. 
+
+
+(We could maybe even add a macro system to allow eg:
+
+```
+@path title info
+```
+
+Where `path` is some user-defined function that reads a schema, figures out the obvious join path between title and info, and returns the corresponding query fragment. [This paper](http://homepages.inf.ed.ac.uk/wadler/papers/qdsl/pepm.pdf) has some really interesting ideas along those lines.)
+
+Let's write out the first few JOB queries in this imagined syntax, to see how it behaves:
+
+``` julia
+q1a = @query(production_year) begin 
+  "top 250 rank" < info_type.info < movie_info.info_type < movie_info
+  movie_info > movie_info.movie_id > title
+  title > title.production_year > production_year
+  title < movie_companies.movie_id < movie_company
+  movie_company > movie_companies.company_type > company_type.kind > "production companies"
+  movie_company > movie_companies.note > note 
+  true = !contains(note, "as Metro-Goldwyn-Mayer Pictures") && (contains(note, "co-production") || contains(note, "presents")
+end
+```
+
+Hmmm. It's *ok*. Syntax highlighting to separate variables from relations would really help.
+
+You might notice that I don't really need `<`, since eg `title < movie_companies.movie_id < movie_company` could be written as `movie_company > movie_companies.movie_id > title`, and using both in the same line is actually kind of confusing. But... I want to have the flexibility to use both because I want to convey variable ordering directly in the query, by just taking the first occurence of each variable. Eg the above query would produce the ordering `[#info, #info_type, movie_info, title, production_year, movie_company, #company_type, #kind, #note]` (where variables beginning with # are unnamed intermediates in chains).
+
+The `true = ...` is gross though. Maybe I should pick a symbol that's less commonly used in Julia, like `|>` or `>>`, and declare that any line containing that symbol is an Imp line. I wish I could use `->` and `<-` but Julia doesn't parse those as functions calls.
+
+``` julia 
+julia> :(foo -> bar -> baz)
+:(foo->begin  # none, line 1:
+            bar->begin  # none, line 1:
+                    baz
+                end
+        end)
+
+julia> :(foo <- bar <- baz)
+:(foo < -bar < -baz)
+```
+
+Hmmm, let's see:
+
+``` julia
+q1a = @query(production_year) begin 
+  "top 250 rank" << info_type.info << movie_info.info_type << movie_info
+  movie_info >> movie_info.movie_id >> title
+  title >> title.production_year >> production_year
+  title << movie_companies.movie_id << movie_company
+  movie_company >> movie_companies.company_type >> company_type.kind >> "production companies"
+  movie_company >> movie_companies.note >> note 
+  !contains(note, "as Metro-Goldwyn-Mayer Pictures") && (contains(note, "co-production") || contains(note, "presents"))
+end
+```
+
+``` julia
+q1a = @query(production_year) begin 
+  "top 250 rank" <| info_type.info <| movie_info.info_type <| movie_info
+  movie_info |> movie_info.movie_id |> title
+  title |> title.production_year |> production_year
+  title <| movie_companies.movie_id <| movie_company
+  movie_company |> movie_companies.company_type |> company_type.kind |> "production companies"
+  movie_company |> movie_companies.note |> note 
+  !contains(note, "as Metro-Goldwyn-Mayer Pictures") && (contains(note, "co-production") || contains(note, "presents"))
+end
+```
+
+I find the latter a little more readable. Let's go with that. `|>` is also used for function chaining in the Julia stdlib, so it's a nice analogy.
+
+Let's check the other queries:
+
+``` julia
+q2a = @query(name) begin
+  "character-name-in-title" <| keyword.keyword <| movie_keyword.keyword_id <| movie_keyword.movie_id |> title 
+  title |> title.name |> name 
+  title <| movie_companies.movie_id |> movie_companies.company_id |> company_name.country_code |> "[de]"
+end
+
+infos = Set(["Sweden", "Norway", "Germany", "Denmark", "Swedish", "Denish", "Norwegian", "German"])
+q3a = @query(name) begin 
+  contains(keyword, "sequel")
+  keyword <| keyword.keyword <| movie_keyword.keyword_id |> movie_keyword.movie_id |> title 
+  title |> title.name |> name 
+  title |> title.production_year |> production_year
+  production_year > 2005 
+  title <| movie_info.movie_id |> movie_info.info |> info 
+  info in infos
+end
+
+q4a = @query(info) begin 
+  contains(keyword, "sequel")
+  keyword <| keyword.keyword <| movie_keyword.keyword_id |> move_keyword.movie_id |> title 
+  title |> title.production_year |> production_year
+  production_year > 2005 
+  "rating" <| info_type.info <| movie_info.info_type_id <| movie_info 
+  movie_info |> move_info.info |> info 
+  info > "5.0"
+end
+```
+
+Hmmm. It's fine for these bidirectional edges, but it doesn't really work for single column relations eg `vertex(v)`.
+
+Here's a different idea. `keyword <| keyword.keyword <| movie_keyword.keyword_id |> move_keyword.movie_id |> title` could be written as `keyword.keyword(keyword, t1); movie_keyword.keyword_id(t1, t2);  movie_keyword.movie_id(t2, title)` in a more traditional syntax. There's the risk of accidentally reusing a temporary variable, but maybe I could make them line- or block- scoped. 
+
+``` julia
+q1a = @query(production_year) begin 
+  info_type.info(t1, "top 250 rank"); movie_info.info_type(movie_info, t1); 
+  movie_info.movie_id(movie_info, title)
+  title.production_year(title, production_year)
+  movie_companies.movie_id(movie_company, title)
+  movie_companies.company_type(movie_company, t1); company_type.kind(t1, "production companies") 
+  movie_companies.note(movie_company, note)
+  !contains(note, "as Metro-Goldwyn-Mayer Pictures") && (contains(note, "co-production") || contains(note, "presents"))
+end
+
+q4a = @query(info) begin 
+  contains(keyword, "sequel")
+  keyword.keyword(t1, keyword); movie_keyword.keyword_id(t2, t1); movie_keyword.movie_id(t2, title)
+  title |> title.production_year |> production_year
+  production_year > 2005 
+  "rating" <| info_type.info <| movie_info.info_type_id <| movie_info 
+  movie_info |> move_info.info |> info 
+  info > "5.0"
+end
+```
+
+Weirdly, I don't find that as readable. The former had this nice visual emphasis on the variables and the connections between them that this lacks. This one also messes with the variable ordering a little (t1 comes before "top 250 rank"), but that will also happen in the other syntax with >2 columns.
+
+Part of the problem in any case is that the JOB schema is pretty distorted to avoid multiple allocations of the same string, but since we're running in-memory we can just share pointers. With a nicer schema:
+
+``` julia
+q4a = @query(rating) begin 
+  true = contains(keyword, "sequel")
+  movie_keyword(movie, keyword)
+  movie_production_year(movie, production_year)
+  true = production_year > 2005 
+  movie_info(movie, "rating", rating)
+  true = rating > "5.0"
+end
+```
+
+Which is totally readable. 
+
+But what about my variable ordering? Picking the first occurence works ok here, but is that flexible enough in general? Maybe I'll allow adding hints inline if I find a need.
+
+So, actually, all I really need to change is to allow inline constants (which I'll lift to the top of the query) and derive the variable ordering from the query. And do something prettier with aggregates.

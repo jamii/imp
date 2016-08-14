@@ -101,38 +101,32 @@ function collect_variables(expr)
   variables
 end
 
-function analyse(returned_variables, typed_variables, aggregate)
-  aggregate_zero, aggregate_add, aggregate_expr = aggregate
-  
-  if isa(aggregate_expr, Expr) && aggregate_expr.head == :(::)
-    aggregate_type = aggregate_expr.args[2]
+function get_variable_symbol(expr)
+  if isa(expr, Expr) && expr.head == :(::)
+    expr.args[1]
   else 
-    aggregate_type = Any
+    expr
   end
-  
-  variables = []
-  variable_types = []
-  for typed_variable in typed_variables
-    if isa(typed_variable, Symbol)
-      push!(variables, typed_variable)
-      push!(variable_types, :Any)
-    elseif isa(typed_variable, Expr) && typed_variable.head == :(::)
-      push!(variables, typed_variable.args[1])
-      push!(variable_types, typed_variable.args[2])
-    else 
-      throw("Variable must be a symbol (with optional type annotation)")
-    end
-  end 
-  
-  return_ix = 1 + maximum(push!(indexin(returned_variables, variables), 0))
-  
-  (aggregate_type, variables, variable_types, return_ix)
+end
+
+function get_variable_type(expr)
+  if isa(expr, Expr) && expr.head == :(::)
+    expr.args[2]
+  else 
+    Any
+  end
 end
 
 query_number = 0
 
-function plan_join(returned_variables, aggregate, aggregate_type, variables, variable_types, return_ix, query)
+function plan_join(returned_typed_variables, aggregate, variables, query)
   aggregate_zero, aggregate_add, aggregate_expr = aggregate
+  aggregate_type = get_variable_type(aggregate_expr)
+  
+  returned_variables = map(get_variable_symbol, returned_typed_variables)
+  returned_variable_types = Dict(zip(returned_variables, map(get_variable_type, returned_typed_variables)))
+  
+  return_ix = 1 + maximum(push!(indexin(returned_variables, variables), 0))
   
   relation_clauses = []
   expression_clauses = []
@@ -198,7 +192,7 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
   end
   
   variable_inits = []
-  for (variable, variable_type) in zip(variables, variable_types)
+  for variable in variables
     clauses_and_columns = sources[variable]
     variable_ixes = [ixes[(clause, column)] for (clause, column) in clauses_and_columns]
     variable_columns = [:(columns[$ix]) for ix in variable_ixes]
@@ -206,7 +200,7 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
       $(symbol("columns_", variable)) = [$(variable_columns...)]
       $(symbol("ixes_", variable)) = [$(variable_ixes...)]
       $(if variable in returned_variables
-          :($(symbol("results_", variable)) = Vector{$(variable_type)}())
+          :($(symbol("results_", variable)) = Vector{$(returned_variable_types[variable])}())
         end)
     end
     push!(variable_inits, variable_init)
@@ -293,19 +287,17 @@ function plan_join(returned_variables, aggregate, aggregate_type, variables, var
   end
 end
 
-function plan_query(returned_variables, typed_variables, aggregate, query)
-  aggregate_type, variables, variable_types, return_ix = analyse(returned_variables, typed_variables, aggregate)
-  join = plan_join(returned_variables, aggregate, aggregate_type, variables, variable_types, return_ix, query)
-  project_variables = Any[variable for (variable, variable_type) in zip(variables, variable_types) if variable in returned_variables]
-  project_variable_types = Any[variable_type for (variable, variable_type) in zip(variables, variable_types) if variable in returned_variables]
+function plan_query(returned_typed_variables, aggregate, variables, query)
+  join = plan_join(returned_typed_variables, aggregate, variables, query)
+
+  project_variables = map(get_variable_symbol, returned_typed_variables)
   push!(project_variables, :prev_aggregate)
-  push!(project_variable_types, aggregate_type)
-  project_aggregate = [aggregate[1], aggregate[2], :(prev_aggregate::$aggregate_type)]
+  project_aggregate = [aggregate[1], aggregate[2], :(prev_aggregate::$(get_variable_type(aggregate[3])))]  
   project_query = quote 
     intermediate($(project_variables...))
   end
-  project_return_ix = length(returned_variables) + 1
-  project = plan_join(returned_variables, project_aggregate, aggregate_type, project_variables, project_variable_types, project_return_ix, project_query)
+  project = plan_join(returned_typed_variables, project_aggregate, project_variables, project_query)
+  
   quote 
     let $(esc(:intermediate)) = let; $join; end
       $project
@@ -317,26 +309,15 @@ end
 @inline mul_exp(a, b, n) = a * (b ^ n)
 @inline min_exp(a, b, n) = min(a,b)
 
-macro join(returned_variables, typed_variables, query)
+macro query(returned_typed_variables, variables, query)
   aggregate = :(0, add_exp, 1::Int64)
-  aggregate_type, variables, variable_types, return_ix = analyse(returned_variables.args, typed_variables.args, aggregate.args)
-  plan_join(returned_variables.args, aggregate.args, aggregate_type, variables, variable_types, return_ix, query)
+  plan_query(returned_typed_variables.args, aggregate.args, variables.args, query)
 end
 
-macro join(returned_variables, typed_variables, aggregate, query)
-  aggregate_type, variables, variable_types, return_ix = analyse(returned_variables.args, typed_variables.args, aggregate.args)
-  plan_join(returned_variables.args, aggregate.args, aggregate_type, variables, variable_types, return_ix, query)
+macro query(returned_typed_variables, variables, aggregate, query)
+  plan_query(returned_typed_variables.args, aggregate.args, variables.args, query)
 end
 
-macro query(returned_variables, typed_variables, query)
-  aggregate = :(0, add_exp, 1::Int64)
-  plan_query(returned_variables.args, typed_variables.args, aggregate.args, query)
-end
-
-macro query(returned_variables, typed_variables, aggregate, query)
-  plan_query(returned_variables.args, typed_variables.args, aggregate.args, query)
-end
-
-export @query, @join
+export @query, add_exp, mul_exp, min_exp
 
 end

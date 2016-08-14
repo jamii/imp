@@ -6648,16 +6648,6 @@ q1a = @query(production_year) begin
   movie_companies.note(movie_company, note)
   !contains(note, "as Metro-Goldwyn-Mayer Pictures") && (contains(note, "co-production") || contains(note, "presents"))
 end
-
-q4a = @query(info) begin 
-  contains(keyword, "sequel")
-  keyword.keyword(t1, keyword); movie_keyword.keyword_id(t2, t1); movie_keyword.movie_id(t2, title)
-  title |> title.production_year |> production_year
-  production_year > 2005 
-  "rating" <| info_type.info <| movie_info.info_type_id <| movie_info 
-  movie_info |> move_info.info |> info 
-  info > "5.0"
-end
 ```
 
 Weirdly, I don't find that as readable. The former had this nice visual emphasis on the variables and the connections between them that this lacks. This one also messes with the variable ordering a little (t1 comes before "top 250 rank"), but that will also happen in the other syntax with >2 columns.

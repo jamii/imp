@@ -8,21 +8,24 @@ function define_columns(n)
   quote
     
     @inline function lt($(cs...), i, j) 
-      @inbounds begin 
+      # @inbounds 
+      begin 
         $([:(if !isequal($(cs[c])[i], $(cs[c])[j]); return isless($(cs[c])[i], $(cs[c])[j]); end) for c in 1:(n-1)]...)
         return isless($(cs[n])[i], $(cs[n])[j])
       end
     end
     
     @inline function lt2($(cs...), $(tmps...), j) 
-      @inbounds begin 
+      # @inbounds 
+      begin 
         $([:(if !isequal($(tmps[c]), $(cs[c])[j]); return isless($(tmps[c]), $(cs[c])[j]); end) for c in 1:(n-1)]...)
         return isless($(tmps[n]), $(cs[n])[j])
       end
     end
     
     @inline function swap2($(cs...), i, j)
-      @inbounds begin
+      # @inbounds 
+      begin
         $([quote
           $(tmps[c]) = $(cs[c])[j]
           $(cs[c])[j] = $(cs[c])[i]
@@ -34,7 +37,8 @@ function define_columns(n)
     # sorting cribbed from Base.Sort
 
     function insertion_sort!($(cs...), lo::Int, hi::Int)
-      @inbounds for i = lo+1:hi
+      # @inbounds 
+      for i = lo+1:hi
         j = i
         $([:($(tmps[c]) = $(cs[c])[i]) for c in 1:n]...)
         while j > lo
@@ -50,7 +54,8 @@ function define_columns(n)
     end
 
     function partition!($(cs...), lo::Int, hi::Int)
-      @inbounds begin
+      # @inbounds 
+      begin
         pivot = rand(lo:hi)
         swap2($(cs...), pivot, lo)
         i, j = lo+1, hi
@@ -67,7 +72,8 @@ function define_columns(n)
     end
 
     function quicksort!($(cs...), lo::Int, hi::Int)
-      @inbounds if hi-lo <= 0
+      # @inbounds 
+      if hi-lo <= 0
         return
       elseif hi-lo <= 20 
         insertion_sort!($(cs...), lo, hi)

@@ -117,18 +117,21 @@ function get_variable_type(expr)
   end
 end
 
-function plan_join(returned_typed_variables, aggregate, variables, query)
+function plan_join(returned_typed_variables, aggregate, query)
   aggregate_zero, aggregate_add, aggregate_expr = aggregate
   aggregate_type = get_variable_type(aggregate_expr)
   
   returned_variables = map(get_variable_symbol, returned_typed_variables)
   returned_variable_types = Dict(zip(returned_variables, map(get_variable_type, returned_typed_variables)))
   
+  hint_clauses = []
   relation_clauses = []
   expression_clauses = []
   assignment_clauses = Dict()
   for (clause, line) in enumerate(query.args) 
-    if line.head == :call && line.args[1] in [:<, :>, :(==), :<=, :>=]
+    if isa(line, Symbol)
+      push!(hint_clauses, clause)
+    elseif line.head == :call && line.args[1] in [:<, :>, :(==), :<=, :>=]
       push!(expression_clauses, clause)
     elseif line.head == :call
       push!(relation_clauses, clause)
@@ -142,18 +145,26 @@ function plan_join(returned_typed_variables, aggregate, variables, query)
     end
   end
   
-  for clause in relation_clauses 
+  variables = []
+  for clause in 1:length(query.args)
     line = query.args[clause]
-    for (ix, arg) in enumerate(line.args)
-      if ix > 1 && !isa(arg, Symbol)
-        variable = gensym("variable")
-        line.args[ix] = variable
-        assignment_clauses[variable] = arg 
-        callable_at = 1 + maximum(push!(indexin(collect_variables(arg), variables), 0))
-        insert!(variables, 1, variable)
+    if clause in hint_clauses 
+      push!(variables, line)
+    elseif clause in relation_clauses
+      for (ix, arg) in enumerate(line.args)
+        if ix > 1 && !isa(arg, Symbol)
+          variable = gensym("variable")
+          line.args[ix] = variable
+          assignment_clauses[variable] = arg 
+          callable_at = 1 + maximum(push!(indexin(collect_variables(arg), variables), 0))
+          insert!(variables, 1, variable)
+        elseif ix > 1 && isa(arg, Symbol)
+          push!(variables, arg)
+        end
       end
     end
   end
+  variables = unique(variables)
   
   sources = Dict()
   for clause in relation_clauses
@@ -293,21 +304,18 @@ function plan_join(returned_typed_variables, aggregate, variables, query)
       $body
       Relation(tuple($([symbol("results_", variable) for variable in returned_variables]...), results_aggregate))
     end
-    # @code_warntype $query_symbol($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
     $query_symbol($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
   end
 end
 
-function plan_query(returned_typed_variables, aggregate, variables, query)
-  join = plan_join(returned_typed_variables, aggregate, variables, query)
+function plan_query(returned_typed_variables, aggregate, query)
+  join = plan_join(returned_typed_variables, aggregate, query)
 
-  project_variables = map(get_variable_symbol, returned_typed_variables)
-  push!(project_variables, :prev_aggregate)
   project_aggregate = [aggregate[1], aggregate[2], :(prev_aggregate::$(get_variable_type(aggregate[3])))]  
   project_query = quote 
-    intermediate($(project_variables...))
+    intermediate($(map(get_variable_symbol, returned_typed_variables)...), prev_aggregate)
   end
-  project = plan_join(returned_typed_variables, project_aggregate, project_variables, project_query)
+  project = plan_join(returned_typed_variables, project_aggregate, project_query)
   
   quote 
     let $(esc(:intermediate)) = let; $join; end
@@ -320,13 +328,13 @@ end
 @inline mul_exp(a, b, n) = a * (b ^ n)
 @inline min_exp(a, b, n) = min(a,b)
 
-macro query(returned_typed_variables, variables, query)
+macro query(returned_typed_variables, query)
   aggregate = :(0, add_exp, 1::Int64)
-  plan_query(returned_typed_variables.args, aggregate.args, variables.args, query)
+  plan_query(returned_typed_variables.args, aggregate.args, query)
 end
 
-macro query(returned_typed_variables, variables, aggregate, query)
-  plan_query(returned_typed_variables.args, aggregate.args, variables.args, query)
+macro query(returned_typed_variables, aggregate, query)
+  plan_query(returned_typed_variables.args, aggregate.args, query)
 end
 
 export @query, add_exp, mul_exp, min_exp

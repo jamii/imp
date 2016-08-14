@@ -42,22 +42,21 @@ end
 
 function q1a()
   @query([t_production_year::Int64],
-  [it_id, mii_id, t_id, ct_id, mc_id, mc_note, t_production_year],
   begin 
-    company_type_kind(ct_id, "production companies")
     info_type_info(it_id, "top 250 rank")
+    movie_info_idx_info_type_id(mii_id, it_id)
+    movie_info_idx_movie_id(mii_id, t_id)
+    movie_companies_movie_id(mc_id, t_id)
+    movie_companies_company_type_id(mc_id, ct_id)
+    company_type_kind(ct_id, "production companies")
     movie_companies_note(mc_id, mc_note)
     contains(mc_note, "as Metro-Goldwyn-Mayer Pictures") == false
     (contains(mc_note, "co-production") || contains(mc_note, "presents")) == true
-    movie_companies_company_type_id(mc_id, ct_id)
     title_production_year(t_id, t_production_year)
-    movie_companies_movie_id(mc_id, t_id)
-    movie_info_idx_movie_id(mii_id, t_id)
-    movie_info_idx_info_type_id(mii_id, it_id)
   end)
 end
 
-# benchmark(q1a, 1000)
+benchmark(q1a, 1000)
 
 # SELECT MIN(t.title) AS movie_title
 # FROM company_name AS cn,
@@ -75,19 +74,18 @@ end
 
 function q2a()
   @query([title::String],
-  [k_id, mk_id, t_id, mc_id, cn_id, title],
   begin
-    company_name_country_code(cn_id, "[de]") 
     keyword_keyword(k_id, "character-name-in-title")
-    movie_companies_company_id(mc_id, cn_id)
-    movie_companies_movie_id(mc_id, t_id)
-    movie_keyword_movie_id(mk_id, t_id)
     movie_keyword_keyword_id(mk_id, k_id)
+    movie_keyword_movie_id(mk_id, t_id)
+    movie_companies_movie_id(mc_id, t_id)
+    movie_companies_company_id(mc_id, cn_id)
+    company_name_country_code(cn_id, "[de]") 
     title_title(t_id, title)
   end)
 end
 
-# benchmark(q2a, 10)
+benchmark(q2a, 10)
 
 # SELECT MIN(t.title) AS movie_title
 # FROM keyword AS k,
@@ -113,22 +111,22 @@ function q3a()
   # "Denish" is in original too
   mi_infos = Set(["Sweden", "Norway", "Germany", "Denmark", "Swedish", "Denish", "Norwegian", "German"])
   @query([t_title::String],
-  [k_keyword, k_id, mk_id, t_id, t_title, t_production_year, mi_id, mi_info],
   begin 
-    keyword_keyword(k_id, k_keyword)
+    k_keyword
     contains(k_keyword, "sequel") == true
-    movie_info_info(mi_id, mi_info)
-    (mi_info in mi_infos) == true
+    keyword_keyword(k_id, k_keyword)
+    movie_keyword_keyword_id(mk_id, k_id)
+    movie_keyword_movie_id(mk_id, t_id)
+    title_title(t_id, t_title)
     title_production_year(t_id, t_production_year)
     t_production_year > 2005
     movie_info_movie_id(mi_id, t_id)
-    movie_keyword_movie_id(mk_id, t_id)
-    movie_keyword_keyword_id(mk_id, k_id)
-    title_title(t_id, t_title)
+    movie_info_info(mi_id, mi_info)
+    (mi_info in mi_infos) == true
   end)
 end
 
-# benchmark(q3a, 20)
+benchmark(q3a, 20)
 
 # SELECT MIN(mi_idx.info) AS rating,
 #        MIN(t.title) AS movie_title
@@ -149,24 +147,22 @@ end
 
 function q4a()
   @query([mii_info::String],
-  [k_keyword, k_id, mk_id, t_id, t_production_year, it_id, mii_id, mii_info],
   begin
-    info_type_info(it_id, "rating")
-    keyword_keyword(k_id, k_keyword)
+    k_keyword
     contains(k_keyword, "sequel") == true
-    movie_info_idx_info(mii_id, mii_info)
-    mii_info > "5.0"
+    keyword_keyword(k_id, k_keyword)
+    movie_keyword_keyword_id(mk_id, k_id)
+    movie_keyword_movie_id(mk_id, t_id)
     title_production_year(t_id, t_production_year)
     t_production_year > 2005
-    movie_info_idx_movie_id(mii_id, t_id)
-    movie_keyword_movie_id(mk_id, t_id)
-    movie_keyword_keyword_id(mk_id, k_id)
-    title_title(t_id, t_title)
+    info_type_info(it_id, "rating")
     movie_info_idx_info_type_id(mii_id, it_id)
     movie_info_idx_movie_id(mii_id, t_id)
+    movie_info_idx_info(mii_id, mii_info)
+    mii_info > "5.0"
   end)
 end
 
-# benchmark(q4a, 100)
+benchmark(q4a, 100)
 
 end

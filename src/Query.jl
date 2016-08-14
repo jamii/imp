@@ -117,16 +117,12 @@ function get_variable_type(expr)
   end
 end
 
-query_number = 0
-
 function plan_join(returned_typed_variables, aggregate, variables, query)
   aggregate_zero, aggregate_add, aggregate_expr = aggregate
   aggregate_type = get_variable_type(aggregate_expr)
   
   returned_variables = map(get_variable_symbol, returned_typed_variables)
   returned_variable_types = Dict(zip(returned_variables, map(get_variable_type, returned_typed_variables)))
-  
-  return_ix = 1 + maximum(push!(indexin(returned_variables, variables), 0))
   
   relation_clauses = []
   expression_clauses = []
@@ -143,6 +139,21 @@ function plan_join(returned_typed_variables, aggregate, variables, query)
       assignment_clauses[variable] = line.args[2]
     else
       assert(line.head == :line)
+    end
+  end
+  
+  # extract constant expressions
+  # (assumes that any expr in a relation clause does not depend on any query vars)
+  for clause in relation_clauses 
+    line = query.args[clause]
+    for (ix, arg) in enumerate(line.args)
+      if ix > 1 && !isa(arg, Symbol)
+        variable = gensym("variable")
+        line.args[ix] = variable
+        assignment_clauses[variable] = arg 
+        callable_at = 1 + maximum(push!(indexin(collect_variables(arg), variables), 0))
+        insert!(variables, 1, variable)
+      end
     end
   end
   
@@ -236,6 +247,8 @@ function plan_join(returned_typed_variables, aggregate, variables, query)
     end
   end
   
+  return_ix = 1 + maximum(push!(indexin(returned_variables, variables), 0))
+  
   repeats = 1
   for buffer_ix in buffer_ixes
     repeats = :($repeats * (his[$buffer_ix] - los[$buffer_ix]))
@@ -273,22 +286,22 @@ function plan_join(returned_typed_variables, aggregate, variables, query)
     end
   end
   
-  global query_number += 1
+  query_symbol = gensym("query")
           
   quote 
     # TODO pass through any external vars too to avoid closure boxing grossness
-    function $(symbol("query_", query_number))($([symbol("relation_", clause) for clause in relation_clauses]...))
+    function $query_symbol($([symbol("relation_", clause) for clause in relation_clauses]...))
       $setup
       $body
       Relation(tuple($([symbol("results_", variable) for variable in returned_variables]...), results_aggregate))
     end
-    # @code_warntype $(symbol("query_", query_number))($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
-    $(symbol("query_", query_number))($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
+    # @code_warntype $query_symbol($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
+    $query_symbol($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
   end
 end
 
 function plan_query(returned_typed_variables, aggregate, variables, query)
-  join = plan_join(returned_typed_variables, aggregate, variables, query)
+  join = @show plan_join(returned_typed_variables, aggregate, variables, query)
 
   project_variables = map(get_variable_symbol, returned_typed_variables)
   push!(project_variables, :prev_aggregate)

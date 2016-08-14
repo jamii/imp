@@ -40,32 +40,12 @@ end
 #   AND mc.movie_id = mi_idx.movie_id
 #   AND it.id = mi_idx.info_type_id;
 
-Query.plan_query(:[t_production_year::Int64].args,
-:(0, add_exp, 1::Int64).args,
-:[it_info, it_id, mii_id, t_id, ct_id, ct_kind, mc_id, mc_note, t_production_year].args,
-quote
-  ct_kind = "production companies"
-  it_info = "top 250 rank"
-  job["company_type", "kind"](ct_id, ct_kind)
-  job["info_type", "info"](it_id, it_info)
-  job["movie_companies", "note"](mc_id, mc_note)
-  contains(mc_note, "as Metro-Goldwyn-Mayer Pictures") == false
-  (contains(mc_note, "co-production") || contains(mc_note, "presents")) == true
-  job["movie_companies", "company_type_id"](mc_id, ct_id)
-  job["title", "production_year"](t_id, t_production_year)
-  job["movie_companies", "movie_id"](mc_id, t_id)
-  job["movie_info_idx", "movie_id"](mii_id, t_id)
-  job["movie_info_idx", "info_type_id"](mii_id, it_id)
-end)
-
 function q1a()
   @query([t_production_year::Int64],
-  [it_info, it_id, mii_id, t_id, ct_id, ct_kind, mc_id, mc_note, t_production_year],
+  [it_id, mii_id, t_id, ct_id, mc_id, mc_note, t_production_year],
   begin 
-    ct_kind = "production companies"
-    it_info = "top 250 rank"
-    job["company_type", "kind"](ct_id, ct_kind)
-    job["info_type", "info"](it_id, it_info)
+    job["company_type", "kind"](ct_id, "production companies")
+    job["info_type", "info"](it_id, "top 250 rank")
     job["movie_companies", "note"](mc_id, mc_note)
     contains(mc_note, "as Metro-Goldwyn-Mayer Pictures") == false
     (contains(mc_note, "co-production") || contains(mc_note, "presents")) == true
@@ -95,12 +75,10 @@ end
 
 function q2a()
   @query([title::String],
-  [cnit, k_id, mk_id, t_id, mc_id, cn_id, de, title],
+  [k_id, mk_id, t_id, mc_id, cn_id, title],
   begin
-    de = "[de]"
-    job["company_name", "country_code"](cn_id, de) 
-    cnit = "character-name-in-title"
-    job["keyword", "keyword"](k_id, cnit)
+    job["company_name", "country_code"](cn_id, "[de]") 
+    job["keyword", "keyword"](k_id, "character-name-in-title")
     job["movie_companies", "company_id"](mc_id, cn_id)
     job["movie_companies", "movie_id"](mc_id, t_id)
     job["movie_keyword", "movie_id"](mk_id, t_id)
@@ -171,10 +149,9 @@ end
 
 function q4a()
   @query([mii_info::String],
-  [k_keyword, it_info, k_id, mk_id, t_id, t_production_year, it_id, mii_id, mii_info],
+  [k_keyword, k_id, mk_id, t_id, t_production_year, it_id, mii_id, mii_info],
   begin
-    job["info_type", "info"](it_id, it_info)
-    it_info = "rating"
+    job["info_type", "info"](it_id, "rating")
     job["keyword", "keyword"](k_id, k_keyword)
     contains(k_keyword, "sequel") == true
     job["movie_info_idx", "info"](mii_id, mii_info)

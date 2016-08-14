@@ -142,8 +142,6 @@ function plan_join(returned_typed_variables, aggregate, variables, query)
     end
   end
   
-  # extract constant expressions
-  # (assumes that any expr in a relation clause does not depend on any query vars)
   for clause in relation_clauses 
     line = query.args[clause]
     for (ix, arg) in enumerate(line.args)
@@ -301,7 +299,7 @@ function plan_join(returned_typed_variables, aggregate, variables, query)
 end
 
 function plan_query(returned_typed_variables, aggregate, variables, query)
-  join = @show plan_join(returned_typed_variables, aggregate, variables, query)
+  join = plan_join(returned_typed_variables, aggregate, variables, query)
 
   project_variables = map(get_variable_symbol, returned_typed_variables)
   push!(project_variables, :prev_aggregate)

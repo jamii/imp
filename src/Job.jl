@@ -44,16 +44,16 @@ function q1a()
   @query([t_production_year::Int64],
   [it_id, mii_id, t_id, ct_id, mc_id, mc_note, t_production_year],
   begin 
-    job["company_type", "kind"](ct_id, "production companies")
-    job["info_type", "info"](it_id, "top 250 rank")
-    job["movie_companies", "note"](mc_id, mc_note)
+    company_type_kind(ct_id, "production companies")
+    info_type_info(it_id, "top 250 rank")
+    movie_companies_note(mc_id, mc_note)
     contains(mc_note, "as Metro-Goldwyn-Mayer Pictures") == false
     (contains(mc_note, "co-production") || contains(mc_note, "presents")) == true
-    job["movie_companies", "company_type_id"](mc_id, ct_id)
-    job["title", "production_year"](t_id, t_production_year)
-    job["movie_companies", "movie_id"](mc_id, t_id)
-    job["movie_info_idx", "movie_id"](mii_id, t_id)
-    job["movie_info_idx", "info_type_id"](mii_id, it_id)
+    movie_companies_company_type_id(mc_id, ct_id)
+    title_production_year(t_id, t_production_year)
+    movie_companies_movie_id(mc_id, t_id)
+    movie_info_idx_movie_id(mii_id, t_id)
+    movie_info_idx_info_type_id(mii_id, it_id)
   end)
 end
 
@@ -77,13 +77,13 @@ function q2a()
   @query([title::String],
   [k_id, mk_id, t_id, mc_id, cn_id, title],
   begin
-    job["company_name", "country_code"](cn_id, "[de]") 
-    job["keyword", "keyword"](k_id, "character-name-in-title")
-    job["movie_companies", "company_id"](mc_id, cn_id)
-    job["movie_companies", "movie_id"](mc_id, t_id)
-    job["movie_keyword", "movie_id"](mk_id, t_id)
-    job["movie_keyword", "keyword_id"](mk_id, k_id)
-    job["title", "title"](t_id, title)
+    company_name_country_code(cn_id, "[de]") 
+    keyword_keyword(k_id, "character-name-in-title")
+    movie_companies_company_id(mc_id, cn_id)
+    movie_companies_movie_id(mc_id, t_id)
+    movie_keyword_movie_id(mk_id, t_id)
+    movie_keyword_keyword_id(mk_id, k_id)
+    title_title(t_id, title)
   end)
 end
 
@@ -115,16 +115,16 @@ function q3a()
   @query([t_title::String],
   [k_keyword, k_id, mk_id, t_id, t_title, t_production_year, mi_id, mi_info],
   begin 
-    job["keyword", "keyword"](k_id, k_keyword)
+    keyword_keyword(k_id, k_keyword)
     contains(k_keyword, "sequel") == true
-    job["movie_info", "info"](mi_id, mi_info)
+    movie_info_info(mi_id, mi_info)
     (mi_info in mi_infos) == true
-    job["title", "production_year"](t_id, t_production_year)
+    title_production_year(t_id, t_production_year)
     t_production_year > 2005
-    job["movie_info", "movie_id"](mi_id, t_id)
-    job["movie_keyword", "movie_id"](mk_id, t_id)
-    job["movie_keyword", "keyword_id"](mk_id, k_id)
-    job["title", "title"](t_id, t_title)
+    movie_info_movie_id(mi_id, t_id)
+    movie_keyword_movie_id(mk_id, t_id)
+    movie_keyword_keyword_id(mk_id, k_id)
+    title_title(t_id, t_title)
   end)
 end
 
@@ -151,19 +151,19 @@ function q4a()
   @query([mii_info::String],
   [k_keyword, k_id, mk_id, t_id, t_production_year, it_id, mii_id, mii_info],
   begin
-    job["info_type", "info"](it_id, "rating")
-    job["keyword", "keyword"](k_id, k_keyword)
+    info_type_info(it_id, "rating")
+    keyword_keyword(k_id, k_keyword)
     contains(k_keyword, "sequel") == true
-    job["movie_info_idx", "info"](mii_id, mii_info)
+    movie_info_idx_info(mii_id, mii_info)
     mii_info > "5.0"
-    job["title", "production_year"](t_id, t_production_year)
+    title_production_year(t_id, t_production_year)
     t_production_year > 2005
-    job["movie_info_idx", "movie_id"](mii_id, t_id)
-    job["movie_keyword", "movie_id"](mk_id, t_id)
-    job["movie_keyword", "keyword_id"](mk_id, k_id)
-    job["title", "title"](t_id, t_title)
-    job["movie_info_idx", "info_type_id"](mii_id, it_id)
-    job["movie_info_idx", "movie_id"](mii_id, t_id)
+    movie_info_idx_movie_id(mii_id, t_id)
+    movie_keyword_movie_id(mk_id, t_id)
+    movie_keyword_keyword_id(mk_id, k_id)
+    title_title(t_id, t_title)
+    movie_info_idx_info_type_id(mii_id, it_id)
+    movie_info_idx_movie_id(mii_id, t_id)
   end)
 end
 

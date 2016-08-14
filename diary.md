@@ -6670,3 +6670,155 @@ Which is totally readable.
 But what about my variable ordering? Picking the first occurence works ok here, but is that flexible enough in general? Maybe I'll allow adding hints inline if I find a need.
 
 So, actually, all I really need to change is to allow inline constants (which I'll lift to the top of the query) and derive the variable ordering from the query. And do something prettier with aggregates.
+
+## 2016 Aug 14
+
+Some quick little ergonomic improvements tonight. 
+
+I moved type annotations from the variable ordering to the return statement, which is the only place they are now needed and also doubles up as a schema for views. This also simplifed the code for `plan_query` to:
+
+``` julia 
+function plan_query(returned_typed_variables, aggregate, variables, query)
+  join = plan_join(returned_typed_variables, aggregate, variables, query)
+
+  project_variables = map(get_variable_symbol, returned_typed_variables)
+  push!(project_variables, :prev_aggregate)
+  project_aggregate = [aggregate[1], aggregate[2], :(prev_aggregate::$(get_variable_type(aggregate[3])))]  
+  project_query = quote 
+    intermediate($(project_variables...))
+  end
+  project = plan_join(returned_typed_variables, project_aggregate, project_variables, project_query)
+  
+  quote 
+    let $(esc(:intermediate)) = let; $join; end
+      $project
+    end
+  end
+end
+```
+
+ I added some code to the compiler that allows writing Julia constants or expressions where Imp variables should be. 
+ 
+ ``` julia 
+ for clause in relation_clauses 
+   line = query.args[clause]
+   for (ix, arg) in enumerate(line.args)
+     if ix > 1 && !isa(arg, Symbol)
+       variable = gensym("variable")
+       line.args[ix] = variable
+       assignment_clauses[variable] = arg 
+       callable_at = 1 + maximum(push!(indexin(collect_variables(arg), variables), 0))
+       insert!(variables, 1, variable)
+     end
+   end
+ end
+ ```
+
+I created nicer names for the various JOB tables.
+
+``` julia 
+for (table_name, column_name) in keys(job)
+  @eval begin 
+    $(symbol(table_name, "_", column_name)) = job[$table_name, $column_name]
+    export $(symbol(table_name, "_", column_name))
+  end
+end
+```
+
+I rewrote each job query so that the order in which in each variable first appears matches the variable ordering I chose, and then changed `plan_query` to use this ordering directly. It also allows simply mentioning a variable to insert in the order. 
+
+``` julia
+variables = []
+for clause in 1:length(query.args)
+  line = query.args[clause]
+  if clause in hint_clauses 
+    push!(variables, line)
+  elseif clause in relation_clauses
+    for (ix, arg) in enumerate(line.args)
+      if ix > 1 && !isa(arg, Symbol)
+        variable = gensym("variable")
+        line.args[ix] = variable
+        assignment_clauses[variable] = arg 
+        insert!(variables, 1, variable) # only handles constants atm
+      elseif ix > 1 && isa(arg, Symbol)
+        push!(variables, arg)
+      end
+    end
+  end
+end
+variables = unique(variables)
+```
+
+It doesn't look inside assignments or expressions yet, but I just use hints to work around that for now.
+
+The job queries now look like:
+
+``` julia
+function q1a()
+  @query([t_production_year::Int64],
+  begin 
+    info_type_info(it_id, "top 250 rank")
+    movie_info_idx_info_type_id(mii_id, it_id)
+    movie_info_idx_movie_id(mii_id, t_id)
+    movie_companies_movie_id(mc_id, t_id)
+    movie_companies_company_type_id(mc_id, ct_id)
+    company_type_kind(ct_id, "production companies")
+    movie_companies_note(mc_id, mc_note)
+    @when !contains(mc_note, "as Metro-Goldwyn-Mayer Pictures") &&
+      (contains(mc_note, "co-production") || contains(mc_note, "presents"))
+    title_production_year(t_id, t_production_year)
+  end)
+end
+
+function q2a()
+  @query([title::String],
+  begin
+    keyword_keyword(k_id, "character-name-in-title")
+    movie_keyword_keyword_id(mk_id, k_id)
+    movie_keyword_movie_id(mk_id, t_id)
+    movie_companies_movie_id(mc_id, t_id)
+    movie_companies_company_id(mc_id, cn_id)
+    company_name_country_code(cn_id, "[de]") 
+    title_title(t_id, title)
+  end)
+end
+
+function q3a()
+  # "Denish" is in original too
+  mi_infos = Set(["Sweden", "Norway", "Germany", "Denmark", "Swedish", "Denish", "Norwegian", "German"])
+  @query([t_title::String],
+  begin 
+    k_keyword
+    @when contains(k_keyword, "sequel")
+    keyword_keyword(k_id, k_keyword)
+    movie_keyword_keyword_id(mk_id, k_id)
+    movie_keyword_movie_id(mk_id, t_id)
+    title_title(t_id, t_title)
+    title_production_year(t_id, t_production_year)
+    @when t_production_year > 2005
+    movie_info_movie_id(mi_id, t_id)
+    movie_info_info(mi_id, mi_info)
+    @when mi_info in mi_infos
+  end)
+end
+
+function q4a()
+  @query([mii_info::String],
+  begin
+    k_keyword
+    @when contains(k_keyword, "sequel")
+    keyword_keyword(k_id, k_keyword)
+    movie_keyword_keyword_id(mk_id, k_id)
+    movie_keyword_movie_id(mk_id, t_id)
+    title_production_year(t_id, t_production_year)
+    @when t_production_year > 2005
+    info_type_info(it_id, "rating")
+    movie_info_idx_info_type_id(mii_id, it_id)
+    movie_info_idx_movie_id(mii_id, t_id)
+    movie_info_idx_info(mii_id, mii_info)
+    @when mii_info > "5.0"
+  end)
+end
+```
+
+The remaining grossness is mostly just the awful table/variable names from the original benchmark. I'm ok with that. 

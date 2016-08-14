@@ -131,15 +131,15 @@ function plan_join(returned_typed_variables, aggregate, query)
   for (clause, line) in enumerate(query.args) 
     if isa(line, Symbol)
       push!(hint_clauses, clause)
-    elseif line.head == :call && line.args[1] in [:<, :>, :(==), :<=, :>=]
-      push!(expression_clauses, clause)
     elseif line.head == :call
       push!(relation_clauses, clause)
     elseif line.head == :(=)
       variable = line.args[1]
-      assert(isa(variable, Symbol)) # single assignment only, no unpacking yet
+      assert(isa(variable, Symbol))
       assert(get(assignment_clauses, variable, nothing) == nothing) # only one assignment per var
       assignment_clauses[variable] = line.args[2]
+    elseif line.head == :macrocall && line.args[1] == symbol("@when")
+      push!(expression_clauses, clause)
     else
       assert(line.head == :line)
     end
@@ -156,8 +156,7 @@ function plan_join(returned_typed_variables, aggregate, query)
           variable = gensym("variable")
           line.args[ix] = variable
           assignment_clauses[variable] = arg 
-          callable_at = 1 + maximum(push!(indexin(collect_variables(arg), variables), 0))
-          insert!(variables, 1, variable)
+          insert!(variables, 1, variable) # only handles constants atm
         elseif ix > 1 && isa(arg, Symbol)
           push!(variables, arg)
         end
@@ -238,9 +237,9 @@ function plan_join(returned_typed_variables, aggregate, query)
   
   filters = [[] for _ in variables]
   for clause in expression_clauses
-    line = query.args[clause]
-    callable_at = maximum(indexin(collect_variables(line), variables))
-    push!(filters[callable_at], line)
+    expr = query.args[clause].args[2]
+    callable_at = maximum(indexin(collect_variables(expr), variables))
+    push!(filters[callable_at], expr)
   end
   
   function make_return(returned_variables, tail) 

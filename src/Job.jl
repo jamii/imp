@@ -18,6 +18,7 @@ function benchmark(q, n)
     results = q()
     counts += length(results.columns[1])
   end
+  println(length(results.columns[1]), " results")
   (counts, results.columns)
 end
 
@@ -50,8 +51,8 @@ function q1a()
     movie_companies_company_type_id(mc_id, ct_id)
     company_type_kind(ct_id, "production companies")
     movie_companies_note(mc_id, mc_note)
-    contains(mc_note, "as Metro-Goldwyn-Mayer Pictures") == false
-    (contains(mc_note, "co-production") || contains(mc_note, "presents")) == true
+    @when !contains(mc_note, "as Metro-Goldwyn-Mayer Pictures") &&
+      (contains(mc_note, "co-production") || contains(mc_note, "presents"))
     title_production_year(t_id, t_production_year)
   end)
 end
@@ -113,16 +114,16 @@ function q3a()
   @query([t_title::String],
   begin 
     k_keyword
-    contains(k_keyword, "sequel") == true
+    @when contains(k_keyword, "sequel")
     keyword_keyword(k_id, k_keyword)
     movie_keyword_keyword_id(mk_id, k_id)
     movie_keyword_movie_id(mk_id, t_id)
     title_title(t_id, t_title)
     title_production_year(t_id, t_production_year)
-    t_production_year > 2005
+    @when t_production_year > 2005
     movie_info_movie_id(mi_id, t_id)
     movie_info_info(mi_id, mi_info)
-    (mi_info in mi_infos) == true
+    @when mi_info in mi_infos
   end)
 end
 
@@ -149,17 +150,17 @@ function q4a()
   @query([mii_info::String],
   begin
     k_keyword
-    contains(k_keyword, "sequel") == true
+    @when contains(k_keyword, "sequel")
     keyword_keyword(k_id, k_keyword)
     movie_keyword_keyword_id(mk_id, k_id)
     movie_keyword_movie_id(mk_id, t_id)
     title_production_year(t_id, t_production_year)
-    t_production_year > 2005
+    @when t_production_year > 2005
     info_type_info(it_id, "rating")
     movie_info_idx_info_type_id(mii_id, it_id)
     movie_info_idx_movie_id(mii_id, t_id)
     movie_info_idx_info(mii_id, mii_info)
-    mii_info > "5.0"
+    @when mii_info > "5.0"
   end)
 end
 

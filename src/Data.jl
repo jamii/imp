@@ -60,8 +60,8 @@ function define_columns(n)
         swap2($(cs...), pivot, lo)
         i, j = lo+1, hi
         while true
-          while lt($(cs...), i, lo); i += 1; end;
-          while lt($(cs...), lo, j); j -= 1; end;
+          while (i <= j) && lt($(cs...), i, lo); i += 1; end;
+          while (i <= j) && lt($(cs...), lo, j); j -= 1; end;
           i >= j && break
           swap2($(cs...), i, j)
           i += 1; j -= 1
@@ -120,5 +120,11 @@ function Atom.render(editor::Atom.Editor, relation::Relation)
 end
 
 export Relation, index
+
+# for i in 1:10000
+#   srand(i)
+#   x = rand(Int64, i)
+#   assert(quicksort!((copy(x),))[1] == sort(copy(x)))
+# end
 
 end

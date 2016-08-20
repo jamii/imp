@@ -6822,3 +6822,25 @@ end
 ```
 
 The remaining grossness is mostly just the awful table/variable names from the original benchmark. I'm ok with that. 
+
+## 2016 Aug 20
+
+Fixed a sorting bug - choosing the pivot at random breaks the invariant that there is always at least one element smaller or larger than the pivot, so the partitioning can run off the end of the array.
+
+``` 
+diff --git a/src/Data.jl b/src/Data.jl
+index bccfa6f..1088331 100644
+--- a/src/Data.jl
++++ b/src/Data.jl
+@@ -60,8 +60,8 @@ function define_columns(n)
+         swap2($(cs...), pivot, lo)
+         i, j = lo+1, hi
+         while true
+-          while lt($(cs...), i, lo); i += 1; end;
+-          while lt($(cs...), lo, j); j -= 1; end;
++          while (i <= j) && lt($(cs...), i, lo); i += 1; end;
++          while (i <= j) && lt($(cs...), lo, j); j -= 1; end;
+           i >= j && break
+           swap2($(cs...), i, j)
+           i += 1; j -= 1
+```

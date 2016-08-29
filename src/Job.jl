@@ -113,7 +113,6 @@ function q3a()
   mi_infos = Set(["Sweden", "Norway", "Germany", "Denmark", "Swedish", "Denish", "Norwegian", "German"])
   @query([t_title::String],
   begin 
-    k_keyword
     @when contains(k_keyword, "sequel")
     keyword_keyword(k_id, k_keyword)
     movie_keyword_keyword_id(mk_id, k_id)
@@ -149,7 +148,6 @@ benchmark(q3a, 20)
 function q4a()
   @query([mii_info::String],
   begin
-    k_keyword
     @when contains(k_keyword, "sequel")
     keyword_keyword(k_id, k_keyword)
     movie_keyword_keyword_id(mk_id, k_id)

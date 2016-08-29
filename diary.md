@@ -6871,3 +6871,5 @@ end
 ```
 
 I could also have sorted the result and treated it like another column for intersection, but that would have been a bit more work and I'm not sure yet whether it would pay off.
+
+I also removed a limitation of the variable ordering detection where it only looked at grounded variables. It can now look inside `=`, `in` and `@when`.

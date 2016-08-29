@@ -124,6 +124,7 @@ function plan_join(returned_typed_variables, aggregate, query)
   returned_variables = map(get_variable_symbol, returned_typed_variables)
   returned_variable_types = Dict(zip(returned_variables, map(get_variable_type, returned_typed_variables)))
   
+  grounded_variables = Set()
   variables = []
   relation_clauses = []
   expression_clauses = []
@@ -134,10 +135,13 @@ function plan_join(returned_typed_variables, aggregate, query)
       push!(variables, line)
     elseif line.head == :call && line.args[1] == :in 
       variable = line.args[2]
+      expr = line.args[3]
       assert(isa(variable, Symbol))
       assert(!haskey(loop_clauses, variable))
+      push!(grounded_variables, variable)
       push!(variables, variable)
-      loop_clauses[variable] = line.args[3]
+      push!(variables, collect_variables(expr)...)
+      loop_clauses[variable] = expr
     elseif line.head == :call
       for (ix, arg) in enumerate(line.args)
         if ix > 1 && !isa(arg, Symbol)
@@ -145,24 +149,31 @@ function plan_join(returned_typed_variables, aggregate, query)
           line.args[ix] = variable
           assignment_clauses[variable] = arg 
           insert!(variables, 1, variable) # only handles constants atm
+          push!(grounded_variables, variable)
         elseif ix > 1 && isa(arg, Symbol)
           push!(variables, arg)
+          push!(grounded_variables, arg)
         end
       end
       push!(relation_clauses, clause)
     elseif line.head == :(=)
       variable = line.args[1]
+      expr = line.args[2]
       assert(isa(variable, Symbol))
       assert(!haskey(assignment_clauses, variable)) # only one assignment per var
+      push!(grounded_variables, variable)
       push!(variables, variable)
-      assignment_clauses[variable] = line.args[2]
+      push!(variables, collect_variables(expr)...)
+      assignment_clauses[variable] = expr
     elseif line.head == :macrocall && line.args[1] == symbol("@when")
       push!(expression_clauses, clause)
+      push!(variables, collect_variables(line.args[2])...)
     else
       assert(line.head == :line)
     end
   end
-  variables = unique(variables)
+  variables = unique([variable for variable in variables if variable in grounded_variables])
+  @show variables
   
   sources = Dict([variable => [] for variable in variables])
   for clause in relation_clauses

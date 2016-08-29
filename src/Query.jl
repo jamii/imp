@@ -124,33 +124,21 @@ function plan_join(returned_typed_variables, aggregate, query)
   returned_variables = map(get_variable_symbol, returned_typed_variables)
   returned_variable_types = Dict(zip(returned_variables, map(get_variable_type, returned_typed_variables)))
   
-  hint_clauses = []
+  variables = []
   relation_clauses = []
   expression_clauses = []
   assignment_clauses = Dict()
+  loop_clauses = Dict()
   for (clause, line) in enumerate(query.args) 
     if isa(line, Symbol)
-      push!(hint_clauses, clause)
-    elseif line.head == :call
-      push!(relation_clauses, clause)
-    elseif line.head == :(=)
-      variable = line.args[1]
-      assert(isa(variable, Symbol))
-      assert(get(assignment_clauses, variable, nothing) == nothing) # only one assignment per var
-      assignment_clauses[variable] = line.args[2]
-    elseif line.head == :macrocall && line.args[1] == symbol("@when")
-      push!(expression_clauses, clause)
-    else
-      assert(line.head == :line)
-    end
-  end
-  
-  variables = []
-  for clause in 1:length(query.args)
-    line = query.args[clause]
-    if clause in hint_clauses 
       push!(variables, line)
-    elseif clause in relation_clauses
+    elseif line.head == :call && line.args[1] == :in 
+      variable = line.args[2]
+      assert(isa(variable, Symbol))
+      assert(!haskey(loop_clauses, variable))
+      push!(variables, variable)
+      loop_clauses[variable] = line.args[3]
+    elseif line.head == :call
       for (ix, arg) in enumerate(line.args)
         if ix > 1 && !isa(arg, Symbol)
           variable = gensym("variable")
@@ -161,16 +149,27 @@ function plan_join(returned_typed_variables, aggregate, query)
           push!(variables, arg)
         end
       end
+      push!(relation_clauses, clause)
+    elseif line.head == :(=)
+      variable = line.args[1]
+      assert(isa(variable, Symbol))
+      assert(!haskey(assignment_clauses, variable)) # only one assignment per var
+      push!(variables, variable)
+      assignment_clauses[variable] = line.args[2]
+    elseif line.head == :macrocall && line.args[1] == symbol("@when")
+      push!(expression_clauses, clause)
+    else
+      assert(line.head == :line)
     end
   end
   variables = unique(variables)
   
-  sources = Dict()
+  sources = Dict([variable => [] for variable in variables])
   for clause in relation_clauses
     line = query.args[clause]
     for (column, variable) in enumerate(line.args[2:end])
       if variable in variables
-        push!(get!(()->[], sources, variable), (clause,column))
+        push!(sources[variable], (clause,column))
       end
     end
   end
@@ -269,7 +268,6 @@ function plan_join(returned_typed_variables, aggregate, query)
     variable = variables[variable_ix]
     variable_columns = symbol("columns_", variable)
     variable_ixes = symbol("ixes_", variable)
-    result_column = ixes[sources[variable][1]]
     for filter in filters[variable_ix]
       body = :(if $(esc(filter)); $body; end)
     end
@@ -280,7 +278,16 @@ function plan_join(returned_typed_variables, aggregate, query)
           $body
         end
       end
+    elseif haskey(loop_clauses, variable)
+      body = quote 
+        for $(esc(variable)) in $(esc(loop_clauses[variable]))
+          if assign($variable_columns, los, ats, his, $variable_ixes, $(esc(variable)))
+            $body
+          end
+        end
+      end
     else
+      result_column = ixes[sources[variable][1]]
       body = quote
         start_intersect($variable_columns, los, ats, his, $variable_ixes)
         while next_intersect($variable_columns, los, ats, his, $variable_ixes)

@@ -6844,3 +6844,30 @@ index bccfa6f..1088331 100644
            swap2($(cs...), i, j)
            i += 1; j -= 1
 ```
+
+### 2016 Aug 29
+
+I added support for `in` so that we can write things like:
+
+``` julia 
+@query([x,y],
+begin
+  x in 1:10
+  y in 1:10
+  @when x < y 
+end)
+```
+
+It works almost identically to `=`, except that it loops over the result of the expression instead of assigning.
+
+``` julia 
+body = quote 
+  for $(esc(variable)) in $(esc(loop_clauses[variable]))
+    if assign($variable_columns, los, ats, his, $variable_ixes, $(esc(variable)))
+      $body
+    end
+  end
+end
+```
+
+I could also have sorted the result and treated it like another column for intersection, but that would have been a bit more work and I'm not sure yet whether it would pay off.

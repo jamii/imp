@@ -122,8 +122,8 @@ function q3a()
     title_production_year(t_id, t_production_year)
     @when t_production_year > 2005
     movie_info_movie_id(mi_id, t_id)
+    mi_info in mi_infos
     movie_info_info(mi_id, mi_info)
-    @when mi_info in mi_infos
   end)
 end
 

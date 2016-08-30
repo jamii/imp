@@ -1,149 +1,56 @@
-module Scratch
+module Chinook 
 
 using Data
 using Query
-using Datasets
+using BenchmarkTools
+using Base.Test
 
-srand(999)
-# edge = (rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6)))
-edge = Relation(([1, 2, 3, 3, 4], [2, 3, 1, 4, 2]))
-# edge = read_columns("/home/jamie/soc-LiveJournal1.txt", [Int32, Int32], comments=true)
+function read_chinook(filename, types; comments=false)
+  rows, _ = readdlm(open(filename), '\t', header=true, quotes=false, comments=comments)
+  n = length(types)
+  columns = tuple([Vector{types[c]}() for c in 1:n]...)
+  for r in 1:size(rows)[1]
+    for c in 1:n
+      if types[c] == String
+        push!(columns[c], string(rows[r, c]))
+      else
+        push!(columns[c], rows[r, c])
+      end
+    end
+  end
+  Relation(columns)
+end
 
-function f(edge) 
-  @query([a,b,c], [a::Int64,b::Int64,c::Int64], 
+album = read_chinook("data/Album.csv", [Int64, String, Int64])
+artist = read_chinook("data/Artist.csv", [Int64, String])
+track = read_chinook("data/Track.csv", [Int64, String, Int64, Int64, Int64, String, Int64, Int64, Float64])
+playlist_track = read_chinook("data/PlaylistTrack.csv", [Int64, Int64])
+playlist = read_chinook("data/Playlist.csv", [Int64, String])
+
+function who_is_metal()
+  @query([artist_name::String],
   begin
-    edge(a,b)
-    a < b
-    edge(b,c)
-    b < c
-    edge(c,a)
+    playlist(playlist, "Heavy Metal Classic")
+    playlist_track(playlist, track)
+    track(track, _, album)
+    album(album, _, artist)
+    artist(artist, artist_name)
   end)
 end
 
-results = @query([a::Int64,b::Int64,c::Int64], 
-begin
-  edge(a,b)
-  @when a < b
-  edge(b,c)
-  @when b < c
-  edge(c,a)
-end)
-
-# @code_warntype f(edge)
-f(edge)
-f(edge)
-
-@query([artist_name::String],
-begin
-  playlist_name(playlist, "Heavy Metal Classic")
-  playlist_track(playlist, track)
-  track_album(track, album)
-  album_artist(album, artist)
-  artist_name(artist, artist_name)
-end)
-
-function who_is_metal(album, artist, track, playlist_track, playlist)
-  metal = @join([an],
-  [pn::String, p::Int64, t::Int64, al::Int64, a::Int64, an::String],
+function how_metal()
+  metal = @query([],
   begin
-    pn = "Heavy Metal Classic"
-    playlist(p, pn)
-    playlist_track(p, t)
-    track(t, _, al)
-    album(al, _, a)
-    artist(a, an)
-  end)
-  @join([an],
-  [an::String], 
-  begin
-    metal(an)
+    playlist(playlist, "Heavy Metal Classic")
+    playlist_track(playlist, track)
+    track(track, _, album)
+    album(album, _, artist)
+    artist(artist, artist_name)
   end)
 end
 
-macroexpand(quote
-metal = @join([an],
-[pn::String, p::Int64, t::Int64, al::Int64, a::Int64, an::String],
-begin
-  pn = "Heavy Metal Classic"
-  playlist(p, pn)
-  playlist_track(p, t)
-  track(t, _, al)
-  album(al, _, a)
-  artist(a, an)
-end)
-@join([an],
-[an::String], 
-begin
-  metal(an)
-end)
-end)
-
-function who_is_metal2(album, artist, track, playlist_track, playlist)
-  i1 = @join([p],
-  [pn::String, p::Int64],
-  begin
-    pn = "Heavy Metal Classic"
-    playlist(p, pn)
-  end)
-  i2 = @join([t],
-  [p::Int64, t::Int64],
-  begin 
-    i1(p)
-    playlist_track(p, t)
-  end)
-  i3 = @join([al],
-  [t::Int64, al::Int64],
-  begin 
-    i2(t)
-    track(t, _, al)
-  end)
-  i4 = @join([a],
-  [al::Int64, a::Int64],
-  begin 
-    i3(al)
-    album(al, _, a)
-  end)
-  i5 = @join([an],
-  [a::Int64, an::String],
-  begin 
-    i4(a)
-    artist(a, an)
-  end)
-  @join([an],
-  [an::String],
-  begin
-    i5(an)
-  end)
-end
-
-who_is_metal(album, artist, track, playlist_track, playlist)
-who_is_metal2(album, artist, track, playlist_track, playlist)
-
-# assert(who_is_metal(album, artist, track, playlist_track, playlist) == who_is_metal2(album, artist, track, playlist_track, playlist))
-
-# @code_warntype who_is_metal(album, artist, track, playlist_track, playlist)
-
-# @time [who_is_metal(album, artist, track, playlist_track, playlist) for n in 1:10000]
-# @time [who_is_metal2(album, artist, track, playlist_track, playlist) for n in 1:10000]
-
-function how_metal(album, artist, track, playlist_track, playlist)
-  metal = @join([],
-  [pn::String, p::Int64, t::Int64, al::Int64, a::Int64, an::String],
-  begin
-    pn = "Heavy Metal Classic"
-    playlist(p, pn)
-    playlist_track(p, t)
-    track(t, _, al)
-    album(al, _, a)
-    artist(a, an)
-  end)
-end
-
-@time how_metal(album, artist, track, playlist_track, playlist)
-
-function cost_of_playlist(album, artist, track, playlist_track, playlist)
-  @join([pn],
-  [p::Int64, pn::String, t::Int64, al::Int64, price::Float64],
+function cost_of_playlist()
+  @query([pn::String],
   (0.0,add_exp,price::Float64),
   begin
     playlist(p, pn)
@@ -152,28 +59,8 @@ function cost_of_playlist(album, artist, track, playlist_track, playlist)
   end)
 end
 
-@time cost_of_playlist(album, artist, track, playlist_track, playlist)
-
-function revenue_per_track(album, artist, track, playlist_track, playlist)
-  result = @join([p, pn, t],
-  [p::Int64, pn::String, t::Int64, al::Int64, price::Float64],
-  (0.0,add_exp,price::Float64),
-  begin
-    playlist(p, pn)
-    playlist_track(p, t)
-    track(t, _, al, _, _, _, _, _, price)
-  end)
-  @join([t],
-  [t::Int64, p::Int64, pn::String, price::Float64],
-  (0.0,add_exp,price::Float64),
-  begin
-    result(p, pn, t, price)
-  end)
-end
-
-function revenue_per_track2(album, artist, track, playlist_track, playlist)
-  @query([t],
-  [p::Int64, pn::String, t::Int64, al::Int64, price::Float64],
+function revenue_per_track()
+  @query([t::Int64],
   (0.0,add_exp,price::Float64),
   begin
     playlist(p, pn)
@@ -182,19 +69,27 @@ function revenue_per_track2(album, artist, track, playlist_track, playlist)
   end)
 end
 
-@time revenue_per_track(album, artist, track, playlist_track, playlist)
-@time revenue_per_track2(album, artist, track, playlist_track, playlist)
+function test()
+  @test who_is_metal().columns == (
+  String["AC/DC","Accept","Black Sabbath","Iron Maiden","Metallica","Motörhead","Mötley Crüe","Ozzy Osbourne","Scorpions"],
+  Int64[1,4,2,6,6,2,1,3,1]
+  )
+  @test how_metal().columns == (
+  [26],
+  )
+  @test cost_of_playlist().columns == (
+  String["90’s Music","Brazilian Music","Classical","Classical 101 - Deep Cuts","Classical 101 - Next Steps","Classical 101 - The Basics","Grunge","Heavy Metal Classic","Music","Music Videos","On-The-Go 1","TV Shows"],
+  Float64[1462.2300000000118,38.60999999999999,74.24999999999999,24.74999999999999,24.74999999999999,24.74999999999999,14.850000000000001,25.739999999999988,6514.199999999501,0.99,0.99,847.7400000000024]
+  )
+  @test revenue_per_track().columns[1][1:10] == Int64[1,2,3,4,5,6,7,8,9,10]
+  @test revenue_per_track().columns[2][1:10] == Float64[2.9699999999999998,2.9699999999999998,3.96,3.96,3.96,1.98,1.98,1.98,1.98,1.98]
+end
 
-assert(revenue_per_track(album, artist, track, playlist_track, playlist).columns == revenue_per_track2(album, artist, track, playlist_track, playlist).columns)
-
-@query([pn, an],
-[pn::String, p::Int64, t::Int64, al::Int64, a::Int64, an::String],
-begin
-  playlist(p, pn)
-  playlist_track(p, t)
-  track(t, _, al)
-  album(al, _, a)
-  artist(a, an)
-end).columns
+function bench()
+  @show @benchmark who_is_metal()
+  @show @benchmark how_metal()
+  @show @benchmark cost_of_playlist()
+  @show @benchmark revenue_per_track()
+end
 
 end

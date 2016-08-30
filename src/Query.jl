@@ -172,8 +172,8 @@ function plan_join(returned_typed_variables, aggregate, query)
       assert(line.head == :line)
     end
   end
+  delete!(grounded_variables, :_)
   variables = unique([variable for variable in variables if variable in grounded_variables])
-  @show variables
   
   sources = Dict([variable => [] for variable in variables])
   for clause in relation_clauses

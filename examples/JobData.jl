@@ -1,33 +1,8 @@
-module Datasets
+module JobData
+
+# separate module because this takes a long time, don't want to rerun it every test
 
 using Data
-
-function read_chinook(filename, types; comments=false)
-  rows, _ = readdlm(open(filename), '\t', header=true, quotes=false, comments=comments)
-  n = length(types)
-  columns = tuple([Vector{types[c]}() for c in 1:n]...)
-  for r in 1:size(rows)[1]
-    for c in 1:n
-      if types[c] == String
-        push!(columns[c], string(rows[r, c]))
-      elseif isa(rows[r, c], SubString)
-        @show r c rows[r, c]
-      else
-        push!(columns[c], rows[r, c])
-      end
-    end
-  end
-  Relation(columns)
-end
-
-album = read_chinook("data/Album.csv", [Int64, String, Int64])
-artist = read_chinook("data/Artist.csv", [Int64, String])
-track = read_chinook("data/Track.csv", [Int64, String, Int64, Int64, Int64, String, Int64, Int64, Float64])
-playlist_track = read_chinook("data/PlaylistTrack.csv", [Int64, Int64])
-playlist = read_chinook("data/Playlist.csv", [Int64, String])
-
-export album, artist, track, playlist_track, playlist
-
 using DataFrames
 
 function read_job()
@@ -74,8 +49,10 @@ end
 
 using JLD
 
-# job = @time read_job()
-# @time save("../job/imp.jld", "job", job)
+if !isfile("../job/imp.jld")
+  job = @time read_job()
+  @time save("../job/imp.jld", "job", job)
+end
 
 job = @time load("../job/imp.jld", "job")
 
@@ -87,7 +64,5 @@ for (table_name, column_name) in keys(job)
 end
 
 gc()
-
-export job
 
 end

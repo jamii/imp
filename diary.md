@@ -6995,3 +6995,25 @@ clicked = Relation((Int64[], String[]))
   body!(w, button("#my_button", Dict(:onclick => @event clicked("my_button")), "clicked $event_number times"))
 end
 ```
+
+Somehow I ended up tidying up code and setting up proper tests. There doesn't seem to be much builtin structure for tests so I just have a scratch file to run things from:
+
+``` julia 
+include("src/Data.jl")
+include("src/Query.jl")
+include("src/UI.jl")
+
+include("examples/JobData.jl")
+
+include("examples/Graph.jl")
+include("examples/Chinook.jl")
+include("examples/Job.jl")
+
+Graph.test()
+Chinook.test()
+Job.test()
+
+Graph.bench()
+Chinook.bench()
+Job.bench()
+```

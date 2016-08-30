@@ -2,25 +2,9 @@ module Job
 
 using Data
 using Query
-using Datasets
-
-# TODO real benchmarks
-function benchmark(q, n)
-  counts = 0
-  results = []
-  println(q, " x1 (+compilation +indexing)")
-  @time begin 
-    results = q()
-    counts += length(results.columns[1])
-  end
-  println(q, " x", n)
-  @time for _ in 1:n
-    results = q()
-    counts += length(results.columns[1])
-  end
-  println(length(results.columns[1]), " results")
-  (counts, results.columns)
-end
+using JobData
+using Base.Test
+using BenchmarkTools
 
 # SELECT MIN(mc.note) AS production_note,
 #        MIN(t.title) AS movie_title,
@@ -57,8 +41,6 @@ function q1a()
   end)
 end
 
-benchmark(q1a, 1000)
-
 # SELECT MIN(t.title) AS movie_title
 # FROM company_name AS cn,
 #      keyword AS k,
@@ -85,8 +67,6 @@ function q2a()
     title_title(t_id, title)
   end)
 end
-
-benchmark(q2a, 10)
 
 # SELECT MIN(t.title) AS movie_title
 # FROM keyword AS k,
@@ -126,8 +106,6 @@ function q3a()
   end)
 end
 
-benchmark(q3a, 20)
-
 # SELECT MIN(mi_idx.info) AS rating,
 #        MIN(t.title) AS movie_title
 # FROM info_type AS it,
@@ -162,6 +140,19 @@ function q4a()
   end)
 end
 
-benchmark(q4a, 100)
+function test()
+  # tested against postgres
+  @test length(q1a().columns[1]) == 57
+  @test length(q2a().columns[1]) == 4127
+  @test length(q3a().columns[1]) == 105
+  @test length(q4a().columns[1]) == 45
+end
+
+function bench()
+  @show @benchmark q1a()
+  @show @benchmark q2a()
+  @show @benchmark q3a()
+  @show @benchmark q4a()
+end
 
 end

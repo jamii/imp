@@ -348,6 +348,7 @@ end
 @inline add_exp(a, b, n) = a + (b * n)
 @inline mul_exp(a, b, n) = a * (b ^ n)
 @inline min_exp(a, b, n) = min(a,b)
+@inline push_exp!(a, b, n) = for _ in 1:n; push!(a,b); end
 
 macro query(returned_typed_variables, query)
   aggregate = :(0, add_exp, 1::Int64)

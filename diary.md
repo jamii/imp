@@ -6967,4 +6967,31 @@ function Base.push!{T}(relation::Relation{T}, values)
 end
 ```
 
-Uh, but I don't have a proper dataflow yet and I'll want to run things on each event, so maybe this is poorly thought out.
+Uh, but I don't have a proper dataflow yet and I'll want to run things on each event, so maybe this is poorly thought out? Let's add a callback to the window:
+
+``` julia 
+function Blink.Window(flow, event_tables)
+  w = Window()
+  event_number = 1
+  handle(w, "event") do args 
+    values = args["values"]
+    insert!(values, 1, event_number)
+    push!(event_tables[args["table"]], values)
+    flow(w, event_number)
+    event_number += 1
+  end
+  flow(w, 0)
+  w
+end
+
+macro Window(flow, event_tables...)
+  :(Window($flow, Dict($([:($(string(table)) => $table) for table in event_tables]...))))
+end
+```
+
+``` julia 
+clicked = Relation((Int64[], String[]))
+@Window(clicked) do w, event_number
+  body!(w, button("#my_button", Dict(:onclick => @event clicked("my_button")), "clicked $event_number times"))
+end
+```

@@ -118,6 +118,13 @@ function Base.push!{T}(relation::Relation{T}, values)
   # TODO remove dupes
 end
 
+function Base.empty!{T}(relation::Relation{T})
+  for column in relations.columns
+    empty!(column)
+  end
+  empty!(relation.indexes)
+end
+
 import Atom
 function Atom.render(editor::Atom.Editor, relation::Relation)
   Atom.render(editor, relation.columns)

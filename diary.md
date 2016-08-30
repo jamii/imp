@@ -6823,6 +6823,8 @@ end
 
 The remaining grossness is mostly just the awful table/variable names from the original benchmark. I'm ok with that. 
 
+I'm going on a long climbing trip, so the next few weeks will be sparse.
+
 ## 2016 Aug 20
 
 Fixed a sorting bug - choosing the pivot at random breaks the invariant that there is always at least one element smaller or larger than the pivot, so the partitioning can run off the end of the array.
@@ -6845,7 +6847,7 @@ index bccfa6f..1088331 100644
            i += 1; j -= 1
 ```
 
-### 2016 Aug 29
+## 2016 Aug 29
 
 I added support for `in` so that we can write things like:
 
@@ -6873,3 +6875,96 @@ end
 I could also have sorted the result and treated it like another column for intersection, but that would have been a bit more work and I'm not sure yet whether it would pay off.
 
 I also removed a limitation of the variable ordering detection where it only looked at grounded variables. It can now look inside `=`, `in` and `@when`.
+
+## 2016 Aug 30
+
+Going to start looking at UI. I'll need to do more work on queries and dataflow along the way, but I think it will be helpful to do add features as they are required by real programs, rather than planning them in advance and finding later that they aren't quite right. 
+
+I'm going with HTML just because it's familiar and widely supported. 
+
+With Blink.jl and Hiccup.jl it's really easy to get a window up and display content:
+
+``` julia 
+w = Window()
+body!(w, Hiccup.div("#foo.bar", "Hello World"))
+```
+
+Handling events is a bit harder. There is a [issue thread](https://github.com/JunoLab/Blink.jl/issues/57) but I'm just reproducing the same error as the person asking the question. To the debugger! Which I haven't used before...
+
+``` julia 
+using Gallium
+breakpoint(Blink.ws_handler)
+```
+
+```
+signal (11): Segmentation fault
+while loading /home/jamie/.atom/packages/julia-client/script/boot.jl, in expression starting on line 327
+evaluate_generic_instruction at /home/jamie/.julia/v0.5/DWARF/src/DWARF.jl:376
+unknown function (ip: 0x7f9323b5a5c9)
+...
+```
+
+Bah. To be fair, I have a pretty janky setup with various packages running at weird versions on top of a Julia RC. When Julia 0.5 is released I'll clean it up and try the debugger again.
+
+Instead I just poke around in the source code and eventually figure out that the data sent back has to be a dict, and that there is a baked-in magic function in `@js` for making such. 
+
+``` julia 
+x = [1,2]
+@js_ w document.getElementById("my_button").onclick = () -> Blink.msg("press", d(("foo", $x)))
+handle(w, "press") do args...
+  @show args
+end
+```
+
+But I want these callbacks to be specified by values in the dom, not by a separate side-effect. 
+
+``` julia
+function event(table_name, values)
+  Blink.jsexpr(quote 
+    Blink.msg("event", d(("table", $table_name), ("values", $values)))
+  end).s
+end
+
+macro event(expr)
+  assert(expr.head == :call)
+  :(event($(string(expr.args[1])), [$(expr.args[2:end]...)]))
+end
+
+function Window(event_tables)
+  w = Window()
+  event_number = 1
+  handle(w, "event") do args 
+    values = args["values"]
+    insert!(values, 1, event_number)
+    event_number += 1
+    push!(event_tables[args["table"]], values)
+  end
+end
+
+macro Window(event_tables...)
+  :(Window(Dict($([:($(string(table)) => $table) for table in event_tables]...))))
+end
+```
+
+``` julia
+using Data
+clicked = Relation((Int64[], String[]))
+w = @Window(clicked)
+body!(w, button("#my_button", Dict(:onclick => @event clicked("my_button")), "click me!"))
+```
+
+I haven't actually implemented `push!` yet for relations, so let's do that too. I'm still just using sorted arrays so this is a little hacky. It'll do for now.
+
+``` julia 
+function Base.push!{T}(relation::Relation{T}, values)
+  assert(length(relation.columns) == length(values))
+  for ix in 1:length(values)
+    push!(relation.columns[ix], values[ix])
+  end
+  empty!(relation.indexes)
+  # TODO can preserve indexes when inserted value is at end or beginning
+  # TODO remove dupes
+end
+```
+
+Uh, but I don't have a proper dataflow yet and I'll want to run things on each event, so maybe this is poorly thought out.

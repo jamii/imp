@@ -108,6 +108,16 @@ function index{T}(relation::Relation{T}, order::Vector{Int64})
   end
 end
 
+function Base.push!{T}(relation::Relation{T}, values)
+  assert(length(relation.columns) == length(values))
+  for ix in 1:length(values)
+    push!(relation.columns[ix], values[ix])
+  end
+  empty!(relation.indexes)
+  # TODO can preserve indexes when inserted value is at end or beginning
+  # TODO remove dupes
+end
+
 import Atom
 function Atom.render(editor::Atom.Editor, relation::Relation)
   Atom.render(editor, relation.columns)

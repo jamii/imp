@@ -6967,7 +6967,7 @@ function Base.push!{T}(relation::Relation{T}, values)
 end
 ```
 
-Uh, but I don't have a proper dataflow yet and I'll want to run things on each event, so maybe this is poorly thought out? Let's add a callback to the window:
+Uh, but I don't have a proper dataflow yet and I'll want to run things on each event, so maybe this is poorly thought out. Let's add a callback to the window:
 
 ``` julia 
 function Blink.Window(flow, event_tables)

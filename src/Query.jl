@@ -284,16 +284,19 @@ function plan_join(returned_typed_variables, aggregate, query)
     end
     if haskey(assignment_clauses, variable)
       body = quote
-        $(esc(variable)) = $(esc(assignment_clauses[variable]))
-        if assign($variable_columns, los, ats, his, $variable_ixes, $(esc(variable)))
-          $body
+        let $(esc(variable)) = $(esc(assignment_clauses[variable]))
+          if assign($variable_columns, los, ats, his, $variable_ixes, $(esc(variable)))
+            $body
+          end
         end
       end
     elseif haskey(loop_clauses, variable)
       body = quote 
-        for $(esc(variable)) in $(esc(loop_clauses[variable]))
-          if assign($variable_columns, los, ats, his, $variable_ixes, $(esc(variable)))
-            $body
+        let
+          for $(esc(variable)) in $(esc(loop_clauses[variable]))
+            if assign($variable_columns, los, ats, his, $variable_ixes, $(esc(variable)))
+              $body
+            end
           end
         end
       end
@@ -302,8 +305,9 @@ function plan_join(returned_typed_variables, aggregate, query)
       body = quote
         start_intersect($variable_columns, los, ats, his, $variable_ixes)
         while next_intersect($variable_columns, los, ats, his, $variable_ixes)
-          $(esc(variable)) = columns[$result_column][los[$(result_column+1)]]
-          $body
+          let $(esc(variable)) = columns[$result_column][los[$(result_column+1)]]
+            $body
+          end
         end
       end 
     end

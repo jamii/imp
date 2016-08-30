@@ -94,10 +94,51 @@ end
 type Relation{T <: Tuple} # where T is a tuple of columns
   columns::T
   indexes::Dict{Vector{Int64},T}
+  key_types::Vector{Type}
+  val_types::Vector{Type}
 end
 
 function Relation{T}(columns::T)
-  Relation(columns, Dict{Vector{Int64},T}())
+  Relation(columns, Dict{Vector{Int64},T}(), Type[eltype(column) for column in columns], Type[])
+end
+
+# examples:
+# @relation height_at(Int64, Int64) = Float64
+# @relation married(String, String)
+# @relation state() = (Int64, Symbol)
+macro relation(expr) 
+  if expr.head == :(=)
+    name_and_keys = expr.args[1]
+    vals_expr = expr.args[2]
+  else 
+    name_and_keys = expr
+    vals_expr = Expr(:tuple)
+  end
+  assert(name_and_keys.head == :call)
+  name = name_and_keys.args[1]
+  assert(isa(name, Symbol))
+  keys = name_and_keys.args[2:end]
+  for key in keys 
+    assert(isa(key, Symbol))
+  end
+  if vals_expr.head == :block
+    vals_expr = vals_expr.args[2]
+  end
+  if isa(vals_expr, Symbol) 
+    vals = [vals_expr]
+  else 
+    assert(vals_expr.head == :tuple)
+    vals = vals_expr.args
+  end
+  for val in vals 
+    assert(isa(val, Symbol))
+  end
+  typs = [keys..., vals...]
+  quote 
+    columns = tuple($([:(Vector{$typ}()) for typ in typs]...))
+    indexes = Dict{Vector{Int64}, typeof(columns)}()
+    $(esc(name)) = Relation(columns, indexes, Type[$(keys...)], Type[$(vals...)])
+  end
 end
 
 function index{T}(relation::Relation{T}, order::Vector{Int64})

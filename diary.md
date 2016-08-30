@@ -7112,3 +7112,46 @@ The last point is a design problem that has been bugging me for ages, so it bear
 Fundeps / upsert is simpler, but it does move Imp away from being a general purpose library. It probably won't be hard to support a separate macro that just returns results though.
 
 I was imagining that eg `+ mine_count(x, y) = c` would replace any existing value for `(x, y)`, but what should happen if a single query execution produces multiple values of `c` for a single `(x,y)`. Probably an error?
+
+Well, let's start with something I do know how to implement:
+
+``` julia 
+# examples:
+# @relation height_at(Int64, Int64) = Float64
+# @relation married(String, String)
+# @relation state() = (Int64, Symbol)
+macro relation(expr) 
+  if expr.head == :(=)
+    name_and_keys = expr.args[1]
+    vals_expr = expr.args[2]
+  else 
+    name_and_keys = expr
+    vals_expr = Expr(:tuple)
+  end
+  assert(name_and_keys.head == :call)
+  name = name_and_keys.args[1]
+  assert(isa(name, Symbol))
+  keys = name_and_keys.args[2:end]
+  for key in keys 
+    assert(isa(key, Symbol))
+  end
+  if vals_expr.head == :block
+    vals_expr = vals_expr.args[2]
+  end
+  if isa(vals_expr, Symbol) 
+    vals = [vals_expr]
+  else 
+    assert(vals_expr.head == :tuple)
+    vals = vals_expr.args
+  end
+  for val in vals 
+    assert(isa(val, Symbol))
+  end
+  typs = [keys..., vals...]
+  quote 
+    columns = tuple($([:(Vector{$typ}()) for typ in typs]...))
+    indexes = Dict{Vector{Int64}, typeof(columns)}()
+    $(esc(name)) = Relation(columns, indexes, Type[$(keys...)], Type[$(vals...)])
+  end
+end
+```

@@ -7116,6 +7116,13 @@ I was imagining that eg `+ mine_count(x, y) = c` would replace any existing valu
 Well, let's start with something I do know how to implement:
 
 ``` julia 
+type Relation{T <: Tuple} # where T is a tuple of columns
+  columns::T
+  indexes::Dict{Vector{Int64},T}
+  key_types::Vector{Type}
+  val_types::Vector{Type}
+end
+
 # examples:
 # @relation height_at(Int64, Int64) = Float64
 # @relation married(String, String)
@@ -7155,3 +7162,86 @@ macro relation(expr)
   end
 end
 ```
+
+## 2016 Sep 1
+
+Next thing I need is a way to merge relations, with the values from the more recent version winning key collisions. I also threw in a function that checks the fundep invariant. 
+
+``` julia 
+function define_keys(n, num_keys)
+  olds = [symbol("old", c) for c in 1:n]
+  news = [symbol("new", c) for c in 1:n]
+  results = [symbol("result", c) for c in 1:n]
+  ts = [symbol("C", c) for c in 1:n]
+  
+  quote 
+  
+    function merge_sorted!{$(ts...)}(old::Tuple{$(ts...)}, new::Tuple{$(ts...)}, result::Tuple{$(ts...)}, num_keys::Type{Val{$num_keys}})
+      @inbounds begin
+        $([:($(olds[c]) = old[$c]) for c in 1:n]...)
+        $([:($(news[c]) = new[$c]) for c in 1:n]...)
+        $([:($(results[c]) = result[$c]) for c in 1:n]...)
+        old_at = 1
+        new_at = 1
+        old_hi = length($(olds[1]))
+        new_hi = length($(news[1]))
+        while old_at <= old_hi && new_at <= new_hi
+          c = c_cmp($(olds[1:num_keys]...), $(news[1:num_keys]...), old_at, new_at)
+          if c == 0
+            $([:(push!($(results[c]), $(news[c])[new_at])) for c in 1:n]...)
+            old_at += 1
+            new_at += 1
+          elseif c == 1
+            $([:(push!($(results[c]), $(news[c])[new_at])) for c in 1:n]...)
+            new_at += 1
+          else 
+            $([:(push!($(results[c]), $(olds[c])[old_at])) for c in 1:n]...)
+            old_at += 1
+          end
+        end
+        while old_at <= old_hi
+          $([:(push!($(results[c]), $(olds[c])[old_at])) for c in 1:n]...)
+          old_at += 1
+        end
+        while new_at <= new_hi
+          $([:(push!($(results[c]), $(news[c])[new_at])) for c in 1:n]...)
+          new_at += 1
+        end
+      end
+    end
+    
+    function assert_no_dupes_sorted{$(ts...)}(result::Tuple{$(ts...)}, num_keys::Type{Val{$num_keys}})
+      $([:($(results[c]) = result[$c]) for c in 1:n]...)
+      for at in 2:length($(results[1]))
+        assert(c_cmp($(results[1:num_keys]...), $(results[1:num_keys]...), at, at-1) == 1)
+      end
+    end
+    
+  end
+end
+
+for n in 1:10
+  for k in 1:n
+    eval(define_keys(n, k))
+  end
+end
+
+function Base.merge{T}(old::Relation{T}, new::Relation{T})
+  # TODO should Relation{T} be typed Relation{K,V} instead?
+  assert(old.key_types == new.key_types)
+  assert(old.val_types == new.val_types)
+  result_columns = tuple([Vector{eltype(column)}() for column in old.columns]...)
+  order = collect(1:(length(old.key_types) + length(old.val_types)))
+  merge_sorted!(index(old, order), index(new, order), result_columns, Val{length(old.key_types)})
+  result_indexes = Dict{Vector{Int64}, typeof(result_columns)}(order => result_columns)
+  Relation(result_columns, result_indexes, old.key_types, old.val_types)
+end
+
+function assert_no_dupes{T}(relation::Relation{T})
+  order = collect(1:(length(relation.key_types) + length(relation.val_types)))
+  assert_no_dupes_sorted(index(relation, order), Val{length(relation.key_types)})
+  relation
+end
+```
+
+There's all kinds of grossness in here, similar to the sort functions before, dealing with the annoying restrictions on stack allocation. Might be worth cleaning this up before I continue.

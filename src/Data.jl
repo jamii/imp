@@ -118,7 +118,7 @@ function merge_sorted!{T <: Tuple, K <: Tuple}(old::T, new::T, old_key::K, new_k
 end
 
 function assert_no_dupes_sorted{K <: Tuple}(key::K)
-  for at in 2:length(result[1])
+  for at in 2:length(key[1])
     assert(cmp_in(key, key, at, at-1) == 1)
   end
 end

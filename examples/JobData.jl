@@ -52,9 +52,9 @@ using JLD
 if !isfile("../job/imp.jld")
   job = @time read_job()
   @time save("../job/imp.jld", "job", job)
+else 
+  job = @time load("../job/imp.jld", "job")
 end
-
-job = @time load("../job/imp.jld", "job")
 
 for (table_name, column_name) in keys(job)
   @eval begin 

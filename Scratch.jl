@@ -14,6 +14,8 @@ Graph.test()
 Chinook.test()
 Job.test()
 
+Data.bench()
+
 Graph.bench()
 Chinook.bench()
 Job.bench()

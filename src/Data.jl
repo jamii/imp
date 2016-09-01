@@ -1,165 +1,125 @@
 module Data
 
 using Base.Test
+using BenchmarkTools
 
-function define_columns(n)
-  cs = [symbol("c", c) for c in 1:n]
-  ts = [symbol("C", c) for c in 1:n]
-  tmps = [symbol("tmp", c) for c in 1:n]
-  olds = [symbol("old", c) for c in 1:n]
-  news = [symbol("new", c) for c in 1:n]
-  
+@generated function cmp_in{T <: Tuple}(xs::T, ys::T, x_at::Int64, y_at::Int64)
+  n = length(T.parameters)
   quote
-    
-    @inline function lt($(cs...), i, j) 
-      @inbounds begin 
-        $([:(if !isequal($(cs[c])[i], $(cs[c])[j]); return isless($(cs[c])[i], $(cs[c])[j]); end) for c in 1:(n-1)]...)
-        return isless($(cs[n])[i], $(cs[n])[j])
-      end
+    $(Expr(:meta, :inline))
+    @inbounds begin 
+      $([:(result = cmp(xs[$c][x_at], ys[$c][y_at]); if result != 0; return result; end) for c in 1:(n-1)]...)
+      return cmp(xs[$n][x_at], ys[$n][y_at])
     end
-    
-    @inline function lt2($(cs...), $(tmps...), j) 
-      @inbounds begin 
-        $([:(if !isequal($(tmps[c]), $(cs[c])[j]); return isless($(tmps[c]), $(cs[c])[j]); end) for c in 1:(n-1)]...)
-        return isless($(tmps[n]), $(cs[n])[j])
-      end
-    end
-    
-    @inline function swap($(cs...), i, j)
-      @inbounds begin
-        $([quote
-          $(tmps[c]) = $(cs[c])[j]
-          $(cs[c])[j] = $(cs[c])[i]
-          $(cs[c])[i] = $(tmps[c])
-        end for c in 1:n]...)
-      end
-    end
-
-    # sorting cribbed from Base.Sort
-
-    function insertion_sort!($(cs...), lo::Int, hi::Int)
-      @inbounds for i = lo+1:hi
-        j = i
-        $([:($(tmps[c]) = $(cs[c])[i]) for c in 1:n]...)
-        while j > lo
-          if lt2($(cs...), $(tmps...), j-1)
-            $([:($(cs[c])[j] = $(cs[c])[j-1]) for c in 1:n]...)
-            j -= 1
-            continue
-          end
-          break
-        end
-        $([:($(cs[c])[j] = $(tmps[c])) for c in 1:n]...)
-      end
-    end
-
-    function partition!($(cs...), lo::Int, hi::Int)
-      @inbounds begin
-        pivot = rand(lo:hi)
-        swap($(cs...), pivot, lo)
-        i, j = lo+1, hi
-        while true
-          while (i <= j) && lt($(cs...), i, lo); i += 1; end;
-          while (i <= j) && lt($(cs...), lo, j); j -= 1; end;
-          i >= j && break
-          swap($(cs...), i, j)
-          i += 1; j -= 1
-        end
-        swap($(cs...), lo, j)
-        return j
-      end
-    end
-
-    function quicksort!($(cs...), lo::Int, hi::Int)
-      @inbounds if hi-lo <= 0
-        return
-      elseif hi-lo <= 20 
-        insertion_sort!($(cs...), lo, hi)
-      else
-        j = partition!($(cs...), lo, hi)
-        quicksort!($(cs...), lo, j-1)
-        quicksort!($(cs...), j+1, hi)
-      end
-    end
-
-    function quicksort!{$(ts...)}(cs::Tuple{$(ts...)})
-      quicksort!($([:(cs[$c]) for c in 1:n]...), 1, length(cs[1]))
-      return cs
-    end
-    
-    @inline function c_cmp($(olds...), $(news...), old_at, new_at) 
-      @inbounds begin 
-        $([quote 
-          c = cmp($(olds[c])[old_at], $(news[c])[new_at])
-          if c != 0; return c; end
-        end for c in 1:(n-1)]...)
-        return cmp($(olds[n])[old_at], $(news[n])[new_at])
-      end
-    end
-
-  end
-
-end
-
-for n in 1:10
-  eval(define_columns(n))
-end
-
-function define_keys(n, num_keys)
-  olds = [symbol("old", c) for c in 1:n]
-  news = [symbol("new", c) for c in 1:n]
-  results = [symbol("result", c) for c in 1:n]
-  ts = [symbol("C", c) for c in 1:n]
-  
-  quote 
-  
-    function merge_sorted!{$(ts...)}(old::Tuple{$(ts...)}, new::Tuple{$(ts...)}, result::Tuple{$(ts...)}, num_keys::Type{Val{$num_keys}})
-      @inbounds begin
-        $([:($(olds[c]) = old[$c]) for c in 1:n]...)
-        $([:($(news[c]) = new[$c]) for c in 1:n]...)
-        $([:($(results[c]) = result[$c]) for c in 1:n]...)
-        old_at = 1
-        new_at = 1
-        old_hi = length($(olds[1]))
-        new_hi = length($(news[1]))
-        while old_at <= old_hi && new_at <= new_hi
-          c = c_cmp($(olds[1:num_keys]...), $(news[1:num_keys]...), old_at, new_at)
-          if c == 0
-            $([:(push!($(results[c]), $(news[c])[new_at])) for c in 1:n]...)
-            old_at += 1
-            new_at += 1
-          elseif c == 1
-            $([:(push!($(results[c]), $(news[c])[new_at])) for c in 1:n]...)
-            new_at += 1
-          else 
-            $([:(push!($(results[c]), $(olds[c])[old_at])) for c in 1:n]...)
-            old_at += 1
-          end
-        end
-        while old_at <= old_hi
-          $([:(push!($(results[c]), $(olds[c])[old_at])) for c in 1:n]...)
-          old_at += 1
-        end
-        while new_at <= new_hi
-          $([:(push!($(results[c]), $(news[c])[new_at])) for c in 1:n]...)
-          new_at += 1
-        end
-      end
-    end
-    
-    function assert_no_dupes_sorted{$(ts...)}(result::Tuple{$(ts...)}, num_keys::Type{Val{$num_keys}})
-      $([:($(results[c]) = result[$c]) for c in 1:n]...)
-      for at in 2:length($(results[1]))
-        assert(c_cmp($(results[1:num_keys]...), $(results[1:num_keys]...), at, at-1) == 1)
-      end
-    end
-    
   end
 end
 
-for n in 1:10
-  for k in 1:n
-    eval(define_keys(n, k))
+@generated function swap_in{T <: Tuple}(xs::T, i::Int64, j::Int64)
+  n = length(T.parameters)
+  quote
+    $(Expr(:meta, :inline))
+    @inbounds begin 
+      $([quote 
+        let tmp = xs[$c][i]
+          xs[$c][i] = xs[$c][j]
+          xs[$c][j] = tmp
+        end
+      end for c in 1:n]...)
+    end
+  end
+end
+
+@generated function push_in!{T <: Tuple}(result::T, cs::T, i::Int64)
+  n = length(T.parameters)
+  quote
+    $(Expr(:meta, :inline))
+    @inbounds begin 
+      $([:(push!(result[$c], cs[$c][i])) for c in 1:n]...)
+    end
+  end
+end
+
+# sorting cribbed from Base.Sort
+# but unrolls `cmp` and `swap` to avoid heap allocation
+# and use random pivot selection because stdlib pivot caused 1000x sadness on real data
+
+function insertion_sort!{T <: Tuple}(cs::T, lo::Int, hi::Int)
+  @inbounds for i = lo+1:hi
+    j = i
+    while j > lo && (cmp_in(cs, cs, j, j-1) == -1)
+      swap_in(cs, j, j-1)
+      j -= 1
+    end
+  end
+end
+
+function partition!{T <: Tuple}(cs::T, lo::Int, hi::Int)
+  @inbounds begin
+    pivot = rand(lo:hi)
+    swap_in(cs, pivot, lo)
+    i, j = lo+1, hi
+    while true
+      while (i <= j) && (cmp_in(cs, cs, i, lo) == -1); i += 1; end;
+      while (i <= j) && (cmp_in(cs, cs, lo, j) == -1); j -= 1; end;
+      i >= j && break
+      swap_in(cs, i, j)
+      i += 1; j -= 1
+    end
+    swap_in(cs, lo, j)
+    return j
+  end
+end
+
+function quicksort!{T <: Tuple}(cs::T, lo::Int, hi::Int)
+  @inbounds if hi-lo <= 0
+    return
+  elseif hi-lo <= 20 
+    insertion_sort!(cs, lo, hi)
+  else
+    j = partition!(cs, lo, hi)
+    quicksort!(cs, lo, j-1)
+    quicksort!(cs, j+1, hi)
+  end
+end
+
+function quicksort!{T <: Tuple}(cs::T)
+  quicksort!(cs, 1, length(cs[1]))
+end
+
+function merge_sorted!{T <: Tuple, K <: Tuple}(old::T, new::T, old_key::K, new_key::K, result::T)
+  @inbounds begin
+    old_at = 1
+    new_at = 1
+    old_hi = length(old[1])
+    new_hi = length(new[1])
+    while old_at <= old_hi && new_at <= new_hi
+      c = cmp_in(old_key, new_key, old_at, new_at)
+      if c == 0
+        push_in!(result, new, new_at)
+        old_at += 1
+        new_at += 1
+      elseif c == 1
+        push_in!(result, new, new_at)
+        new_at += 1
+      else 
+        push_in!(result, old, old_at)
+        old_at += 1
+      end
+    end
+    while old_at <= old_hi
+      push_in!(result, old, old_at)
+      old_at += 1
+    end
+    while new_at <= new_hi
+      push_in!(result, new, new_at)
+      new_at += 1
+    end
+  end
+end
+
+function assert_no_dupes_sorted{K <: Tuple}(key::K)
+  for at in 2:length(result[1])
+    assert(cmp_in(key, key, at, at-1) == 1)
   end
 end
 
@@ -246,16 +206,20 @@ function Base.merge{T}(old::Relation{T}, new::Relation{T})
   # TODO should Relation{T} be typed Relation{K,V} instead?
   assert(old.key_types == new.key_types)
   assert(old.val_types == new.val_types)
-  result_columns = tuple([Vector{eltype(column)}() for column in old.columns]...)
   order = collect(1:(length(old.key_types) + length(old.val_types)))
-  merge_sorted!(index(old, order), index(new, order), result_columns, Val{length(old.key_types)})
+  old_index = index(old, order)
+  new_index = index(new, order)
+  num_keys = length(old.key_types)
+  result_columns = tuple([Vector{eltype(column)}() for column in old.columns]...)
+  merge_sorted!(old_index, new_index, old_index[1:num_keys], new_index[1:num_keys], result_columns)
   result_indexes = Dict{Vector{Int64}, typeof(result_columns)}(order => result_columns)
   Relation(result_columns, result_indexes, old.key_types, old.val_types)
 end
 
 function assert_no_dupes{T}(relation::Relation{T})
   order = collect(1:(length(relation.key_types) + length(relation.val_types)))
-  assert_no_dupes_sorted(index(relation, order), Val{length(relation.key_types)})
+  key = index(relation, order)[1:length(relation.key_types)]
+  assert_no_dupes_sorted(key)
   relation
 end
 
@@ -270,7 +234,9 @@ function test()
   for i in 1:10000
     srand(i)
     x = rand(Int64, i)
-    @test quicksort!((copy(x),))[1] == sort(copy(x))
+    sx = sort(copy(x))
+    quicksort!((x,))
+    @test x == sx
   end
   
   for i in 1:10000
@@ -296,6 +262,24 @@ function test()
     c = merge(a,b)
     @test length(c) == length(x1) + length(x2)
   end
+end
+
+function bench()
+  srand(999)
+  x = rand(Int64, 10000)
+  @show @benchmark quicksort!((copy($x),))
+  
+  srand(999)
+  y = [string(i) for i in rand(Int64, 10000)]
+  @show @benchmark quicksort!((copy($y),))
+  
+  srand(999)
+  x = unique(rand(1:10000, 10000))
+  y = rand(1:10000, length(x))
+  z = rand(1:10000, length(x))
+  a = Relation((x,y), Dict{Vector{Int64}, typeof((x,y))}(), Type[Int64], Type[Int64])
+  b = Relation((x,z), Dict{Vector{Int64}, typeof((x,y))}(), Type[Int64], Type[Int64])
+  @show @benchmark merge($a,$b)
 end
 
 end

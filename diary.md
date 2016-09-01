@@ -7245,3 +7245,245 @@ end
 ```
 
 There's all kinds of grossness in here, similar to the sort functions before, dealing with the annoying restrictions on stack allocation. Might be worth cleaning this up before I continue.
+
+First, let's add some microbenchmarks to make sure I don't screw anything up.
+
+``` julia 
+function bench()
+  srand(999)
+  x = rand(Int64, 10000)
+  @show @benchmark quicksort!((copy($x),))
+  
+  srand(999)
+  y = [string(i) for i in rand(Int64, 10000)]
+  @show @benchmark quicksort!((copy($y),))
+  
+  srand(999)
+  x = unique(rand(1:10000, 10000))
+  y = rand(1:10000, length(x))
+  z = rand(1:10000, length(x))
+  a = Relation((x,y), Dict{Vector{Int64}, typeof((x,y))}(), Type[Int64], Type[Int64])
+  b = Relation((x,z), Dict{Vector{Int64}, typeof((x,y))}(), Type[Int64], Type[Int64])
+  @show @benchmark merge($a,$b)
+end
+```
+
+``` julia
+@benchmark(quicksort!((copy($(Expr(:$, :x))),))) = BenchmarkTools.Trial: 
+  samples:          8320
+  evals/sample:     1
+  time tolerance:   5.00%
+  memory tolerance: 1.00%
+  memory estimate:  78.22 kb
+  allocs estimate:  3
+  minimum time:     463.05 μs (0.00% GC)
+  median time:      545.95 μs (0.00% GC)
+  mean time:        599.23 μs (4.81% GC)
+  maximum time:     11.10 ms (92.95% GC)
+@benchmark(quicksort!((copy($(Expr(:$, :y))),))) = BenchmarkTools.Trial: 
+  samples:          1025
+  evals/sample:     1
+  time tolerance:   5.00%
+  memory tolerance: 1.00%
+  memory estimate:  78.22 kb
+  allocs estimate:  3
+  minimum time:     3.73 ms (0.00% GC)
+  median time:      4.72 ms (0.00% GC)
+  mean time:        4.87 ms (0.48% GC)
+  maximum time:     14.11 ms (58.82% GC)
+@benchmark(merge($(Expr(:$, :a)),$(Expr(:$, :b)))) = BenchmarkTools.Trial: 
+  samples:          10000
+  evals/sample:     1
+  time tolerance:   5.00%
+  memory tolerance: 1.00%
+  memory estimate:  258.72 kb
+  allocs estimate:  47
+  minimum time:     105.06 μs (0.00% GC)
+  median time:      115.67 μs (0.00% GC)
+  mean time:        196.96 μs (39.01% GC)
+  maximum time:     7.80 ms (97.17% GC)
+```
+
+The only functions that actually pull a row onto the stack are `cmp`, `lt`, `lt2`, `swap` and `insertion_sort!`. First let's rewrite insertion sort to use swapping, and see if doubling the number of writes slows things down appreciably. 
+
+``` julia
+function insertion_sort!($(cs...), lo::Int, hi::Int)
+  @inbounds for i = lo+1:hi
+    j = i
+    while j > lo && lt($(cs...), j, j-1)
+      swap($(cs...), j, j-1)
+      j -= 1
+    end
+  end
+end
+```
+
+Any change to the benchmarks is within the range of noise. `lt2` was only used in `insertion_sort!`, so that leaves us with just `cmp`, `lt` and `swap`. `lt` is redundant.
+
+``` julia
+@inline function c_cmp($(olds...), $(news...), old_at, new_at) 
+  @inbounds begin 
+    $([quote 
+      c = cmp($(olds[c])[old_at], $(news[c])[new_at])
+      if c != 0; return c; end
+    end for c in 1:(n-1)]...)
+    return cmp($(olds[n])[old_at], $(news[n])[new_at])
+  end
+end
+ 
+@inline function swap($(cs...), i, j)
+  @inbounds begin
+    $([quote
+      $(tmps[c]) = $(cs[c])[j]
+      $(cs[c])[j] = $(cs[c])[i]
+      $(cs[c])[i] = $(tmps[c])
+    end for c in 1:n]...)
+  end
+end
+```
+
+Both of these need the loops to be unrolled because the type of `tmp` changes on each iteration. Without unrolling, it will get the type `Any` which will cause it to heap-allocate eg integers that were allocated as values in the array.
+
+``` julia 
+@generated function cmp_in{T <: Tuple}(xs::T, ys::T, x_at::Int64, y_at::Int64)
+  n = length(T.parameters)
+  quote
+    $(Expr(:meta, :inline))
+    @inbounds begin 
+      $([:(result = cmp(xs[$c][x_at], ys[$c][y_at]); if result != 0; return result; end) for c in 1:(n-1)]...)
+      return cmp(xs[$n][x_at], ys[$n][y_at])
+    end
+  end
+end
+
+@generated function swap_in{T <: Tuple}(xs::T, i::Int65, j::Int64)
+  n = length(T.parameters)
+  quote
+    $(Expr(:meta, :inline))
+    @inbounds begin 
+      $([quote 
+        let tmp = xs[$c][i]
+          xs[$c][i] = xs[$c][j]
+          xs[$c][j] = tmp
+        end
+      end for c in 1:n]...)
+    end
+  end
+end
+```
+
+I'm no longer unpacking the tuple of columns, so I can use `@generated` to generate them on the fly rather than `for n in 1:10; eval(define_columns(n)); end`. 
+
+Now I can make the rest of the sorting code into normal functions:
+
+``` julia 
+function insertion_sort!{T <: Tuple}(cs::T, lo::Int, hi::Int)
+  @inbounds for i = lo+1:hi
+    j = i
+    while j > lo && (cmp_in(cs, cs, j, j-1) == -1)
+      swap_in(cs, j, j-1)
+      j -= 1
+    end
+  end
+end
+
+function partition!{T <: Tuple}(cs::T, lo::Int, hi::Int)
+  @inbounds begin
+    pivot = rand(lo:hi)
+    swap_in(cs, pivot, lo)
+    i, j = lo+1, hi
+    while true
+      while (i <= j) && (cmp_in(cs, cs, i, lo) == -1); i += 1; end;
+      while (i <= j) && (cmp_in(cs, cs, lo, j) == -1); j -= 1; end;
+      i >= j && break
+      swap_in(cs, i, j)
+      i += 1; j -= 1
+    end
+    swap_in(cs, lo, j)
+    return j
+  end
+end
+
+function quicksort!{T <: Tuple}(cs::T, lo::Int, hi::Int)
+  @inbounds if hi-lo <= 0
+    return
+  elseif hi-lo <= 20 
+    insertion_sort!(cs, lo, hi)
+  else
+    j = partition!(cs, lo, hi)
+    quicksort!(cs, lo, j-1)
+    quicksort!(cs, j+1, hi)
+  end
+end
+
+function quicksort!{T <: Tuple}(cs::T)
+  quicksort!(cs, 1, length(cs[1]))
+end
+```
+
+`merge` and `assert_no_dupes` change similarly.
+
+This adds a bunch of tuple accesses to the hot path, so let's check if it hurt the benchmarks:
+
+``` julia 
+@benchmark(quicksort!((copy($(Expr(:$, :x))),))) = BenchmarkTools.Trial: 
+  samples:          8569
+  evals/sample:     1
+  time tolerance:   5.00%
+  memory tolerance: 1.00%
+  memory estimate:  78.22 kb
+  allocs estimate:  3
+  minimum time:     491.56 μs (0.00% GC)
+  median time:      556.94 μs (0.00% GC)
+  mean time:        582.50 μs (3.39% GC)
+  maximum time:     7.47 ms (91.25% GC)
+@benchmark(quicksort!((copy($(Expr(:$, :y))),))) = BenchmarkTools.Trial: 
+  samples:          1335
+  evals/sample:     1
+  time tolerance:   5.00%
+  memory tolerance: 1.00%
+  memory estimate:  78.22 kb
+  allocs estimate:  3
+  minimum time:     3.26 ms (0.00% GC)
+  median time:      3.68 ms (0.00% GC)
+  mean time:        3.74 ms (0.47% GC)
+  maximum time:     10.67 ms (58.69% GC)
+@benchmark(merge($(Expr(:$, :a)),$(Expr(:$, :b)))) = BenchmarkTools.Trial: 
+  samples:          7918
+  evals/sample:     1
+  time tolerance:   5.00%
+  memory tolerance: 1.00%
+  memory estimate:  442.06 kb
+  allocs estimate:  11769
+  minimum time:     351.98 μs (0.00% GC)
+  median time:      398.31 μs (0.00% GC)
+  mean time:        630.96 μs (34.79% GC)
+  maximum time:     13.66 ms (93.77% GC)
+```
+
+Ouch, `merge` got a lot slower and is making a ton of allocations. What went wrong in there?
+
+Oh, that's disappointing. `merge_sorted!` contains:
+
+``` julia
+old_key = old[1:num_keys]
+new_key = new[1:num_keys]
+```
+
+And julia doesn't infer the correct types. Easily fixed though - I'll just pass them as args instead of `num_keys`.
+
+``` julia
+@benchmark(merge($(Expr(:$, :a)),$(Expr(:$, :b)))) = BenchmarkTools.Trial: 
+  samples:          10000
+  evals/sample:     1
+  time tolerance:   5.00%
+  memory tolerance: 1.00%
+  memory estimate:  259.06 kb
+  allocs estimate:  57
+  minimum time:     93.48 μs (0.00% GC)
+  median time:      123.75 μs (0.00% GC)
+  mean time:        206.21 μs (38.39% GC)
+  maximum time:     8.54 ms (96.65% GC)
+```
+
+Eh, that'll do.

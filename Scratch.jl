@@ -2,6 +2,8 @@ include("src/Data.jl")
 include("src/Query.jl")
 include("src/UI.jl")
 
+Data.test()
+
 include("examples/JobData.jl")
 
 include("examples/Graph.jl")

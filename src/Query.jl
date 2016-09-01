@@ -340,7 +340,7 @@ function plan_query(returned_typed_variables, aggregate, query)
   
   quote 
     let $(esc(:intermediate)) = let; $join; end
-      $project
+      assert_no_dupes($project)
     end
   end
 end

@@ -7487,3 +7487,38 @@ And julia doesn't infer the correct types. Easily fixed though - I'll just pass 
 ```
 
 Eh, that'll do.
+
+## 2016 Sep 2
+
+Now I have to deal with aggregates. In terms of expressivity, what I really want are first-class relations within the query language. But I don't want to actually materialize or allow them to end up in the output, because that just brings back all of the pointer-chasing problems of high-level languages. 
+
+One option would be something like [T-LINQ](http://homepages.inf.ed.ac.uk/jcheney/publications/cheney13icfp.pdf) which allows first-class sets in queries but guarantees to normalize them away before execution. I like the principle, but the small addendum in the paper about not being able to normalize aggregates makes it seem like more work is necessary.
+
+What I'm going to do instead is to make queries return an iterator instead of executing all in one go. Then aggregates can be handled by normal Julia functions. This will make queries much harder to analyse when I come to look at things like incremental evaluation, but in the meantime it's easier and safer to implement. I'll come back to T-LINQy ideas later.
+
+Sidenote: I just noticed that Julia has a neat feature that I really wanted when working on Strucjure - you can embed pointers directly into an ast:
+
+``` julia 
+xs = [1,2,3]
+
+q = let ys = xs
+  :(push!($ys, 4))
+end
+
+@show q
+# :(push!([1,2,3],4))
+
+@show xs
+# xs = [1,2,3]
+
+@show ys
+# UndefVarError: ys not defined
+
+eval(q)
+
+@show xs
+# xs = [1,2,3,4]
+
+@show q
+# :(push!([1,2,3,4],4))
+```

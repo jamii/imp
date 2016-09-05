@@ -7522,3 +7522,116 @@ eval(q)
 @show q
 # :(push!([1,2,3,4],4))
 ```
+
+So, let's pick an example query:
+
+``` julia
+@query begin
+  cleared(x,y)
+  mine_count(x,y) = 0
+  nx in -1:1
+  ny in -1:1
+  @when (nx * ny == 0) && (nx + ny != 0) # no boolean xor :(
+end
+```
+
+This is going to be replaced by a couple of closures that close over all the necessary data:
+
+``` julia
+begin
+  ixes_x = [1,1]
+  function start()
+    los = [...]
+    ats = [...]
+    his = [...]
+    index_1 = index(cleared, [1,2])
+    index_2 = index(mine_count, [3,1,2])
+    ...
+    row = Row(ats)
+    (row, los, ats, his, index_1, index_2, ...)
+  end
+  function next(state)
+    row, los, ats, his, index_1, index_2, ... = state
+    ...
+    row
+  end
+  Query(start, next)
+end
+```
+
+I've already checked in previous experiments that in Julia 0.5 closures can be specialized on, so if the query has a known type then these closures shouldn't cause any dispatch overhead while looping over the results.
+
+### 2016 Sep 5
+
+I let that idea stew and worked on some other projects for a few days. I kept going back and forth between various different implementations with different trade-offs and eventually realized that I was failing to make decision because I don't have enough information. I don't have nearly enough example code and datasets to think about the impact of different implementations.
+
+Let's instead just try to pick something that is easy and doesn't limit future choices too much. What if I had queries just return everything and then used normal Julia functions for aggregation? I can replace the internal aggregation code with the simple optimization that bails out after finding a single solution for each returned row.
+
+``` julia
+while ...
+  a = ...
+  while ...
+    b = ...
+    need_more_results = true 
+    while need_more_results && ...
+      c = ...
+      while need_more_results && ...
+        d = ...
+        push!(results, (a, b))
+        need_more_results = false
+      end
+    end
+  end
+end
+```
+
+While working on this I spent hours tracking down a subtle bug. `assign` does not bail out if the value is not found but a higher value is. This doesn't cause any test failures because the later aggregate handling multiplies the aggregate value by number of matching rows in each table. If the value is missing the number of matching rows is 0, so the aggregate is 0 and is not returned. Fixing this yields some mild speedups:
+
+``` julia
+@benchmark(q1a()) = BenchmarkTools.Trial: 
+  samples:          2932
+  evals/sample:     1
+  time tolerance:   5.00%
+  memory tolerance: 1.00%
+  memory estimate:  23.20 kb
+  allocs estimate:  156
+  minimum time:     1.27 ms (0.00% GC)
+  median time:      1.68 ms (0.00% GC)
+  mean time:        1.70 ms (0.92% GC)
+  maximum time:     17.64 ms (86.49% GC)
+@benchmark(q2a()) = BenchmarkTools.Trial: 
+  samples:          79
+  evals/sample:     1
+  time tolerance:   5.00%
+  memory tolerance: 1.00%
+  memory estimate:  713.50 kb
+  allocs estimate:  249
+  minimum time:     61.60 ms (0.00% GC)
+  median time:      63.79 ms (0.00% GC)
+  mean time:        64.01 ms (0.36% GC)
+  maximum time:     71.39 ms (13.57% GC)
+@benchmark(q3a()) = BenchmarkTools.Trial: 
+  samples:          42
+  evals/sample:     1
+  time tolerance:   5.00%
+  memory tolerance: 1.00%
+  memory estimate:  30.20 kb
+  allocs estimate:  234
+  minimum time:     117.45 ms (0.00% GC)
+  median time:      119.76 ms (0.00% GC)
+  mean time:        119.83 ms (0.00% GC)
+  maximum time:     122.71 ms (0.00% GC)
+@benchmark(q4a()) = BenchmarkTools.Trial: 
+  samples:          109
+  evals/sample:     1
+  time tolerance:   5.00%
+  memory tolerance: 1.00%
+  memory estimate:  60.28 kb
+  allocs estimate:  229
+  minimum time:     43.93 ms (0.00% GC)
+  median time:      45.35 ms (0.00% GC)
+  mean time:        46.25 ms (0.00% GC)
+  maximum time:     51.02 ms (0.00% GC)
+```
+
+Then I removed the aggregates from inside the query handling and replaced them with the early exit optimization. Disappointingly, it didn't seem to affect performance much. Perhaps the runtime is dominated by the early table scans.

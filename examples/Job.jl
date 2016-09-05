@@ -30,6 +30,7 @@ function q1a()
   begin 
     info_type_info(it_id, "top 250 rank")
     movie_info_idx_info_type_id(mii_id, it_id)
+    title_production_year(t_id, t_production_year)
     movie_info_idx_movie_id(mii_id, t_id)
     movie_companies_movie_id(mc_id, t_id)
     movie_companies_company_type_id(mc_id, ct_id)
@@ -37,7 +38,6 @@ function q1a()
     movie_companies_note(mc_id, mc_note)
     @when !contains(mc_note, "as Metro-Goldwyn-Mayer Pictures") &&
       (contains(mc_note, "co-production") || contains(mc_note, "presents"))
-    title_production_year(t_id, t_production_year)
   end)
 end
 
@@ -60,11 +60,11 @@ function q2a()
   begin
     keyword_keyword(k_id, "character-name-in-title")
     movie_keyword_keyword_id(mk_id, k_id)
+    title_title(t_id, title)
     movie_keyword_movie_id(mk_id, t_id)
     movie_companies_movie_id(mc_id, t_id)
     movie_companies_company_id(mc_id, cn_id)
     company_name_country_code(cn_id, "[de]") 
-    title_title(t_id, title)
   end)
 end
 

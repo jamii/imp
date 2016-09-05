@@ -38,58 +38,57 @@ function who_is_metal()
   end)
 end
 
-function how_metal()
-  metal = @query([],
-  begin
-    playlist(playlist, "Heavy Metal Classic")
-    playlist_track(playlist, track)
-    track(track, _, album)
-    album(album, _, artist)
-    artist(artist, artist_name)
-  end)
-end
+# function how_metal()
+#   metal = @query([],
+#   begin
+#     playlist(playlist, "Heavy Metal Classic")
+#     playlist_track(playlist, track)
+#     track(track, _, album)
+#     album(album, _, artist)
+#     artist(artist, artist_name)
+#   end)
+# end
 
-function cost_of_playlist()
-  @query([pn::String],
-  (0.0,add_exp,price::Float64),
-  begin
-    playlist(p, pn)
-    playlist_track(p, t)
-    track(t, _, al, _, _, _, _, _, price)
-  end)
-end
+# function cost_of_playlist()
+#   @query([pn::String],
+#   (0.0,add_exp,price::Float64),
+#   begin
+#     playlist(p, pn)
+#     playlist_track(p, t)
+#     track(t, _, al, _, _, _, _, _, price)
+#   end)
+# end
 
-function revenue_per_track()
-  @query([t::Int64],
-  (0.0,add_exp,price::Float64),
-  begin
-    playlist(p, pn)
-    playlist_track(p, t)
-    track(t, _, al, _, _, _, _, _, price)
-  end)
-end
+# function revenue_per_track()
+#   @query([t::Int64],
+#   (0.0,add_exp,price::Float64),
+#   begin
+#     playlist(p, pn)
+#     playlist_track(p, t)
+#     track(t, _, al, _, _, _, _, _, price)
+#   end)
+# end
 
 function test()
   @test who_is_metal().columns == (
   String["AC/DC","Accept","Black Sabbath","Iron Maiden","Metallica","Motörhead","Mötley Crüe","Ozzy Osbourne","Scorpions"],
-  Int64[1,4,2,6,6,2,1,3,1]
   )
-  @test how_metal().columns == (
-  [26],
-  )
-  @test cost_of_playlist().columns == (
-  String["90’s Music","Brazilian Music","Classical","Classical 101 - Deep Cuts","Classical 101 - Next Steps","Classical 101 - The Basics","Grunge","Heavy Metal Classic","Music","Music Videos","On-The-Go 1","TV Shows"],
-  Float64[1462.2300000000118,38.60999999999999,74.24999999999999,24.74999999999999,24.74999999999999,24.74999999999999,14.850000000000001,25.739999999999988,6514.199999999501,0.99,0.99,847.7400000000024]
-  )
-  @test revenue_per_track().columns[1][1:10] == Int64[1,2,3,4,5,6,7,8,9,10]
-  @test revenue_per_track().columns[2][1:10] == Float64[2.9699999999999998,2.9699999999999998,3.96,3.96,3.96,1.98,1.98,1.98,1.98,1.98]
+  # @test how_metal().columns == (
+  # [26],
+  # )
+  # @test cost_of_playlist().columns == (
+  # String["90’s Music","Brazilian Music","Classical","Classical 101 - Deep Cuts","Classical 101 - Next Steps","Classical 101 - The Basics","Grunge","Heavy Metal Classic","Music","Music Videos","On-The-Go 1","TV Shows"],
+  # Float64[1462.2300000000118,38.60999999999999,74.24999999999999,24.74999999999999,24.74999999999999,24.74999999999999,14.850000000000001,25.739999999999988,6514.199999999501,0.99,0.99,847.7400000000024]
+  # )
+  # @test revenue_per_track().columns[1][1:10] == Int64[1,2,3,4,5,6,7,8,9,10]
+  # @test revenue_per_track().columns[2][1:10] == Float64[2.9699999999999998,2.9699999999999998,3.96,3.96,3.96,1.98,1.98,1.98,1.98,1.98]
 end
 
 function bench()
   @show @benchmark who_is_metal()
-  @show @benchmark how_metal()
-  @show @benchmark cost_of_playlist()
-  @show @benchmark revenue_per_track()
+  # @show @benchmark how_metal()
+  # @show @benchmark cost_of_playlist()
+  # @show @benchmark revenue_per_track()
 end
 
 end

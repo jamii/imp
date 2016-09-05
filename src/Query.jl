@@ -120,10 +120,7 @@ function get_variable_type(expr)
   end
 end
 
-function plan_join(returned_typed_variables, aggregate, query)
-  aggregate_zero, aggregate_add, aggregate_expr = aggregate
-  aggregate_type = get_variable_type(aggregate_expr)
-  
+function plan_join(returned_typed_variables, query)
   returned_variables = map(get_variable_symbol, returned_typed_variables)
   returned_variable_types = Dict(zip(returned_variables, map(get_variable_type, returned_typed_variables)))
   
@@ -142,8 +139,10 @@ function plan_join(returned_typed_variables, aggregate, query)
       assert(isa(variable, Symbol))
       assert(!haskey(loop_clauses, variable))
       push!(grounded_variables, variable)
-      push!(variables, variable)
-      push!(variables, collect_variables(expr)...)
+      push!(variables, variable)      
+      for expr_variable in collect_variables(expr)
+        push!(variables, expr_variable)
+      end
       loop_clauses[variable] = expr
     elseif line.head == :call
       for (ix, arg) in enumerate(line.args)
@@ -166,7 +165,9 @@ function plan_join(returned_typed_variables, aggregate, query)
       assert(!haskey(assignment_clauses, variable)) # only one assignment per var
       push!(grounded_variables, variable)
       push!(variables, variable)
-      push!(variables, collect_variables(expr)...)
+      for expr_variable in collect_variables(expr)
+        push!(variables, expr_variable)
+      end
       assignment_clauses[variable] = expr
     elseif line.head == :macrocall && line.args[1] == symbol("@when")
       push!(expression_clauses, clause)
@@ -245,7 +246,6 @@ function plan_join(returned_typed_variables, aggregate, query)
     ats = Int64[1 for i in 1:$(length(ixes))]
     his = Int64[length(columns[i])+1 for i in 1:$(length(ixes))]
     $(variable_inits...)
-    results_aggregate = Vector{$aggregate_type}()
   end
   
   filters = [[] for _ in variables]
@@ -255,28 +255,12 @@ function plan_join(returned_typed_variables, aggregate, query)
     push!(filters[callable_at], expr)
   end
   
-  function make_return(returned_variables, tail) 
-    quote
-      aggregate = $aggregate_zero
-      $tail 
-      if aggregate != $aggregate_zero
-        $([
-        :(push!($(symbol("results_", variable)), $(esc(variable))))
-        for variable in returned_variables]...)
-        push!(results_aggregate, aggregate)
-      end
-    end
-  end
+  return_ix = maximum(push!(indexin(returned_variables, variables), 0))
   
-  return_ix = 1 + maximum(push!(indexin(returned_variables, variables), 0))
-  
-  repeats = 1
-  for buffer_ix in buffer_ixes
-    repeats = :($repeats * (his[$buffer_ix] - los[$buffer_ix]))
-  end
-  body = :(aggregate = $(aggregate_add)(aggregate, $(esc(aggregate_expr)), $repeats))
-  if return_ix == length(variables) + 1
-    body = make_return(returned_variables, body)
+  body = quote
+    $([:(push!($(symbol("results_", variable)), $(esc(variable))))
+    for variable in returned_variables]...)
+    need_more_results = false
   end
   for variable_ix in length(variables):-1:1
     variable = variables[variable_ix]
@@ -284,6 +268,13 @@ function plan_join(returned_typed_variables, aggregate, query)
     variable_ixes = symbol("ixes_", variable)
     for filter in filters[variable_ix]
       body = :(if $(esc(filter)); $body; end)
+    end
+    need_more_results = variable_ix > return_ix ? :need_more_results : true
+    if variable_ix == return_ix
+      body = quote
+        need_more_results = true
+        $body
+      end
     end
     if haskey(assignment_clauses, variable)
       body = quote
@@ -296,7 +287,10 @@ function plan_join(returned_typed_variables, aggregate, query)
     elseif haskey(loop_clauses, variable)
       body = quote 
         let
-          for $(esc(variable)) in $(esc(loop_clauses[variable]))
+          iter = $(esc(loop_clauses[variable]))
+          state = start(iter)
+          while $need_more_results && !done(iter, state)
+            ($(esc(variable)), state) = next(iter, state)
             if assign($variable_columns, los, ats, his, $variable_ixes, $(esc(variable)))
               $body
             end
@@ -307,61 +301,45 @@ function plan_join(returned_typed_variables, aggregate, query)
       result_column = ixes[sources[variable][1]]
       body = quote
         start_intersect($variable_columns, los, ats, his, $variable_ixes)
-        while next_intersect($variable_columns, los, ats, his, $variable_ixes)
+        while $need_more_results && next_intersect($variable_columns, los, ats, his, $variable_ixes)
           let $(esc(variable)) = columns[$result_column][los[$(result_column+1)]]
             $body
           end
         end
       end 
     end
-    if return_ix == variable_ix 
-      body = make_return(returned_variables, body)
-    end
   end
   
   query_symbol = gensym("query")
           
   quote 
-    # TODO pass through any external vars too to avoid closure boxing grossness
     function $query_symbol($([symbol("relation_", clause) for clause in relation_clauses]...))
       $setup
       $body
-      Relation(tuple($([symbol("results_", variable) for variable in returned_variables]...), results_aggregate))
+      Relation(tuple($([symbol("results_", variable) for variable in returned_variables]...)))
     end
     $query_symbol($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
   end
 end
 
-function plan_query(returned_typed_variables, aggregate, query)
-  join = plan_join(returned_typed_variables, aggregate, query)
-
-  project_aggregate = [aggregate[1], aggregate[2], :(prev_aggregate::$(get_variable_type(aggregate[3])))]  
+function plan_query(returned_typed_variables, query)
+  join = plan_join(returned_typed_variables, query)
   project_query = quote 
-    intermediate($(map(get_variable_symbol, returned_typed_variables)...), prev_aggregate)
+    intermediate($(map(get_variable_symbol, returned_typed_variables)...))
   end
-  project = plan_join(returned_typed_variables, project_aggregate, project_query)
+  project = plan_join(returned_typed_variables, project_query)
   
   quote 
     let $(esc(:intermediate)) = let; $join; end
-      assert_no_dupes($project)
+      $project
     end
   end
 end
 
-@inline add_exp(a, b, n) = a + (b * n)
-@inline mul_exp(a, b, n) = a * (b ^ n)
-@inline min_exp(a, b, n) = min(a,b)
-@inline push_exp!(a, b, n) = for _ in 1:n; push!(a,b); end
-
 macro query(returned_typed_variables, query)
-  aggregate = :(0, add_exp, 1::Int64)
-  plan_query(returned_typed_variables.args, aggregate.args, query)
+  plan_query(returned_typed_variables.args, query)
 end
 
-macro query(returned_typed_variables, aggregate, query)
-  plan_query(returned_typed_variables.args, aggregate.args, query)
-end
-
-export @query, add_exp, mul_exp, min_exp
+export @query
 
 end

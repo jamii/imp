@@ -80,6 +80,9 @@ function assign(cols, los, ats, his, ixes, value)
         return false
       end
       his[ix+1] = gallop(cols[c], value, los[ix+1], his[ix], <=)
+      if los[ix+1] >= his[ix+1]
+        return false
+      end
     end
     return true
   end

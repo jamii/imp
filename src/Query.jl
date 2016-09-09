@@ -192,9 +192,7 @@ function plan_join(query)
   returned_variables = map(get_variable_symbol, returned_typed_variables)
   returned_variable_types = Dict(zip(returned_variables, map(get_variable_type, returned_typed_variables)))
   
-  @show variables returned_variables returned_variable_types
-  
-  sources = Dict([variable => [] for variable in variables])
+  sources = Dict(variable => [] for variable in variables)
   for clause in relation_clauses
     line = query.args[clause]
     for (column, variable) in enumerate(line.args[2:end])

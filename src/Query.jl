@@ -191,7 +191,8 @@ function plan_join(query)
   
   returned_variables = map(get_variable_symbol, returned_typed_variables)
   returned_variable_types = Dict(zip(returned_variables, map(get_variable_type, returned_typed_variables)))
-  @show returned_variables returned_variable_types
+  
+  @show variables returned_variables returned_variable_types
   
   sources = Dict([variable => [] for variable in variables])
   for clause in relation_clauses
@@ -301,8 +302,9 @@ function plan_join(query)
     elseif haskey(loop_clauses, variable)
       body = quote 
         let
-          iter = $(esc(loop_clauses[variable]))
-          state = start(iter)
+          local iter = $(esc(loop_clauses[variable]))
+          local state = start(iter)
+          local $(esc(variable)) 
           while $need_more_results && !done(iter, state)
             ($(esc(variable)), state) = next(iter, state)
             if assign($variable_columns, los, ats, his, $variable_ixes, $(esc(variable)))

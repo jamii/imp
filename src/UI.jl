@@ -16,7 +16,7 @@ end
 
 macro event(expr)
   @assert expr.head == :call
-  :(event($(string(expr.args[1])), [$(expr.args[2:end]...)]))
+  :(event($(string(expr.args[1])), [$(map(esc, expr.args[2:end])...)]))
 end
 
 function Blink.Window(flow, event_tables)

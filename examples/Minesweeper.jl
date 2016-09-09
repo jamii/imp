@@ -78,8 +78,8 @@ function run(num_x, num_y, num_mines)
     return (x::Int64, y::Int64, c::Int64)
   end
   
-  Window(Dict("clicked" => clicked)) do window, event_number
-    
+  @Window(clicked) do window, event_number
+
     @merge! cleared begin
       clicked($event_number, x, y)
       return (x::Int64, y::Int64)

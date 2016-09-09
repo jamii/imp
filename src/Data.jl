@@ -207,7 +207,11 @@ function Base.empty!{T}(relation::Relation{T})
 end
 
 function Base.length(relation::Relation)
-  length(relation.columns[1])
+  if length(relation.columns) == 0
+    return 0
+  else 
+    length(relation.columns[1])
+  end
 end
 
 function Base.merge{T}(old::Relation{T}, new::Relation{T})

@@ -34,7 +34,7 @@ function Blink.Window(flow, event_tables)
 end
 
 macro Window(flow, event_tables...)
-  :(Window($flow, Dict($([:($(string(table)) => $table) for table in event_tables]...))))
+  :(Window($(esc(flow)), Dict($([:($(string(table)) => $(esc(table))) for table in event_tables]...))))
 end
 
 # using Data

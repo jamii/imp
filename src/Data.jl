@@ -5,11 +5,15 @@ using BenchmarkTools
 
 @generated function cmp_in{T <: Tuple}(xs::T, ys::T, x_at::Int64, y_at::Int64)
   n = length(T.parameters)
-  quote
-    $(Expr(:meta, :inline))
-    @inbounds begin 
-      $([:(result = cmp(xs[$c][x_at], ys[$c][y_at]); if result != 0; return result; end) for c in 1:(n-1)]...)
-      return cmp(xs[$n][x_at], ys[$n][y_at])
+  if n == 0
+    :(return 0)
+  else 
+    quote
+      $(Expr(:meta, :inline))
+      @inbounds begin 
+        $([:(result = cmp(xs[$c][x_at], ys[$c][y_at]); if result != 0; return result; end) for c in 1:(n-1)]...)
+        return cmp(xs[$n][x_at], ys[$n][y_at])
+      end
     end
   end
 end

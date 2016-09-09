@@ -7635,3 +7635,44 @@ While working on this I spent hours tracking down a subtle bug. `assign` does no
 ```
 
 Then I removed the aggregates from inside the query handling and replaced them with the early exit optimization. Disappointingly, it didn't seem to affect performance much. Perhaps the runtime is dominated by the early table scans.
+
+### 2016 Sep 9
+
+I'm back from my climbing trip now, so Imp dev should return to it's usual rhythm. 
+
+First thing is a syntactic tweak - moving returned variables to the end of the query. It's cleaner visually and it removes a lot of punctuation.
+
+``` julia 
+function who_is_metal()
+  @query begin
+    playlist(playlist, "Heavy Metal Classic")
+    playlist_track(playlist, track)
+    track(track, _, album)
+    album(album, _, artist)
+    artist(artist, artist_name)
+    return (artist_name::String,)
+  end
+end
+```
+
+I'm also playing around with nesting queries for aggregation.
+
+``` julia 
+function cost_of_playlist()
+  @query begin
+    playlist(p, pn)
+    tracks = @query begin 
+      p = p
+      playlist_track(p, t)
+      track(t, _, _, _, _, _, _, _, price)
+      return (t::Int64, price::Float64)
+    end
+    total = sum(tracks.columns[1])
+    return (pn::String, total::Float64)
+  end
+end
+```
+
+I don't like the current implementation at all. It allocates a new relation on each loop, only to aggregate over it and throw it away. I don't want to get bogged down in this forever though, so I'm going to leave it for now and revisit it when I look at factorizing queries. 
+
+I also fixed a minor bug that caused a crash on queries that don't return any results. I've been aware of it for a while but it was only worth fixing once I started working on sub-queries.

@@ -28,67 +28,59 @@ playlist_track = read_chinook("data/PlaylistTrack.csv", [Int64, Int64])
 playlist = read_chinook("data/Playlist.csv", [Int64, String])
 
 function who_is_metal()
-  @query([artist_name::String],
-  begin
+  @query begin
     playlist(playlist, "Heavy Metal Classic")
     playlist_track(playlist, track)
     track(track, _, album)
     album(album, _, artist)
     artist(artist, artist_name)
-  end)
+    return (artist_name::String,)
+  end
 end
 
-# function how_metal()
-#   metal = @query([],
-#   begin
-#     playlist(playlist, "Heavy Metal Classic")
-#     playlist_track(playlist, track)
-#     track(track, _, album)
-#     album(album, _, artist)
-#     artist(artist, artist_name)
-#   end)
-# end
+function cost_of_playlist()
+  @query begin
+    playlist(p, pn)
+    tracks = @query begin 
+      p = p
+      playlist_track(p, t)
+      track(t, _, _, _, _, _, _, _, price)
+      return (t::Int64, price::Float64)
+    end
+    total = sum(tracks.columns[1])
+    return (pn::String, total::Float64)
+  end
+end
 
-# function cost_of_playlist()
-#   @query([pn::String],
-#   (0.0,add_exp,price::Float64),
-#   begin
-#     playlist(p, pn)
-#     playlist_track(p, t)
-#     track(t, _, al, _, _, _, _, _, price)
-#   end)
-# end
-
-# function revenue_per_track()
-#   @query([t::Int64],
-#   (0.0,add_exp,price::Float64),
-#   begin
-#     playlist(p, pn)
-#     playlist_track(p, t)
-#     track(t, _, al, _, _, _, _, _, price)
-#   end)
-# end
+function revenue_per_track()
+  @query begin
+    track(t, tn, _, _, _, _, _, _, price)
+    plays = @query begin 
+      t = t
+      playlist_track(p, t)
+      return (p::Int64,)
+    end
+    total = price * length(plays)
+    return (tn::String, total::Float64)
+  end
+end
 
 function test()
   @test who_is_metal().columns == (
   String["AC/DC","Accept","Black Sabbath","Iron Maiden","Metallica","Motörhead","Mötley Crüe","Ozzy Osbourne","Scorpions"],
   )
-  # @test how_metal().columns == (
-  # [26],
-  # )
-  # @test cost_of_playlist().columns == (
-  # String["90’s Music","Brazilian Music","Classical","Classical 101 - Deep Cuts","Classical 101 - Next Steps","Classical 101 - The Basics","Grunge","Heavy Metal Classic","Music","Music Videos","On-The-Go 1","TV Shows"],
-  # Float64[1462.2300000000118,38.60999999999999,74.24999999999999,24.74999999999999,24.74999999999999,24.74999999999999,14.850000000000001,25.739999999999988,6514.199999999501,0.99,0.99,847.7400000000024]
-  # )
-  # @test revenue_per_track().columns[1][1:10] == Int64[1,2,3,4,5,6,7,8,9,10]
-  # @test revenue_per_track().columns[2][1:10] == Float64[2.9699999999999998,2.9699999999999998,3.96,3.96,3.96,1.98,1.98,1.98,1.98,1.98]
+  @test cost_of_playlist().columns == (
+  String["90’s Music","Audiobooks","Brazilian Music","Classical","Classical 101 - Deep Cuts","Classical 101 - Next Steps","Classical 101 - The Basics","Grunge","Heavy Metal Classic","Movies","Music","Music Videos","On-The-Go 1","TV Shows"],
+  Float64[2.490879e6,0.0,46631.0,258700.0,87275.0,86050.0,85375.0,31832.0,34864.0,0.0,5.487052e6,3402.0,597.0,650204.0]
+  )
+  @test revenue_per_track().columns[1][1:10] == String["\"40\"","\"?\"","\"Eine Kleine Nachtmusik\" Serenade In G, K. 525: I. Allegro","#1 Zero","#9 Dream","'Round Midnight","(Anesthesia) Pulling Teeth","(Da Le) Yaleo","(I Can't Help) Falling In Love With You","(Oh) Pretty Woman"]
+  @test revenue_per_track().columns[2][1:10] == Float64[1.98,3.98,3.96,1.98,1.98,1.98,1.98,2.9699999999999998,2.9699999999999998,1.98]
 end
 
 function bench()
   @show @benchmark who_is_metal()
-  # @show @benchmark how_metal()
-  # @show @benchmark cost_of_playlist()
-  # @show @benchmark revenue_per_track()
+  @show @benchmark cost_of_playlist()
+  @show @benchmark revenue_per_track()
 end
 
 end

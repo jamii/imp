@@ -11,14 +11,14 @@ edge2 = Relation((rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6))
 # edge3 = read_columns("/home/jamie/soc-LiveJournal1.txt", [Int32, Int32], comments=true)
 
 function f(edge) 
-  @query([a::Int64,b::Int64,c::Int64], 
-  begin
+  @query begin
     edge(a,b)
     @when a < b
     edge(b,c)
     @when b < c
     edge(c,a)
-  end)
+    return (a::Int64, b::Int64, c::Int64)
+  end
 end
 
 function test()

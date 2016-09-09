@@ -29,7 +29,6 @@ function start_intersect(cols, los, ats, his, ixes)
   # los inclusive, his exclusive
   @inbounds begin
     for ix in ixes
-      assert(los[ix] < his[ix])
       ats[ix] = los[ix]
     end
   end
@@ -120,10 +119,8 @@ function get_variable_type(expr)
   end
 end
 
-function plan_join(returned_typed_variables, query)
-  returned_variables = map(get_variable_symbol, returned_typed_variables)
-  returned_variable_types = Dict(zip(returned_variables, map(get_variable_type, returned_typed_variables)))
-  
+function plan_join(query)
+  local returned_typed_variables
   grounded_variables = Set()
   variables = []
   relation_clauses = []
@@ -172,12 +169,24 @@ function plan_join(returned_typed_variables, query)
     elseif line.head == :macrocall && line.args[1] == symbol("@when")
       push!(expression_clauses, clause)
       push!(variables, collect_variables(line.args[2])...)
+    elseif line.head == :return 
+      returned = line.args[1]
+      if returned.head == :call && returned.args[1] == :tuple
+        returned_typed_variables = returned.args[2:end]
+      elseif returned.head == :tuple 
+        returned_typed_variables = returned.args
+      else
+        error("Confused by: $line")
+      end
     else
       assert(line.head == :line)
     end
   end
   delete!(grounded_variables, :_)
   variables = unique([variable for variable in variables if variable in grounded_variables])
+  
+  returned_variables = map(get_variable_symbol, returned_typed_variables)
+  returned_variable_types = Dict(zip(returned_variables, map(get_variable_type, returned_typed_variables)))
   
   sources = Dict([variable => [] for variable in variables])
   for clause in relation_clauses
@@ -312,7 +321,7 @@ function plan_join(returned_typed_variables, query)
   
   query_symbol = gensym("query")
           
-  quote 
+  code = quote 
     function $query_symbol($([symbol("relation_", clause) for clause in relation_clauses]...))
       $setup
       $body
@@ -320,14 +329,16 @@ function plan_join(returned_typed_variables, query)
     end
     $query_symbol($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
   end
+  
+  (code, returned_typed_variables)
 end
 
-function plan_query(returned_typed_variables, query)
-  join = plan_join(returned_typed_variables, query)
-  project_query = quote 
+function plan_query(query)
+  (join, returned_typed_variables) = plan_join(query)
+  (project, _) = plan_join(quote 
     intermediate($(map(get_variable_symbol, returned_typed_variables)...))
-  end
-  project = plan_join(returned_typed_variables, project_query)
+    return tuple($(returned_typed_variables...))
+  end)
   
   quote 
     let $(esc(:intermediate)) = let; $join; end
@@ -336,8 +347,8 @@ function plan_query(returned_typed_variables, query)
   end
 end
 
-macro query(returned_typed_variables, query)
-  plan_query(returned_typed_variables.args, query)
+macro query(query)
+  plan_query(query)
 end
 
 export @query

@@ -26,8 +26,7 @@ using BenchmarkTools
 #   AND it.id = mi_idx.info_type_id;
 
 function q1a()
-  @query([t_production_year::Int64],
-  begin 
+  @query begin 
     info_type_info(it_id, "top 250 rank")
     movie_info_idx_info_type_id(mii_id, it_id)
     title_production_year(t_id, t_production_year)
@@ -38,7 +37,8 @@ function q1a()
     movie_companies_note(mc_id, mc_note)
     @when !contains(mc_note, "as Metro-Goldwyn-Mayer Pictures") &&
       (contains(mc_note, "co-production") || contains(mc_note, "presents"))
-  end)
+    return (t_production_year::Int64,)
+  end
 end
 
 # SELECT MIN(t.title) AS movie_title
@@ -56,8 +56,7 @@ end
 #   AND mc.movie_id = mk.movie_id;
 
 function q2a()
-  @query([title::String],
-  begin
+  @query begin
     keyword_keyword(k_id, "character-name-in-title")
     movie_keyword_keyword_id(mk_id, k_id)
     title_title(t_id, title)
@@ -65,7 +64,8 @@ function q2a()
     movie_companies_movie_id(mc_id, t_id)
     movie_companies_company_id(mc_id, cn_id)
     company_name_country_code(cn_id, "[de]") 
-  end)
+    return (title::String,)
+  end
 end
 
 # SELECT MIN(t.title) AS movie_title
@@ -91,8 +91,7 @@ end
 function q3a()
   # "Denish" is in original too
   mi_infos = Set(["Sweden", "Norway", "Germany", "Denmark", "Swedish", "Denish", "Norwegian", "German"])
-  @query([t_title::String],
-  begin 
+  @query begin 
     @when contains(k_keyword, "sequel")
     keyword_keyword(k_id, k_keyword)
     movie_keyword_keyword_id(mk_id, k_id)
@@ -103,7 +102,8 @@ function q3a()
     movie_info_movie_id(mi_id, t_id)
     mi_info in mi_infos
     movie_info_info(mi_id, mi_info)
-  end)
+    return (t_title::String,)
+  end
 end
 
 # SELECT MIN(mi_idx.info) AS rating,
@@ -124,8 +124,7 @@ end
 #   AND it.id = mi_idx.info_type_id;
 
 function q4a()
-  @query([mii_info::String],
-  begin
+  @query begin
     @when contains(k_keyword, "sequel")
     keyword_keyword(k_id, k_keyword)
     movie_keyword_keyword_id(mk_id, k_id)
@@ -137,7 +136,8 @@ function q4a()
     movie_info_idx_movie_id(mii_id, t_id)
     movie_info_idx_info(mii_id, mii_info)
     @when mii_info > "5.0"
-  end)
+    return (mii_info::String,)
+  end
 end
 
 function test()

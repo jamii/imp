@@ -204,8 +204,8 @@ end
 
 function Base.merge{T}(old::Relation{T}, new::Relation{T})
   # TODO should Relation{T} be typed Relation{K,V} instead?
-  assert(old.key_types == new.key_types)
-  assert(old.val_types == new.val_types)
+  # assert(old.key_types == new.key_types)
+  # assert(old.val_types == new.val_types)
   order = collect(1:(length(old.key_types) + length(old.val_types)))
   old_index = index(old, order)
   new_index = index(new, order)

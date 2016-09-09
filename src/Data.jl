@@ -119,7 +119,7 @@ end
 
 function assert_no_dupes_sorted{K <: Tuple}(key::K)
   for at in 2:length(key[1])
-    assert(cmp_in(key, key, at, at-1) == 1)
+    @assert cmp_in(key, key, at, at-1) == 1
   end
 end
 
@@ -134,6 +134,10 @@ function Relation{T}(columns::T)
   Relation(columns, Dict{Vector{Int64},T}(), Type[eltype(column) for column in columns], Type[])
 end
 
+function is_type_expr(expr)
+  isa(expr, Symbol) || (isa(expr, Expr) && expr.head == :(.))
+end
+
 # examples:
 # @relation height_at(Int64, Int64) = Float64
 # @relation married(String, String)
@@ -146,30 +150,30 @@ macro relation(expr)
     name_and_keys = expr
     vals_expr = Expr(:tuple)
   end
-  assert(name_and_keys.head == :call)
+  @assert name_and_keys.head == :call
   name = name_and_keys.args[1]
-  assert(isa(name, Symbol))
+  @assert isa(name, Symbol)
   keys = name_and_keys.args[2:end]
   for key in keys 
-    assert(isa(key, Symbol))
+    @assert is_type_expr(key)
   end
   if vals_expr.head == :block
     vals_expr = vals_expr.args[2]
   end
-  if isa(vals_expr, Symbol) 
+  if is_type_expr(vals_expr)
     vals = [vals_expr]
   else 
-    assert(vals_expr.head == :tuple)
+    @assert vals_expr.head == :tuple
     vals = vals_expr.args
   end
   for val in vals 
-    assert(isa(val, Symbol))
+    @assert is_type_expr(val)
   end
   typs = [keys..., vals...]
   quote 
-    columns = tuple($([:(Vector{$typ}()) for typ in typs]...))
+    columns = tuple($([:(Vector{$(esc(typ))}()) for typ in typs]...))
     indexes = Dict{Vector{Int64}, typeof(columns)}()
-    $(esc(name)) = Relation(columns, indexes, Type[$(keys...)], Type[$(vals...)])
+    $(esc(name)) = Relation(columns, indexes, Type[$(map(esc, keys)...)], Type[$(map(esc, vals)...)])
   end
 end
 
@@ -182,7 +186,7 @@ function index{T}(relation::Relation{T}, order::Vector{Int64})
 end
 
 function Base.push!{T}(relation::Relation{T}, values)
-  assert(length(relation.columns) == length(values))
+  @assert length(relation.columns) == length(values)
   for ix in 1:length(values)
     push!(relation.columns[ix], values[ix])
   end
@@ -216,6 +220,15 @@ function Base.merge{T}(old::Relation{T}, new::Relation{T})
   Relation(result_columns, result_indexes, old.key_types, old.val_types)
 end
 
+function replace!{T}(old::Relation{T}, new::Relation{T})
+  old.columns = new.columns
+  old.indexes = copy(new.indexes)
+end
+
+function Base.merge!{T}(old::Relation{T}, new::Relation{T})
+  replace!(old, merge(old, new))
+end
+
 function assert_no_dupes{T}(relation::Relation{T})
   order = collect(1:(length(relation.key_types) + length(relation.val_types)))
   key = index(relation, order)[1:length(relation.key_types)]
@@ -228,7 +241,7 @@ function Atom.render(editor::Atom.Editor, relation::Relation)
   Atom.render(editor, relation.columns)
 end
 
-export Relation, index, assert_no_dupes
+export Relation, @relation, index, assert_no_dupes, replace!
 
 function test()
   for i in 1:10000

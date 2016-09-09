@@ -127,14 +127,17 @@ function plan_join(query)
   expression_clauses = []
   assignment_clauses = Dict()
   loop_clauses = Dict()
+  while query.head in [:quote, :tuple]
+    query = query.args[1]
+  end
   for (clause, line) in enumerate(query.args) 
     if isa(line, Symbol)
       push!(variables, line)
     elseif line.head == :call && line.args[1] == :in 
       variable = line.args[2]
       expr = line.args[3]
-      assert(isa(variable, Symbol))
-      assert(!haskey(loop_clauses, variable))
+      @assert isa(variable, Symbol)
+      @assert !haskey(loop_clauses, variable)
       push!(grounded_variables, variable)
       push!(variables, variable)      
       for expr_variable in collect_variables(expr)
@@ -146,7 +149,8 @@ function plan_join(query)
         if ix > 1 && !isa(arg, Symbol)
           variable = gensym("variable")
           line.args[ix] = variable
-          assignment_clauses[variable] = arg 
+          assignment = (isa(arg, Expr) && arg.head == :($)) ? arg.args[1] : arg
+          assignment_clauses[variable] = assignment
           insert!(variables, 1, variable) # only handles constants atm
           push!(grounded_variables, variable)
         elseif ix > 1 && isa(arg, Symbol)
@@ -158,15 +162,15 @@ function plan_join(query)
     elseif line.head == :(=)
       variable = line.args[1]
       expr = line.args[2]
-      assert(isa(variable, Symbol))
-      assert(!haskey(assignment_clauses, variable)) # only one assignment per var
+      @assert isa(variable, Symbol)
+      @assert !haskey(assignment_clauses, variable) # only one assignment per var
       push!(grounded_variables, variable)
       push!(variables, variable)
       for expr_variable in collect_variables(expr)
         push!(variables, expr_variable)
       end
       assignment_clauses[variable] = expr
-    elseif line.head == :macrocall && line.args[1] == symbol("@when")
+    elseif line.head == :macrocall && line.args[1] == Symbol("@when")
       push!(expression_clauses, clause)
       push!(variables, collect_variables(line.args[2])...)
     elseif line.head == :return 
@@ -179,7 +183,7 @@ function plan_join(query)
         error("Confused by: $line")
       end
     else
-      assert(line.head == :line)
+      @assert line.head == :line
     end
   end
   delete!(grounded_variables, :_)
@@ -187,6 +191,7 @@ function plan_join(query)
   
   returned_variables = map(get_variable_symbol, returned_typed_variables)
   returned_variable_types = Dict(zip(returned_variables, map(get_variable_type, returned_typed_variables)))
+  @show returned_variables returned_variable_types
   
   sources = Dict([variable => [] for variable in variables])
   for clause in relation_clauses
@@ -220,7 +225,7 @@ function plan_join(query)
   
   index_inits = []
   for (clause, columns) in sort_orders
-    index_init = :($(symbol("index_", clause)) = index($(symbol("relation_", clause)), [$(columns...)]))
+    index_init = :($(Symbol("index_", clause)) = index($(Symbol("relation_", clause)), [$(columns...)]))
     push!(index_inits, index_init)
   end
   
@@ -229,7 +234,7 @@ function plan_join(query)
     if column == :buffer
       column_inits[ix] = :()
     else
-      column_inits[ix] = :($(symbol("index_", clause))[$column])
+      column_inits[ix] = :($(Symbol("index_", clause))[$column])
     end
   end
   
@@ -239,10 +244,10 @@ function plan_join(query)
     variable_ixes = [ixes[(clause, column)] for (clause, column) in clauses_and_columns]
     variable_columns = [:(columns[$ix]) for ix in variable_ixes]
     variable_init = quote
-      $(symbol("columns_", variable)) = [$(variable_columns...)]
-      $(symbol("ixes_", variable)) = [$(variable_ixes...)]
+      $(Symbol("columns_", variable)) = [$(variable_columns...)]
+      $(Symbol("ixes_", variable)) = [$(variable_ixes...)]
       $(if variable in returned_variables
-          :($(symbol("results_", variable)) = Vector{$(returned_variable_types[variable])}())
+          :($(Symbol("results_", variable)) = Vector{$(esc(returned_variable_types[variable]))}())
         end)
     end
     push!(variable_inits, variable_init)
@@ -267,14 +272,14 @@ function plan_join(query)
   return_ix = maximum(push!(indexin(returned_variables, variables), 0))
   
   body = quote
-    $([:(push!($(symbol("results_", variable)), $(esc(variable))))
+    $([:(push!($(Symbol("results_", variable)), $(esc(variable))))
     for variable in returned_variables]...)
     need_more_results = false
   end
   for variable_ix in length(variables):-1:1
     variable = variables[variable_ix]
-    variable_columns = symbol("columns_", variable)
-    variable_ixes = symbol("ixes_", variable)
+    variable_columns = Symbol("columns_", variable)
+    variable_ixes = Symbol("ixes_", variable)
     for filter in filters[variable_ix]
       body = :(if $(esc(filter)); $body; end)
     end
@@ -322,10 +327,10 @@ function plan_join(query)
   query_symbol = gensym("query")
           
   code = quote 
-    function $query_symbol($([symbol("relation_", clause) for clause in relation_clauses]...))
+    function $query_symbol($([Symbol("relation_", clause) for clause in relation_clauses]...))
       $setup
       $body
-      Relation(tuple($([symbol("results_", variable) for variable in returned_variables]...)))
+      Relation(tuple($([Symbol("results_", variable) for variable in returned_variables]...)))
     end
     $query_symbol($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
   end

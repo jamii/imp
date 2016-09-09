@@ -15,7 +15,7 @@ function event(table_name, values)
 end
 
 macro event(expr)
-  assert(expr.head == :call)
+  @assert expr.head == :call
   :(event($(string(expr.args[1])), [$(expr.args[2:end]...)]))
 end
 

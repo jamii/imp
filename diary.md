@@ -7673,6 +7673,8 @@ function cost_of_playlist()
 end
 ```
 
-I don't like the current implementation at all. It allocates a new relation on each loop, only to aggregate over it and throw it away. I don't want to get bogged down in this forever though, so I'm going to leave it for now and revisit it when I look at factorizing queries. 
+I don't like the current implementation at all. It allocates a new relation on each loop, only to aggregate over it and throw it away. I don't want to get bogged down in this forever though, so I'm going to leave it for now and revisit it when I look at factorizing queries.
+
+That `p = p` is caused by a scoping issue. I can't tell at the moment whether `p` is being used as a variable or as a constant from an outside scope, so I have to create a new `p` to resolve the ambiguity. The ideal way to fix this would be if macros could query what variables are defined in their enclosing scope, but I think this may be impossible in Julia because declarations can float upwards - a later macro could create a new variable that is available in this macro. So I may have to settle for explicitly escaping variables eg `$p` for constant, `p` for variable. 
 
 I also fixed a minor bug that caused a crash on queries that don't return any results. I've been aware of it for a while but it was only worth fixing once I started working on sub-queries.

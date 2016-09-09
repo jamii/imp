@@ -9,6 +9,7 @@ include("examples/JobData.jl")
 include("examples/Graph.jl")
 include("examples/Chinook.jl")
 include("examples/Job.jl")
+include("examples/Minesweeper.jl")
 
 Graph.test()
 Chinook.test()

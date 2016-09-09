@@ -7795,4 +7795,15 @@ end
 (state, mine, mine_count, clicked, display, cleared) = run(10, 20, 10)
 ```
 
-The Imp computation takes around 0.1-3.0ms per event, where the top end is down to `@fix!` not doing semi-naive evaluation. Building the Hiccup node takes up to 100ms, whic is disgraceful. About half of that is the repeated inner queries and the other half is entirely inside Hiccup.
+The Imp computation takes around 0.1-3.0ms per event, where the top end is down to `@fix!` not doing semi-naive evaluation. Building the Hiccup node takes up to 100ms, which is disgraceful. About half of that is the repeated inner queries and the other half is entirely inside Hiccup.
+
+There's a ton of minor stuff to fix before I'll consider this finished:
+
+* Queries support `relation(keys) => value` syntax
+* Declare merge in return statement
+* Remove need for type declarations in merged returns
+* Allow returning expressions, not just symbols 
+* Sort only by keys in query, so that we can have non-sortable objects as values
+* Distinguish empty set from set containing empty tuple 
+
+I also want to reduce the noise of inner aggregates, but I have no good ideas right now.

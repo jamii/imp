@@ -7807,3 +7807,55 @@ There's a ton of minor stuff to fix before I'll consider this finished:
 * Distinguish empty set from set containing empty tuple 
 
 I also want to reduce the noise of inner aggregates, but I have no good ideas right now.
+
+### 2016 Sep 11
+
+I figured out how to hook into Julia's type inference at runtime. The simple way is:
+
+``` julia
+Base.return_types(() -> ..., [])[1]
+```
+
+This executes at runtime and Julia can't infer the return type. I think that works fine if I move it outside the function that wraps the query. 
+
+Another option is:
+
+``` julia 
+@generated function infer_type(closure, args...)
+  m = Core.Inference._methods_by_ftype(Tuple{closure, (arg.parameters[1] for arg in args)...}, 1)[1]
+  _, ty, inferred = Core.Inference.typeinf(m[3], m[1], m[2], false)
+  t = inferred ? ty : Any
+  quote
+    $(Expr(:meta, :inline))
+    $t
+  end
+end
+```
+
+This returns the correct results when I execute it by itself, but if I wrap it in a function call it always returns `Any`. No idea why.
+
+Also, sometimes it segfaults. I guess there is a reason that the exported reflection functions refuse to work inside `@generated` :D
+
+I could just use `Base.return_types` at compile time, but macros run before later functions in the same module are compiled, so it wouldn't know the types of those functions. Evalling the same module twice would produce different type inferences.
+
+If I use it at runtime, the query itself would be fine because it's wrapped in a function, but the return type of the query would be un-inferrable.
+
+I spent a lot of time thinking about this and eventually realised that Julia's array comprehensions have exactly the same problem - giving a stable type to the empty array. So I have a truly glorious hack:
+
+``` julia
+# nearly works, but x and y get boxed
+results_x = [x for _ in []]
+results_y = [y for _ in []]
+x = 3
+y = x + 1
+
+# actually works!
+f_x = () -> 3
+f_y = (x) -> x + 1
+results_x = [f_x() for _ in []]
+results_y = [f_y(results_x[1]) for _ in []]
+x = 3
+y = x + 1
+```
+
+It's a bit sketchy, because the Julia folks keep warning everyone that type inference is not stable/predictable and that runtime behaviour shouldn't depend on inference. But as far as I'm concerned, allocating ints on the stack vs making a bajillion heap allocations *is* important runtime behavior, so I'm *already* a hostage to type inference and/or manual assertions. Throwing an error on pushing to a weirdly typed array is much less annoying than trying to allocate 100gb of Int64 objects and crashing my machine.

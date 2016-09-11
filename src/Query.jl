@@ -121,6 +121,7 @@ end
 
 function plan_join(query)
   local returned_typed_variables
+  returned_relation = Nullable{Symbol}()
   grounded_variables = Set()
   variables = []
   relation_clauses = []
@@ -176,6 +177,9 @@ function plan_join(query)
     elseif line.head == :return 
       returned = line.args[1]
       if returned.head == :call && returned.args[1] == :tuple
+        returned_typed_variables = returned.args[2:end]
+      elseif returned.head == :call
+        returned_relation = Nullable{Symbol}(returned.args[1])
         returned_typed_variables = returned.args[2:end]
       elseif returned.head == :tuple 
         returned_typed_variables = returned.args
@@ -335,19 +339,20 @@ function plan_join(query)
     $query_symbol($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
   end
   
-  (code, returned_typed_variables)
+  (code, returned_typed_variables, returned_relation)
 end
 
 function plan_query(query)
-  (join, returned_typed_variables) = plan_join(query)
-  (project, _) = plan_join(quote 
+  (join, returned_typed_variables, returned_relation) = plan_join(query)
+  
+  (project, _, _) = plan_join(quote 
     intermediate($(map(get_variable_symbol, returned_typed_variables)...))
     return tuple($(returned_typed_variables...))
   end)
   
   quote 
     let $(esc(:intermediate)) = let; $join; end
-      $project
+      $(isnull(returned_relation) ? project : :(merge!($(esc(get(returned_relation))), $project)))
     end
   end
 end

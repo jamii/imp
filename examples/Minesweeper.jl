@@ -44,7 +44,7 @@ function run(num_x, num_y, num_mines)
   
   @query begin 
     s = :game_in_progress
-    return state(s::Symbol)
+    return state(s)
   end
   
   fix(mine) do
@@ -56,7 +56,7 @@ function run(num_x, num_y, num_mines)
       @when length(mines) < num_mines
       x = rand(1:num_x)
       y = rand(1:num_y)
-      return mine(x::Int64, y::Int64)
+      return mine(x, y)
     end 
   end
   
@@ -71,14 +71,14 @@ function run(num_x, num_y, num_mines)
       return (nx::Int64, ny::Int64)
     end
     c = length(neighbouring_mines)
-    return mine_count(x::Int64, y::Int64, c::Int64)
+    return mine_count(x, y, c)
   end
   
   @Window(clicked) do window, event_number
 
     @query begin
       clicked($event_number, x, y)
-      return cleared(x::Int64, y::Int64)
+      return cleared(x, y)
     end
     
     fix(cleared) do
@@ -90,7 +90,7 @@ function run(num_x, num_y, num_mines)
         @when nx in 1:num_x
         @when ny in 1:num_y
         @when (nx != x) || (ny != y)
-        return cleared(nx::Int64, ny::Int64)
+        return cleared(nx, ny)
       end
     end
     
@@ -101,14 +101,14 @@ function run(num_x, num_y, num_mines)
       end)
       @when num_cleared + num_mines >= num_x * num_y
       s = :game_won
-      return state(s::Symbol)
+      return state(s)
     end
     
     @query begin
       clicked($event_number, x, y)
       mine(x,y)
       s = :game_lost
-      return state(s::Symbol)
+      return state(s)
     end
     
     node = vbox(map(1:num_y) do y

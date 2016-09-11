@@ -250,7 +250,9 @@ function plan_join(query)
       $(Symbol("columns_", variable)) = [$(variable_columns...)]
       $(Symbol("ixes_", variable)) = [$(variable_ixes...)]
       $(if variable in returned_variables
-          :($(Symbol("results_", variable)) = Vector{$(esc(returned_variable_types[variable]))}())
+          ix = findfirst(returned_variables, variable)
+          typ = isnull(returned_relation) ? esc(returned_variable_types[variable]) : :(eltype($(esc(get(returned_relation))).columns[$ix]))
+          :($(Symbol("results_", variable)) = Vector{$typ}())
         end)
     end
     push!(variable_inits, variable_init)
@@ -347,7 +349,7 @@ function plan_query(query)
   
   (project, _, _) = plan_join(quote 
     intermediate($(map(get_variable_symbol, returned_typed_variables)...))
-    return tuple($(returned_typed_variables...))
+    return intermediate($(returned_typed_variables...)) # use of intermediate here is a hack to convey types 
   end)
   
   quote 

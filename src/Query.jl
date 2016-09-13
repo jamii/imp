@@ -187,7 +187,7 @@ function plan_join(query)
             Expr(:$, [value], _) => value
             value => value 
           end
-          push!(clauses, Assign(var, value, collect_vars(value)))
+          insert!(clauses, 1, Assign(var, value, collect_vars(value)))
         end
       end
     end

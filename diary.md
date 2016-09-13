@@ -7862,7 +7862,7 @@ It's a bit sketchy, because the Julia folks keep warning everyone that type infe
 
 The actual implementation of this plan was simple enough, but the type inference really struggles with subqueries and I can't figure out why. A large part of the problem is that the generated code is pretty verbose, so it's really hard for me to work through the lowered, inferred ast and find problems. I think I'm going to abandon inference for now. I'll finish the rest of the bullet points, then clean up the compiler and then try inference again. 
 
-## 2016 Sep 12
+### 2016 Sep 12
 
 Let's figure out what I want the emitted code to look like.
 
@@ -7949,3 +7949,11 @@ end
 
 query2_outer([infer_pn() for _ in []], [infer_total() for _ in []])
 ```
+
+The first step is to clean up the compiler itself, while still generating the same code. I've got the bulk of this done but it'll need some debugging tomorrow.
+
+### 2016 Sep 13
+
+I have the cleaned up compiler working now, and it's a relief to have done it. 
+
+However, the generated code is not identical - there is a significant slowdown in some of the JOB queries. It looks like the cause is that I'm no longer lifting constants to the top of the variable order. Easily fixed.

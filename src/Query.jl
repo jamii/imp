@@ -1,6 +1,7 @@
 module Query
 
 using Data
+using Match
 
 # gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
 function gallop{T}(column::Vector{T}, value::T, lo::Int64, hi::Int64, cmp) 
@@ -87,23 +88,23 @@ function assign(cols, los, ats, his, ixes, value)
   end
 end
 
-function collect_variables(expr, variables)
+function collect_vars(expr, vars)
   if isa(expr, Symbol)
-    push!(variables, expr)
+    push!(vars, expr)
   elseif isa(expr, Expr) && expr.head != :quote
     for arg in expr.args
-      collect_variables(arg, variables)
+      collect_vars(arg, vars)
     end
   end
 end
 
-function collect_variables(expr)
-  variables = []
-  collect_variables(expr, variables)
-  variables
+function collect_vars(expr)
+  vars = []
+  collect_vars(expr, vars)
+  vars
 end
 
-function get_variable_symbol(expr)
+function get_var_symbol(expr)
   if isa(expr, Expr) && expr.head == :(::)
     expr.args[1]
   else 
@@ -111,7 +112,7 @@ function get_variable_symbol(expr)
   end
 end
 
-function get_variable_type(expr)
+function get_var_type(expr)
   if isa(expr, Expr) && expr.head == :(::)
     expr.args[2]
   else 
@@ -119,242 +120,316 @@ function get_variable_type(expr)
   end
 end
 
+type Row; name; vars; end
+type When; expr; vars; end
+type Assign; var; expr; vars; end
+type In; var; expr; vars; end
+type Hint; var; end
+type Return; name; vars; typs; end
+
+query = quote 
+edge(a,b)
+@when a < b
+edge(b,c)
+@when b < c
+edge(c,a)
+return (a::Int64, b::Int64, c::Int64)
+end
+
 function plan_join(query)
-  local returned_typed_variables
-  returned_relation = Nullable{Symbol}()
-  grounded_variables = Set()
-  variables = []
-  relation_clauses = []
-  expression_clauses = []
-  assignment_clauses = Dict()
-  loop_clauses = Dict()
-  while query.head in [:quote, :tuple]
-    query = query.args[1]
+  # parse
+  clauses = []
+  for line in query.args
+    clause = @match line begin
+      line::Symbol => Hint(line)
+      Expr(:call, [:in, var, expr], _) => In(var, expr, collect_vars(expr))
+      Expr(:call, [name, vars...], _) => Row(name, Any[vars...])
+      Expr(:(=), [var, expr], _) => Assign(var, expr, collect_vars(expr))
+      Expr(:macrocall, [head, expr], _), if head == Symbol("@when") end => When(expr, collect_vars(expr))
+      Expr(:return, [Expr(:tuple, [vars...], _)], _) => Return((), map(get_var_symbol, vars), map(get_var_type, vars))
+      Expr(:return, [Expr(:call, [:tuple, vars...], _)], _) => Return((), map(get_var_symbol, vars), map(get_var_type, vars))
+      Expr(:return, [Expr(:call, [name, vars...], _)], _) => Return(name, map(get_var_symbol, vars), map(get_var_type, vars))
+      Expr(:line, _, _) => ()
+      _ => error("Confused by: $line")
+    end
+    if clause != ()
+      push!(clauses, clause)
+    end
   end
-  for (clause, line) in enumerate(query.args) 
-    if isa(line, Symbol)
-      push!(variables, line)
-    elseif line.head == :call && line.args[1] == :in 
-      variable = line.args[2]
-      expr = line.args[3]
-      @assert isa(variable, Symbol)
-      @assert !haskey(loop_clauses, variable)
-      push!(grounded_variables, variable)
-      push!(variables, variable)      
-      for expr_variable in collect_variables(expr)
-        push!(variables, expr_variable)
-      end
-      loop_clauses[variable] = expr
-    elseif line.head == :call
-      for (ix, arg) in enumerate(line.args)
-        if ix > 1 && !isa(arg, Symbol)
-          variable = gensym("variable")
-          line.args[ix] = variable
-          assignment = (isa(arg, Expr) && arg.head == :($)) ? arg.args[1] : arg
-          assignment_clauses[variable] = assignment
-          insert!(variables, 1, variable) # only handles constants atm
-          push!(grounded_variables, variable)
-        elseif ix > 1 && isa(arg, Symbol)
-          push!(variables, arg)
-          push!(grounded_variables, arg)
+  
+  # check all assignments are to single vars
+  for clause in clauses
+    if typeof(clause) in [In, Assign]
+      @assert isa(clause.var, Symbol)
+    end
+  end
+  
+  # add a return if needed
+  returns = [clause for clause in clauses if typeof(clause) == Return]
+  if length(returns) == 0
+    return_clause = Return((), [], [])
+  elseif length(returns) == 1
+    return_clause = returns[1]
+  else
+    error("Too many returns: $returns")
+  end
+  
+  # rewrite expressions nested in Row
+  old_clauses = clauses
+  clauses = []
+  for clause in old_clauses
+    if typeof(clause) in [Row]
+      for (ix, expr) in enumerate(clause.vars)
+        if !isa(expr, Symbol)
+          var = gensym("constant")
+          clause.vars[ix] = var
+          value = @match expr begin
+            Expr(:$, [value], _) => value
+            value => value 
+          end
+          push!(clauses, Assign(var, value, collect_vars(value)))
         end
       end
-      push!(relation_clauses, clause)
-    elseif line.head == :(=)
-      variable = line.args[1]
-      expr = line.args[2]
-      @assert isa(variable, Symbol)
-      @assert !haskey(assignment_clauses, variable) # only one assignment per var
-      push!(grounded_variables, variable)
-      push!(variables, variable)
-      for expr_variable in collect_variables(expr)
-        push!(variables, expr_variable)
+    end
+    push!(clauses, clause)
+  end
+  
+  # collect vars created in this query
+  created_vars = Set()
+  for clause in clauses
+    if typeof(clause) in [Row]
+      for var in clause.vars
+        push!(created_vars, var)
+      end 
+    end
+    if typeof(clause) in [Assign, In]
+      push!(created_vars, clause.var)
+    end
+  end
+  delete!(created_vars, :_) # _ is a wildcard, not a real var
+  
+  # collect vars mentioned in this query, in order of mention
+  mentioned_vars = []
+  for clause in clauses 
+    if typeof(clause) in [Row, When, Assign, In]
+      for var in clause.vars
+        push!(mentioned_vars, var)
+      end 
+    end
+    if typeof(clause) in [Assign, In, Hint]
+      push!(mentioned_vars, clause.var)
+    end
+  end
+  
+  # use mention order to decide execution order
+  vars = unique((var for var in mentioned_vars if var in created_vars))
+  
+  # collect clauses that assign a value to a var before intersect
+  var_assigned_by = Dict()
+  for clause in clauses
+    if typeof(clause) in [Assign, In]
+      @assert !haskey(var_assigned_by, clause.var) # only one assignment per var 
+      var_assigned_by[clause.var] = clause
+    end
+  end
+  
+  # for each var, collect list of relation/column pairs that need to be intersected
+  sources = Dict(var => Tuple{Int64, Int64}[] for var in vars)
+  for (clause_ix, clause) in enumerate(clauses)
+    if typeof(clause) == Row 
+      for (var_ix, var) in enumerate(clause.vars)
+        if var != :_
+          push!(sources[var], (clause_ix, var_ix))
+        end
       end
-      assignment_clauses[variable] = expr
-    elseif line.head == :macrocall && line.args[1] == Symbol("@when")
-      push!(expression_clauses, clause)
-      push!(variables, collect_variables(line.args[2])...)
-    elseif line.head == :return 
-      returned = line.args[1]
-      if returned.head == :call && returned.args[1] == :tuple
-        returned_typed_variables = returned.args[2:end]
-      elseif returned.head == :call
-        returned_relation = Nullable{Symbol}(returned.args[1])
-        returned_typed_variables = returned.args[2:end]
-      elseif returned.head == :tuple 
-        returned_typed_variables = returned.args
-      else
-        error("Confused by: $line")
-      end
-    else
-      @assert line.head == :line
-    end
-  end
-  delete!(grounded_variables, :_)
-  variables = unique([variable for variable in variables if variable in grounded_variables])
-  
-  returned_variables = map(get_variable_symbol, returned_typed_variables)
-  returned_variable_types = Dict(zip(returned_variables, map(get_variable_type, returned_typed_variables)))
-  
-  sources = Dict(variable => [] for variable in variables)
-  for clause in relation_clauses
-    line = query.args[clause]
-    for (column, variable) in enumerate(line.args[2:end])
-      if variable in variables
-        push!(sources[variable], (clause,column))
-      end
     end
   end
   
-  sort_orders = Dict()
-  for variable in variables 
-    for (clause, column) in sources[variable]
-      push!(get!(()->[], sort_orders, clause), column)
+  # for each Row clause, figure out what order to sort the index in
+  sort_orders = Dict(clause_ix => Int64[] for clause_ix in 1:length(clauses))
+  for var in vars 
+    for (clause_ix, var_ix) in sources[var]
+      push!(sort_orders[clause_ix], var_ix)
     end
   end
   
-  ixes = Dict()
-  buffer_ixes = []
-  next_ix = 1
-  for (clause, columns) in sort_orders
-    for column in columns
-      ixes[(clause, column)] = next_ix
-      next_ix += 1
+  # assign a slot in the los/ats/his arrays for each relation/column pair
+  ixes = Tuple{Int64, Any}[]
+  for (clause_ix, var_ixes) in sort_orders
+    for var_ix in var_ixes
+      push!(ixes, (clause_ix, var_ix))
     end
-    ixes[(clause, :buffer)] = next_ix
-    push!(buffer_ixes, next_ix)
-    next_ix += 1
+    push!(ixes, (clause_ix, :buffer))
   end
+  ix_for = Dict(column => ix for (ix, column) in enumerate(ixes))
   
+  # --- codegen ---
+  
+  # for each Row clause, get the correct index
   index_inits = []
-  for (clause, columns) in sort_orders
-    index_init = :($(Symbol("index_", clause)) = index($(Symbol("relation_", clause)), [$(columns...)]))
-    push!(index_inits, index_init)
+  for (clause_ix, clause) in enumerate(clauses)
+    if typeof(clause) == Row 
+      order = sort_orders[clause_ix]
+      index_init = :($(Symbol("index_$clause_ix")) = index($(Symbol("relation_$clause_ix")), $order))
+      push!(index_inits, index_init)
+    end
   end
   
-  column_inits = Vector(length(ixes))
-  for ((clause, column), ix) in ixes
-    if column == :buffer
-      column_inits[ix] = :()
+  # for each var, collect up the columns to be intersected
+  columns_inits = []
+  for var in vars
+    columns = [:($(Symbol("index_$clause_ix"))[$var_ix]) for (clause_ix, var_ix) in sources[var]]
+    columns_init = :($(Symbol("columns_$var")) = [$(columns...)])
+    push!(columns_inits, columns_init)
+  end
+  
+  # for each var, make list of ixes into the global state
+  ixes_inits = []
+  for var in vars 
+    ixes_init = :($(Symbol("ixes_$var")) = $([ix_for[source] for source in sources[var]]))
+    push!(ixes_inits, ixes_init)
+  end
+  
+  # initialize arrays for storing results
+  results_inits = []
+  for (ix, var) in enumerate(return_clause.vars) 
+    if return_clause.name == ()
+      typ = return_clause.typs[ix]
     else
-      column_inits[ix] = :($(Symbol("index_", clause))[$column])
+      typ = :(eltype($(esc(return_clause.name)).columns[$ix]))
+    end
+    result_init = :($(Symbol("results_$var")) = Vector{$typ}())
+    push!(results_inits, result_init)
+  end
+  
+  # initilize global state
+  los = [1 for _ in ixes]
+  ats = [1 for _ in ixes]
+  his = []
+  for (clause_ix, var_ix) in ixes
+    if var_ix == :buffer
+      push!(his, 0)
+    else 
+      push!(his, :(length($(Symbol("index_$clause_ix"))[$var_ix]) + 1))
     end
   end
   
-  variable_inits = []
-  for variable in variables
-    clauses_and_columns = sources[variable]
-    variable_ixes = [ixes[(clause, column)] for (clause, column) in clauses_and_columns]
-    variable_columns = [:(columns[$ix]) for ix in variable_ixes]
-    variable_init = quote
-      $(Symbol("columns_", variable)) = [$(variable_columns...)]
-      $(Symbol("ixes_", variable)) = [$(variable_ixes...)]
-      $(if variable in returned_variables
-          ix = findfirst(returned_variables, variable)
-          typ = isnull(returned_relation) ? esc(returned_variable_types[variable]) : :(eltype($(esc(get(returned_relation))).columns[$ix]))
-          :($(Symbol("results_", variable)) = Vector{$typ}())
-        end)
-    end
-    push!(variable_inits, variable_init)
-  end
-  
-  setup = quote
+  # combine all the init steps
+  init = quote
     $(index_inits...)
-    columns = tuple($(column_inits...))
-    los = Int64[1 for i in 1:$(length(ixes))]
-    ats = Int64[1 for i in 1:$(length(ixes))]
-    his = Int64[length(columns[i])+1 for i in 1:$(length(ixes))]
-    $(variable_inits...)
+    $(columns_inits...)
+    $(ixes_inits...)
+    $(results_inits...)
+    los = [$(los...)]
+    ats = [$(ats...)]
+    his = [$(his...)]
   end
   
-  filters = [[] for _ in variables]
-  for clause in expression_clauses
-    expr = query.args[clause].args[2]
-    callable_at = maximum(indexin(collect_variables(expr), variables))
-    push!(filters[callable_at], expr)
+  # figure out at which point in the variable order each When clause can be run
+  whens = [[] for _ in vars]
+  for clause in clauses
+    if typeof(clause) == When
+      var_ix = maximum(indexin(collect_vars(clause.expr), vars))
+      push!(whens[var_ix], clause.expr)
+    end
   end
   
-  return_ix = maximum(push!(indexin(returned_variables, variables), 0))
+  # figure out at which point in the variable order we have all the variables we need to return
+  return_after = maximum(push!(indexin(return_clause.vars, vars), 0))
   
+  # store results 
   body = quote
-    $([:(push!($(Symbol("results_", variable)), $(esc(variable))))
-    for variable in returned_variables]...)
+    $([:(push!($(Symbol("results_$var")), $(esc(var))))
+    for var in return_clause.vars]...)
     need_more_results = false
   end
-  for variable_ix in length(variables):-1:1
-    variable = variables[variable_ix]
-    variable_columns = Symbol("columns_", variable)
-    variable_ixes = Symbol("ixes_", variable)
-    for filter in filters[variable_ix]
-      body = :(if $(esc(filter)); $body; end)
+  
+  # build up the main loop from the inside out
+  for var_ix in length(vars):-1:1
+    var = vars[var_ix]
+    var_columns = Symbol("columns_$var")
+    var_ixes = Symbol("ixes_$var")
+    
+    # run any When clauses
+    for when in whens[var_ix]
+      body = :(if $(esc(when)); $body; end)
     end
-    need_more_results = variable_ix > return_ix ? :need_more_results : true
-    if variable_ix == return_ix
+    
+    # after return_after, only need to find one solution, not all solutions
+    if var_ix == return_after
       body = quote
         need_more_results = true
         $body
       end
     end
-    if haskey(assignment_clauses, variable)
+    need_more_results = var_ix > return_after ? :need_more_results : true
+    
+    # find valid values for this variable
+    clause = get(var_assigned_by, var, ())
+    if typeof(clause) == Assign
       body = quote
-        let $(esc(variable)) = $(esc(assignment_clauses[variable]))
-          if assign($variable_columns, los, ats, his, $variable_ixes, $(esc(variable)))
+        let $(esc(var)) = $(esc(clause.expr))
+          if assign($var_columns, los, ats, his, $var_ixes, $(esc(var)))
             $body
           end
         end
       end
-    elseif haskey(loop_clauses, variable)
+    elseif typeof(clause) == In
       body = quote 
         let
-          local iter = $(esc(loop_clauses[variable]))
+          local iter = $(esc(clause.expr))
           local state = start(iter)
-          local $(esc(variable)) 
+          local $(esc(var)) 
           while $need_more_results && !done(iter, state)
-            ($(esc(variable)), state) = next(iter, state)
-            if assign($variable_columns, los, ats, his, $variable_ixes, $(esc(variable)))
+            ($(esc(var)), state) = next(iter, state)
+            if assign($var_columns, los, ats, his, $var_ixes, $(esc(var)))
               $body
             end
           end
         end
       end
-    else
-      result_column = ixes[sources[variable][1]]
+    else 
+      result_column = ix_for[sources[var][1]]
       body = quote
-        start_intersect($variable_columns, los, ats, his, $variable_ixes)
-        while $need_more_results && next_intersect($variable_columns, los, ats, his, $variable_ixes)
-          let $(esc(variable)) = columns[$result_column][los[$(result_column+1)]]
+        start_intersect($var_columns, los, ats, his, $var_ixes)
+        while $need_more_results && next_intersect($var_columns, los, ats, his, $var_ixes)
+          let $(esc(var)) = $(Symbol("columns_$var"))[1][los[$(result_column+1)]]
             $body
           end
         end
       end 
     end
+    
   end
   
   query_symbol = gensym("query")
+  relation_symbols = [Symbol("relation_$clause_ix") for (clause_ix, clause) in enumerate(clauses) if typeof(clause) == Row]
+  relation_names = [esc(clause.name) for clause in clauses if typeof(clause) == Row]
+  result_symbols = [Symbol("results_$var") for var in return_clause.vars]
           
   code = quote 
-    function $query_symbol($([Symbol("relation_", clause) for clause in relation_clauses]...))
-      $setup
+    function $query_symbol($(relation_symbols...))
+      $init
       $body
-      Relation(tuple($([Symbol("results_", variable) for variable in returned_variables]...)))
+      Relation(tuple($(result_symbols...)))
     end
-    $query_symbol($([esc(query.args[clause].args[1]) for clause in relation_clauses]...))
+    $query_symbol($(relation_names...))
   end
   
-  (code, returned_typed_variables, returned_relation)
+  (code, return_clause)
 end
 
 function plan_query(query)
-  (join, returned_typed_variables, returned_relation) = plan_join(query)
+  (join, return_clause) = plan_join(query)
   
-  (project, _, _) = plan_join(quote 
-    intermediate($(map(get_variable_symbol, returned_typed_variables)...))
-    return intermediate($(returned_typed_variables...)) # use of intermediate here is a hack to convey types 
+  (project, _) = plan_join(quote 
+    intermediate($(return_clause.vars...))
+    return intermediate($(return_clause.vars...)) # returning to intermediate is just a temporary hack to convey types
   end)
   
   quote 
     let $(esc(:intermediate)) = let; $join; end
-      $(isnull(returned_relation) ? project : :(merge!($(esc(get(returned_relation))), $project)))
+      $((return_clause.name == ()) ? project : :(merge!($(esc(return_clause.name)), $project)))
     end
   end
 end

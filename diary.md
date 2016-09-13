@@ -7861,3 +7861,91 @@ y = x + 1
 It's a bit sketchy, because the Julia folks keep warning everyone that type inference is not stable/predictable and that runtime behaviour shouldn't depend on inference. But as far as I'm concerned, allocating ints on the stack vs making a bajillion heap allocations *is* important runtime behavior, so I'm *already* a hostage to type inference and/or manual assertions. Throwing an error on pushing to a weirdly typed array is much less annoying than trying to allocate 100gb of Int64 objects and crashing my machine.
 
 The actual implementation of this plan was simple enough, but the type inference really struggles with subqueries and I can't figure out why. A large part of the problem is that the generated code is pretty verbose, so it's really hard for me to work through the lowered, inferred ast and find problems. I think I'm going to abandon inference for now. I'll finish the rest of the bullet points, then clean up the compiler and then try inference again. 
+
+## 2016 Sep 12
+
+Let's figure out what I want the emitted code to look like.
+
+``` julia
+@query begin
+  playlist(p, pn)
+  tracks = @query begin 
+    playlist_track($p, t)
+    track(t, _, _, _, _, _, _, _, price)
+    return (t::Int64, price::Float64)
+  end
+  total = sum(tracks.columns[1])
+  return (pn::String, total::Float64)
+end
+```
+
+``` julia
+index_playlist = index(esc(playlist), [1,2])
+
+columns_p = tuple(index_playlist[1])
+infer_p() = infer(columns_p)
+
+columns_pn = tuple(index_playlist[2])
+infer_pn() = infer(columns_pn)
+
+begin # subquery init
+  index_playlist_track = index(esc(playlist_track), [1, 2])
+  index_track = index(esc(track), [1, 9])
+  
+  @inline function eval_tmp1(p) = p
+  columns_tmp1 = tuple(index_playlist_track[1])
+  infer_tmp1() = infer(columns_tmp1, infer_p())
+
+  columns_t = tuple(index_playlist_track[2], index_track[1])
+  infer_t() = infer(columns_t)
+
+  columns_price = tuple(index_track[9])
+  infer_price() = infer(columns_price)
+  
+  @inline function query2_outer(results_t, results_price, p)
+    for tmp1 in intersect(columns_tmp1, eval_tmp1(p))
+      for t in intersect(columns_t)
+        for price in intersect(columns_price)
+          query2_inner(results_t, results_price, p, tmp1, t, price)
+        end
+      end
+    end
+    Relation(tuple(results_t, results_price), tuple()) # dedup
+  end
+
+  @inline function query2_inner(results_t, results_price, p, tmp1, t, price)
+    push!(results_t, t)
+    push!(results_price, price)
+    return
+  end
+end
+
+@inline eval_tracks(p) = query2_outer([infer_t() for _ in []], [infer_price() for _ in []], p)
+columns_tracks = tuple()
+infer_tracks() = infer(columns_tracks, eval_tracks(infer_p()))
+
+eval_total(tracks) = sum(track.columns[1])
+columns_total = tuple()
+infer_total() = infer(columns_totals, eval_total(infer_tracks()))
+
+@inline function query1_outer(results_pn, results_total)
+  for p in intersect(columns_p)
+    for pn in intersect(columns_pn)
+      for tracks in intersect(columns_tracks, eval_tracks(p))
+        for total in intersect(columns_total, eval_total(tracks))
+          query1_inner(results_pn, results_total, p, pn, tracks, total)
+        end
+      end
+    end
+  end
+  Relation((results_pn, results_total)) # dedup
+end
+
+@inline function query1_inner(results_pn, results_total, p, pn, tracks, total)
+  push!(results_pn, pn)
+  push!(results_total, total)
+  return
+end
+
+query2_outer([infer_pn() for _ in []], [infer_total() for _ in []])
+```

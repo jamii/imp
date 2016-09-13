@@ -8259,3 +8259,70 @@ function plan_query(query)
   end
 end
 ```
+
+Now to start cleaning up the generated code. First step is to remove the second join and do the deduping in the `Relation` constructor instead. 
+
+``` julia
+function Relation{T}(columns::T)
+  deduped = tuple((Vector{eltype(column)}() for column in columns)...)
+  quicksort!(columns)
+  at = 1
+  hi = length(columns[1])
+  while at <= hi
+    push_in!(deduped, columns, at)
+    while (at += 1; (at <= hi) && cmp_in(columns, columns, at, at-1) == 0) end
+  end
+  order = collect(1:length(columns))
+  key_types = Type[eltype(column) for column in columns]
+  Relation(deduped, Dict{Vector{Int64},T}(order => deduped), key_types, Type[])
+end
+```
+
+Some slight slowdowns on queries that produce a large number of intermediate results, but nothing that bothers me too much:
+
+``` julia
+@benchmark(q1a()) = BenchmarkTools.Trial: 
+  samples:          3016
+  evals/sample:     1
+  time tolerance:   5.00%
+  memory tolerance: 1.00%
+  memory estimate:  7.28 kb
+  allocs estimate:  66
+  minimum time:     1.25 ms (0.00% GC)
+  median time:      1.66 ms (0.00% GC)
+  mean time:        1.66 ms (0.00% GC)
+  maximum time:     3.17 ms (0.00% GC)
+@benchmark(q2a()) = BenchmarkTools.Trial: 
+  samples:          73
+  evals/sample:     1
+  time tolerance:   5.00%
+  memory tolerance: 1.00%
+  memory estimate:  318.03 kb
+  allocs estimate:  3730
+  minimum time:     67.10 ms (0.00% GC)
+  median time:      68.82 ms (0.00% GC)
+  mean time:        69.36 ms (0.46% GC)
+  maximum time:     95.58 ms (24.48% GC)
+@benchmark(q3a()) = BenchmarkTools.Trial: 
+  samples:          43
+  evals/sample:     1
+  time tolerance:   5.00%
+  memory tolerance: 1.00%
+  memory estimate:  11.31 kb
+  allocs estimate:  81
+  minimum time:     113.73 ms (0.00% GC)
+  median time:      115.70 ms (0.00% GC)
+  mean time:        116.35 ms (0.00% GC)
+  maximum time:     120.57 ms (0.00% GC)
+@benchmark(q4a()) = BenchmarkTools.Trial: 
+  samples:          108
+  evals/sample:     1
+  time tolerance:   5.00%
+  memory tolerance: 1.00%
+  memory estimate:  21.92 kb
+  allocs estimate:  98
+  minimum time:     44.07 ms (0.00% GC)
+  median time:      46.17 ms (0.00% GC)
+  mean time:        46.55 ms (0.00% GC)
+  maximum time:     53.74 ms (0.00% GC)
+```

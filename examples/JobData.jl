@@ -58,8 +58,8 @@ end
 
 for (table_name, column_name) in keys(job)
   @eval begin 
-    $(symbol(table_name, "_", column_name)) = job[$table_name, $column_name]
-    export $(symbol(table_name, "_", column_name))
+    $(Symbol(table_name, "_", column_name)) = job[$table_name, $column_name]
+    export $(Symbol(table_name, "_", column_name))
   end
 end
 

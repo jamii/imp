@@ -127,16 +127,7 @@ type In; var; expr; vars; end
 type Hint; var; end
 type Return; name; vars; typs; end
 
-query = quote 
-edge(a,b)
-@when a < b
-edge(b,c)
-@when b < c
-edge(c,a)
-return (a::Int64, b::Int64, c::Int64)
-end
-
-function plan_join(query)
+function plan_query(query)
   # parse
   clauses = []
   for line in query.args
@@ -407,30 +398,18 @@ function plan_join(query)
   relation_names = [esc(clause.name) for clause in clauses if typeof(clause) == Row]
   result_symbols = [Symbol("results_$var") for var in return_clause.vars]
           
-  code = quote 
+  quote 
     function $query_symbol($(relation_symbols...))
       $init
       $body
       Relation(tuple($(result_symbols...)))
     end
-    $query_symbol($(relation_names...))
-  end
-  
-  (code, return_clause)
-end
-
-function plan_query(query)
-  (join, return_clause) = plan_join(query)
-  
-  (project, _) = plan_join(quote 
-    intermediate($(return_clause.vars...))
-    return intermediate($(return_clause.vars...)) # returning to intermediate is just a temporary hack to convey types
-  end)
-  
-  quote 
-    let $(esc(:intermediate)) = let; $join; end
-      $((return_clause.name == ()) ? project : :(merge!($(esc(return_clause.name)), $project)))
-    end
+    result = $query_symbol($(relation_names...))
+    $(if return_clause.name != ()
+      :(merge!($(esc(return_clause.name)), result))
+    else
+      :result
+    end) 
   end
 end
 

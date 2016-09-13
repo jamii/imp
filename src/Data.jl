@@ -134,10 +134,6 @@ type Relation{T <: Tuple} # where T is a tuple of columns
   val_types::Vector{Type}
 end
 
-function Relation{T}(columns::T)
-  Relation(columns, Dict{Vector{Int64},T}(), Type[eltype(column) for column in columns], Type[])
-end
-
 function is_type_expr(expr)
   isa(expr, Symbol) || (isa(expr, Expr) && expr.head == :(.))
 end
@@ -235,6 +231,20 @@ end
 
 function Base.merge!{T}(old::Relation{T}, new::Relation{T})
   replace!(old, merge(old, new))
+end
+
+function Relation{T}(columns::T)
+  deduped = tuple((Vector{eltype(column)}() for column in columns)...)
+  quicksort!(columns)
+  at = 1
+  hi = length(columns[1])
+  while at <= hi
+    push_in!(deduped, columns, at)
+    while (at += 1; (at <= hi) && cmp_in(columns, columns, at, at-1) == 0) end
+  end
+  order = collect(1:length(columns))
+  key_types = Type[eltype(column) for column in columns]
+  Relation(deduped, Dict{Vector{Int64},T}(order => deduped), key_types, Type[])
 end
 
 function assert_no_dupes{T}(relation::Relation{T})

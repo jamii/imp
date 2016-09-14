@@ -49,9 +49,9 @@ function run(num_x, num_y, num_mines)
     @query begin 
       mines = @query mine(x, y)
       @when length(mines) < num_mines
-      x = rand(1:num_x)
-      y = rand(1:num_y)
-      return mine(x, y)
+      nx = rand(1:num_x)
+      ny = rand(1:num_y)
+      return mine(nx, ny)
     end 
   end
   
@@ -91,7 +91,7 @@ function run(num_x, num_y, num_mines)
     @query begin 
       num_cleared = length(@query cleared(x,y))
       @when num_cleared + num_mines >= num_x * num_y
-      return state(:game_won)
+      return state() => :game_won
     end
     
     @query begin
@@ -110,7 +110,8 @@ function run(num_x, num_y, num_mines)
          (:game_in_progress, _, true, 0) => button("_")
          (:game_in_progress, _, true, _) => button(string(count))
          (:game_in_progress, _, false, _) => button(Dict(:onclick => @event clicked(x,y)), "X")
-         (_, true, _, _) => button("💣")
+         (:game_won, true, _, _) => button("💣")
+         (:game_lost, true, _, _) => button("☀")
          (_, false, _, _) => button(string(count))
          _ => error()
        end

@@ -122,17 +122,11 @@ function merge_sorted!{T <: Tuple, K <: Tuple}(old::T, new::T, old_key::K, new_k
   end
 end
 
-function assert_no_dupes_sorted{K <: Tuple}(key::K)
-  for at in 2:length(key[1])
-    @assert cmp_in(key, key, at, at-1) == 1
-  end
-end
-
+# TODO should be typed {K,V} instead of {T}, but pain in the ass to change now
 type Relation{T <: Tuple} # where T is a tuple of columns
   columns::T
+  num_keys::Int64
   indexes::Dict{Vector{Int64},T}
-  key_types::Vector{Type}
-  val_types::Vector{Type}
 end
 
 function is_type_expr(expr)
@@ -153,6 +147,7 @@ function parse_relation(expr)
     Expr(:tuple, vals, _) => vals
     _ => [tail]
   end
+  (name, keys, vals)
 end
 
 # examples:
@@ -164,10 +159,11 @@ end
 macro relation(expr) 
   (name, keys, vals) = parse_relation(expr)
   typs = [keys..., vals...]
+  order = collect(1:length(typs))
   body = quote 
     columns = tuple($([:(Vector{$(esc(typ))}()) for typ in typs]...))
-    indexes = Dict{Vector{Int64}, typeof(columns)}()
-    Relation(columns, indexes, Type[$(map(esc, keys)...)], Type[$(map(esc, vals)...)])
+    indexes = Dict{Vector{Int64}, typeof(columns)}($order => columns)
+    Relation(columns, $(length(keys)), indexes)
   end
   if name != ()
     :(const $(esc(name)) = $body)
@@ -210,47 +206,44 @@ function Base.length(relation::Relation)
 end
 
 function Base.merge{T}(old::Relation{T}, new::Relation{T})
-  # TODO should Relation{T} be typed Relation{K,V} instead?
-  # assert(old.key_types == new.key_types)
-  # assert(old.val_types == new.val_types)
-  order = collect(1:(length(old.key_types) + length(old.val_types)))
+  @assert old.num_keys == new.num_keys 
+  order = collect(1:length(old.columns))
   old_index = index(old, order)
   new_index = index(new, order)
-  num_keys = length(old.key_types)
   result_columns = tuple([Vector{eltype(column)}() for column in old.columns]...)
-  merge_sorted!(old_index, new_index, old_index[1:num_keys], new_index[1:num_keys], result_columns)
+  merge_sorted!(old_index, new_index, old_index[1:old.num_keys], new_index[1:new.num_keys], result_columns)
   result_indexes = Dict{Vector{Int64}, typeof(result_columns)}(order => result_columns)
-  Relation(result_columns, result_indexes, old.key_types, old.val_types)
+  Relation(result_columns, old.num_keys, result_indexes)
 end
 
 function replace!{T}(old::Relation{T}, new::Relation{T})
   old.columns = new.columns
-  old.indexes = copy(new.indexes)
+  old.indexes = copy(new.indexes) # shallow copy of Dict
 end
 
 function Base.merge!{T}(old::Relation{T}, new::Relation{T})
   replace!(old, merge(old, new))
 end
 
-function Relation{T}(columns::T)
+function Relation{T}(columns::T, num_keys::Int64)
   deduped = tuple((Vector{eltype(column)}() for column in columns)...)
   quicksort!(columns)
   at = 1
   hi = length(columns[1])
+  key = columns[1:num_keys]
+  val = columns[num_keys+1:1]
   while at <= hi
     push_in!(deduped, columns, at)
-    while (at += 1; (at <= hi) && cmp_in(columns, columns, at, at-1) == 0) end
+    while (at += 1; (at <= hi) && cmp_in(key, key, at, at-1) == 0) # skip dupe keys
+      @assert cmp_in(val, val, at, at-1) == 0 # no key collisions allowed
+    end
   end
   order = collect(1:length(columns))
-  key_types = Type[eltype(column) for column in columns]
-  Relation(deduped, Dict{Vector{Int64},T}(order => deduped), key_types, Type[])
+  Relation{T}(deduped, num_keys, Dict(order => deduped))
 end
 
-function assert_no_dupes{T}(relation::Relation{T})
-  order = collect(1:(length(relation.key_types) + length(relation.val_types)))
-  key = index(relation, order)[1:length(relation.key_types)]
-  assert_no_dupes_sorted(key)
-  relation
+function Relation{T}(columns::T)
+  Relation{T}(columns, length(columns))
 end
 
 import Atom
@@ -258,7 +251,7 @@ function Atom.render(editor::Atom.Editor, relation::Relation)
   Atom.render(editor, relation.columns)
 end
 
-export Relation, @relation, index, assert_no_dupes, replace!
+export Relation, @relation, index, replace!
 
 function test()
   for i in 1:10000
@@ -274,8 +267,8 @@ function test()
     x = unique(rand(1:i, i))
     y = rand(1:i, length(x))
     z = rand(1:i, length(x))
-    a = Relation((x,y), Dict{Vector{Int64}, typeof((x,y))}(), Type[Int64], Type[Int64])
-    b = Relation((x,z), Dict{Vector{Int64}, typeof((x,y))}(), Type[Int64], Type[Int64])
+    a = Relation((x,y), 1)
+    b = Relation((x,z), 1)
     c = merge(a,b)
     @test index(c, [1,2]) == index(b, [1,2])
   end
@@ -287,8 +280,8 @@ function test()
     x2 = [i*2+1 for i in x]
     y = rand(1:i, length(x))
     z = rand(1:i, length(x))
-    a = Relation((x1,y), Dict{Vector{Int64}, typeof((x,y))}(), Type[Int64], Type[Int64])
-    b = Relation((x2,z), Dict{Vector{Int64}, typeof((x,y))}(), Type[Int64], Type[Int64])
+    a = Relation((x1,y), 1)
+    b = Relation((x2,z), 1)
     c = merge(a,b)
     @test length(c) == length(x1) + length(x2)
   end
@@ -307,8 +300,8 @@ function bench()
   x = unique(rand(1:10000, 10000))
   y = rand(1:10000, length(x))
   z = rand(1:10000, length(x))
-  a = Relation((x,y), Dict{Vector{Int64}, typeof((x,y))}(), Type[Int64], Type[Int64])
-  b = Relation((x,z), Dict{Vector{Int64}, typeof((x,y))}(), Type[Int64], Type[Int64])
+  a = Relation((x,y), 1)
+  b = Relation((x,z), 1)
   @show @benchmark merge($a,$b)
 end
 

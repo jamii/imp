@@ -128,12 +128,12 @@ function random_value_from(columns, value)
   rand(Bool) ? value : random_value_from(columns)
 end
 
-type Row; name; vars; end
+type Row; name; vars; num_keys; end
 type When; expr; vars; end
 type Assign; var; expr; vars; end
 type In; var; expr; vars; end
 type Hint; var; end
-type Return; name; vars; end
+type Return; name; vars; num_keys; end
 
 function plan_query(query)
   # unwrap block
@@ -156,11 +156,11 @@ function plan_query(query)
       end
       Expr(:return, [expr], _) => begin 
         (name, keys, vals) = Data.parse_relation(expr) 
-        Return(name, Any[keys..., vals...]) 
+        Return(name, Any[keys..., vals...], length(keys)) 
       end
       _ => begin
         (name, keys, vals) = Data.parse_relation(line)
-        Row(name, Any[keys..., vals...])
+        Row(name, Any[keys..., vals...], length(keys))
       end
     end
     if clause != :line
@@ -228,7 +228,7 @@ function plan_query(query)
   # add a return if needed
   returns = [clause for clause in clauses if typeof(clause) == Return]
   if length(returns) == 0
-    return_clause = Return((), vars)
+    return_clause = Return((), vars, length(vars))
   elseif length(returns) == 1
     return_clause = returns[1]
   else
@@ -357,8 +357,8 @@ function plan_query(query)
   # initialize arrays for storing results
   results_inits = []
   for var in vars
-    result_init = :($(Symbol("results_$var")) = [($(Symbol("infer_$var")))() for _ in []])
-    push!(results_inits, result_init)
+    results_init = :($(Symbol("results_$var")) = [($(Symbol("infer_$var")))() for _ in []])
+    push!(results_inits, results_init)
   end
   
   # initilize global state
@@ -468,13 +468,13 @@ function plan_query(query)
   query_symbol = gensym("query")
   relation_symbols = [Symbol("relation_$clause_ix") for (clause_ix, clause) in enumerate(clauses) if typeof(clause) == Row]
   relation_names = [esc(clause.name) for clause in clauses if typeof(clause) == Row]
-  result_symbols = [Symbol("results_$var") for var in return_clause.vars]
+  results_symbols = [Symbol("results_$var") for var in return_clause.vars]
           
   quote 
     function $query_symbol($(relation_symbols...))
       $init
       $body
-      Relation(tuple($(result_symbols...)))
+      Relation(tuple($(results_symbols...)), $(return_clause.num_keys))
     end
     result = $query_symbol($(relation_names...))
     $(if return_clause.name != ()

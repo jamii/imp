@@ -219,6 +219,7 @@ end
 function replace!{T}(old::Relation{T}, new::Relation{T})
   old.columns = new.columns
   old.indexes = copy(new.indexes) # shallow copy of Dict
+  old
 end
 
 function Base.merge!{T}(old::Relation{T}, new::Relation{T})

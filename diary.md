@@ -8340,3 +8340,31 @@ infer_tracks(infer_p()) # inferred result type is Any
 I finally found the bug. At some point I had typed `$(Symbol("infer_$var()"))` rather than `$(Symbol("infer_$var"))()`. The latter creates a call to the function `infer_p`. The former creates a load of the variable `infer_p()`, which is nonsense. But both print the same way when the ast is rendered! And, weirdly, the type inference for the former produced `Any`, instead of producing `Union{}` which would have clued me in to the fact that I was producing nonsense code.
   
 But it's fixed now. I have type inference.
+
+``` julia
+@relation mine(Int64, Int64)
+@relation mine_count(Int64, Int64) => Int64
+
+const num_x = 3
+const num_y = 4
+
+function update()
+  @query begin 
+    x in 1:num_x
+    y in 1:num_y
+    neighbouring_mines = @query begin
+      nx in (x-1):(x+1)
+      ny in (y-1):(y+1)
+      @when (nx != x) || (ny != y)
+      mine(nx, ny) 
+    end
+    c = length(neighbouring_mines)
+    return mine_count(x, y) => c
+  end
+end
+
+Base.return_types(update) 
+# [Data.Relation{Tuple{Array{Int64,1},Array{Int64,1},Array{Int64,1}}}]
+```
+
+I also fixed all the bullet points in the minesweeper post a few days ago. The only remaining problem is that hiccup nodes are not comparable, so I can't sort them into a relation column.

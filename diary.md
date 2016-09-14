@@ -8342,13 +8342,12 @@ I finally found the bug. At some point I had typed `$(Symbol("infer_$var()"))` r
 But it's fixed now. I have type inference.
 
 ``` julia
-@relation mine(Int64, Int64)
-@relation mine_count(Int64, Int64) => Int64
-
 const num_x = 3
 const num_y = 4
 
-function update()
+@relation mine(Int64, Int64)
+
+function neighbours()
   @query begin 
     x in 1:num_x
     y in 1:num_y
@@ -8359,11 +8358,11 @@ function update()
       mine(nx, ny) 
     end
     c = length(neighbouring_mines)
-    return mine_count(x, y) => c
+    return (x, y) => c
   end
 end
 
-Base.return_types(update) 
+Base.return_types(neighbours) 
 # [Data.Relation{Tuple{Array{Int64,1},Array{Int64,1},Array{Int64,1}}}]
 ```
 

@@ -1,5 +1,6 @@
 module Data
 
+using Match
 using Base.Test
 using BenchmarkTools
 
@@ -138,42 +139,40 @@ function is_type_expr(expr)
   isa(expr, Symbol) || (isa(expr, Expr) && expr.head == :(.))
 end
 
+function parse_relation(expr)
+  (head, tail) = @match expr begin
+    Expr(:(=>), [head, tail], _) => (head, tail)
+    head => (head, :(()))
+  end
+  (name, keys) = @match head begin
+    Expr(:call, [name, keys...], _) => (name, keys)
+    Expr(:tuple, keys, _) => ((), keys)
+    _ => error("Can't parse $expr as relation")
+  end
+  vals = @match tail begin 
+    Expr(:tuple, vals, _) => vals
+    _ => [tail]
+  end
+end
+
 # examples:
+# @relation (Int64, Float64)
+# @relation (Int64,) => Int64
 # @relation height_at(Int64, Int64) = Float64
 # @relation married(String, String)
 # @relation state() = (Int64, Symbol)
 macro relation(expr) 
-  if expr.head == :(=)
-    name_and_keys = expr.args[1]
-    vals_expr = expr.args[2]
-  else 
-    name_and_keys = expr
-    vals_expr = Expr(:tuple)
-  end
-  @assert name_and_keys.head == :call
-  name = name_and_keys.args[1]
-  @assert isa(name, Symbol)
-  keys = name_and_keys.args[2:end]
-  for key in keys 
-    @assert is_type_expr(key)
-  end
-  if vals_expr.head == :block
-    vals_expr = vals_expr.args[2]
-  end
-  if is_type_expr(vals_expr)
-    vals = [vals_expr]
-  else 
-    @assert vals_expr.head == :tuple
-    vals = vals_expr.args
-  end
-  for val in vals 
-    @assert is_type_expr(val)
-  end
+  (name, keys, vals) = parse_relation(expr)
   typs = [keys..., vals...]
-  quote 
+  body = quote 
     columns = tuple($([:(Vector{$(esc(typ))}()) for typ in typs]...))
     indexes = Dict{Vector{Int64}, typeof(columns)}()
-    const $(esc(name)) = Relation(columns, indexes, Type[$(map(esc, keys)...)], Type[$(map(esc, vals)...)])
+    Relation(columns, indexes, Type[$(map(esc, keys)...)], Type[$(map(esc, vals)...)])
+  end
+  if name != ()
+    :(const $(esc(name)) = $body)
+  else
+    body
   end
 end
 

@@ -33,25 +33,21 @@ function vbox(nodes)
 end
 
 function run(num_x, num_y, num_mines)
-  srand(999)
   
-  @relation state() = Symbol
+  @relation state() => Symbol
   @relation mine(Int64, Int64)
-  @relation mine_count(Int64, Int64) = Int64
+  @relation mine_count(Int64, Int64) => Int64
   @relation cleared(Int64, Int64)
-  @relation clicked(Int64) = (Int64, Int64)
-  @relation display() = Hiccup.Node
+  @relation clicked(Int64) => (Int64, Int64)
+  @relation display() => Hiccup.Node
   
   @query begin 
-    return state(:game_in_progress)
+    return state() => :game_in_progress
   end
   
   fix(mine) do
     @query begin 
-      mines = @query begin
-        mine(x, y)
-        return (x, y)
-      end
+      mines = @query mine(x, y)
       @when length(mines) < num_mines
       x = rand(1:num_x)
       y = rand(1:num_y)
@@ -67,23 +63,22 @@ function run(num_x, num_y, num_mines)
       ny in (y-1):(y+1)
       @when (nx != x) || (ny != y)
       mine(nx, ny) 
-      return (nx, ny)
     end
     c = length(neighbouring_mines)
-    return mine_count(x, y, c)
+    return mine_count(x, y) => c
   end
   
   @Window(clicked) do window, event_number
 
     @query begin
-      clicked($event_number, x, y)
+      clicked($event_number) => (x, y)
       return cleared(x, y)
     end
     
     fix(cleared) do
       @query begin
         cleared(x,y)
-        mine_count(x,y,0)
+        mine_count(x,y) => 0
         nx in (x-1):(x+1)
         ny in (y-1):(y+1)
         @when nx in 1:num_x
@@ -100,9 +95,9 @@ function run(num_x, num_y, num_mines)
     end
     
     @query begin
-      clicked($event_number, x, y)
+      clicked($event_number) => (x, y)
       mine(x,y)
-      return state(:game_lost)
+      return state() => :game_lost
     end
     
     node = vbox(map(1:num_y) do y
@@ -110,7 +105,7 @@ function run(num_x, num_y, num_mines)
         current_state = state.columns[1][1]
         is_cleared = exists(@query cleared($x,$y))
         is_mine = exists(@query mine($x,$y))
-        count = (@query mine_count($x,$y,count)).columns[3][1]
+        count = (@query mine_count($x,$y) => count).columns[3][1]
         return @match (current_state, is_mine, is_cleared, count) begin
          (:game_in_progress, _, true, 0) => button("_")
          (:game_in_progress, _, true, _) => button(string(count))

@@ -146,18 +146,24 @@ function plan_query(query)
   clauses = []
   for line in lines
     clause = @match line begin
+      Expr(:line, _, _) => :line
       line::Symbol => Hint(line)
       Expr(:call, [:in, var, expr], _) => In(var, expr, collect_vars(expr))
-      Expr(:call, [name, vars...], _) => Row(name, Any[vars...])
       Expr(:(=), [var, expr], _) => Assign(var, expr, collect_vars(expr))
-      Expr(:macrocall, [head, expr], _), if head == Symbol("@when") end => When(expr, collect_vars(expr))
-      Expr(:return, [Expr(:tuple, [vars...], _)], _) => Return((), vars)
-      Expr(:return, [Expr(:call, [:tuple, vars...], _)], _) => Return((), vars)
-      Expr(:return, [Expr(:call, [name, vars...], _)], _) => Return(name, vars)
-      Expr(:line, _, _) => ()
-      _ => error("Confused by: $line")
+      Expr(:macrocall, [head, expr], _) => @match head begin
+        Symbol("@when") => When(expr, collect_vars(expr))
+        _ => error("Don't know what to do with $head")
+      end
+      Expr(:return, [expr], _) => begin 
+        (name, keys, vals) = Data.parse_relation(expr) 
+        Return(name, Any[keys..., vals...]) 
+      end
+      _ => begin
+        (name, keys, vals) = Data.parse_relation(line)
+        Row(name, Any[keys..., vals...])
+      end
     end
-    if clause != ()
+    if clause != :line
       push!(clauses, clause)
     end
   end

@@ -94,10 +94,7 @@ function run(num_x, num_y, num_mines)
     end
     
     @query begin 
-      num_cleared = length(@query begin
-        cleared(x,y)
-        return (x, y)
-      end)
+      num_cleared = length(@query cleared(x,y))
       @when num_cleared + num_mines >= num_x * num_y
       return state(:game_won)
     end
@@ -111,18 +108,9 @@ function run(num_x, num_y, num_mines)
     node = vbox(map(1:num_y) do y
       return hbox(map(1:num_x) do x  
         current_state = state.columns[1][1]
-        is_cleared = exists(@query begin 
-          cleared($x,$y) 
-          return (true,)
-        end)
-        is_mine = exists(@query begin 
-          mine($x,$y) 
-          return (true,)
-        end)
-        count = (@query begin 
-          mine_count($x,$y,count)
-          return (count,)
-        end).columns[1][1]
+        is_cleared = exists(@query cleared($x,$y))
+        is_mine = exists(@query mine($x,$y))
+        count = (@query mine_count($x,$y,count)).columns[3][1]
         return @match (current_state, is_mine, is_cleared, count) begin
          (:game_in_progress, _, true, 0) => button("_")
          (:game_in_progress, _, true, _) => button(string(count))

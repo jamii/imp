@@ -136,9 +136,15 @@ type Hint; var; end
 type Return; name; vars; end
 
 function plan_query(query)
+  # unwrap block
+  lines = @match query begin
+    Expr(:block, lines, _) => lines
+    line => [line]
+  end
+  
   # parse
   clauses = []
-  for line in query.args
+  for line in lines
     clause = @match line begin
       line::Symbol => Hint(line)
       Expr(:call, [:in, var, expr], _) => In(var, expr, collect_vars(expr))
@@ -183,16 +189,6 @@ function plan_query(query)
     push!(clauses, clause)
   end
   
-  # add a return if needed
-  returns = [clause for clause in clauses if typeof(clause) == Return]
-  if length(returns) == 0
-    return_clause = Return((), [])
-  elseif length(returns) == 1
-    return_clause = returns[1]
-  else
-    error("Too many returns: $returns")
-  end
-  
   # collect vars created in this query
   created_vars = Set()
   for clause in clauses
@@ -222,6 +218,16 @@ function plan_query(query)
   
   # use mention order to decide execution order
   vars = unique((var for var in mentioned_vars if var in created_vars))
+  
+  # add a return if needed
+  returns = [clause for clause in clauses if typeof(clause) == Return]
+  if length(returns) == 0
+    return_clause = Return((), vars)
+  elseif length(returns) == 1
+    return_clause = returns[1]
+  else
+    error("Too many returns: $returns")
+  end
   
   # collect clauses that assign a value to a var before intersect
   var_assigned_by = Dict()

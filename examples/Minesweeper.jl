@@ -43,8 +43,7 @@ function run(num_x, num_y, num_mines)
   @relation display() = Hiccup.Node
   
   @query begin 
-    s = :game_in_progress
-    return state(s)
+    return state(:game_in_progress)
   end
   
   fix(mine) do
@@ -100,15 +99,13 @@ function run(num_x, num_y, num_mines)
         return (x, y)
       end)
       @when num_cleared + num_mines >= num_x * num_y
-      s = :game_won
-      return state(s)
+      return state(:game_won)
     end
     
     @query begin
       clicked($event_number, x, y)
       mine(x,y)
-      s = :game_lost
-      return state(s)
+      return state(:game_lost)
     end
     
     node = vbox(map(1:num_y) do y
@@ -116,13 +113,11 @@ function run(num_x, num_y, num_mines)
         current_state = state.columns[1][1]
         is_cleared = exists(@query begin 
           cleared($x,$y) 
-          e = true
-          return (e,)
+          return (true,)
         end)
         is_mine = exists(@query begin 
           mine($x,$y) 
-          e = true 
-          return (e,)
+          return (true,)
         end)
         count = (@query begin 
           mine_count($x,$y,count)

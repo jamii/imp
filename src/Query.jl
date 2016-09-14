@@ -133,7 +133,7 @@ type When; expr; vars; end
 type Assign; var; expr; vars; end
 type In; var; expr; vars; end
 type Hint; var; end
-type Return; name; vars; typs; end
+type Return; name; vars; end
 
 function plan_query(query)
   # parse
@@ -145,9 +145,9 @@ function plan_query(query)
       Expr(:call, [name, vars...], _) => Row(name, Any[vars...])
       Expr(:(=), [var, expr], _) => Assign(var, expr, collect_vars(expr))
       Expr(:macrocall, [head, expr], _), if head == Symbol("@when") end => When(expr, collect_vars(expr))
-      Expr(:return, [Expr(:tuple, [vars...], _)], _) => Return((), map(get_var_symbol, vars), map(get_var_type, vars))
-      Expr(:return, [Expr(:call, [:tuple, vars...], _)], _) => Return((), map(get_var_symbol, vars), map(get_var_type, vars))
-      Expr(:return, [Expr(:call, [name, vars...], _)], _) => Return(name, map(get_var_symbol, vars), map(get_var_type, vars))
+      Expr(:return, [Expr(:tuple, [vars...], _)], _) => Return((), vars)
+      Expr(:return, [Expr(:call, [:tuple, vars...], _)], _) => Return((), vars)
+      Expr(:return, [Expr(:call, [name, vars...], _)], _) => Return(name, vars)
       Expr(:line, _, _) => ()
       _ => error("Confused by: $line")
     end
@@ -163,21 +163,11 @@ function plan_query(query)
     end
   end
   
-  # add a return if needed
-  returns = [clause for clause in clauses if typeof(clause) == Return]
-  if length(returns) == 0
-    return_clause = Return((), [], [])
-  elseif length(returns) == 1
-    return_clause = returns[1]
-  else
-    error("Too many returns: $returns")
-  end
-  
   # rewrite expressions nested in Row
   old_clauses = clauses
   clauses = []
   for clause in old_clauses
-    if typeof(clause) in [Row]
+    if typeof(clause) in [Row, Return]
       for (ix, expr) in enumerate(clause.vars)
         if !isa(expr, Symbol)
           var = gensym("constant")
@@ -191,6 +181,16 @@ function plan_query(query)
       end
     end
     push!(clauses, clause)
+  end
+  
+  # add a return if needed
+  returns = [clause for clause in clauses if typeof(clause) == Return]
+  if length(returns) == 0
+    return_clause = Return((), [])
+  elseif length(returns) == 1
+    return_clause = returns[1]
+  else
+    error("Too many returns: $returns")
   end
   
   # collect vars created in this query

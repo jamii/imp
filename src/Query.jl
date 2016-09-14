@@ -304,10 +304,14 @@ function plan_query(query)
   # for each var, make a function whose inferred return type matches the inferred type of the var
   infer_funs = Dict()
   for var in vars
-    if haskey(eval_funs, var)
+    if haskey(var_assigned_by, var)
+      clause = var_assigned_by[var]
       (args, _) = eval_funs[var]
       inferred_args = [:($(Symbol("infer_$arg"))()) for arg in args]
       eval_call = :($(esc(Symbol("eval_$var")))($(inferred_args...)))
+      if typeof(clause) == In
+        eval_call = :(first($eval_call))
+      end
       if isempty(sources[var])
         infer_body = eval_call
       else
@@ -322,6 +326,20 @@ function plan_query(query)
       end
     end
     infer_funs[var] = infer_fun # infer_fun.args[2]
+  end
+  
+  # for each When clause, make a wrapper function
+  when_funs = Dict()
+  for (ix, clause) in enumerate(clauses)
+    if typeof(clause) == When
+      args = intersect(vars, clause.vars)
+      when_fun = esc((quote
+        @inline function $(Symbol("when_$ix"))($(args...))
+          $(clause.expr)
+        end
+      end).args[2])
+      when_funs[ix] = (args, when_fun)
+    end
   end
   
   # initialize arrays for storing results
@@ -350,6 +368,7 @@ function plan_query(query)
     $(ixes_inits...)
     $((eval_fun for (var, (args, eval_fun)) in eval_funs)...)
     $((infer_funs[var] for var in vars)...)
+    $((when_fun for (var, (args, when_fun)) in when_funs)...)
     $(results_inits...)
     los = [$(los...)]
     ats = [$(ats...)]
@@ -358,11 +377,10 @@ function plan_query(query)
   
   # figure out at which point in the variable order each When clause can be run
   whens = [[] for _ in vars]
-  for clause in clauses
-    if typeof(clause) == When
-      var_ix = maximum(indexin(collect_vars(clause.expr), vars))
-      push!(whens[var_ix], clause.expr)
-    end
+  for (clause_ix, (args, when_fun)) in when_funs
+    var_ix = maximum(indexin(args, vars))
+    when_call = :($(esc(Symbol("when_$clause_ix")))($(args...)))
+    push!(whens[var_ix], when_call)
   end
   
   # figure out at which point in the variable order we have all the variables we need to return

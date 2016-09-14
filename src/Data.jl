@@ -173,7 +173,7 @@ macro relation(expr)
   quote 
     columns = tuple($([:(Vector{$(esc(typ))}()) for typ in typs]...))
     indexes = Dict{Vector{Int64}, typeof(columns)}()
-    $(esc(name)) = Relation(columns, indexes, Type[$(map(esc, keys)...)], Type[$(map(esc, vals)...)])
+    const $(esc(name)) = Relation(columns, indexes, Type[$(map(esc, keys)...)], Type[$(map(esc, vals)...)])
   end
 end
 

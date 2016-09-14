@@ -8326,3 +8326,17 @@ Some slight slowdowns on queries that produce a large number of intermediate res
   mean time:        46.55 ms (0.00% GC)
   maximum time:     53.74 ms (0.00% GC)
 ```
+
+### 2016 Sep 14
+
+My latest attempt at type inference spawned a two day debugging session. I was very confused for a long time by the following situation.
+
+``` julia
+infer_p() # inferred result type is Int64
+infer_tracks(1::Int64) # inferred result type is Relation{Int64, Float64}
+infer_tracks(infer_p()) # inferred result type is Any
+```
+
+I finally found the bug. At some point I had typed `$(Symbol("infer_$var()"))` rather than `$(Symbol("infer_$var"))()`. The latter creates a call to the function `infer_p`. The former creates a load of the variable `infer_p()`, which is nonsense. But both print the same way when the ast is rendered! And, weirdly, the type inference for the former produced `Any`, instead of producing `Union{}` which would have clued me in to the fact that I was producing nonsense code.
+  
+But it's fixed now. I have type inference.

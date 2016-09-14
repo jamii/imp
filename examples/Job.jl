@@ -37,7 +37,7 @@ function q1a()
     movie_companies_note(mc_id, mc_note)
     @when !contains(mc_note, "as Metro-Goldwyn-Mayer Pictures") &&
       (contains(mc_note, "co-production") || contains(mc_note, "presents"))
-    return (t_production_year::Int64,)
+    return (t_production_year,)
   end
 end
 
@@ -64,7 +64,7 @@ function q2a()
     movie_companies_movie_id(mc_id, t_id)
     movie_companies_company_id(mc_id, cn_id)
     company_name_country_code(cn_id, "[de]") 
-    return (title::String,)
+    return (title,)
   end
 end
 
@@ -102,7 +102,7 @@ function q3a()
     movie_info_movie_id(mi_id, t_id)
     mi_info in mi_infos
     movie_info_info(mi_id, mi_info)
-    return (t_title::String,)
+    return (t_title,)
   end
 end
 
@@ -136,7 +136,7 @@ function q4a()
     movie_info_idx_movie_id(mii_id, t_id)
     movie_info_idx_info(mii_id, mii_info)
     @when mii_info > "5.0"
-    return (mii_info::String,)
+    return (mii_info,)
   end
 end
 

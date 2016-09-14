@@ -6,8 +6,8 @@ using BenchmarkTools
 using Base.Test
 
 srand(999)
-edge1 = Relation(([1, 2, 3, 3, 4], [2, 3, 1, 4, 2]))
-edge2 = Relation((rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6))))
+const edge1 = Relation(([1, 2, 3, 3, 4], [2, 3, 1, 4, 2]))
+const edge2 = Relation((rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6))))
 # edge3 = read_columns("/home/jamie/soc-LiveJournal1.txt", [Int32, Int32], comments=true)
 
 function f(edge) 
@@ -17,7 +17,7 @@ function f(edge)
     edge(b,c)
     @when b < c
     edge(c,a)
-    return (a::Int64, b::Int64, c::Int64)
+    return (a, b, c)
   end
 end
 

@@ -44,7 +44,7 @@ end
 end
 
 # sorting cribbed from Base.Sort
-# but unrolls `cmp` and `swap` to avoid heap allocation
+# but unrolls `cmp` and `swap` to avoid heap allocation of rows
 # and use random pivot selection because stdlib pivot caused 1000x sadness on real data
 
 function insertion_sort!{T <: Tuple}(cs::T, lo::Int, hi::Int)

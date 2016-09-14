@@ -120,6 +120,14 @@ function get_var_type(expr)
   end
 end
 
+function random_value_from(columns)
+  columns[rand(1:length(columns))][1]
+end
+
+function random_value_from(columns, value) 
+  rand(Bool) ? value : random_value_from(columns)
+end
+
 type Row; name; vars; end
 type When; expr; vars; end
 type Assign; var; expr; vars; end
@@ -281,15 +289,45 @@ function plan_query(query)
     push!(ixes_inits, ixes_init)
   end
   
+  # for each var that is assigned an expr, make a wrapper function
+  eval_funs = Dict()
+  for (var, clause) in var_assigned_by
+    args = intersect(vars, clause.vars)
+    eval_fun = esc((quote
+      @inline function $(Symbol("eval_$var"))($(args...))
+        $(clause.expr)
+      end
+    end).args[2])
+    eval_funs[var] = (args, eval_fun)
+  end
+  
+  # for each var, make a function whose inferred return type matches the inferred type of the var
+  infer_funs = Dict()
+  for var in vars
+    if haskey(eval_funs, var)
+      (args, _) = eval_funs[var]
+      inferred_args = [:($(Symbol("infer_$arg"))()) for arg in args]
+      eval_call = :($(esc(Symbol("eval_$var")))($(inferred_args...)))
+      if isempty(sources[var])
+        infer_body = eval_call
+      else
+        infer_body = :(random_value_from($(Symbol("columns_$var")), $eval_call))
+      end
+    else
+      infer_body = :(random_value_from($(Symbol("columns_$var"))))
+    end
+    infer_fun = quote
+      function $(Symbol("infer_$var"))()
+        $infer_body
+      end
+    end
+    infer_funs[var] = infer_fun # infer_fun.args[2]
+  end
+  
   # initialize arrays for storing results
   results_inits = []
-  for (ix, var) in enumerate(return_clause.vars) 
-    if return_clause.name == ()
-      typ = return_clause.typs[ix]
-    else
-      typ = :(eltype($(esc(return_clause.name)).columns[$ix]))
-    end
-    result_init = :($(Symbol("results_$var")) = Vector{$typ}())
+  for var in vars
+    result_init = :($(Symbol("results_$var")) = [($(Symbol("infer_$var")))() for _ in []])
     push!(results_inits, result_init)
   end
   
@@ -310,6 +348,8 @@ function plan_query(query)
     $(index_inits...)
     $(columns_inits...)
     $(ixes_inits...)
+    $((eval_fun for (var, (args, eval_fun)) in eval_funs)...)
+    $((infer_funs[var] for var in vars)...)
     $(results_inits...)
     los = [$(los...)]
     ats = [$(ats...)]
@@ -330,7 +370,7 @@ function plan_query(query)
   
   # store results 
   body = quote
-    $([:(push!($(Symbol("results_$var")), $(esc(var))))
+    $([:(push!($(Symbol("results_$var")), $var))
     for var in return_clause.vars]...)
     need_more_results = false
   end
@@ -343,7 +383,7 @@ function plan_query(query)
     
     # run any When clauses
     for when in whens[var_ix]
-      body = :(if $(esc(when)); $body; end)
+      body = :(if $when; $body; end)
     end
     
     # after return_after, only need to find one solution, not all solutions
@@ -357,10 +397,12 @@ function plan_query(query)
     
     # find valid values for this variable
     clause = get(var_assigned_by, var, ())
+    (args, eval_fun) = get(eval_funs, var, ([], ()))
+    eval_call = :($(esc(Symbol("eval_$var")))($(args...)))
     if typeof(clause) == Assign
       body = quote
-        let $(esc(var)) = $(esc(clause.expr))
-          if assign($var_columns, los, ats, his, $var_ixes, $(esc(var)))
+        let $var = $eval_call
+          if assign($var_columns, los, ats, his, $var_ixes, $var)
             $body
           end
         end
@@ -368,12 +410,12 @@ function plan_query(query)
     elseif typeof(clause) == In
       body = quote 
         let
-          local iter = $(esc(clause.expr))
+          local iter = $eval_call
           local state = start(iter)
-          local $(esc(var)) 
+          local $var
           while $need_more_results && !done(iter, state)
-            ($(esc(var)), state) = next(iter, state)
-            if assign($var_columns, los, ats, his, $var_ixes, $(esc(var)))
+            ($var, state) = next(iter, state)
+            if assign($var_columns, los, ats, his, $var_ixes, $var)
               $body
             end
           end
@@ -384,7 +426,7 @@ function plan_query(query)
       body = quote
         start_intersect($var_columns, los, ats, his, $var_ixes)
         while $need_more_results && next_intersect($var_columns, los, ats, his, $var_ixes)
-          let $(esc(var)) = $(Symbol("columns_$var"))[1][los[$(result_column+1)]]
+          let $var = $(Symbol("columns_$var"))[1][los[$(result_column+1)]]
             $body
           end
         end

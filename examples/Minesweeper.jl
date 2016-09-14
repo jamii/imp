@@ -51,7 +51,7 @@ function run(num_x, num_y, num_mines)
     @query begin 
       mines = @query begin
         mine(x, y)
-        return (x::Int64, y::Int64)
+        return (x, y)
       end
       @when length(mines) < num_mines
       x = rand(1:num_x)
@@ -68,7 +68,7 @@ function run(num_x, num_y, num_mines)
       ny in (y-1):(y+1)
       @when (nx != x) || (ny != y)
       mine(nx, ny) 
-      return (nx::Int64, ny::Int64)
+      return (nx, ny)
     end
     c = length(neighbouring_mines)
     return mine_count(x, y, c)
@@ -97,7 +97,7 @@ function run(num_x, num_y, num_mines)
     @query begin 
       num_cleared = length(@query begin
         cleared(x,y)
-        return (x::Int64, y::Int64)
+        return (x, y)
       end)
       @when num_cleared + num_mines >= num_x * num_y
       s = :game_won
@@ -117,16 +117,16 @@ function run(num_x, num_y, num_mines)
         is_cleared = exists(@query begin 
           cleared($x,$y) 
           e = true
-          return (e::Bool,)
+          return (e,)
         end)
         is_mine = exists(@query begin 
           mine($x,$y) 
           e = true 
-          return (e::Bool,)
+          return (e,)
         end)
         count = (@query begin 
           mine_count($x,$y,count)
-          return (count::Int64,)
+          return (count,)
         end).columns[1][1]
         return @match (current_state, is_mine, is_cleared, count) begin
          (:game_in_progress, _, true, 0) => button("_")

@@ -21,11 +21,11 @@ function read_chinook(filename, types; comments=false)
   Relation(columns)
 end
 
-album = read_chinook("data/Album.csv", [Int64, String, Int64])
-artist = read_chinook("data/Artist.csv", [Int64, String])
-track = read_chinook("data/Track.csv", [Int64, String, Int64, Int64, Int64, String, Int64, Int64, Float64])
-playlist_track = read_chinook("data/PlaylistTrack.csv", [Int64, Int64])
-playlist = read_chinook("data/Playlist.csv", [Int64, String])
+const album = read_chinook("data/Album.csv", [Int64, String, Int64])
+const artist = read_chinook("data/Artist.csv", [Int64, String])
+const track = read_chinook("data/Track.csv", [Int64, String, Int64, Int64, Int64, String, Int64, Int64, Float64])
+const playlist_track = read_chinook("data/PlaylistTrack.csv", [Int64, Int64])
+const playlist = read_chinook("data/Playlist.csv", [Int64, String])
 
 function who_is_metal()
   @query begin
@@ -34,7 +34,7 @@ function who_is_metal()
     track(track, _, album)
     album(album, _, artist)
     artist(artist, artist_name)
-    return (artist_name::String,)
+    return (artist_name,)
   end
 end
 
@@ -42,13 +42,12 @@ function cost_of_playlist()
   @query begin
     playlist(p, pn)
     tracks = @query begin 
-      p = p
-      playlist_track(p, t)
+      playlist_track($p, t)
       track(t, _, _, _, _, _, _, _, price)
-      return (t::Int64, price::Float64)
+      return (t, price)
     end
     total = sum(tracks.columns[1])
-    return (pn::String, total::Float64)
+    return (pn, total)
   end
 end
 
@@ -56,12 +55,11 @@ function revenue_per_track()
   @query begin
     track(t, tn, _, _, _, _, _, _, price)
     plays = @query begin 
-      t = t
-      playlist_track(p, t)
+      playlist_track(p, $t)
       return (p::Int64,)
     end
     total = price * length(plays)
-    return (tn::String, total::Float64)
+    return (tn, total)
   end
 end
 

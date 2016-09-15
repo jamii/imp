@@ -8501,8 +8501,34 @@ end
 
 Still a couple of ugly parts. 
 
-Those `::Hiccup.Node`s are necessary because the compiler infers `Union{Hiccup.Node, Void}` otherwise. Haven't figured that out yet.
+* Those `::Hiccup.Node`s are necessary because the compiler infers `Union{Hiccup.Node, Void}` otherwise. Haven't figured that out yet.
 
-`.columns[3]` should just be `[3]` or `.cell_node`. The latter will work if I store variable names in the relation and implement `getfield`. Just have to be careful not to break inference.
+* `.columns[3]` should just be `[3]` or `.cell_node`. The latter will work if I store variable names in the relation and implement `getfield`. Just have to be careful not to break inference.
 
-The call to `Blink.body!` should happen in the UI lib.
+* The call to `Blink.body!` should happen in the UI lib.
+
+The first one appears to be an inference problem. I figured out a way to simplify the inference stage. While doing that, I discovered that I had broken the JOB queries some time ago and somehow not noticed. I could bisect the problem, but I've changed the representation of relations a few times in the past days so I would have to rebuild the JOB dataset on every commit, which takes about 30 minutes each time. 
+
+Maybe I can just figure it out by comparing smaller queries to postgres.
+
+The smallest query that disagrees with postgres is:
+
+``` julia
+@query begin 
+  info_type_info(it_id, "top 250 rank")
+  movie_info_idx_info_type_id(mii_id, it_id)
+  movie_info_idx_movie_id(mii_id, t_id)
+  title_production_year(t_id, t_production_year)
+  # movie_companies_movie_id(mc_id, t_id)
+  # movie_companies_company_type_id(mc_id, ct_id)
+  # company_type_kind(ct_id, "production companies")
+  # movie_companies_note(mc_id, mc_note)
+  # @when !contains(mc_note, "as Metro-Goldwyn-Mayer Pictures") &&
+  #   (contains(mc_note, "co-production") || contains(mc_note, "presents"))
+  return (t_production_year,)
+end
+```
+
+Comparing `title_production_year` to the csv I notice that the length is correct but the data is wrong. A few minutes later it all snaps into focus - the changed the Relation constructor to sort it's input data for deduping, but I share input columns in the JOB data. This was fine for a while because I save the relations on disk and it was only when I changed the representation of relations and had to regenerate the JOB data from scratch that it all went wrong.
+
+An aliasing/mutation bug. I feel so dirty.

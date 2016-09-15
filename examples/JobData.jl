@@ -21,12 +21,12 @@ function read_job()
       @show table_name column_names column_types
       frame = readtable(open("../imdb/$(table_name).csv"), header=false, eltypes=column_types)
       n = length(frame[1])
-      ids = copy(frame[1].data)
+      ids::Vector{Int64} = frame[1].data
       for (ix, (column_name, column_type)) in enumerate(zip(column_names, column_types))
         @show table_name ix column_name column_type
         data_array = frame[ix]
         if ix == 1
-          relations[table_name, column_name] = Relation((ids,), 1)
+          relations[table_name, column_name] = Relation((copy(ids),), 1)
         else
           column_ids = Int64[id for (ix, id) in enumerate(ids) if !(data_array.na[ix])]
           local column
@@ -36,10 +36,10 @@ function read_job()
             end
           elseif isa(data_array, DataArray{String})
             let data::Vector{String} = data_array.data
-              column = String[d for (ix, d) in enumerate(data_array.data) if !(data_array.na[ix])]
+              column = String[d for (ix, d) in enumerate(data) if !(data_array.na[ix])]
             end
           end
-          relations[table_name, column_name] = Relation((column_ids, column), 2)
+          relations[table_name, column_name] = Relation((column_ids, column), 1)
         end
       end
     end

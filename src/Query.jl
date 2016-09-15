@@ -330,7 +330,7 @@ function plan_query(query)
   # initialize arrays for storing results
   results_inits = []
   for var in vars    
-    inputs = [:($(Symbol("index_$clause_ix"))[$var_ix][1]) for (clause_ix, var_ix) in sources[var]]
+    typs = [:(eltype($(Symbol("index_$clause_ix"))[$var_ix])) for (clause_ix, var_ix) in sources[var]]
     if haskey(var_assigned_by, var)
       clause = var_assigned_by[var]
       (args, _) = eval_funs[var]
@@ -339,9 +339,15 @@ function plan_query(query)
       if typeof(clause) == In
         eval_call = :(first($eval_call))
       end
-      push!(inputs, eval_call)
+      results_init = quote
+        $(Symbol("type_$var")) = eltype([$eval_call for _ in []])
+        $(Symbol("results_$var")) = Vector{typejoin($(typs...), $(Symbol("type_$var")))}()
+      end
+    else
+      results_init = quote
+        $(Symbol("results_$var")) = Vector{typejoin($(typs...))}()
+      end
     end
-    results_init = :($(Symbol("results_$var")) = [[$(inputs...)][rand(Int64)] for _ in []])
     push!(results_inits, results_init)
   end
   
@@ -362,8 +368,8 @@ function plan_query(query)
     $(index_inits...)
     $(columns_inits...)
     $(ixes_inits...)
-    $((eval_fun for (var, (args, eval_fun)) in eval_funs)...)
-    $((when_fun for (var, (args, when_fun)) in when_funs)...)
+    $((eval_funs[var][2] for var in vars if haskey(eval_funs, var))...)
+    $((when_fun for (ix, (args, when_fun)) in when_funs)...)
     $(results_inits...)
     los = [$(los...)]
     ats = [$(ats...)]

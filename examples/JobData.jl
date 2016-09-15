@@ -58,7 +58,7 @@ end
 
 for (table_name, column_name) in keys(job)
   @eval begin 
-    $(Symbol(table_name, "_", column_name)) = job[$table_name, $column_name]
+    const $(Symbol(table_name, "_", column_name)) = job[$table_name, $column_name]
     export $(Symbol(table_name, "_", column_name))
   end
 end

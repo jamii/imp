@@ -185,10 +185,10 @@ end
 
 function index{T}(relation::Relation{T}, order::Vector{Int64})
   get!(relation.indexes, order) do
-    index::T = tuple([(ix in order) ? copy(column) : Vector{eltype(column)}() for (ix, column) in enumerate(relation.columns)]...)
+    index = tuple([(ix in order) ? copy(column) : Vector{eltype(column)}() for (ix, column) in enumerate(relation.columns)]...)
     quicksort!(tuple([index[ix] for ix in order]...))
     index
-  end
+  end::T
 end
 
 function Base.push!{T}(relation::Relation{T}, values)
@@ -286,6 +286,8 @@ function test()
     c = merge(a,b)
     @test length(c) == length(x1) + length(x2)
   end
+  
+  @test Base.return_types(Relation, (Tuple{Vector{Int64}, Vector{String}}, Int64)) == [Relation{Tuple{Vector{Int64}, Vector{String}}}]
 end
 
 function bench()

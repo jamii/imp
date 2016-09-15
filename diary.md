@@ -8532,3 +8532,89 @@ end
 Comparing `title_production_year` to the csv I notice that the length is correct but the data is wrong. A few minutes later it all snaps into focus - the changed the Relation constructor to sort it's input data for deduping, but I share input columns in the JOB data. This was fine for a while because I save the relations on disk and it was only when I changed the representation of relations and had to regenerate the JOB data from scratch that it all went wrong.
 
 An aliasing/mutation bug. I feel so dirty.
+
+Back to inference. I noticed something that is probably responsible for a lot of my confusion.
+
+``` julia
+julia> function foo1()
+         function bar()
+           @inline eval_a() = 1
+           @inline eval_b(a) = a
+           a = [(([[eval_a()]])[1])[1] for _ in []]
+           b = [(([[eval_b(a[1])]])[1])[1] for _ in []]
+         end
+         bar()
+       end
+foo1 (generic function with 1 method)
+
+julia> foo1()
+0-element Array{Int64,1}
+
+julia> function foo2()
+         function bar()
+           @inline eval_a() = 1
+           @inline eval_b(a) = a
+           @show a = [(([[eval_a()]])[1])[1] for _ in []]
+           @show b = [(([[eval_b(a[1])]])[1])[1] for _ in []]
+         end
+         bar()
+       end
+foo2 (generic function with 1 method)
+
+julia> foo2()
+a = [(([[eval_a()]])[1])[1] for _ = []] = Int64[]
+b = [(([[eval_b(a[1])]])[1])[1] for _ = []] = Any[]
+0-element Array{Any,1}
+```
+
+The `@show` macro I immediately turn to to help me debug these issues also confuses type inference itself. So as soon as I tried to debug some problem, I was creating a new problem. Hopefully I shouldn't have any more crazy self-doubting inference debugging sessions now that I've figured this out.
+
+The problem with the buttons in minesweeper seems to be that inference just rounds up to `Any` when encountering an abstract type in an array:
+
+``` julia
+function foo()
+  const bb = button("")
+  const t = typeof(bb)
+  x = Vector{t}()
+  y = [bb]
+end
+```
+
+``` julia 
+Variables:
+  #self#::Minesweeper.#foo
+  bb::HICCUP.NODE{TAG}
+  t::TYPE{_<:HICCUP.NODE}
+  x::ANY
+  y::ANY
+
+Body:
+  begin 
+      bb::HICCUP.NODE{TAG} = $(Expr(:invoke, LambdaInfo for #button#1(::Array{Any,1}, ::Function, ::String, ::Vararg{String,N}), :(Minesweeper.#button#1), :((Core.ccall)(:jl_alloc_array_1d,(Core.apply_type)(Core.Array,Any,1)::Type{Array{Any,1}},(Core.svec)(Core.Any,Core.Int)::SimpleVector,Array{Any,1},0,0,0)::Array{Any,1}), :(Minesweeper.button), "")) # line 167:
+      t::TYPE{_<:HICCUP.NODE} = (Minesweeper.typeof)(bb::HICCUP.NODE{TAG})::TYPE{_<:HICCUP.NODE} # line 168:
+      x::ANY = ((Core.apply_type)(Minesweeper.Vector,t::TYPE{_<:HICCUP.NODE})::TYPE{_<:ARRAY{_<:HICCUP.NODE,1}})()::ANY # line 169:
+      SSAValue(0) = (Base.vect)(bb::HICCUP.NODE{TAG})::ANY
+      y::ANY = SSAValue(0)
+      return SSAValue(0)
+  end::ANY
+```
+
+So I fix that by just using tuples instead which don't have any weird type coercion behavior. And finally we get to the root of the issue:
+
+``` julia
+# inferred types
+cell.columns[3] # Array{Hiccup.Node,1}
+cell.columns[3][1] # HICCUP.NODE{TAG}
+[cell.columns[3][1]] # ANY
+```
+
+`ANY` is not quite the same as `Any`. In user annotations, the former indicates not to specialize on this type at all. I'm guessing that the all-caps in `HICCUP.NODE{TAG}` means something similar. 
+
+So the core issue seems to be that if you have an array of an abstract type and you take something out of it and put it in a new array, Julia just bails out entirely. I don't know why it behaves this way, but I can at least work around it by just never taking anything out of an array during inference. I make the results vectors like this now:
+
+``` julia
+type_x = eltype([eval_x(results_y[1]) for _ in []])
+results_x = Vector{typejoin(type_x, eltype(index_2[3]), eltype(index_4[3]))}()
+```
+
+All my tests pass and none of them require type annotations. I've also added new tests that look at the inferred return types for all the old tests to make sure it stays that way.

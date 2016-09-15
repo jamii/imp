@@ -46,7 +46,7 @@ function cost_of_playlist()
       track(t, _, _, _, _, _, _, _, price)
       return (t, price)
     end
-    total = sum(tracks.columns[1])
+    total = sum(tracks.columns[2])
     return (pn, total)
   end
 end

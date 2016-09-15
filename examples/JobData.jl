@@ -26,7 +26,7 @@ function read_job()
         @show table_name ix column_name column_type
         data_array = frame[ix]
         if ix == 1
-          relations[table_name, column_name] = Relation((ids,))
+          relations[table_name, column_name] = Relation((ids,), 1)
         else
           column_ids = Int64[id for (ix, id) in enumerate(ids) if !(data_array.na[ix])]
           local column
@@ -39,7 +39,7 @@ function read_job()
               column = String[d for (ix, d) in enumerate(data_array.data) if !(data_array.na[ix])]
             end
           end
-          relations[table_name, column_name] = Relation((column_ids, column))
+          relations[table_name, column_name] = Relation((column_ids, column), 2)
         end
       end
     end

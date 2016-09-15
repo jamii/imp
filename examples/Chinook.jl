@@ -18,7 +18,7 @@ function read_chinook(filename, types; comments=false)
       end
     end
   end
-  Relation(columns)
+  Relation(columns, length(columns))
 end
 
 const album = read_chinook("data/Album.csv", [Int64, String, Int64])

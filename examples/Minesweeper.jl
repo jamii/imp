@@ -39,7 +39,10 @@ function run(num_x, num_y, num_mines)
   @relation mine_count(Int64, Int64) => Int64
   @relation cleared(Int64, Int64)
   @relation clicked(Int64) => (Int64, Int64)
-  @relation display() => Hiccup.Node
+  
+  @relation cell(Int64, Int64) => Hiccup.Node
+  @relation row(Int64) => Hiccup.Node
+  @relation grid() => Hiccup.Node
   
   @query begin 
     return state() => :game_in_progress
@@ -100,25 +103,37 @@ function run(num_x, num_y, num_mines)
       return state() => :game_lost
     end
     
-    node = vbox(map(1:num_y) do y
-      return hbox(map(1:num_x) do x  
-        current_state = state.columns[1][1]
-        is_cleared = exists(@query cleared($x,$y))
-        is_mine = exists(@query mine($x,$y))
-        count = (@query mine_count($x,$y) => count).columns[3][1]
-        return @match (current_state, is_mine, is_cleared, count) begin
-         (:game_in_progress, _, true, 0) => button("_")
-         (:game_in_progress, _, true, _) => button(string(count))
-         (:game_in_progress, _, false, _) => button(Dict(:onclick => @event clicked(x,y)), "X")
-         (:game_won, true, _, _) => button("💣")
-         (:game_lost, true, _, _) => button("☀")
-         (_, false, _, _) => button(string(count))
-         _ => error()
-       end
-     end)
-   end)
+    @query begin
+      state() => current_state
+      x in 1:num_x
+      y in 1:num_y
+      is_cleared = exists(@query cleared($x,$y))
+      is_mine = exists(@query mine($x,$y))
+      mine_count(x, y) => count
+      cell_node = @match (current_state, is_mine, is_cleared, count) begin
+        (:game_in_progress, _, true, 0) => button("_")
+        (:game_in_progress, _, true, _) => button(string(count))
+        (:game_in_progress, _, false, _) => button(Dict(:onclick => @event clicked(x,y)), "X")
+        (:game_won, true, _, _) => button("💣")
+        (:game_lost, true, _, _) => button("☀")
+        (_, false, _, _) => button(string(count))
+        other => error("The hell is this: $other")
+      end
+      return cell(x,y) => cell_node
+    end
     
-   Blink.body!(window, node)
+    @query begin
+      y in 1:num_y
+      row_node = hbox((@query cell(x,$y) => cell_node).columns[3])
+      return row(y) => row_node
+    end
+    
+    @query begin
+      grid_node = vbox((@query row(y) => row_node).columns[2])
+      return grid() => grid_node
+    end
+    
+    Blink.body!(window, grid.columns[1][1])
     
   end
   

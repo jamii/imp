@@ -122,6 +122,17 @@ function merge_sorted!{T <: Tuple, K <: Tuple}(old::T, new::T, old_key::K, new_k
   end
 end
 
+function dedup_sorted!{T}(columns::T, key, val, deduped::T)
+  at = 1
+  hi = length(columns[1])
+  while at <= hi
+    push_in!(deduped, columns, at)
+    while (at += 1; (at <= hi) && cmp_in(key, key, at, at-1) == 0) # skip dupe keys
+      @assert cmp_in(val, val, at, at-1) == 0 # no key collisions allowed
+    end
+  end
+end
+
 # TODO should be typed {K,V} instead of {T}, but pain in the ass to change now
 type Relation{T <: Tuple} # where T is a tuple of columns
   columns::T
@@ -227,24 +238,13 @@ function Base.merge!{T}(old::Relation{T}, new::Relation{T})
 end
 
 function Relation{T}(columns::T, num_keys::Int64)
-  deduped = tuple((Vector{eltype(column)}() for column in columns)...)
+  deduped::T = map((column) -> Vector{eltype(column)}(), columns)
   quicksort!(columns)
-  at = 1
-  hi = length(columns[1])
   key = columns[1:num_keys]
   val = columns[num_keys+1:1]
-  while at <= hi
-    push_in!(deduped, columns, at)
-    while (at += 1; (at <= hi) && cmp_in(key, key, at, at-1) == 0) # skip dupe keys
-      @assert cmp_in(val, val, at, at-1) == 0 # no key collisions allowed
-    end
-  end
+  dedup_sorted!(columns, key, val, deduped)
   order = collect(1:length(columns))
   Relation{T}(deduped, num_keys, Dict(order => deduped))
-end
-
-function Relation{T}(columns::T)
-  Relation{T}(columns, length(columns))
 end
 
 import Atom

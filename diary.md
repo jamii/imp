@@ -8366,4 +8366,4 @@ Base.return_types(neighbours)
 # [Data.Relation{Tuple{Array{Int64,1},Array{Int64,1},Array{Int64,1}}}]
 ```
 
-I also fixed all the bullet points in the minesweeper post a few days ago. The only remaining problem is that hiccup nodes are not comparable, so I can't sort them into a relation column.
+I also fixed all the bullet points from the minesweeper post. The only remaining problem is that hiccup nodes are not comparable, so I can't sort them into a relation column.

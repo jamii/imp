@@ -8367,3 +8367,142 @@ Base.return_types(neighbours)
 ```
 
 I also fixed all the bullet points from the minesweeper post. The only remaining problem is that hiccup nodes are not comparable, so I can't sort them into a relation column.
+
+### 2016 Sep 15
+
+So many strange bugs today. One query only gets the correct inferred type if the module is compiled twice. That makes no sense.
+
+Ignoring that for now. Node comparisons:
+
+``` julia
+function Base.cmp{T1, T2}(n1::Hiccup.Node{T1}, n2::Hiccup.Node{T2})
+  c = cmp(T1, T2)
+  if c != 0; return c; end
+  c = cmp(length(n1.attrs), length(n2.attrs))
+  if c != 0; return c; end
+  for (a1, a2) in zip(n1.attrs, n2.attrs)
+    c = cmp(a1, a2)
+    if c != 0; return c; end
+  end
+  c = cmp(length(n1.children), length(n2.children))
+  if c != 0; return c; end
+  for (c1, c2) in zip(n1.children, n2.children)
+    c = cmp(c1, c2)
+    if c != 0; return c; end
+  end
+  return 0
+end
+```
+
+Which means the UI can now happen in Imp too. Here is the whole minesweeper:
+
+``` julia 
+@relation state() => Symbol
+@relation mine(Int64, Int64)
+@relation mine_count(Int64, Int64) => Int64
+@relation cleared(Int64, Int64)
+@relation clicked(Int64) => (Int64, Int64)
+
+@relation cell(Int64, Int64) => Hiccup.Node
+@relation row(Int64) => Hiccup.Node
+@relation grid() => Hiccup.Node
+
+@query begin 
+  return state() => :game_in_progress
+end
+
+while length(@query mine(x,y)) < num_mines
+  @query begin 
+    nx = rand(1:num_x)
+    ny = rand(1:num_y)
+    return mine(nx, ny)
+  end 
+end
+
+@query begin 
+  x in 1:num_x
+  y in 1:num_y
+  neighbouring_mines = @query begin
+    nx in (x-1):(x+1)
+    ny in (y-1):(y+1)
+    @when (nx != x) || (ny != y)
+    mine(nx, ny) 
+  end
+  c = length(neighbouring_mines)
+  return mine_count(x, y) => c
+end
+
+@Window(clicked) do window, event_number
+
+  @query begin
+    clicked($event_number) => (x, y)
+    return cleared(x, y)
+  end
+  
+  fix(cleared) do
+    @query begin
+      cleared(x,y)
+      mine_count(x,y) => 0
+      nx in (x-1):(x+1)
+      ny in (y-1):(y+1)
+      @when nx in 1:num_x
+      @when ny in 1:num_y
+      @when (nx != x) || (ny != y)
+      return cleared(nx, ny)
+    end
+  end
+  
+  @query begin 
+    num_cleared = length(@query cleared(x,y))
+    @when num_cleared + num_mines >= num_x * num_y
+    return state() => :game_won
+  end
+  
+  @query begin
+    clicked($event_number) => (x, y)
+    mine(x,y)
+    return state() => :game_lost
+  end
+  
+  @query begin
+    state() => current_state
+    x in 1:num_x
+    y in 1:num_y
+    is_cleared = exists(@query cleared($x,$y))
+    is_mine = exists(@query mine($x,$y))
+    mine_count(x, y) => count
+    cell_node = (@match (current_state, is_mine, is_cleared, count) begin
+      (:game_in_progress, _, true, 0) => button("_")
+      (:game_in_progress, _, true, _) => button(string(count))
+      (:game_in_progress, _, false, _) => button(Dict(:onclick => @event clicked(x,y)), "X")
+      (:game_won, true, _, _) => button("💣")
+      (:game_lost, true, _, _) => button("☀")
+      (_, false, _, _) => button(string(count))
+      other => error("The hell is this: $other")
+    end)::Hiccup.Node
+    return cell(x,y) => cell_node
+  end
+  
+  @query begin
+    y in 1:num_y
+    row_node = hbox((@query cell(x,$y) => cell_node).columns[3])::Hiccup.Node
+    return row(y) => row_node
+  end
+  
+  @query begin
+    grid_node = vbox((@query row(y) => row_node).columns[2])::Hiccup.Node
+    return grid() => grid_node
+  end
+  
+  Blink.body!(window, grid.columns[1][1])
+  
+end
+```
+
+Still a couple of ugly parts. 
+
+Those `::Hiccup.Node`s are necessary because the compiler infers `Union{Hiccup.Node, Void}` otherwise. Haven't figured that out yet.
+
+`.columns[3]` should just be `[3]` or `.cell_node`. The latter will work if I store variable names in the relation and implement `getfield`. Just have to be careful not to break inference.
+
+The call to `Blink.body!` should happen in the UI lib.

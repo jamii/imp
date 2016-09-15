@@ -297,7 +297,7 @@ function plan_query(query)
   # for each var, make list of ixes into the global state
   ixes_inits = []
   for var in vars 
-    ixes_init = :($(Symbol("ixes_$var")) = $([ix_for[source] for source in sources[var]]))
+    ixes_init = :($(Symbol("ixes_$var")) = $(Int64[ix_for[source] for source in sources[var]]))
     push!(ixes_inits, ixes_init)
   end
   
@@ -311,33 +311,6 @@ function plan_query(query)
       end
     end).args[2])
     eval_funs[var] = (args, eval_fun)
-  end
-  
-  # for each var, make a function whose inferred return type matches the inferred type of the var
-  infer_funs = Dict()
-  for var in vars
-    if haskey(var_assigned_by, var)
-      clause = var_assigned_by[var]
-      (args, _) = eval_funs[var]
-      inferred_args = [:($(Symbol("infer_$arg"))()) for arg in args]
-      eval_call = :($(esc(Symbol("eval_$var")))($(inferred_args...)))
-      if typeof(clause) == In
-        eval_call = :(first($eval_call))
-      end
-      if isempty(sources[var])
-        infer_body = eval_call
-      else
-        infer_body = :(random_value_from($(Symbol("columns_$var")), $eval_call))
-      end
-    else
-      infer_body = :(random_value_from($(Symbol("columns_$var"))))
-    end
-    infer_fun = quote
-      function $(Symbol("infer_$var"))()
-        $infer_body
-      end
-    end
-    infer_funs[var] = infer_fun # infer_fun.args[2]
   end
   
   # for each When clause, make a wrapper function
@@ -356,8 +329,19 @@ function plan_query(query)
   
   # initialize arrays for storing results
   results_inits = []
-  for var in vars
-    results_init = :($(Symbol("results_$var")) = [($(Symbol("infer_$var")))() for _ in []])
+  for var in vars    
+    inputs = [:($(Symbol("index_$clause_ix"))[$var_ix][1]) for (clause_ix, var_ix) in sources[var]]
+    if haskey(var_assigned_by, var)
+      clause = var_assigned_by[var]
+      (args, _) = eval_funs[var]
+      inferred_args = [:($(Symbol("results_$arg"))[1]) for arg in args]
+      eval_call = :($(esc(Symbol("eval_$var")))($(inferred_args...)))
+      if typeof(clause) == In
+        eval_call = :(first($eval_call))
+      end
+      push!(inputs, eval_call)
+    end
+    results_init = :($(Symbol("results_$var")) = [[$(inputs...)][rand(Int64)] for _ in []])
     push!(results_inits, results_init)
   end
   
@@ -379,7 +363,6 @@ function plan_query(query)
     $(columns_inits...)
     $(ixes_inits...)
     $((eval_fun for (var, (args, eval_fun)) in eval_funs)...)
-    $((infer_funs[var] for var in vars)...)
     $((when_fun for (var, (args, when_fun)) in when_funs)...)
     $(results_inits...)
     los = [$(los...)]

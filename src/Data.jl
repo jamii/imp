@@ -237,14 +237,14 @@ function Base.merge!{T}(old::Relation{T}, new::Relation{T})
   replace!(old, merge(old, new))
 end
 
-function Relation{T}(columns::T, num_keys::Int64)
-  deduped::T = map((column) -> Vector{eltype(column)}(), columns)
+function Relation(columns, num_keys::Int64)
+  deduped::typeof(columns) = map((column) -> Vector{eltype(column)}(), columns)
   quicksort!(columns)
   key = columns[1:num_keys]
   val = columns[num_keys+1:1]
   dedup_sorted!(columns, key, val, deduped)
   order = collect(1:length(columns))
-  Relation{T}(deduped, num_keys, Dict(order => deduped))
+  Relation(deduped, num_keys, Dict(order => deduped))
 end
 
 import Atom

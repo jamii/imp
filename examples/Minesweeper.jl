@@ -8,6 +8,10 @@ using Blink
 using Hiccup
 @tags button
 
+function count(relation)
+  length(relation)
+end
+
 function exists(relation)
   length(relation) > 0
 end
@@ -22,36 +26,6 @@ function fix(flow, relation)
       return
     end
   end
-end
-
-function hbox(nodes)
-  Hiccup.div(nodes)
-end
-
-function vbox(nodes)
-  Hiccup.div(nodes)
-end
-
-function Base.cmp{T1, T2}(n1::Hiccup.Node{T1}, n2::Hiccup.Node{T2})
-  c = cmp(T1, T2)
-  if c != 0; return c; end
-  c = cmp(length(n1.attrs), length(n2.attrs))
-  if c != 0; return c; end
-  for (a1, a2) in zip(n1.attrs, n2.attrs)
-    c = cmp(a1, a2)
-    if c != 0; return c; end
-  end
-  c = cmp(length(n1.children), length(n2.children))
-  if c != 0; return c; end
-  for (c1, c2) in zip(n1.children, n2.children)
-    c = cmp(c1, c2)
-    if c != 0; return c; end
-  end
-  return 0
-end
-
-function Base.isless(n1::Hiccup.Node, n2::Hiccup.Node)
-  cmp(n1, n2) == -1
 end
 
 function run(num_x, num_y, num_mines)
@@ -70,7 +44,7 @@ function run(num_x, num_y, num_mines)
     return state() => :game_in_progress
   end
   
-  while length(@query mine(x,y)) < num_mines
+  while count(@query mine(x,y)) < num_mines
     @query begin 
       nx = rand(1:num_x)
       ny = rand(1:num_y)
@@ -87,7 +61,7 @@ function run(num_x, num_y, num_mines)
       @when (nx != x) || (ny != y)
       mine(nx, ny) 
     end
-    c = length(neighbouring_mines)
+    c = count(neighbouring_mines)
     return mine_count(x, y) => c
   end
   
@@ -112,7 +86,7 @@ function run(num_x, num_y, num_mines)
     end
     
     @query begin 
-      num_cleared = length(@query cleared(x,y))
+      num_cleared = count(@query cleared(x,y))
       @when num_cleared + num_mines >= num_x * num_y
       return state() => :game_won
     end
@@ -130,7 +104,7 @@ function run(num_x, num_y, num_mines)
       is_cleared = exists(@query cleared($x,$y))
       is_mine = exists(@query mine($x,$y))
       mine_count(x, y) => count
-      cell_node = (@match (current_state, is_mine, is_cleared, count) begin
+      cell_node = @match (current_state, is_mine, is_cleared, count) begin
         (:game_in_progress, _, true, 0) => button("_")
         (:game_in_progress, _, true, _) => button(string(count))
         (:game_in_progress, _, false, _) => button(Dict(:onclick => @event clicked(x,y)), "X")
@@ -138,18 +112,18 @@ function run(num_x, num_y, num_mines)
         (:game_lost, true, _, _) => button("☀")
         (_, false, _, _) => button(string(count))
         other => error("The hell is this: $other")
-      end)::Hiccup.Node
+      end
       return cell(x,y) => cell_node
     end
     
     @query begin
       y in 1:num_y
-      row_node = hbox((@query cell(x,$y) => cell_node).columns[3])::Hiccup.Node
+      row_node = hbox((@query cell(x,$y) => cell_node).columns[3])
       return row(y) => row_node
     end
     
     @query begin
-      grid_node = vbox((@query row(y) => row_node).columns[2])::Hiccup.Node
+      grid_node = vbox((@query row(y) => row_node).columns[2])
       return grid() => grid_node
     end
     
@@ -157,7 +131,7 @@ function run(num_x, num_y, num_mines)
     
   end
   
-  (state, mine, mine_count, clicked, display, cleared)
+  (state, mine, mine_count, cleared, clicked, cell, row, grid)
 end
 
 (state, mine, mine_count, clicked, display, cleared) = run(30, 30, 100)

@@ -6,7 +6,6 @@ module UI
 
 using Blink
 using Hiccup
-@tags button
 
 function event(table_name, values)
   Blink.jsexpr(quote 
@@ -37,28 +36,36 @@ macro Window(flow, event_tables...)
   :(Window($(esc(flow)), Dict($([:($(string(table)) => $(esc(table))) for table in event_tables]...))))
 end
 
-# using Data
-# clicked = Relation((Int64[], String[]))
-# @Window(clicked) do w, event_number
-#   body!(w, button("#my_button", Dict(:onclick => @event clicked("my_button")), "clicked $event_number times"))
-# end
+function hbox(nodes)
+  Hiccup.div(nodes)
+end
 
-# function ids(node, acc)
-#   if isa(node, Node)
-#     if haskey(node.attrs, :id)
-#       push!(acc, node.attrs[:id])
-#     end
-#     for child in node.children
-#       ids(child, acc)
-#     end
-#   end
-#   acc
-# end
-# 
-# function ids(node)
-#   ids(node, Set{String}())
-# end
+function vbox(nodes)
+  Hiccup.div(nodes)
+end
 
-export event, @event, Window, @Window
+function Base.cmp{T1, T2}(n1::Hiccup.Node{T1}, n2::Hiccup.Node{T2})
+  c = cmp(T1, T2)
+  if c != 0; return c; end
+  c = cmp(length(n1.attrs), length(n2.attrs))
+  if c != 0; return c; end
+  for (a1, a2) in zip(n1.attrs, n2.attrs)
+    c = cmp(a1, a2)
+    if c != 0; return c; end
+  end
+  c = cmp(length(n1.children), length(n2.children))
+  if c != 0; return c; end
+  for (c1, c2) in zip(n1.children, n2.children)
+    c = cmp(c1, c2)
+    if c != 0; return c; end
+  end
+  return 0
+end
+
+function Base.isless(n1::Hiccup.Node, n2::Hiccup.Node)
+  cmp(n1, n2) == -1
+end
+
+export event, @event, Window, @Window, hbox, vbox
 
 end

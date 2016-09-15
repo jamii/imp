@@ -69,10 +69,14 @@ function test()
   )
   @test cost_of_playlist().columns == (
   String["90’s Music","Audiobooks","Brazilian Music","Classical","Classical 101 - Deep Cuts","Classical 101 - Next Steps","Classical 101 - The Basics","Grunge","Heavy Metal Classic","Movies","Music","Music Videos","On-The-Go 1","TV Shows"],
-  Float64[2.490879e6,0.0,46631.0,258700.0,87275.0,86050.0,85375.0,31832.0,34864.0,0.0,5.487052e6,3402.0,597.0,650204.0]
+  Float64[1462.2300000000016, 0.0, 38.61000000000001, 74.24999999999999, 24.749999999999996, 24.749999999999996, 24.749999999999996, 14.850000000000001, 25.740000000000002, 0.0, 3257.1000000000063, 0.99, 0.99, 423.86999999999966]
   )
   @test revenue_per_track().columns[1][1:10] == String["\"40\"","\"?\"","\"Eine Kleine Nachtmusik\" Serenade In G, K. 525: I. Allegro","#1 Zero","#9 Dream","'Round Midnight","(Anesthesia) Pulling Teeth","(Da Le) Yaleo","(I Can't Help) Falling In Love With You","(Oh) Pretty Woman"]
   @test revenue_per_track().columns[2][1:10] == Float64[1.98,3.98,3.96,1.98,1.98,1.98,1.98,2.9699999999999998,2.9699999999999998,1.98]
+
+  @test Base.return_types(who_is_metal) == [Relation{Tuple{Vector{String}}}]
+  @test Base.return_types(cost_of_playlist) == [Relation{Tuple{Vector{String}, Vector{Float64}}}]
+  @test Base.return_types(revenue_per_track) == [Relation{Tuple{Vector{String}, Vector{Float64}}}]
 end
 
 function bench()

@@ -146,6 +146,11 @@ function test()
   @test length(q2a().columns[1]) == 4127
   @test length(q3a().columns[1]) == 105
   @test length(q4a().columns[1]) == 45
+  
+  @test Base.return_types(q1a) == [Relation{Tuple{Vector{Int64}}}]
+  @test Base.return_types(q2a) == [Relation{Tuple{Vector{String}}}]
+  @test Base.return_types(q3a) == [Relation{Tuple{Vector{String}}}]
+  @test Base.return_types(q4a) == [Relation{Tuple{Vector{String}}}]
 end
 
 function bench()

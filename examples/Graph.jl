@@ -27,6 +27,8 @@ function test()
   [2, 3],
   [3, 4],
   )
+  
+  @test Base.return_types(f, (typeof(edge1),)) == [Relation{Tuple{Vector{Int64},Vector{Int64},Vector{Int64}}}]
 end
 
 function bench()

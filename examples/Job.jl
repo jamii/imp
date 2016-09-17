@@ -61,15 +61,29 @@ end
 
 function test()
   # tested against postgres
-  @test length(q1a().columns[1]) == 57
-  @test length(q2a().columns[1]) == 4127
-  @test length(q3a().columns[1]) == 105
-  @test length(q4a().columns[1]) == 45
+  # @test length(q1a()) == 57
+  # @test length(q2a()) == 4127
+  # @test length(q3a()) == 105
+  # @test length(q4a()) == 45
   
-  @test Base.return_types(q1a) == [Relation{Tuple{Vector{Int64}}}]
+  @test Base.return_types(q1a) == [Relation{Tuple{Vector{String}, Vector{String}, Vector{Int64}}}]
   @test Base.return_types(q2a) == [Relation{Tuple{Vector{String}}}]
   @test Base.return_types(q3a) == [Relation{Tuple{Vector{String}}}]
-  @test Base.return_types(q4a) == [Relation{Tuple{Vector{String}}}]
+  @test Base.return_types(q4a) == [Relation{Tuple{Vector{String}, Vector{String}}}]
+  
+  db = SQLite.DB("../job/job.sqlite")
+  for q in 1:4
+    results_imp = eval(Symbol("q$(q)a"))()
+    query = rstrip(readline("../job/$(q)a.sql"))
+    query = replace(query, "MIN", "")
+    frame = SQLite.query(db, query)
+    num_columns = length(results_imp.columns)
+    results_sqlite = Relation(tuple((frame[ix].values for ix in 1:num_columns)...), num_columns)
+    @show q
+    @show results_imp.columns == results_sqlite.columns
+    # @test length(results_imp.columns[1]) == length(results_sqlite.columns[1])
+    # @test results_imp.columns == results_sqlite.columns
+  end
 end
 
 function bench_imp()

@@ -30,8 +30,9 @@ function q2a()
   end
 end
 
+# "Denish" typo is also in original benchmarks
 function q3a()
-  infos = Set(["Sweden", "Norway", "Germany", "Denmark", "Swedish", "Danish", "Norwegian", "German"])
+  infos = Set(["Sweden", "Norway", "Germany", "Denmark", "Swedish", "Denish", "Norwegian", "German"])
   @query begin 
     @when contains(keyword, "sequel")
     keyword(k_id, keyword, _)
@@ -71,11 +72,31 @@ function test()
   @test Base.return_types(q4a) == [Relation{Tuple{Vector{String}}}]
 end
 
-function bench()
-  @show @benchmark q1a()
-  @show @benchmark q2a()
-  @show @benchmark q3a()
-  @show @benchmark q4a()
+t = @benchmark 1
+fieldnames(t)
+median(t.times)
+
+function bench_imp()
+  medians = []
+  for q in 1:4
+    @show q
+    trial = @show @benchmark $(eval(Symbol("q$(q)a")))()
+    push!(medians, median(trial.times))
+  end
+  medians
 end
 
+function bench_pg()
+  medians = []
+  for q in 1:4
+    query = rstrip(readline("../job/$(q)a.sql"))
+    query = query[1:(length(query)-1)] # drop ';' at end
+    bench = "explain analyze $query"
+    cmd = `sudo -u postgres psql -c $bench`
+    times = Float64[]
+    @show q
+    @show @benchmark push!($times, parse(Float64, match(r"Execution time: (\S*) ms", readstring($cmd))[1]))
+    push!(medians, @show median(times))
+  end
+  medians
 end

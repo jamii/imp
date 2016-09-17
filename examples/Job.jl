@@ -9,9 +9,9 @@ using BenchmarkTools
 function q1a()
   @query begin 
     info_type(it_id, "top 250 rank")
-    movie_info_idx(mii_id, t_id, it_id, _, _)
+    movie_info_idx(_, t_id, it_id, _, _)
     title(t_id, title, _, _, production_year)
-    movie_companies(mc_id, t_id, _, ct_id, note)
+    movie_companies(_, t_id, _, ct_id, note)
     company_type(ct_id, "production companies")
     @when !contains(note, "as Metro-Goldwyn-Mayer Pictures") &&
       (contains(note, "co-production") || contains(note, "presents"))
@@ -22,9 +22,9 @@ end
 function q2a()
   @query begin
     keyword(k_id, "character-name-in-title", _)
-    movie_keyword(mk_id, t_id, k_id)
+    movie_keyword(_, t_id, k_id)
     title(t_id, title, _, _, _)
-    movie_companies(mc_id, t_id, cn_id, _, _)
+    movie_companies(_, t_id, cn_id, _, _)
     company_name(cn_id, _, "[de]", _, _, _, _)
     return (title,)
   end
@@ -36,10 +36,10 @@ function q3a()
   @query begin 
     @when contains(keyword, "sequel")
     keyword(k_id, keyword, _)
-    movie_keyword(mk_id, t_id, k_id)
+    movie_keyword(_, t_id, k_id)
     title(t_id, title, _, _, production_year)
     @when production_year > 2005
-    movie_info(mi_id, t_id, _, info, _)
+    movie_info(_, t_id, _, info, _)
     @when info in infos
     return (title,)
   end
@@ -49,13 +49,13 @@ function q4a()
   @query begin
     @when contains(keyword, "sequel")
     keyword(k_id, keyword, _)
-    movie_keyword(mk_id, t_id, k_id)
+    movie_keyword(_, t_id, k_id)
     title(t_id, title, _, _, production_year)
     @when production_year > 2005
     info_type(it_id, "rating")
-    movie_info_idx(mi_id, t_id, it_id, info, _)
+    movie_info_idx(_, t_id, it_id, info, _)
     @when info > "5.0"
-    return (mi_info, title)
+    return (info, title)
   end
 end
 
@@ -97,7 +97,6 @@ function bench_sqlite()
   medians
 end
 
-
 function bench_pg()
   medians = []
   for q in 1:4
@@ -111,4 +110,6 @@ function bench_pg()
     push!(medians, @show median(times))
   end
   medians
+end
+
 end

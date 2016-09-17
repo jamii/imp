@@ -4645,3 +4645,66 @@ results_x = Vector{typejoin(type_x, eltype(index_2[3]), eltype(index_4[3]))}()
 ```
 
 All my tests pass and none of them require type annotations. I've also added new tests that look at the inferred return types for all the old tests to make sure it stays that way.
+
+### 2016 Sep 16
+
+I spent today mostly deciding what to do next. I want to publish some sort of progress report before the end of the month, so I spent a few hours drafting that report. Chipping away at all the caveats in that report gives me a nice todo list for the next few weeks.
+
+### 2016 Sep 17
+
+I spent a few hours getting the JOB data into SQLite, figuring out how to use SQLite.jl and running benchmarks. 
+
+``` julia
+import SQLite
+function bench_sqlite()
+  db = SQLite.DB("../job/job.sqlite")
+  SQLite.execute!(db, "PRAGMA cache_size = 1000000000;")
+  SQLite.execute!(db, "PRAGMA temp_store = memory;")
+  medians = []
+  for q in 1:4
+    query = rstrip(readline("../job/$(q)a.sql"))
+    @time SQLite.query(db, query)
+    trial = @show @benchmark SQLite.query($db, $query)
+    push!(medians, @show (median(trial.times) / 1000000))
+  end
+  medians
+end
+```
+
+For postgres I'm instead just running the queries through bash, but using the execution times from EXPLAIN ANALYZE instead of the @benchmark time. 
+
+``` julia 
+function bench_pg()
+  medians = []
+  for q in 1:4
+    query = rstrip(readline("../job/$(q)a.sql"))
+    query = query[1:(length(query)-1)] # drop ';' at end
+    bench = "explain analyze $query"
+    cmd = `sudo -u postgres psql -c $bench`
+    times = Float64[]
+    @show q
+    @show @benchmark push!($times, parse(Float64, match(r"Execution time: (\S*) ms", readstring($cmd))[1]))
+    push!(medians, @show median(times))
+  end
+  medians
+end
+```
+
+I've also changed the Imp JOB data to use exactly the same schema as the other databases, so queries now look like:
+
+``` julia 
+function q1a()
+  @query begin 
+    info_type(it_id, "top 250 rank")
+    movie_info_idx(mii_id, t_id, it_id, _, _)
+    title(t_id, title, _, _, production_year)
+    movie_companies(mc_id, t_id, _, ct_id, note)
+    company_type(ct_id, "production companies")
+    @when !contains(note, "as Metro-Goldwyn-Mayer Pictures") &&
+      (contains(note, "co-production") || contains(note, "presents"))
+    return (note, title, production_year)
+  end
+end
+```
+
+They're all broken now though, so it's debugging time.

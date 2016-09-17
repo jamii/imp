@@ -90,7 +90,6 @@ function bench_sqlite()
   medians = []
   for q in 1:4
     query = rstrip(readline("../job/$(q)a.sql"))
-    query = query[1:(length(query)-1)] # drop ';' at end
     @time SQLite.query(db, query)
     trial = @show @benchmark SQLite.query($db, $query)
     push!(medians, @show (median(trial.times) / 1000000))

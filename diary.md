@@ -4708,3 +4708,20 @@ end
 ```
 
 They're all broken now though, so it's debugging time.
+
+I added some tests against SQLite to help out.
+
+``` julia 
+db = SQLite.DB("../job/job.sqlite")
+for q in 1:4
+  results_imp = eval(Symbol("q$(q)a"))()
+  query = rstrip(readline("../job/$(q)a.sql"))
+  query = replace(query, "MIN", "")
+  frame = SQLite.query(db, query)
+  num_columns = length(results_imp.columns)
+  results_sqlite = Relation(tuple((frame[ix].values for ix in 1:num_columns)...), num_columns)
+  @show q
+  @test length(results_imp.columns[1]) == length(results_sqlite.columns[1])
+  @test results_imp.columns == results_sqlite.columns
+end
+```

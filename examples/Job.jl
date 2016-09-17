@@ -99,7 +99,7 @@ end
 import SQLite
 function bench_sqlite()
   db = SQLite.DB("../job/job.sqlite")
-  SQLite.execute!(db, "PRAGMA cache_size = 1000000000;")
+  SQLite.execute!(db, "PRAGMA cache_size = -1000000000;")
   SQLite.execute!(db, "PRAGMA temp_store = memory;")
   medians = []
   for q in 1:4

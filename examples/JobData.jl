@@ -4,6 +4,9 @@ module JobData
 
 using Data
 using DataFrames
+using JLD
+
+import SQLite
 
 function read_job()
   schema = readdlm(open("data/job_schema.csv"), ',', header=false, quotes=true, comments=false)
@@ -19,35 +22,13 @@ function read_job()
     if isfile("../job/$(table_name).csv")
       column_types = table_column_types[table_name]
       @show table_name column_names column_types
-      frame = readtable(open("../imdb/$(table_name).csv"), header=false, eltypes=column_types)
-      n = length(frame[1])
-      ids::Vector{Int64} = frame[1].data
-      for (ix, (column_name, column_type)) in enumerate(zip(column_names, column_types))
-        @show table_name ix column_name column_type
-        data_array = frame[ix]
-        if ix == 1
-          relations[table_name, column_name] = Relation((copy(ids),), 1)
-        else
-          column_ids = Int64[id for (ix, id) in enumerate(ids) if !(data_array.na[ix])]
-          local column
-          if isa(data_array, DataArray{Int64})
-            let data::Vector{Int64} = data_array.data
-              column = Int64[d for (ix, d) in enumerate(data) if !(data_array.na[ix])]
-            end
-          elseif isa(data_array, DataArray{String})
-            let data::Vector{String} = data_array.data
-              column = String[d for (ix, d) in enumerate(data) if !(data_array.na[ix])]
-            end
-          end
-          relations[table_name, column_name] = Relation((column_ids, column), 1)
-        end
-      end
+      frame = readtable(open("../job/$(table_name).csv"), header=false, eltypes=column_types)
+      columns = tuple((frame[ix].data for ix in 1:length(column_names))...)
+      relations[table_name] = Relation(columns, 1)
     end
   end
   relations
 end
-
-using JLD
 
 if !isfile("../job/imp.jld")
   job = @time read_job()
@@ -56,13 +37,17 @@ else
   job = @time load("../job/imp.jld", "job")
 end
 
-for (table_name, column_name) in keys(job)
+gc()
+
+for table_name in keys(job)
   @eval begin 
-    const $(Symbol(table_name, "_", column_name)) = job[$table_name, $column_name]
-    export $(Symbol(table_name, "_", column_name))
+    const $(Symbol(table_name)) = job[$table_name]
+    export $(Symbol(table_name))
   end
 end
 
-gc()
+if !isfile("../job/job.sqlite")
+  run(`sqlite3 ../job/job.sqlite -init ./data/sqlite_job`)
+end
 
 end

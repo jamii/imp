@@ -6,8 +6,6 @@ using Data
 using DataFrames
 using JLD
 
-import SQLite
-
 function read_job()
   schema = readdlm(open("data/job_schema.csv"), ',', header=false, quotes=true, comments=false)
   table_column_names = Dict()
@@ -44,10 +42,6 @@ for table_name in keys(job)
     const $(Symbol(table_name)) = job[$table_name]
     export $(Symbol(table_name))
   end
-end
-
-if !isfile("../job/job.sqlite")
-  run(`sqlite3 ../job/job.sqlite -init ./data/sqlite_job`)
 end
 
 end

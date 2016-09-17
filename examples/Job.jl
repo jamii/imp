@@ -72,19 +72,32 @@ function test()
   @test Base.return_types(q4a) == [Relation{Tuple{Vector{String}}}]
 end
 
-t = @benchmark 1
-fieldnames(t)
-median(t.times)
-
 function bench_imp()
   medians = []
   for q in 1:4
     @show q
     trial = @show @benchmark $(eval(Symbol("q$(q)a")))()
-    push!(medians, median(trial.times))
+    push!(medians, @show (median(trial.times) / 1000000))
   end
   medians
 end
+
+import SQLite
+function bench_sqlite()
+  db = SQLite.DB("../job/job.sqlite")
+  SQLite.execute!(db, "PRAGMA cache_size = 1000000000;")
+  SQLite.execute!(db, "PRAGMA temp_store = memory;")
+  medians = []
+  for q in 1:4
+    query = rstrip(readline("../job/$(q)a.sql"))
+    query = query[1:(length(query)-1)] # drop ';' at end
+    @time SQLite.query(db, query)
+    trial = @show @benchmark SQLite.query($db, $query)
+    push!(medians, @show (median(trial.times) / 1000000))
+  end
+  medians
+end
+
 
 function bench_pg()
   medians = []

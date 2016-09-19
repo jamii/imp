@@ -17,10 +17,10 @@ function read_job()
   end
   relations = Dict()
   for (table_name, column_names) in table_column_names
-    if isfile("../job/$(table_name).csv")
+    if isfile("../imdb/$(table_name).csv")
       column_types = table_column_types[table_name]
       @show table_name column_names column_types
-      frame = readtable(open("../job/$(table_name).csv"), header=false, eltypes=column_types)
+      frame = readtable(open("../imdb/$(table_name).csv"), header=false, eltypes=column_types)
       columns = tuple((frame[ix].data for ix in 1:length(column_names))...)
       relations[table_name] = Relation(columns, 1)
     end
@@ -28,11 +28,11 @@ function read_job()
   relations
 end
 
-if !isfile("../job/imp.jld")
+if !isfile("../imdb/imp.jld")
   job = @time read_job()
-  @time save("../job/imp.jld", "job", job)
+  @time save("../imdb/imp.jld", "job", job)
 else 
-  job = @time load("../job/imp.jld", "job")
+  job = @time load("../imdb/imp.jld", "job")
 end
 
 gc()

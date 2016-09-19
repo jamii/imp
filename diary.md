@@ -4725,3 +4725,380 @@ for q in 1:4
   @test results_imp.columns == results_sqlite.columns
 end
 ```
+
+### 2016 Sep 19
+
+Ok, debugging time. Q1 and Q3 don't work. Q2 and Q4 do. All of them worked before I changed the schema and rewrote the queries to match. 
+
+I want to narrow the failure down to a single incorrect row, so let's add:
+
+``` julia 
+function diff_sorted!{T <: Tuple, K <: Tuple}(old::T, new::T, old_key::K, new_key::K, old_only::T, new_only::T)
+  @inbounds begin
+    old_at = 1
+    new_at = 1
+    old_hi = length(old[1])
+    new_hi = length(new[1])
+    while old_at <= old_hi && new_at <= new_hi
+      c = cmp_in(old_key, new_key, old_at, new_at)
+      if c == 0
+        old_at += 1
+        new_at += 1
+      elseif c == 1
+        push_in!(new_only, new, new_at)
+        new_at += 1
+      else 
+        push_in!(old_only, old, old_at)
+        old_at += 1
+      end
+    end
+    while old_at <= old_hi
+      push_in!(old_only, old, old_at)
+      old_at += 1
+    end
+    while new_at <= new_hi
+      push_in!(new_only, new, new_at)
+      new_at += 1
+    end
+  end
+end
+
+function diff{T}(old::Relation{T}, new::Relation{T})
+  @assert old.num_keys == new.num_keys 
+  order = collect(1:length(old.columns))
+  old_index = index(old, order)
+  new_index = index(new, order)
+  old_only_columns = tuple([Vector{eltype(column)}() for column in old.columns]...)
+  new_only_columns = tuple([Vector{eltype(column)}() for column in new.columns]...)
+  diff_sorted!(old_index, new_index, old_index[1:old.num_keys], new_index[1:new.num_keys], old_only_columns, new_only_columns)
+  old_only_indexes = Dict{Vector{Int64}, typeof(old_only_columns)}(order => old_only_columns)
+  new_only_indexes = Dict{Vector{Int64}, typeof(new_only_columns)}(order => new_only_columns)
+  (Relation(old_only_columns, old.num_keys, old_only_indexes), Relation(new_only_columns, new.num_keys, new_only_indexes))
+end
+```
+
+And change the test to:
+
+``` julia
+(imp_only, sqlite_only) = Data.diff(results_imp, results_sqlite)
+@test imp_only.columns == sqlite_only.columns # ie both empty - but @test will print both otherwise
+```
+
+And for Q1 we get:
+
+``` julia
+Test Failed
+  Expression: imp_only.columns == sqlite_only.columns
+   Evaluated: (String["(as A Selznick International Picture) (as Selznick International presents its picturization of Daphne Du Maurier's celebrated novel also)","(as Warner Bros.- Seven Arts presents)","(presents: Ernest Lehman's production of Edward Albee's)"],String["Rebecca","The Wild Bunch","Who's Afraid of Virginia Woolf?"],[1940,1969,1966]) == (String[],String[],Int64[])
+```
+
+I have a sudden suspicion. Maybe I don't track ixes correctly when there are `_`s in between variables.
+
+Let's dump the ixes for Q1. 
+
+``` julia
+ixes = Tuple{Int64,Any}[(7,2),(7,1),(7,:buffer),(4,3),(4,2),(4,:buffer),(9,:buffer),(2,:buffer),(3,2),(3,1),(3,:buffer),(5,1),(5,2),(5,5),(5,:buffer),(8,:buffer),(6,2),(6,4),(6,5),(6,:buffer),(1,:buffer)]
+```
+
+Nope, looks fine. Back to debugging.
+
+Let's first see if those rows actually exist in the Imp tables.
+
+``` julia
+for ix in 1:length(title)
+  if title.columns[2][ix] == "Who's Afraid of Virginia Woolf?"
+    @show title.columns[1][ix] title.columns[5][ix]
+  end
+end
+
+# (title.columns[1])[ix] = 2499084
+# (title.columns[5])[ix] = 1966
+
+for ix in 1:length(movie_companies)
+  if movie_companies.columns[2][ix] == 2499084
+    @show movie_companies.columns[5][ix]
+  end
+end
+
+# (movie_companies.columns[5])[ix] = "(1973) (USA) (TV) (original airing)"
+# (movie_companies.columns[5])[ix] = "(1976) (Finland) (TV)"
+# (movie_companies.columns[5])[ix] = "(1966) (USA) (theatrical)"
+# (movie_companies.columns[5])[ix] = "(1966) (Finland) (theatrical)"
+# (movie_companies.columns[5])[ix] = "(2004) (Czech Republic) (theatrical)"
+# (movie_companies.columns[5])[ix] = "(1966) (West Germany) (theatrical)"
+# (movie_companies.columns[5])[ix] = "(2006) (Canada) (DVD) (4 film set)"
+# (movie_companies.columns[5])[ix] = "(19??) (West Germany) (VHS)"
+# (movie_companies.columns[5])[ix] = "(2006) (Germany) (DVD)"
+# (movie_companies.columns[5])[ix] = "(2007) (Finland) (DVD)"
+# (movie_companies.columns[5])[ix] = "(2007) (Netherlands) (DVD)"
+# (movie_companies.columns[5])[ix] = "(1966) (Sweden) (VHS)"
+# (movie_companies.columns[5])[ix] = "(1992) (USA) (video) (laserdisc)"
+# (movie_companies.columns[5])[ix] = "(1994) (USA) (VHS)"
+# (movie_companies.columns[5])[ix] = "(1997) (USA) (DVD)"
+# (movie_companies.columns[5])[ix] = "(2000) (USA) (VHS)"
+# (movie_companies.columns[5])[ix] = "(2006) (USA) (DVD) (4 film set)"
+# (movie_companies.columns[5])[ix] = "(2006) (USA) (DVD) (two-disc special edition)"
+# (movie_companies.columns[5])[ix] = "(1966) (Sweden) (theatrical)"
+# (movie_companies.columns[5])[ix] = "(uncredited)"
+# (movie_companies.columns[5])[ix] = "(presents: Ernest Lehman's production of Edward Albee's)"
+```
+
+So that looks legit. What about the info?
+
+``` julia
+for ix in 1:length(info_type)
+  if info_type.columns[2][ix] == "top 250 rank"
+    @show info_type.columns[1][ix]
+  end
+end
+
+# (info_type.columns[1])[ix] = 112
+
+for ix in 1:length(movie_info_idx)
+  if movie_info_idx.columns[2][ix] == 2499084 && movie_info_idx.columns[3][ix] == 112
+    @show movie_info_idx.columns[1][ix]
+  end
+end
+
+(movie_info_idx.columns[1])[ix] = 1379970
+```
+
+Wait, so it does match the whole query. Let's just confirm that in postgres too.
+
+```
+postgres=# select distinct info_type.info, title.title from title, movie_info_idx, info_type where info_type.info = 'top 250 rank' and title.id = 2499084 and info_type.id = movie_info_idx.info_type_id and movie_info_idx.movie_id = title.id;
+     info     |              title              
+--------------+---------------------------------
+ top 250 rank | Who's Afraid of Virginia Woolf?
+```
+
+```
+sqlite> select distinct info_type.info, title.title from title, movie_info_idx, info_type where info_type.info = 'top 250 rank' and title.id = 2499084 and info_type.id = movie_info_idx.info_type_id and movie_info_idx.movie_id = title.id;
+top 250 rank|Who's Afraid of Virginia Woolf?
+sqlite> 
+```
+
+Oh, did I check the company type?
+
+``` julia
+for ix in 1:length(movie_companies)
+  if movie_companies.columns[2][ix] == 2499084
+    @show movie_companies.columns[4][ix] movie_companies.columns[5][ix]
+  end
+end
+
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(1973) (USA) (TV) (original airing)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(1976) (Finland) (TV)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(1966) (USA) (theatrical)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(1966) (Finland) (theatrical)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(2004) (Czech Republic) (theatrical)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(1966) (West Germany) (theatrical)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(2006) (Canada) (DVD) (4 film set)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(19??) (West Germany) (VHS)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(2006) (Germany) (DVD)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(2007) (Finland) (DVD)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(2007) (Netherlands) (DVD)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(1966) (Sweden) (VHS)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(1992) (USA) (video) (laserdisc)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(1994) (USA) (VHS)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(1997) (USA) (DVD)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(2000) (USA) (VHS)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(2006) (USA) (DVD) (4 film set)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(2006) (USA) (DVD) (two-disc special edition)"
+# (movie_companies.columns[4])[ix] = 1
+# (movie_companies.columns[5])[ix] = "(1966) (Sweden) (theatrical)"
+# (movie_companies.columns[4])[ix] = 2
+# (movie_companies.columns[5])[ix] = "(uncredited)"
+# (movie_companies.columns[4])[ix] = 2
+# (movie_companies.columns[5])[ix] = "(presents: Ernest Lehman's production of Edward Albee's)"
+
+for ix in 1:length(company_type)
+  if company_type.columns[1][ix] in [1,2]
+    @show company_type.columns[1][ix] company_type.columns[2][ix]
+  end
+end
+
+# (company_type.columns[1])[ix] = 1
+# (company_type.columns[2])[ix] = "distributors"
+# (company_type.columns[1])[ix] = 2
+# (company_type.columns[2])[ix] = "production companies"
+```
+
+```
+postgres=# select title.title, movie_companies.company_type_id from title, movie_companies where title.id = 2499084 and movie_companies.movie_id = title.id;
+              title              | company_type_id 
+---------------------------------+-----------------
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               1
+ Who's Afraid of Virginia Woolf? |               2
+ Who's Afraid of Virginia Woolf? |               2
+(21 rows)
+
+postgres=# select * from company_type where company_type.id in (1,2);
+ id |         kind         
+----+----------------------
+  1 | distributors
+  2 | production companies
+(2 rows)
+```
+
+Maybe it's the LIKE patterns that I'm messing up? Let's modify Q1A to specify this particular title, return everything and then remove conditions until we get results.
+
+```
+postgres=# SELECT distinct mc.note AS production_note, (t.title) AS movie_title, (t.production_year), ct.kind, it.info AS movie_year FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info_idx AS mi_idx, title AS t WHERE ct.kind = 'production companies' AND it.info = 'top 250 rank' AND mc.note  not like '%(as Metro-Goldwyn-Mayer Pictures)%' and (mc.note like '%(co-production)%' or mc.note like '%(presents)%') AND ct.id = mc.company_type_id AND t.id = mc.movie_id AND t.id = mi_idx.movie_id AND mc.movie_id = mi_idx.movie_id AND it.id = mi_idx.info_type_id and t.id = 2499084;
+ production_note | movie_title | production_year | kind | movie_year 
+-----------------+-------------+-----------------+------+------------
+(0 rows)
+
+postgres=# SELECT distinct mc.note AS production_note, (t.title) AS movie_title, (t.production_year), ct.kind, it.info AS movie_year FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info_idx AS mi_idx, title AS t WHERE ct.kind = 'production companies' AND it.info = 'top 250 rank' AND ct.id = mc.company_type_id AND t.id = mc.movie_id AND t.id = mi_idx.movie_id AND mc.movie_id = mi_idx.movie_id AND it.id = mi_idx.info_type_id and t.id = 2499084;
+production_note                      |           movie_title           | production_year |         kind         |  movie_year  
+----------------------------------------------------------+---------------------------------+-----------------+----------------------+--------------
+(uncredited)                                             | Who's Afraid of Virginia Woolf? |            1966 | production companies | top 250 rank
+(presents: Ernest Lehman's production of Edward Albee's) | Who's Afraid of Virginia Woolf? |            1966 | production companies | top 250 rank
+(2 rows)
+
+postgres=# SELECT distinct mc.note AS production_note, (t.title) AS movie_title, (t.production_year), ct.kind, it.info AS movie_year FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info_idx AS mi_idx, title AS t WHERE ct.kind = 'production companies' AND it.info = 'top 250 rank' AND ct.id = mc.company_type_id AND t.id = mc.movie_id AND t.id = mi_idx.movie_id AND mc.movie_id = mi_idx.movie_id AND it.id = mi_idx.info_type_id and t.id = 2499084 and mc.note like '%presents%';
+production_note                      |           movie_title           | production_year |         kind         |  movie_year  
+----------------------------------------------------------+---------------------------------+-----------------+----------------------+--------------
+(presents: Ernest Lehman's production of Edward Albee's) | Who's Afraid of Virginia Woolf? |            1966 | production companies | top 250 rank
+(1 row)
+
+postgres=# SELECT distinct mc.note AS production_note, (t.title) AS movie_title, (t.production_year), ct.kind, it.info AS movie_year FROM company_type AS ct, info_type AS it, movie_companies AS mc, movie_info_idx AS mi_idx, title AS t WHERE ct.kind = 'production companies' AND it.info = 'top 250 rank' AND ct.id = mc.company_type_id AND t.id = mc.movie_id AND t.id = mi_idx.movie_id AND mc.movie_id = mi_idx.movie_id AND it.id = mi_idx.info_type_id and t.id = 2499084 and mc.note like '%(presents)%';
+ production_note | movie_title | production_year | kind | movie_year 
+-----------------+-------------+-----------------+------+------------
+(0 rows)
+```
+
+It appears that "(presents: Ernest Lehman's production of Edward Albee's)" is LIKE "%presents%" but not LIKE "%(presents)%". But the postgres docs tell me that the parens are used for grouping patterns. 
+
+If I use parens too then I get the correct results. Fine. On to Q3.
+
+``` julia
+q = 3
+length(results_sqlite) = 107
+Test Failed
+  Expression: imp_only.columns == sqlite_only.columns
+   Evaluated: (String[],) == (String["Austin Powers 4","Teeny-Action Volume 7"],)
+```
+
+Imp returns 105 rows. SQLite returns 107 rows. Postgres returns 105 rows. That sounds like I messed up my data sources. 
+
+Oh well, let's blow everything away and rebuild, to make sure I have a consistent set of data.
+
+I'm using the [original csv files](http://homepages.cwi.nl/%7Eboncz/job/imdb.tgz) from the author of the JOB paper. Postgres can import them directly. SQLite doesn't understand the escapes, so I'll re-export them from postgres to feed to SQLite (this requires giving the postgres user write access to the directory). Imp can read the originals. Then if Imp and Postgres agree on the results and SQLite disagrees, we can suspect the export/import process.
+
+
+``` julia
+length(Job.q3a())
+# 105
+```
+
+```
+postgres=# SELECT count(distinct t.title) FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t WHERE k.keyword  like '%sequel%' AND mi.info  IN ('Sweden', 'Norway', 'Germany', 'Denmark', 'Swedish', 'Denish', 'Norwegian', 'German') AND t.production_year > 2005 AND t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id;
+ count 
+-------
+   105
+(1 row)
+```
+ 
+```
+sqlite> SELECT count(distinct t.title) FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t WHERE k.keyword  like '%sequel%' AND mi.info  IN ('Sweden', 'Norway', 'Germany', 'Denmark', 'Swedish', 'Denish', 'Norwegian', 'German') AND t.production_year > 2005 AND t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id;
+107
+```
+
+Well there you go. 
+
+Let's pick one of the extra rows and see what's going on.
+
+```
+sqlite> SELECT distinct t.title, k.keyword, mi.info, t.production_year FROM keyword AS k, movie_info AS mi, movie_keyword AS mk, title AS t WHERE k.keyword  like '%sequel%' AND mi.info  IN ('Sweden', 'Norway', 'Germany', 'Denmark', 'Swedish', 'Denish', 'Norwegian', 'German') AND t.production_year > 2005 AND t.id = mi.movie_id AND t.id = mk.movie_id AND mk.movie_id = mi.movie_id AND k.id = mk.keyword_id AND t.title == 'Austin Powers 4';
+"Austin Powers 4",sequel,Germany,""
+```
+
+```
+postgres=# SELECT title.production_year FROM title where title.title = 'Austin Powers 4';
+ production_year 
+-----------------
+                
+(1 row)
+```
+
+Oh dear. The production year is null and SQLite thinks null > 2005. Imp and Postgres both think that if there is no production year it can't be > 2005. 
+
+...
+
+Maybe I should test against Postgres instead.
+
+``` julia
+function test()
+  @test Base.return_types(q1a) == [Relation{Tuple{Vector{String}, Vector{String}, Vector{Int64}}}]
+  @test Base.return_types(q2a) == [Relation{Tuple{Vector{String}}}]
+  @test Base.return_types(q3a) == [Relation{Tuple{Vector{String}}}]
+  @test Base.return_types(q4a) == [Relation{Tuple{Vector{String}, Vector{String}}}]
+  
+  # db = SQLite.DB("../imdb/imdb.sqlite")
+  # for q in 1:4
+  #   results_imp = eval(Symbol("q$(q)a"))()
+  #   query = rstrip(readline("../job/$(q)a.sql"))
+  #   query = replace(query, "MIN", "")
+  #   frame = SQLite.query(db, query)
+  #   num_columns = length(results_imp.columns)
+  #   results_sqlite = Relation(tuple((frame[ix].values for ix in 1:num_columns)...), num_columns)
+  #   (imp_only, sqlite_only) = Data.diff(results_imp, results_sqlite)
+  #   @show q 
+  #   @test imp_only.columns == sqlite_only.columns # ie both empty - but @test will print both otherwise
+  # end
+  
+  for q in 1:4
+    results_imp = eval(Symbol("q$(q)a"))()
+    query = rstrip(readline("../job/$(q)a.sql"))
+    query = query[1:(length(query)-1)] # drop ';' at end
+    query = replace(query, "MIN", "")
+    query = "copy ($query) to '/tmp/results.csv' with CSV DELIMITER ',';"
+    run(`sudo -u postgres psql -c $query`)
+    frame = DataFrames.readtable(open("/tmp/results.csv"), header=false, eltypes=[eltype(c) for c in results_imp.columns])
+    num_columns = length(results_imp.columns)
+    results_pg = Relation(tuple((frame[ix].data for ix in 1:num_columns)...), num_columns)
+    (imp_only, pg_only) = Data.diff(results_imp, results_pg)
+    @show q 
+    @test imp_only.columns == pg_only.columns # ie both empty - but @test will print both otherwise
+  end
+end
+```
+
+All tests pass.

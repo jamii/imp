@@ -80,9 +80,8 @@ function test()
     num_columns = length(results_imp.columns)
     results_sqlite = Relation(tuple((frame[ix].values for ix in 1:num_columns)...), num_columns)
     @show q
-    @show results_imp.columns == results_sqlite.columns
-    # @test length(results_imp.columns[1]) == length(results_sqlite.columns[1])
-    # @test results_imp.columns == results_sqlite.columns
+    (imp_only, sqlite_only) = Data.diff(results_imp, results_sqlite)
+    @test imp_only.columns == sqlite_only.columns # ie both empty - but @test will print both otherwise
   end
 end
 

@@ -3,28 +3,6 @@ module Query
 using Data
 using Match
 
-# gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
-function gallop{T}(column::Vector{T}, value::T, lo::Int64, hi::Int64, cmp) 
-  @inbounds if (lo < hi) && cmp(column[lo], value)
-    step = 1
-    while (lo + step < hi) && cmp(column[lo + step], value)
-      lo = lo + step 
-      step = step << 1
-    end
-    
-    step = step >> 1
-    while step > 0
-      if (lo + step < hi) && cmp(column[lo + step], value)
-        lo = lo + step 
-      end
-      step = step >> 1
-    end
-    
-    lo += 1
-  end
-  lo 
-end 
-
 function start_intersect(cols, los, ats, his, ixes)
   # assume los/his are valid 
   # los inclusive, his exclusive

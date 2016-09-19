@@ -5102,3 +5102,5 @@ end
 ```
 
 All tests pass.
+
+Early bench results (median, in ms, to 2 sf). Imp 0.30 31 82 54. Pg 6.8 530 180 120. SQLite 250 200 93 87.

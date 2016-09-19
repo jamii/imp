@@ -6,6 +6,7 @@ using JobData
 using Base.Test
 using BenchmarkTools
 import DataFrames
+import SQLite
 
 function q1a()
   @query begin 
@@ -106,7 +107,6 @@ function bench_imp()
   medians
 end
 
-import SQLite
 function bench_sqlite()
   db = SQLite.DB("../imdb/imdb.sqlite")
   SQLite.execute!(db, "PRAGMA cache_size = -1000000000;")

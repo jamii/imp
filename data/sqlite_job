@@ -1,26 +1,29 @@
-.read ../job/schema.sql
+.read job/schema.sql
 
 .mode csv
-.import ../job/aka_name.csv aka_name 
-.import ../job/aka_title.csv aka_title
-.import ../job/cast_info.csv cast_info 
-.import ../job/char_name.csv char_name
-.import ../job/comp_cast_type.csv comp_cast_type 
-.import ../job/company_name.csv company_name
-.import ../job/company_type.csv company_type 
-.import ../job/complete_cast.csv complete_cast
-.import ../job/info_type.csv info_type
-.import ../job/keyword.csv keyword
-.import ../job/kind_type.csv kind_type
-.import ../job/link_type.csv link_type
-.import ../job/movie_companies.csv movie_companies
-.import ../job/movie_info.csv movie_info
-.import ../job/movie_info_idx.csv movie_info_idx
-.import ../job/movie_keyword.csv movie_keyword
-.import ../job/movie_link.csv movie_link
-.import ../job/name.csv name
-.import ../job/person_info.csv person_info
-.import ../job/role_type.csv role_type
-.import ../job/title.csv title
+.import imdb/pg_aka_name.csv aka_name 
+.import imdb/pg_aka_title.csv aka_title
+.import imdb/pg_cast_info.csv cast_info 
+.import imdb/pg_char_name.csv char_name
+.import imdb/pg_comp_cast_type.csv comp_cast_type 
+.import imdb/pg_company_name.csv company_name
+.import imdb/pg_company_type.csv company_type 
+.import imdb/pg_complete_cast.csv complete_cast
+.import imdb/pg_info_type.csv info_type
+.import imdb/pg_keyword.csv keyword
+.import imdb/pg_kind_type.csv kind_type
+.import imdb/pg_link_type.csv link_type
+.import imdb/pg_movie_companies.csv movie_companies
+.import imdb/pg_movie_info.csv movie_info
+.import imdb/pg_movie_info_idx.csv movie_info_idx
+.import imdb/pg_movie_keyword.csv movie_keyword
+.import imdb/pg_movie_link.csv movie_link
+.import imdb/pg_name.csv name
+.import imdb/pg_person_info.csv person_info
+.import imdb/pg_role_type.csv role_type
+.import imdb/pg_title.csv title
 
-.read ../job/fkindexes.sql
+.read job/fkindexes.sql
+
+VACUUM;
+ANALYZE;

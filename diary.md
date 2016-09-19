@@ -4728,7 +4728,9 @@ end
 
 ### 2016 Sep 19
 
-Ok, debugging time. Q1 and Q3 don't work. Q2 and Q4 do. All of them worked before I changed the schema and rewrote the queries to match. 
+Only have a few hours today. Debugging time. 
+
+Q1 and Q3 don't work. Q2 and Q4 do. All of them worked before I changed the schema and rewrote the queries to match. 
 
 I want to narrow the failure down to a single incorrect row, so let's add:
 
@@ -4800,7 +4802,7 @@ Let's dump the ixes for Q1.
 ixes = Tuple{Int64,Any}[(7,2),(7,1),(7,:buffer),(4,3),(4,2),(4,:buffer),(9,:buffer),(2,:buffer),(3,2),(3,1),(3,:buffer),(5,1),(5,2),(5,5),(5,:buffer),(8,:buffer),(6,2),(6,4),(6,5),(6,:buffer),(1,:buffer)]
 ```
 
-Nope, looks fine. Back to debugging.
+Nope, looks fine. Back to systematic debugging.
 
 Let's first see if those rows actually exist in the Imp tables.
 
@@ -5004,7 +5006,7 @@ postgres=# SELECT distinct mc.note AS production_note, (t.title) AS movie_title,
 (0 rows)
 ```
 
-It appears that "(presents: Ernest Lehman's production of Edward Albee's)" is LIKE "%presents%" but not LIKE "%(presents)%". But the postgres docs tell me that the parens are used for grouping patterns. 
+It appears that "(presents: Ernest Lehman's production of Edward Albee's)" is LIKE "%presents%" but not LIKE "%(presents)%". The postgres docs tell me that the parens are used for grouping patterns, but I guess that doesn't apply if there is only one alternative.
 
 If I use parens too then I get the correct results. Fine. On to Q3.
 
@@ -5104,3 +5106,5 @@ end
 All tests pass.
 
 Early bench results (median, in ms, to 2 sf). Imp 0.30 31 82 54. Pg 6.8 530 180 120. SQLite 250 200 93 87.
+
+Ok, what next? Completing all the JOB queries has to come last, because I want to test the number of attempts required to get a good variable ordering by hand. I want to use read-write balanced data-structures in Imp for a fair comparison, instead of the read-optimized arrays I have at the moment, but I don't know if I have time to finish that before the end of the week. One of the steps towards that though is moving from Triejoin to a different worst-case join that makes fewer assumptions about the layout of the data. I'll try it using the same indexes I have now and see if it hurts performance at all.

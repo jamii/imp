@@ -5108,3 +5108,106 @@ All tests pass.
 Early bench results (median, in ms, to 2 sf). Imp 0.30 31 82 54. Pg 6.8 530 180 120. SQLite 250 200 93 87.
 
 Ok, what next? Completing all the JOB queries has to come last, because I want to test the number of attempts required to get a good variable ordering by hand. I want to use read-write balanced data-structures in Imp for a fair comparison, instead of the read-optimized arrays I have at the moment, but I don't know if I have time to finish that before the end of the week. One of the steps towards that though is moving from Triejoin to a different worst-case join that makes fewer assumptions about the layout of the data. I'll try it using the same indexes I have now and see if it hurts performance at all.
+
+### 2016 Sep 20
+
+I have a few different index data-structures in mind. Coming up with a interface that can efficiently support joins on any of them is tricky. 
+
+The first thing I want to find out is how much it would cost me to switch from TrieJoin to GenericJoin. I can do that just by rewriting the intersection.
+
+``` julia
+body = quote 
+  let
+    local iter = shortest($var_columns, los, ats, his, $var_ixes)
+    local state = start(iter)
+    local $var
+    while $need_more_results && !done(iter, state)
+      ($var, state) = next(iter, state)
+      if assign($var_columns, los, ats, his, $var_ixes, $var)
+        $body
+      end
+    end
+  end
+end
+```
+
+Times after are 0.58 47 170 110, times before were 0.30 31 82 54. I'm seeing a lot of allocations, so maybe those subarrays are a problem. Let's try just returning the ixes.
+
+``` julia
+body = quote 
+  let
+    local min_i = shortest(los, ats, his, $var_ixes)
+    local column = $var_columns[min_i]
+    local at = los[$var_ixes[min_i]]
+    local hi = his[$var_ixes[min_i]]
+    while $need_more_results && (at < hi)
+      let $var = column[at]
+        at += 1
+        if assign($var_columns, los, ats, his, $var_ixes, $var)
+          $body
+        end
+      end
+    end
+  end
+end
+```
+
+(I just want to once again note how much easier my life would be if Julia could stack-allocate things containing points.)
+
+Ok, allocations go away, and the times are a little better - 0.47 42 160 110.
+
+Actually though, in both cases I need to skip repeated values so `at += 1` needs to be `at = gallop(column, $var, at, hi, <=)`, which is a little more expensive in this case.
+
+Altogether it looks like about 2x the time, which makes sense because the `assign` repeats work done by iteration. Maybe if we were a little smarter we could remove that. Let's add a parameter to `assign` that skips whichever column we're drawing from.
+
+``` julia 
+function assign(cols, los, ats, his, ixes, value, skip)
+  @inbounds begin
+    n = length(ixes)
+    for c in 1:n
+      if c != skip
+        ix = ixes[c]
+        los[ix+1] = gallop(cols[c], value, los[ix], his[ix], <)
+        if los[ix+1] >= his[ix]
+          return false
+        end
+        his[ix+1] = gallop(cols[c], value, los[ix+1], his[ix], <=)
+        if los[ix+1] >= his[ix+1]
+          return false
+        end
+      end
+    end
+    return true
+  end
+end
+```
+
+``` julia
+body = quote 
+  @inbounds let
+    local min_i = shortest(los, ats, his, $var_ixes)
+    local ix = $var_ixes[min_i]
+    local column = $var_columns[min_i]
+    ats[ix] = los[ix]
+    while $need_more_results && (ats[ix] < his[ix])
+      let $var = column[ats[ix]]
+        los[ix+1] = ats[ix]
+        ats[ix] = gallop(column, $var, ats[ix], his[ix], <=)
+        his[ix+1] = ats[ix]
+        if assign($var_columns, los, ats, his, $var_ixes, $var, min_i)
+          $body
+        end
+      end
+    end
+  end
+```
+
+Now we get 0.38 34 73 44. That's actually somewhat better than the original. I'm confused. 
+
+Perhaps lookups in the job queries almost always succeed, because most of them are foreign key joins, so the leapfrog part of triejoin just ends up being wasted work? 
+
+But counting triangles also shows a similar improvement, from 636ms to 598ms. Really not sure what to make of that.
+
+The upside is that it looks like I can switch to GenericJoin without major losses, at least on my current benchmarks.
+
+Julia 0.5 is out for real now, so let's quickly upgrade. Benchmark numbers are about the same.

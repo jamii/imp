@@ -48,18 +48,35 @@ function next_intersect(cols, los, ats, his, ixes)
   end
 end
 
-function assign(cols, los, ats, his, ixes, value)
+function shortest(los, ats, his, ixes)
+  @inbounds begin
+    min_i = 1
+    min_length = his[ixes[1]] - los[ixes[1]]
+    for i in 2:length(ixes)
+      length = his[ixes[i]] - los[ixes[i]]
+      if length < min_length
+        min_i = i
+        min_length = length
+      end
+    end
+    return min_i
+  end
+end    
+
+function assign(cols, los, ats, his, ixes, value, skip)
   @inbounds begin
     n = length(ixes)
     for c in 1:n
-      ix = ixes[c]
-      los[ix+1] = gallop(cols[c], value, los[ix], his[ix], <)
-      if los[ix+1] >= his[ix]
-        return false
-      end
-      his[ix+1] = gallop(cols[c], value, los[ix+1], his[ix], <=)
-      if los[ix+1] >= his[ix+1]
-        return false
+      if c != skip
+        ix = ixes[c]
+        los[ix+1] = gallop(cols[c], value, los[ix], his[ix], <)
+        if los[ix+1] >= his[ix]
+          return false
+        end
+        his[ix+1] = gallop(cols[c], value, los[ix+1], his[ix], <=)
+        if los[ix+1] >= his[ix+1]
+          return false
+        end
       end
     end
     return true
@@ -399,7 +416,7 @@ function plan_query(query)
     if typeof(clause) == Assign
       body = quote
         let $var = $eval_call
-          if assign($var_columns, los, ats, his, $var_ixes, $var)
+          if assign($var_columns, los, ats, his, $var_ixes, $var, -1)
             $body
           end
         end
@@ -412,22 +429,31 @@ function plan_query(query)
           local $var
           while $need_more_results && !done(iter, state)
             ($var, state) = next(iter, state)
-            if assign($var_columns, los, ats, his, $var_ixes, $var)
+            if assign($var_columns, los, ats, his, $var_ixes, $var, -1)
               $body
             end
           end
         end
       end
     else 
-      result_column = ix_for[sources[var][1]]
-      body = quote
-        start_intersect($var_columns, los, ats, his, $var_ixes)
-        while $need_more_results && next_intersect($var_columns, los, ats, his, $var_ixes)
-          let $var = $(Symbol("columns_$var"))[1][los[$(result_column+1)]]
-            $body
+      body = quote 
+        @inbounds let
+          local min_i = shortest(los, ats, his, $var_ixes)
+          local ix = $var_ixes[min_i]
+          local column = $var_columns[min_i]
+          ats[ix] = los[ix]
+          while $need_more_results && (ats[ix] < his[ix])
+            let $var = column[ats[ix]]
+              los[ix+1] = ats[ix]
+              ats[ix] = gallop(column, $var, ats[ix], his[ix], <=)
+              his[ix+1] = ats[ix]
+              if assign($var_columns, los, ats, his, $var_ixes, $var, min_i)
+                $body
+              end
+            end
           end
         end
-      end 
+      end
     end
     
   end

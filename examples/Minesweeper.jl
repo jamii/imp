@@ -19,9 +19,9 @@ end
 function fix(flow, relation)
   order = collect(1:length(relation.columns))
   while true
-    old_state = index(relation, order)
+    old_state = relation.columns
     flow()
-    new_state = index(relation, order)
+    new_state = relation.columns
     if new_state == old_state
       return
     end

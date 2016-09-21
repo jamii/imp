@@ -10,14 +10,5 @@ Chinook.test()
 include("examples/Job.jl")
 Job.test()
 
-# include("src/UI.jl")
-# 
-# include("examples/Graph.jl")
-# include("examples/Chinook.jl")
-# Graph.test()
-# Chinook.test()
-# 
-# include("examples/JobData.jl")
-
-# 
-# include("examples/Minesweeper.jl")
+include("src/UI.jl")
+include("examples/Minesweeper.jl")

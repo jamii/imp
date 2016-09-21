@@ -5241,3 +5241,62 @@ I'm using the `Val{1}` to specify the column, making the return type predictable
 I don't really like breaking up the iter interface into done/next. I would rather have a `foreach` and pass a closure, but if `index_1` and `index_2` have different types this risks blowing up the amount of code generated at each step. It seems best to stick to a single path through the query. 
 
 So now I need to implement this iterator interface for sorted arrays. 
+
+``` julia
+type Index{T}
+  columns::T
+  los::Vector{Int64}
+  ats::Vector{Int64}
+  his::Vector{Int64}
+end
+
+function index{T}(relation::Relation{T}, order::Vector{Int64})
+  columns = get!(relation.indexes, order) do
+    columns = tuple([copy(relation.columns[ix]) for ix in order]...)
+    quicksort!(columns)
+    columns
+  end
+  n = length(order) + 1
+  los = [1 for _ in 1:n]
+  ats = [1 for _ in 1:n]
+  his = [length(relation)+1 for _ in 1:n]
+  Index(columns, los, ats, his)
+end
+
+function span{T,C}(index::Index{T}, ::Type{Val{C}})
+  # not technically correct - may be repeated values
+  index.his[C] - index.ats[C]
+end
+
+function start!{T,C}(index::Index{T}, ::Type{Val{C}})
+  index.ats[C] = index.los[C]
+end
+
+function next!{T,C}(index::Index{T}, ::Type{Val{C}})
+  val = index.columns[C][index.ats[C]]
+  index.los[C+1] = index.ats[C]
+  index.ats[C] = gallop(index.columns[C], val, index.ats[C], index.his[C], <=)
+  index.his[C+1] = index.ats[C]
+  val
+end
+
+function skip!{T,C}(index::Index{T}, ::Type{Val{C}}, val)
+  index.los[C+1] = gallop(index.columns[C], val, index.los[C], index.his[C], <)
+  if index.los[C+1] >= index.his[C]
+    return false
+  end
+  index.his[C+1] = gallop(index.columns[C], val, index.los[C+1], index.his[C], <=)
+  if index.los[C+1] >= index.his[C+1]
+    return false
+  end
+  return true
+end
+```
+
+Major debugging follows. I've totally destroyed type inference, somehow.
+
+I learned how to get at closure objects:
+
+``` julia
+Base.return_types(eval(Expr(:new, Symbol("#eval_tracks#10"))), (Int64,))
+```

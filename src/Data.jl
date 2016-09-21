@@ -391,7 +391,7 @@ function Atom.render(editor::Atom.Editor, relation::Relation)
   Atom.render(editor, relation.columns)
 end
 
-export Relation, @relation, index, span, start!, next!, skip!, replace!, gallop, diff
+export Relation, @relation, Index, index, span, start!, next!, skip!, replace!, gallop, diff
 
 function test()
   for i in 1:10000

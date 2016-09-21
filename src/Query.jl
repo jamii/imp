@@ -196,7 +196,9 @@ function plan_query(query)
   for (clause_ix, clause) in enumerate(clauses)
     if typeof(clause) == Row 
       order = sort_orders[clause_ix]
-      index_init = :($(Symbol("index_$clause_ix")) = index($(esc(clause.name)), $order))
+      typs = [:(Vector{eltype($(esc(clause.name)).columns[$ix])}) for ix in order]
+      typ = :(Index{Tuple{$(typs...)}})
+      index_init = :(local $(Symbol("index_$clause_ix"))::$typ = index($(esc(clause.name)), $order))
       push!(index_inits, index_init)
     end
   end
@@ -227,27 +229,29 @@ function plan_query(query)
     end
   end
   
-  # initialize arrays for storing results
-  results_inits = []
-  for var in vars    
+  # figure out types of variables
+  typ_inits = []
+  for var in vars
     typs = [:(eltype($(esc(clauses[clause_ix].name)).columns[$var_ix])) for (clause_ix, var_ix) in relation_sources[var]]
     if haskey(var_assigned_by, var)
       clause = var_assigned_by[var]
       (args, _) = eval_funs[var]
-      inferred_args = [:($(Symbol("results_$arg"))[1]) for arg in args]
+      inferred_args = [:($(Symbol("type_$arg"))[][1]) for arg in args]
       eval_call = :($(esc(Symbol("eval_$var")))($(inferred_args...)))
       if typeof(clause) == In
         eval_call = :(first($eval_call))
       end
-      results_init = quote
-        $(Symbol("type_$var")) = eltype([$eval_call for _ in []])
-        $(Symbol("results_$var")) = Vector{typejoin($(typs...), $(Symbol("type_$var")))}()
-      end
-    else
-      results_init = quote
-        $(Symbol("results_$var")) = Vector{typejoin($(typs...))}()
-      end
+      typ = :([$eval_call for _ in []])
+      push!(typs, typ)
     end
+    typ_init = :(local $(Symbol("type_$var")) = typejoin($(typs...)))
+    push!(typ_inits, typ_init)
+  end
+  
+  # initialize arrays for storing results
+  results_inits = []
+  for var in return_clause.vars
+    results_init = :(local $(Symbol("results_$var")) = Vector{$(Symbol("type_$var"))}())
     push!(results_inits, results_init)
   end
   
@@ -256,6 +260,7 @@ function plan_query(query)
     $(index_inits...)
     $((eval_funs[var][2] for var in vars if haskey(eval_funs, var))...)
     $((when_fun for (ix, (args, when_fun)) in when_funs)...)
+    $(typ_inits...)
     $(results_inits...)
   end
   
@@ -349,14 +354,16 @@ function plan_query(query)
   
   results_symbols = [Symbol("results_$var") for var in return_clause.vars]
   result = :(Relation(tuple($(results_symbols...)), $(return_clause.num_keys)))        
-  quote 
-    $init
-    $body
-    $(if return_clause.name != ()
-      :(merge!($(esc(return_clause.name)), $result))
-    else
-      result
-    end) 
+  @show quote 
+    let
+      $init
+      $body
+      $(if return_clause.name != ()
+        :(merge!($(esc(return_clause.name)), $result))
+      else
+        result
+      end) 
+    end
   end
 end
 

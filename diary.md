@@ -5304,3 +5304,157 @@ Base.return_types(eval(Expr(:new, Symbol("#eval_tracks#10"))), (Int64,))
 I spent the entire day debugging newly created type inference issues and eventually decided to give up on it entirely. It's been nothing but a time sink, and I knew it was going to be a time sink from the beginning and I did it anyway. Note to self - do not ignore that feeling of creeping doom.
 
 Bench numbers for new relation api are 0.45 35 67 38. Within a margin of error of previous numbers.
+
+I belatedly realised that typing this stateful interface was going to be really hard for the other index structures I had in mind, so I also tried out a stateless interface.
+
+``` julia
+immutable Finger{C}
+  lo::Int64
+  hi::Int64
+end
+
+function finger(index)
+  Finger{1}(1, length(index[1])+1)
+end
+  
+function Base.length{C}(index, finger::Finger{C})
+  # not technically correct - may be repeated values
+  finger.hi - finger.lo
+end
+
+@generated function project{C}(index, finger::Finger{C}, val)
+  quote
+    column = index[$C]
+    down_lo = gallop(column, val, finger.lo, finger.hi, <)
+    down_hi = gallop(column, val, down_lo, finger.hi, <=)
+    Finger{$(C+1)}(down_lo, down_hi)
+  end
+end
+
+function Base.start{C}(index, finger::Finger{C})
+  finger.lo
+end
+
+function Base.done{C}(index, finger::Finger{C}, at)
+  at >= finger.hi
+end
+
+@generated function Base.next{C}(index, finger::Finger{C}, at)
+  quote
+    column = index[$C]
+    next_at = gallop(column, column[at], at, finger.hi, <=)
+    (Finger{$(C+1)}(at, next_at), next_at)
+  end
+end
+
+function head{C}(index, finger::Finger{C})
+  index[C-1][finger.lo]
+end
+```
+
+`project` and `next` have to be generated because the type inference sees `C+1` as opaque and then terrible things happen down the road.
+
+Times (on battery power, so not super trustworthy) are 0.57 160 79 48. Allocation numbers are really high, especially for q2a. Maybe things are not ending up on the stack as I'd hoped.
+
+Aha, `head` also needs to be generated, again because the type inference sees `C-1` as opaque. Battery power numbers now are 0.35 33 62 35. Happy with that. 
+
+Allocations are still much higher than I expected though. How do I debug this...
+
+Let's take one of the queries and remove clauses until we get to the minimal surprise-allocating query.
+
+``` julia
+@query begin
+  movie_keyword(_, t_id, _)
+  title(t_id, _, _, _, _)
+  return (t_id::Int64,)
+end
+# (5.06 M allocations: 161.319 MB, 56.56% gc time)
+```
+
+The types are all correctly inferred and there is nothing surprising in the lowered code, so let's poke around in the llvm bitcode.
+
+Every gallop is followed by a heap allocation:
+
+``` julia
+%159 = call i64 @julia_gallop_73100(%jl_value_t* %148, i64 %158, i64 %at.0, i64 %97) #0
+%160 = call %jl_value_t* @jl_gc_pool_alloc(i8* %ptls_i8, i32 1456, i32 32)
+```
+
+It's hard to follow the rest of the bitcode, but my first suspicion is that it's allocating the type `Finger{C}`. So let's calculate those at compile time:
+
+``` julia
+@generated function project{C}(index, finger::Finger{C}, val)
+  quote
+    column = index[$C]
+    down_lo = gallop(column, val, finger.lo, finger.hi, <)
+    down_hi = gallop(column, val, down_lo, finger.hi, <=)
+    $(Finger{C+1})(down_lo, down_hi)
+  end
+end
+
+@generated function Base.next{C}(index, finger::Finger{C}, at)
+  quote
+    column = index[$C]
+    next_at = gallop(column, column[at], at, finger.hi, <=)
+    ($(Finger{C+1})(at, next_at), next_at)
+  end
+end
+```
+
+No difference.
+
+Offhand, I notice this chunk of code:
+
+``` julia
+SSAValue(16) = (Core.tuple)($(Expr(:new, Data.Finger{2}, :(at), :(next_at@_29))),next_at@_29::Int64)::Tuple{Data.Finger{2},Int64}
+SSAValue(5) = SSAValue(16)
+SSAValue(28) = (Base.getfield)(SSAValue(5),1)::UNION{DATA.FINGER{2},INT64}
+```
+
+Now there is some shitty type inference. It put a thing in a tuple, then took it out again, and immediately forgot what it was.
+
+I wonder if I can get rid of the tuples.
+
+Took a bit of fiddling, but I can use the down_finger as the iterator for the loop too.
+
+``` julia
+function finger(index)
+  Finger{0}(1, length(index[1])+1)
+end
+  
+function Base.length{C}(index, finger::Finger{C})
+  # not technically correct - may be repeated values
+  finger.hi - finger.lo
+end
+
+@generated function project{C}(index, finger::Finger{C}, val)
+  quote
+    column = index[$(C+1)]
+    down_lo = gallop(column, val, finger.lo, finger.hi, <)
+    down_hi = gallop(column, val, down_lo, finger.hi, <=)
+    Finger{$(C+1)}(down_lo, down_hi)
+  end
+end
+
+@generated function Base.start{C}(index, finger::Finger{C})
+  quote 
+    column = index[$(C+1)]
+    hi = gallop(column, column[finger.lo], finger.lo, finger.hi, <=)
+    Finger{$(C+1)}(finger.lo, hi)
+  end
+end
+
+function Base.done{C, C2}(index, finger::Finger{C}, down_finger::Finger{C2})
+  down_finger.hi >= finger.hi
+end
+
+function Base.next{C,C2}(index, finger::Finger{C}, down_finger::Finger{C2})
+  column = index[C2]
+  hi = gallop(column, column[down_finger.hi], down_finger.hi, finger.hi, <=)
+  Finger{C2}(down_finger.hi, hi)
+end
+
+function head{C}(index, finger::Finger{C})
+  index[C][finger.lo]
+end
+```

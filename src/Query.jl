@@ -310,19 +310,25 @@ function plan_query(query)
         end
       end
     else 
-      starts = [:(start($index, $finger)) for (index, finger) in zip(indexes, fingers)]
-      dones = [:(!done($index, $finger, at)) for (index, finger) in zip(indexes, fingers)]
-      nexts = [:(($down_finger, at) = next($index, $finger, at); $(esc(var)) = head($index, $down_finger)) for (index, finger, down_finger) in zip(indexes, fingers, down_fingers)]
+      starts = [:($down_finger = start($index, $finger)) for (index, finger, down_finger) in zip(indexes, fingers, down_fingers)]
+      heads = [:($(esc(var)) = head($index, $down_finger)) for (index, down_finger) in zip(indexes, down_fingers)]
+      nexts = [:($down_finger = next($index, $finger, $down_finger)) for (index, finger, down_finger) in zip(indexes, fingers, down_fingers)]
+      dones = [:(!done($index, $finger, $down_finger)) for (index, finger, down_finger) in zip(indexes, fingers, down_fingers)]
       body = quote 
         let 
           local ix = @min_by_length([$(indexes...)], [$(fingers...)])
-          local at = @switch ix $(starts...)
-          local var
-          while $need_more_results && (@switch ix $(dones...))
-            @switch ix $(nexts...)
+          @switch ix $(starts...)
+          local $(esc(var))
+          local more = true
+          while $need_more_results && more
+            @switch ix $(heads...)
             @switch_off ix $(projects...)
             if $(reduce((a,b) -> :($a && $b), lengths))
               $body
+            end
+            more = @switch ix $(dones...)
+            if more
+              @switch ix $(nexts...)
             end
           end
         end
@@ -331,6 +337,7 @@ function plan_query(query)
     
   end
   
+  # put everything together
   results_symbols = [Symbol("results_$var") for var in return_clause.vars]
   result = :(Relation(tuple($(results_symbols...)), $(return_clause.num_keys)))        
   quote 

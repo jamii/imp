@@ -194,7 +194,7 @@ immutable Finger{C}
 end
 
 function finger(index)
-  Finger{1}(1, length(index[1])+1)
+  Finger{0}(1, length(index[1])+1)
 end
   
 function Base.length{C}(index, finger::Finger{C})
@@ -202,29 +202,35 @@ function Base.length{C}(index, finger::Finger{C})
   finger.hi - finger.lo
 end
 
-function project{C}(index, finger::Finger{C}, val)
-  column = index[C]
-  down_lo = gallop(column, val, finger.lo, finger.hi, <)
-  down_hi = gallop(column, val, down_lo, finger.hi, <=)
-  Finger{C+1}(down_lo, down_hi)
+@generated function project{C}(index, finger::Finger{C}, val)
+  quote
+    column = index[$(C+1)]
+    down_lo = gallop(column, val, finger.lo, finger.hi, <)
+    down_hi = gallop(column, val, down_lo, finger.hi, <=)
+    Finger{$(C+1)}(down_lo, down_hi)
+  end
 end
 
-function Base.start{C}(index, finger::Finger{C})
-  finger.lo
+@generated function Base.start{C}(index, finger::Finger{C})
+  quote 
+    column = index[$(C+1)]
+    hi = gallop(column, column[finger.lo], finger.lo, finger.hi, <=)
+    Finger{$(C+1)}(finger.lo, hi)
+  end
 end
 
-function Base.done{C}(index, finger::Finger{C}, at)
-  at >= finger.hi
+function Base.done{C, C2}(index, finger::Finger{C}, down_finger::Finger{C2})
+  down_finger.hi >= finger.hi
 end
 
-function Base.next{C}(index, finger::Finger{C}, at)
-  column = index[C]
-  next_at = gallop(column, column[at], at, finger.hi, <=)
-  (Finger{C+1}(at, next_at), next_at)
+function Base.next{C,C2}(index, finger::Finger{C}, down_finger::Finger{C2})
+  column = index[C2]
+  hi = gallop(column, column[down_finger.hi], down_finger.hi, finger.hi, <=)
+  Finger{C2}(down_finger.hi, hi)
 end
 
 function head{C}(index, finger::Finger{C})
-  index[C-1][finger.lo]
+  index[C][finger.lo]
 end
 
 function Base.length(relation::Relation)

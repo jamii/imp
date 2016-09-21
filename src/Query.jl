@@ -169,7 +169,7 @@ function plan_query(query)
   # use types of return relation if available
   if return_clause.name != ()
     for (ix, var) in enumerate(return_clause.vars)
-      return_clause.typs[ix] = :(eltype($(esc(return_clause.name)).columns[ix]))
+      return_clause.typs[ix] = :(eltype($(return_clause.name).columns[$ix]))
     end
   end
   
@@ -225,53 +225,20 @@ function plan_query(query)
     end
   end
   
-  # for each var that is assigned an expr, make a wrapper function
-  eval_funs = Dict()
-  for (var, clause) in var_assigned_by
-    args = intersect(vars, clause.vars)
-    eval_fun = esc((quote
-      @inline function $(Symbol("eval_$var"))($(args...))
-        $(clause.expr)
-      end
-    end).args[2])
-    eval_funs[var] = (args, eval_fun)
-  end
-  
-  # for each When clause, make a wrapper function
-  when_funs = Dict()
-  for (ix, clause) in enumerate(clauses)
-    if typeof(clause) == When
-      args = intersect(vars, clause.vars)
-      when_fun = esc((quote
-        @inline function $(Symbol("when_$ix"))($(args...))
-          $(clause.expr)
-        end
-      end).args[2])
-      when_funs[ix] = (args, when_fun)
-    end
-  end
-  
   # initialize arrays for storing results
   results_inits = []
   for (var, typ) in zip(return_clause.vars, return_clause.typs)
-    results_init = :(local $(Symbol("results_$var")) = Vector{$typ}())
+    results_init = :(local $(Symbol("results_$var")) = Vector{$(esc(typ))}())
     push!(results_inits, results_init)
-  end
-  
-  # combine all the init steps
-  init = quote
-    $(index_inits...)
-    $((eval_funs[var][2] for var in vars if haskey(eval_funs, var))...)
-    $((when_fun for (ix, (args, when_fun)) in when_funs)...)
-    $(results_inits...)
   end
   
   # figure out at which point in the variable order each When clause can be run
   whens = [[] for _ in vars]
-  for (clause_ix, (args, when_fun)) in when_funs
-    var_ix = maximum(indexin(args, vars))
-    when_call = :($(esc(Symbol("when_$clause_ix")))($(args...)))
-    push!(whens[var_ix], when_call)
+  for clause in clauses
+    if typeof(clause) == When
+      var_ix = maximum(indexin(clause.vars, vars))
+      push!(whens[var_ix], clause.expr)
+    end
   end
   
   # figure out at which point in the variable order we have all the variables we need to return
@@ -279,7 +246,7 @@ function plan_query(query)
   
   # store results 
   body = quote
-    $([:(push!($(Symbol("results_$var")), $var))
+    $([:(push!($(Symbol("results_$var")), $(esc(var))))
     for var in return_clause.vars]...)
     need_more_results = false
   end
@@ -290,7 +257,7 @@ function plan_query(query)
     
     # run any When clauses
     for when in whens[var_ix]
-      body = :(if $when; $body; end)
+      body = :(if $(esc(when)); $body; end)
     end
     
     # after return_after, only need to find one solution, not all solutions
@@ -304,29 +271,27 @@ function plan_query(query)
     
     # find valid values for this variable
     clause = get(var_assigned_by, var, ())
-    (args, eval_fun) = get(eval_funs, var, ([], ()))
-    eval_call = :($(esc(Symbol("eval_$var")))($(args...)))
     (clause_ixes, col_ixes) = index_sources[var]
     indexes = [Symbol("index_$clause_ix") for clause_ix in clause_ixes]
     cols = [:(Val{$col_ix}) for col_ix in col_ixes]
     if typeof(clause) == Assign
-      skips = [:(skip!($index, $col, $var)) for (ix, (index, col)) in enumerate(zip(indexes, cols))]
+      skips = [:(skip!($index, $col, $(esc(var)))) for (ix, (index, col)) in enumerate(zip(indexes, cols))]
       body = quote
-        let $var = $eval_call
+        let $(esc(var)) = $(esc(clause.expr))
           if $(reduce((a,b) -> :($a && $b), true, skips))
             $body
           end
         end
       end
     elseif typeof(clause) == In
-      skips = [:(skip!($index, $col, $var)) for (ix, (index, col)) in enumerate(zip(indexes, cols))]
+      skips = [:(skip!($index, $col, $(esc(var)))) for (ix, (index, col)) in enumerate(zip(indexes, cols))]
       body = quote
         let
-          local iter = $eval_call
+          local iter = $(esc(clause.expr))
           local state = start(iter)
-          local $var 
+          local $(esc(var)) 
           while $need_more_results && !done(iter, state)
-            ($var, state) = next(iter, state)
+            ($(esc(var)), state) = next(iter, state)
             if $(reduce((a,b) -> :($a && $b), true, skips))
               $body
             end
@@ -337,12 +302,12 @@ function plan_query(query)
       starts = [:(start!($index, $col)) for (index, col) in zip(indexes, cols)]
       dones = [:(span($index, $col) > 0) for (index, col) in zip(indexes, cols)]
       nexts = [:(next!($index, $col)) for (index, col) in zip(indexes, cols)]
-      skips = [:((state_ix == $ix) || skip!($index, $col, $var)) for (ix, (index, col)) in enumerate(zip(indexes, cols))]
+      skips = [:((state_ix == $ix) || skip!($index, $col, $(esc(var)))) for (ix, (index, col)) in enumerate(zip(indexes, cols))]
       body = quote 
         $(starts...)
         let state_ix = @min_by_span([$(indexes...)], [$(cols...)])
           while $need_more_results && (@switch state_ix $(dones...))
-            let $var = @switch state_ix $(nexts...)
+            let $(esc(var)) = @switch state_ix $(nexts...)
               if $(reduce((a,b) -> :($a && $b), skips))
                 $body
               end
@@ -358,7 +323,8 @@ function plan_query(query)
   result = :(Relation(tuple($(results_symbols...)), $(return_clause.num_keys)))        
   quote 
     let
-      $init
+      $(index_inits...)
+      $(results_inits...)
       $body
       $(if return_clause.name != ()
         :(merge!($(esc(return_clause.name)), $result))

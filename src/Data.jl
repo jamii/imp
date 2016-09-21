@@ -345,8 +345,8 @@ end
 function diff{T}(old::Relation{T}, new::Relation{T})
   @assert old.num_keys == new.num_keys 
   order = collect(1:length(old.columns))
-  old_index = index(old, order)
-  new_index = index(new, order)
+  old_index = old.indexes[order]
+  new_index = new.indexes[order]
   old_only_columns = tuple([Vector{eltype(column)}() for column in old.columns]...)
   new_only_columns = tuple([Vector{eltype(column)}() for column in new.columns]...)
   diff_sorted!(old_index, new_index, old_index[1:old.num_keys], new_index[1:new.num_keys], old_only_columns, new_only_columns)
@@ -358,8 +358,8 @@ end
 function Base.merge{T}(old::Relation{T}, new::Relation{T})
   @assert old.num_keys == new.num_keys 
   order = collect(1:length(old.columns))
-  old_index = index(old, order)
-  new_index = index(new, order)
+  old_index = old.indexes[order]
+  new_index = new.indexes[order]
   result_columns = tuple([Vector{eltype(column)}() for column in old.columns]...)
   merge_sorted!(old_index, new_index, old_index[1:old.num_keys], new_index[1:new.num_keys], result_columns)
   result_indexes = Dict{Vector{Int64}, Tuple}(order => result_columns)
@@ -410,7 +410,7 @@ function test()
     a = Relation((x,y), 1)
     b = Relation((x,z), 1)
     c = merge(a,b)
-    @test index(c, [1,2]) == index(b, [1,2])
+    @test c.columns == b.columns
   end
   
   for i in 1:10000

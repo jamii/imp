@@ -208,7 +208,7 @@ function plan_query(query)
   for (var, clause) in var_assigned_by
     args = intersect(vars, clause.vars)
     eval_fun = esc((quote
-      @inline function $(Symbol("eval_$var"))($(args...))
+      function $(Symbol("eval_$var"))($(args...))
         $(clause.expr)
       end
     end).args[2])
@@ -221,7 +221,7 @@ function plan_query(query)
     if typeof(clause) == When
       args = intersect(vars, clause.vars)
       when_fun = esc((quote
-        @inline function $(Symbol("when_$ix"))($(args...))
+        function $(Symbol("when_$ix"))($(args...))
           $(clause.expr)
         end
       end).args[2])
@@ -236,12 +236,10 @@ function plan_query(query)
     if haskey(var_assigned_by, var)
       clause = var_assigned_by[var]
       (args, _) = eval_funs[var]
-      inferred_args = [:($(Symbol("type_$arg"))[][1]) for arg in args]
-      eval_call = :($(esc(Symbol("eval_$var")))($(inferred_args...)))
+      typ = :(eltype(map($(esc(Symbol("eval_$var"))), $([:($(Symbol("type_$arg"))[]) for arg in args]...))))
       if typeof(clause) == In
-        eval_call = :(first($eval_call))
+        error("TODO")
       end
-      typ = :([$eval_call for _ in []])
       push!(typs, typ)
     end
     typ_init = :(local $(Symbol("type_$var")) = typejoin($(typs...)))

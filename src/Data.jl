@@ -4,28 +4,6 @@ using Match
 using Base.Test
 using BenchmarkTools
 
-# gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
-function gallop{T}(column::Vector{T}, value::T, lo::Int64, hi::Int64, cmp) 
-  @inbounds if (lo < hi) && cmp(column[lo], value)
-    step = 1
-    while (lo + step < hi) && cmp(column[lo + step], value)
-      lo = lo + step 
-      step = step << 1
-    end
-    
-    step = step >> 1
-    while step > 0
-      if (lo + step < hi) && cmp(column[lo + step], value)
-        lo = lo + step 
-      end
-      step = step >> 1
-    end
-    
-    lo += 1
-  end
-  lo 
-end 
-
 @generated function cmp_in{T <: Tuple}(xs::T, ys::T, x_at::Int64, y_at::Int64)
   n = length(T.parameters)
   if n == 0
@@ -113,67 +91,6 @@ function quicksort!{T <: Tuple}(cs::T)
   quicksort!(cs, 1, length(cs[1]))
 end
 
-function merge_sorted!{T <: Tuple, K <: Tuple}(old::T, new::T, old_key::K, new_key::K, result::T)
-  @inbounds begin
-    old_at = 1
-    new_at = 1
-    old_hi = length(old[1])
-    new_hi = length(new[1])
-    while old_at <= old_hi && new_at <= new_hi
-      c = cmp_in(old_key, new_key, old_at, new_at)
-      if c == 0
-        push_in!(result, new, new_at)
-        old_at += 1
-        new_at += 1
-      elseif c == 1
-        push_in!(result, new, new_at)
-        new_at += 1
-      else 
-        push_in!(result, old, old_at)
-        old_at += 1
-      end
-    end
-    while old_at <= old_hi
-      push_in!(result, old, old_at)
-      old_at += 1
-    end
-    while new_at <= new_hi
-      push_in!(result, new, new_at)
-      new_at += 1
-    end
-  end
-end
-
-function diff_sorted!{T <: Tuple, K <: Tuple}(old::T, new::T, old_key::K, new_key::K, old_only::T, new_only::T)
-  @inbounds begin
-    old_at = 1
-    new_at = 1
-    old_hi = length(old[1])
-    new_hi = length(new[1])
-    while old_at <= old_hi && new_at <= new_hi
-      c = cmp_in(old_key, new_key, old_at, new_at)
-      if c == 0
-        old_at += 1
-        new_at += 1
-      elseif c == 1
-        push_in!(new_only, new, new_at)
-        new_at += 1
-      else 
-        push_in!(old_only, old, old_at)
-        old_at += 1
-      end
-    end
-    while old_at <= old_hi
-      push_in!(old_only, old, old_at)
-      old_at += 1
-    end
-    while new_at <= new_hi
-      push_in!(new_only, new, new_at)
-      new_at += 1
-    end
-  end
-end
-
 function dedup_sorted!{T}(columns::T, key, val, deduped::T)
   at = 1
   hi = length(columns[1])
@@ -192,8 +109,14 @@ type Relation{T <: Tuple} # where T is a tuple of columns
   indexes::Dict{Vector{Int64},Tuple}
 end
 
-function is_type_expr(expr)
-  isa(expr, Symbol) || (isa(expr, Expr) && expr.head == :(.))
+function Relation(columns, num_keys::Int64)
+  deduped::typeof(columns) = map((column) -> Vector{eltype(column)}(), columns)
+  quicksort!(columns)
+  key = columns[1:num_keys]
+  val = columns[num_keys+1:1]
+  dedup_sorted!(columns, key, val, deduped)
+  order = collect(1:length(columns))
+  Relation(deduped, num_keys, Dict{Vector{Int64}, Tuple}(order => deduped))
 end
 
 function parse_relation(expr)
@@ -216,9 +139,9 @@ end
 # examples:
 # @relation (Int64, Float64)
 # @relation (Int64,) => Int64
-# @relation height_at(Int64, Int64) = Float64
+# @relation height_at(Int64) => Float64
 # @relation married(String, String)
-# @relation state() = (Int64, Symbol)
+# @relation state() => (Int64, Symbol)
 macro relation(expr) 
   (name, keys, vals) = parse_relation(expr)
   typs = [keys..., vals...]
@@ -235,121 +158,121 @@ macro relation(expr)
   end
 end
 
-type Index{T}
-  columns::T
-  los::Vector{Int64}
-  ats::Vector{Int64}
-  his::Vector{Int64}
-end
-
 function index{T}(relation::Relation{T}, order::Vector{Int64})
-  columns = get!(relation.indexes, order) do
+  get!(relation.indexes, order) do
     columns = tuple([copy(relation.columns[ix]) for ix in order]...)
     quicksort!(columns)
     columns
   end
-  n = length(order) + 1
-  los = [1 for _ in 1:n]
-  ats = [1 for _ in 1:n]
-  his = [length(relation)+1 for _ in 1:n]
-  Index(columns, los, ats, his)
 end
 
-function span{T,C}(index::Index{T}, ::Type{Val{C}})
+# gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
+function gallop{T}(column::Vector{T}, value::T, lo::Int64, hi::Int64, cmp) 
+  @inbounds if (lo < hi) && cmp(column[lo], value)
+    step = 1
+    while (lo + step < hi) && cmp(column[lo + step], value)
+      lo = lo + step 
+      step = step << 1
+    end
+    
+    step = step >> 1
+    while step > 0
+      if (lo + step < hi) && cmp(column[lo + step], value)
+        lo = lo + step 
+      end
+      step = step >> 1
+    end
+    
+    lo += 1
+  end
+  lo 
+end 
+
+immutable Finger{C}
+  lo::Int64
+  hi::Int64
+end
+
+function finger(index)
+  Finger{1}(1, length(index[1])+1)
+end
+  
+function Base.length{C}(index, finger::Finger{C})
   # not technically correct - may be repeated values
-  index.his[C] - index.ats[C]
+  finger.hi - finger.lo
 end
 
-function start!{T,C}(index::Index{T}, ::Type{Val{C}})
-  index.ats[C] = index.los[C]
+function project{C}(index, finger::Finger{C}, val)
+  column = index[C]
+  down_lo = gallop(column, val, finger.lo, finger.hi, <)
+  down_hi = gallop(column, val, down_lo, finger.hi, <=)
+  Finger{C+1}(down_lo, down_hi)
 end
 
-function next!{T,C}(index::Index{T}, ::Type{Val{C}})
-  val = index.columns[C][index.ats[C]]
-  index.los[C+1] = index.ats[C]
-  index.ats[C] = gallop(index.columns[C], val, index.ats[C], index.his[C], <=)
-  index.his[C+1] = index.ats[C]
-  val
+function Base.start{C}(index, finger::Finger{C})
+  finger.lo
 end
 
-function skip!{T,C}(index::Index{T}, ::Type{Val{C}}, val)
-  index.los[C+1] = gallop(index.columns[C], val, index.los[C], index.his[C], <)
-  if index.los[C+1] >= index.his[C]
-    return false
-  end
-  index.his[C+1] = gallop(index.columns[C], val, index.los[C+1], index.his[C], <=)
-  if index.los[C+1] >= index.his[C+1]
-    return false
-  end
-  return true
+function Base.done{C}(index, finger::Finger{C}, at)
+  at >= finger.hi
 end
 
-function Base.push!{T}(relation::Relation{T}, values)
-  @assert length(relation.columns) == length(values)
-  for ix in 1:length(values)
-    push!(relation.columns[ix], values[ix])
-  end
-  empty!(relation.indexes)
-  # TODO can preserve indexes when inserted value is at end or beginning
-  # TODO remove dupes
+function Base.next{C}(index, finger::Finger{C}, at)
+  column = index[C]
+  next_at = gallop(column, column[at], at, finger.hi, <=)
+  (Finger{C+1}(at, next_at), next_at)
 end
 
-function Base.empty!{T}(relation::Relation{T})
-  for column in relations.columns
-    empty!(column)
-  end
-  empty!(relation.indexes)
+function head{C}(index, finger::Finger{C})
+  index[C-1][finger.lo]
 end
 
 function Base.length(relation::Relation)
-  if length(relation.columns) == 0
-    return 0
-  else 
-    length(relation.columns[1])
-  end
+  length(relation.columns) == 0 ? 0 : length(relation.columns[1])
 end
 
-function assign(cols, los, ats, his, ixes, value)
+function foreach_diff{T <: Tuple, K <: Tuple}(old::T, new::T, old_key::K, new_key::K, old_only, new_only, old_and_new)
   @inbounds begin
-    n = length(ixes)
-    for c in 1:n
-      ix = ixes[c]
-      los[ix+1] = gallop(cols[c], value, los[ix], his[ix], <)
-      if los[ix+1] >= his[ix]
-        return false
-      end
-      his[ix+1] = gallop(cols[c], value, los[ix+1], his[ix], <=)
-      if los[ix+1] >= his[ix+1]
-        return false
+    old_at = 1
+    new_at = 1
+    old_hi = length(old[1])
+    new_hi = length(new[1])
+    while old_at <= old_hi && new_at <= new_hi
+      c = cmp_in(old_key, new_key, old_at, new_at)
+      if c == 0
+        old_and_new(old, new, old_at, new_at)
+        old_at += 1
+        new_at += 1
+      elseif c == 1
+        new_only(new, new_at)
+        new_at += 1
+      else 
+        old_only(old, old_at)
+        old_at += 1
       end
     end
-    return true
-  end
-end
-
-function Base.in(row::Tuple, relation::Relation)
-  @assert length(relation.columns) == length(row)
-  lo = 1
-  hi = length(relation.columns[1]) + 1
-  # @inbounds
-  for (c,v) in zip(relation.columns, row)
-    if lo >= hi
-      return false
+    while old_at <= old_hi
+      old_only(old, old_at)
+      old_at += 1
     end
-    lo = gallop(c, v, lo, hi, <)
-    hi = gallop(c, v, lo, hi, <=)
+    while new_at <= new_hi
+      new_only(new, new_at)
+      new_at += 1
+    end
   end
-  return lo < hi
 end
 
 function diff{T}(old::Relation{T}, new::Relation{T})
   @assert old.num_keys == new.num_keys 
   order = collect(1:length(old.columns))
-  old_index = old.indexes[order]
-  new_index = new.indexes[order]
+  old_index = index(old, order)
+  new_index = index(new, order)
   old_only_columns = tuple([Vector{eltype(column)}() for column in old.columns]...)
   new_only_columns = tuple([Vector{eltype(column)}() for column in new.columns]...)
-  diff_sorted!(old_index, new_index, old_index[1:old.num_keys], new_index[1:new.num_keys], old_only_columns, new_only_columns)
+  foreach_diff(old_index, new_index, old_index[1:old.num_keys], new_index[1:new.num_keys], 
+    (o, i) -> push_in!(old_only_columns, o, i),
+    (n, i) -> push_in!(new_only_columns, n, i),
+    (o, n, oi, ni) -> ())
   old_only_indexes = Dict{Vector{Int64}, Tuple}(order => old_only_columns)
   new_only_indexes = Dict{Vector{Int64}, Tuple}(order => new_only_columns)
   (Relation(old_only_columns, old.num_keys, old_only_indexes), Relation(new_only_columns, new.num_keys, new_only_indexes))
@@ -361,7 +284,10 @@ function Base.merge{T}(old::Relation{T}, new::Relation{T})
   old_index = old.indexes[order]
   new_index = new.indexes[order]
   result_columns = tuple([Vector{eltype(column)}() for column in old.columns]...)
-  merge_sorted!(old_index, new_index, old_index[1:old.num_keys], new_index[1:new.num_keys], result_columns)
+  foreach_diff(old_index, new_index, old_index[1:old.num_keys], new_index[1:new.num_keys], 
+    (o, i) -> push_in!(result_columns, o, i),
+    (n, i) -> push_in!(result_columns, n, i),
+    (o, n, oi, ni) -> push_in!(result_columns, n, ni))
   result_indexes = Dict{Vector{Int64}, Tuple}(order => result_columns)
   Relation(result_columns, old.num_keys, result_indexes)
 end
@@ -376,14 +302,14 @@ function Base.merge!{T}(old::Relation{T}, new::Relation{T})
   replace!(old, merge(old, new))
 end
 
-function Relation(columns, num_keys::Int64)
-  deduped::typeof(columns) = map((column) -> Vector{eltype(column)}(), columns)
-  quicksort!(columns)
-  key = columns[1:num_keys]
-  val = columns[num_keys+1:1]
-  dedup_sorted!(columns, key, val, deduped)
-  order = collect(1:length(columns))
-  Relation(deduped, num_keys, Dict{Vector{Int64}, Tuple}(order => deduped))
+function Base.push!{T}(relation::Relation{T}, values)
+  @assert length(relation.columns) == length(values)
+  for ix in 1:length(values)
+    push!(relation.columns[ix], values[ix])
+  end
+  empty!(relation.indexes)
+  # TODO can preserve indexes when inserted value is at end or beginning
+  # TODO remove dupes
 end
 
 import Atom
@@ -391,7 +317,7 @@ function Atom.render(editor::Atom.Editor, relation::Relation)
   Atom.render(editor, relation.columns)
 end
 
-export Relation, @relation, Index, index, span, start!, next!, skip!, replace!, gallop, diff
+export Relation, @relation, Index, index, Finger, finger, project, head
 
 function test()
   for i in 1:10000
@@ -424,27 +350,6 @@ function test()
     b = Relation((x2,z), 1)
     c = merge(a,b)
     @test length(c) == length(x1) + length(x2)
-  end
-  
-  for i in 1:10000
-    srand(i)
-    x = unique(rand(1:i, i))
-    y = rand(1:i, length(x))
-    ix = rand(1:length(x))
-    row = (x[ix], y[ix])
-    @test row in Relation((x,y), 2)
-  end
-  
-  for i in 1:10000
-    srand(i)
-    x = unique(rand(1:i, i))
-    y = rand(1:i, length(x))
-    rows = Set(zip(x,y))
-    row = (rand(1:(i+1)), rand(1:(i+1)))
-    while row in rows
-      row = (rand(1:(i+1)), rand(1:(i+1)))
-    end
-    @test !(row in Relation((x,y), 2))
   end
   
   @test Base.return_types(Relation, (Tuple{Vector{Int64}, Vector{String}}, Int64)) == [Relation{Tuple{Vector{Int64}, Vector{String}}}]

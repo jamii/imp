@@ -11,17 +11,22 @@ macro switch(ix_var, cases...)
   body
 end
 
-macro min_by_span(indexes, cols)
+macro switch_off(ix_var, cases...)
+  lines = [:(if $(esc(ix_var)) != $ix; $(esc(cases[ix])); end) for ix in 1:length(cases)]
+  quote $(lines...) end
+end
+
+macro min_by_length(indexes, fingers)
   indexes = indexes.args
-  cols = cols.args
+  fingers = fingers.args
   quote 
     min_ix = 1
-    min_span = span($(esc(indexes[1])), $(esc(cols[1])))
+    min_length = length($(esc(indexes[1])), $(esc(fingers[1])))
     $([quote 
-      next_span = span($(esc(indexes[ix])), $(esc(cols[ix])))
-      if next_span < min_span
+      next_length = length($(esc(indexes[ix])), $(esc(fingers[ix])))
+      if next_length < min_length
         min_ix = $ix
-        min_span = next_span
+        min_length = next_length
       end
     end for ix in 2:length(indexes)]...)
     min_ix
@@ -219,9 +224,12 @@ function plan_query(query)
     if typeof(clause) == Row 
       order = sort_orders[clause_ix]
       typs = [:(Vector{eltype($(esc(clause.name)).columns[$ix])}) for ix in order]
-      typ = :(Index{Tuple{$(typs...)}})
-      index_init = :(local $(Symbol("index_$clause_ix"))::$typ = index($(esc(clause.name)), $order))
-      push!(index_inits, index_init)
+      typ = :(Tuple{$(typs...)})
+      index_init = quote
+        local $(Symbol("index_$clause_ix"))::$typ = index($(esc(clause.name)), $order)
+        local $(Symbol("finger_$(clause_ix)_1")) = finger($(Symbol("index_$clause_ix")))
+      end
+      push!(index_inits, index_init.args...)
     end
   end
   
@@ -273,44 +281,48 @@ function plan_query(query)
     clause = get(var_assigned_by, var, ())
     (clause_ixes, col_ixes) = index_sources[var]
     indexes = [Symbol("index_$clause_ix") for clause_ix in clause_ixes]
-    cols = [:(Val{$col_ix}) for col_ix in col_ixes]
+    fingers = [Symbol("finger_$(clause_ix)_$(col_ix)") for (clause_ix, col_ix) in zip(clause_ixes, col_ixes)]
+    down_fingers = [Symbol("finger_$(clause_ix)_$(col_ix+1)") for (clause_ix, col_ix) in zip(clause_ixes, col_ixes)]
+    projects = [:($down_finger = project($index, $finger, $(esc(var)))) for (index, finger, down_finger) in zip(indexes, fingers, down_fingers)]
+    lengths = [:(length($index, $down_finger) > 0) for (index, down_finger) in zip(indexes, down_fingers)]
     if typeof(clause) == Assign
-      skips = [:(skip!($index, $col, $(esc(var)))) for (ix, (index, col)) in enumerate(zip(indexes, cols))]
       body = quote
         let $(esc(var)) = $(esc(clause.expr))
-          if $(reduce((a,b) -> :($a && $b), true, skips))
+          $(projects...)
+          if $(reduce((a,b) -> :($a && $b), true, lengths))
             $body
           end
         end
       end
     elseif typeof(clause) == In
-      skips = [:(skip!($index, $col, $(esc(var)))) for (ix, (index, col)) in enumerate(zip(indexes, cols))]
       body = quote
         let
           local iter = $(esc(clause.expr))
           local state = start(iter)
           local $(esc(var)) 
           while $need_more_results && !done(iter, state)
+            $(projects...)
             ($(esc(var)), state) = next(iter, state)
-            if $(reduce((a,b) -> :($a && $b), true, skips))
+            if $(reduce((a,b) -> :($a && $b), true, lengths))
               $body
             end
           end
         end
       end
     else 
-      starts = [:(start!($index, $col)) for (index, col) in zip(indexes, cols)]
-      dones = [:(span($index, $col) > 0) for (index, col) in zip(indexes, cols)]
-      nexts = [:(next!($index, $col)) for (index, col) in zip(indexes, cols)]
-      skips = [:((state_ix == $ix) || skip!($index, $col, $(esc(var)))) for (ix, (index, col)) in enumerate(zip(indexes, cols))]
+      starts = [:(start($index, $finger)) for (index, finger) in zip(indexes, fingers)]
+      dones = [:(!done($index, $finger, at)) for (index, finger) in zip(indexes, fingers)]
+      nexts = [:(($down_finger, at) = next($index, $finger, at); $(esc(var)) = head($index, $down_finger)) for (index, finger, down_finger) in zip(indexes, fingers, down_fingers)]
       body = quote 
-        $(starts...)
-        let state_ix = @min_by_span([$(indexes...)], [$(cols...)])
-          while $need_more_results && (@switch state_ix $(dones...))
-            let $(esc(var)) = @switch state_ix $(nexts...)
-              if $(reduce((a,b) -> :($a && $b), skips))
-                $body
-              end
+        let 
+          local ix = @min_by_length([$(indexes...)], [$(fingers...)])
+          local at = @switch ix $(starts...)
+          local var
+          while $need_more_results && (@switch ix $(dones...))
+            @switch ix $(nexts...)
+            @switch_off ix $(projects...)
+            if $(reduce((a,b) -> :($a && $b), lengths))
+              $body
             end
           end
         end

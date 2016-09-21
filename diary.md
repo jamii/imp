@@ -5366,8 +5366,10 @@ Let's take one of the queries and remove clauses until we get to the minimal sur
 @query begin
   movie_keyword(_, t_id, _)
   title(t_id, _, _, _, _)
+  @when t_id < -1
   return (t_id::Int64,)
 end
+# 0 results
 # (5.06 M allocations: 161.319 MB, 56.56% gc time)
 ```
 
@@ -5458,3 +5460,17 @@ function head{C}(index, finger::Finger{C})
   index[C][finger.lo]
 end
 ```
+
+Still have 50m allocations though. 
+
+``` julia
+function foo()
+  finger = Finger{1}(1,1)
+  for _ in 1:1000
+    finger = Finger{1}(finger.hi + finger.lo, finger.lo)
+  end
+  finger
+end
+```
+
+This doesn't allocate at all. So fingers definitely *can* be stack-allocated. The lowered code doesn't look any different to me. Not sure what else to do.

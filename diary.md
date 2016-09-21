@@ -5300,3 +5300,7 @@ I learned how to get at closure objects:
 ``` julia
 Base.return_types(eval(Expr(:new, Symbol("#eval_tracks#10"))), (Int64,))
 ```
+
+I spent the entire day debugging newly created type inference issues and eventually decided to give up on it entirely. It's been nothing but a time sink, and I knew it was going to be a time sink from the beginning and I did it anyway. Note to self - do not ignore that feeling of creeping doom.
+
+Bench numbers for new relation api are 0.45 35 67 38. Within a margin of error of previous numbers.

@@ -303,9 +303,29 @@ function plan_query(query)
     indexes = [Symbol("index_$clause_ix") for clause_ix in clause_ixes]
     cols = [:(Val{$col_ix}) for col_ix in col_ixes]
     if typeof(clause) == Assign
-      error("TODO")
+      skips = [:(skip!($index, $col, $var)) for (ix, (index, col)) in enumerate(zip(indexes, cols))]
+      body = quote
+        let $var = $eval_call
+          if $(reduce((a,b) -> :($a && $b), true, skips))
+            $body
+          end
+        end
+      end
     elseif typeof(clause) == In
-      error("TODO")
+      skips = [:(skip!($index, $col, $var)) for (ix, (index, col)) in enumerate(zip(indexes, cols))]
+      body = quote
+        let
+          local iter = $eval_call
+          local state = start(iter)
+          local $var 
+          while $need_more_results && !done(iter, state)
+            ($var, state) = next(iter, state)
+            if $(reduce((a,b) -> :($a && $b), true, skips))
+              $body
+            end
+          end
+        end
+      end
     else 
       starts = [:(start!($index, $col)) for (index, col) in zip(indexes, cols)]
       dones = [:(span($index, $col) > 0) for (index, col) in zip(indexes, cols)]
@@ -314,10 +334,11 @@ function plan_query(query)
       body = quote 
         $(starts...)
         let state_ix = @min_by_span([$(indexes...)], [$(cols...)])
-          while @switch state_ix $(dones...)
-            $var = @switch state_ix $(nexts...)
-            if $(reduce((a,b) -> :($a && $b), skips))
-              $body
+          while $need_more_results && (@switch state_ix $(dones...))
+            let $var = @switch state_ix $(nexts...)
+              if $(reduce((a,b) -> :($a && $b), skips))
+                $body
+              end
             end
           end
         end

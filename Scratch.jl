@@ -1,7 +1,9 @@
 include("src/Data.jl")
 include("src/Query.jl")
 include("examples/Graph.jl")
-Graph.f(Graph.edge1)
+Graph.test()
+include("examples/Chinook.jl")
+Chinook.test()
 
 # Data.test()
 # include("src/UI.jl")

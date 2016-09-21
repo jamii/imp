@@ -189,7 +189,7 @@ end
 type Relation{T <: Tuple} # where T is a tuple of columns
   columns::T
   num_keys::Int64
-  indexes::Dict{Vector{Int64},T}
+  indexes::Dict{Vector{Int64},Tuple}
 end
 
 function is_type_expr(expr)
@@ -225,7 +225,7 @@ macro relation(expr)
   order = collect(1:length(typs))
   body = quote 
     columns = tuple($([:(Vector{$(esc(typ))}()) for typ in typs]...))
-    indexes = Dict{Vector{Int64}, typeof(columns)}($order => columns)
+    indexes = Dict{Vector{Int64},Tuple}($order => columns)
     Relation(columns, $(length(keys)), indexes)
   end
   if name != ()
@@ -242,7 +242,7 @@ type Index{T}
   his::Vector{Int64}
 end
 
-@inline function index{T}(relation::Relation{T}, order::Vector{Int64})
+function index{T}(relation::Relation{T}, order::Vector{Int64})
   columns = get!(relation.indexes, order) do
     columns = tuple([copy(relation.columns[ix]) for ix in order]...)
     quicksort!(columns)
@@ -350,8 +350,8 @@ function diff{T}(old::Relation{T}, new::Relation{T})
   old_only_columns = tuple([Vector{eltype(column)}() for column in old.columns]...)
   new_only_columns = tuple([Vector{eltype(column)}() for column in new.columns]...)
   diff_sorted!(old_index, new_index, old_index[1:old.num_keys], new_index[1:new.num_keys], old_only_columns, new_only_columns)
-  old_only_indexes = Dict{Vector{Int64}, typeof(old_only_columns)}(order => old_only_columns)
-  new_only_indexes = Dict{Vector{Int64}, typeof(new_only_columns)}(order => new_only_columns)
+  old_only_indexes = Dict{Vector{Int64}, Tuple}(order => old_only_columns)
+  new_only_indexes = Dict{Vector{Int64}, Tuple}(order => new_only_columns)
   (Relation(old_only_columns, old.num_keys, old_only_indexes), Relation(new_only_columns, new.num_keys, new_only_indexes))
 end
 
@@ -362,7 +362,7 @@ function Base.merge{T}(old::Relation{T}, new::Relation{T})
   new_index = index(new, order)
   result_columns = tuple([Vector{eltype(column)}() for column in old.columns]...)
   merge_sorted!(old_index, new_index, old_index[1:old.num_keys], new_index[1:new.num_keys], result_columns)
-  result_indexes = Dict{Vector{Int64}, typeof(result_columns)}(order => result_columns)
+  result_indexes = Dict{Vector{Int64}, Tuple}(order => result_columns)
   Relation(result_columns, old.num_keys, result_indexes)
 end
 
@@ -383,7 +383,7 @@ function Relation(columns, num_keys::Int64)
   val = columns[num_keys+1:1]
   dedup_sorted!(columns, key, val, deduped)
   order = collect(1:length(columns))
-  Relation(deduped, num_keys, Dict(order => deduped))
+  Relation(deduped, num_keys, Dict{Vector{Int64}, Tuple}(order => deduped))
 end
 
 import Atom

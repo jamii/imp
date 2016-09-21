@@ -34,7 +34,7 @@ function who_is_metal()
     track(track, _, album)
     album(album, _, artist)
     artist(artist, artist_name)
-    return (artist_name,)
+    return (artist_name::String,)
   end
 end
 
@@ -44,10 +44,10 @@ function cost_of_playlist()
     tracks = @query begin 
       playlist_track($p, t)
       track(t, _, _, _, _, _, _, _, price)
-      return (t, price)
+      return (t::Int64, price::Float64)
     end
     total = sum(tracks.columns[2])
-    return (pn, total)
+    return (pn::String, total::Float64)
   end
 end
 
@@ -59,7 +59,7 @@ function revenue_per_track()
       return (p::Int64,)
     end
     total = price * length(plays)
-    return (tn, total)
+    return (tn::String, total::Float64)
   end
 end
 

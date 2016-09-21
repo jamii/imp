@@ -17,7 +17,7 @@ function q1a()
     company_type(ct_id, "production companies")
     @when !contains(note, "(as Metro-Goldwyn-Mayer Pictures)") &&
       (contains(note, "(co-production)") || contains(note, "(presents)"))
-    return (note, title, production_year)
+    return (note::String, title::String, production_year::Int64)
   end
 end
 
@@ -28,7 +28,7 @@ function q2a()
     title(t_id, title, _, _, _)
     movie_companies(_, t_id, cn_id, _, _)
     company_name(cn_id, _, "[de]", _, _, _, _)
-    return (title,)
+    return (title::String,)
   end
 end
 
@@ -43,7 +43,7 @@ function q3a()
     @when production_year > 2005
     movie_info(_, t_id, _, info, _)
     @when info in infos
-    return (title,)
+    return (title::String,)
   end
 end
 
@@ -57,7 +57,7 @@ function q4a()
     info_type(it_id, "rating")
     movie_info_idx(_, t_id, it_id, info, _)
     @when info > "5.0"
-    return (info, title)
+    return (info::String, title::String)
   end
 end
 

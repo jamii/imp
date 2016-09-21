@@ -17,7 +17,7 @@ function f(edge)
     edge(b,c)
     @when b < c
     edge(c,a)
-    return (a, b, c)
+    return (a::Int64, b::Int64, c::Int64)
   end
 end
 

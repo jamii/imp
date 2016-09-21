@@ -8,7 +8,7 @@ include("examples/Chinook.jl")
 Chinook.test()
 
 # Data.test()
-# include("src/UI.jl")
+include("src/UI.jl")
 # 
 # include("examples/Graph.jl")
 # include("examples/Chinook.jl")

@@ -44,12 +44,26 @@ function collect_vars(expr)
   vars
 end
 
+function parse_var(expr)
+  @match expr begin
+    Expr(:(::), [var, typ], _) => var
+    _ => expr
+  end
+end
+
+function parse_typ(expr)
+  @match expr begin
+    Expr(:(::), [var, typ], _) => typ
+    _ => :Any
+  end
+end
+  
 type Row; name; vars; num_keys; end
 type When; expr; vars; end
 type Assign; var; expr; vars; end
 type In; var; expr; vars; end
 type Hint; var; end
-type Return; name; vars; num_keys; end  
+type Return; name; vars; typs; num_keys; end  
 
 function plan_query(query)
   # unwrap block
@@ -72,7 +86,8 @@ function plan_query(query)
       end
       Expr(:return, [expr], _) => begin 
         (name, keys, vals) = Data.parse_relation(expr) 
-        Return(name, Any[keys..., vals...], length(keys)) 
+        typed_vars = Any[keys..., vals...]
+        Return(name, map(parse_var, typed_vars), map(parse_typ, typed_vars), length(keys)) 
       end
       _ => begin
         (name, keys, vals) = Data.parse_relation(line)
@@ -144,11 +159,18 @@ function plan_query(query)
   # add a return if needed
   returns = [clause for clause in clauses if typeof(clause) == Return]
   if length(returns) == 0
-    return_clause = Return((), vars, length(vars))
+    return_clause = Return((), vars, [:Any for _ in vars], length(vars))
   elseif length(returns) == 1
     return_clause = returns[1]
   else
     error("Too many returns: $returns")
+  end
+  
+  # use types of return relation if available
+  if return_clause.name != ()
+    for (ix, var) in enumerate(return_clause.vars)
+      return_clause.typs[ix] = :(eltype($(esc(return_clause.name)).columns[ix]))
+    end
   end
   
   # collect clauses that assign a value to a var before intersect
@@ -208,7 +230,7 @@ function plan_query(query)
   for (var, clause) in var_assigned_by
     args = intersect(vars, clause.vars)
     eval_fun = esc((quote
-      function $(Symbol("eval_$var"))($(args...))
+      @inline function $(Symbol("eval_$var"))($(args...))
         $(clause.expr)
       end
     end).args[2])
@@ -221,7 +243,7 @@ function plan_query(query)
     if typeof(clause) == When
       args = intersect(vars, clause.vars)
       when_fun = esc((quote
-        function $(Symbol("when_$ix"))($(args...))
+        @inline function $(Symbol("when_$ix"))($(args...))
           $(clause.expr)
         end
       end).args[2])
@@ -229,27 +251,10 @@ function plan_query(query)
     end
   end
   
-  # figure out types of variables
-  typ_inits = []
-  for var in vars
-    typs = [:(eltype($(esc(clauses[clause_ix].name)).columns[$var_ix])) for (clause_ix, var_ix) in relation_sources[var]]
-    if haskey(var_assigned_by, var)
-      clause = var_assigned_by[var]
-      (args, _) = eval_funs[var]
-      typ = :(eltype(map($(esc(Symbol("eval_$var"))), $([:($(Symbol("type_$arg"))[]) for arg in args]...))))
-      if typeof(clause) == In
-        error("TODO")
-      end
-      push!(typs, typ)
-    end
-    typ_init = :(local $(Symbol("type_$var")) = typejoin($(typs...)))
-    push!(typ_inits, typ_init)
-  end
-  
   # initialize arrays for storing results
   results_inits = []
-  for var in return_clause.vars
-    results_init = :(local $(Symbol("results_$var")) = Vector{$(Symbol("type_$var"))}())
+  for (var, typ) in zip(return_clause.vars, return_clause.typs)
+    results_init = :(local $(Symbol("results_$var")) = Vector{$typ}())
     push!(results_inits, results_init)
   end
   
@@ -258,7 +263,6 @@ function plan_query(query)
     $(index_inits...)
     $((eval_funs[var][2] for var in vars if haskey(eval_funs, var))...)
     $((when_fun for (ix, (args, when_fun)) in when_funs)...)
-    $(typ_inits...)
     $(results_inits...)
   end
   
@@ -352,7 +356,7 @@ function plan_query(query)
   
   results_symbols = [Symbol("results_$var") for var in return_clause.vars]
   result = :(Relation(tuple($(results_symbols...)), $(return_clause.num_keys)))        
-  @show quote 
+  quote 
     let
       $init
       $body

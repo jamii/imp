@@ -5211,3 +5211,33 @@ But counting triangles also shows a similar improvement, from 636ms to 598ms. Re
 The upside is that it looks like I can switch to GenericJoin without major losses, at least on my current benchmarks.
 
 Julia 0.5 is out for real now, so let's quickly upgrade. Benchmark numbers are about the same.
+
+### 2016 Sep 21
+
+Ok, let's figure out what the query plan should look like. I'm going to preallocate all the needed state up front, to avoid messing around with trying to split up structures so that non-pointerful parts can be stack-allocated.
+
+``` julia
+index_1 = index(edge, [1,2])
+index_2 = index(edge, [1,2])
+index_3 = index(edge, [2,1])
+
+results_a = ...
+results_b = ...
+results_c = ...
+
+state_ix = @min_by_length(index_1, Val{1}, index_2, Val{1})
+while @switch state_ix !done(index_1, Val{1}) !done(index_2, Val{1})
+  a = @switch state_ix next!(index_1, Val{1}) next!(index_2, Val{1})
+  ok_1 = (state_ix == 1) || skip!(index_1, Val{1})
+  ok_2 = (state_ix == 2) || skip!(index_2, Val{1})
+  if ok_1 && ok_2
+    ...
+  end
+end
+```
+
+I'm using the `Val{1}` to specify the column, making the return type predictable.
+
+I don't really like breaking up the iter interface into done/next. I would rather have a `foreach` and pass a closure, but if `index_1` and `index_2` have different types this risks blowing up the amount of code generated at each step. It seems best to stick to a single path through the query. 
+
+So now I need to implement this iterator interface for sorted arrays. 

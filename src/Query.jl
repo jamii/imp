@@ -3,83 +3,28 @@ module Query
 using Data
 using Match
 
-function start_intersect(cols, los, ats, his, ixes)
-  # assume los/his are valid 
-  # los inclusive, his exclusive
-  @inbounds begin
-    for ix in ixes
-      ats[ix] = los[ix]
-    end
+macro switch(ix_var, cases...)
+  body = :(error("Missing case in switch"))
+  for ix in length(cases):-1:1
+    body = :(($(esc(ix_var)) == $ix) ? $(esc(cases[ix])) : $body)
   end
+  body
 end
 
-function next_intersect(cols, los, ats, his, ixes)
-  @inbounds begin
-    fixed = 1
-    n = length(ixes)
-    if ats[ixes[n]] >= his[ixes[n]]
-      return false
-    else
-      value = cols[n][ats[ixes[n]]]
-    end
-    while true 
-      for c in 1:n
-        ix = ixes[c]
-        if fixed == n
-          for c2 in 1:n
-            ix2 = ixes[c2]
-            los[ix2+1] = ats[ix2]
-            his[ix2+1] = gallop(cols[c2], value, ats[ix2], his[ix2], <=)
-            ats[ix2] = his[ix2+1]
-          end
-          return true
-        else 
-          ats[ix] = gallop(cols[c], value, ats[ix], his[ix], <)
-        end
-        if ats[ix] >= his[ix]
-          return false
-        else 
-          next_value = cols[c][ats[ix]]
-          fixed = (value == next_value) ? fixed+1 : 1
-          value = next_value
-        end
+macro min_by_span(indexes, cols)
+  indexes = indexes.args
+  cols = cols.args
+  quote 
+    min_ix = 1
+    min_span = span($(esc(indexes[1])), $(esc(cols[1])))
+    $([quote 
+      next_span = span($(esc(indexes[ix])), $(esc(cols[ix])))
+      if next_span < min_span
+        min_ix = $ix
+        min_span = next_span
       end
-    end
-  end
-end
-
-function shortest(los, ats, his, ixes)
-  @inbounds begin
-    min_i = 1
-    min_length = his[ixes[1]] - los[ixes[1]]
-    for i in 2:length(ixes)
-      length = his[ixes[i]] - los[ixes[i]]
-      if length < min_length
-        min_i = i
-        min_length = length
-      end
-    end
-    return min_i
-  end
-end    
-
-function assign(cols, los, ats, his, ixes, value, skip)
-  @inbounds begin
-    n = length(ixes)
-    for c in 1:n
-      if c != skip
-        ix = ixes[c]
-        los[ix+1] = gallop(cols[c], value, los[ix], his[ix], <)
-        if los[ix+1] >= his[ix]
-          return false
-        end
-        his[ix+1] = gallop(cols[c], value, los[ix+1], his[ix], <=)
-        if los[ix+1] >= his[ix+1]
-          return false
-        end
-      end
-    end
-    return true
+    end for ix in 2:length(indexes)]...)
+    min_ix
   end
 end
 
@@ -99,36 +44,12 @@ function collect_vars(expr)
   vars
 end
 
-function get_var_symbol(expr)
-  if isa(expr, Expr) && expr.head == :(::)
-    expr.args[1]
-  else 
-    expr
-  end
-end
-
-function get_var_type(expr)
-  if isa(expr, Expr) && expr.head == :(::)
-    expr.args[2]
-  else 
-    Any
-  end
-end
-
-function random_value_from(columns)
-  columns[rand(1:length(columns))][1]
-end
-
-function random_value_from(columns, value) 
-  rand(Bool) ? value : random_value_from(columns)
-end
-
 type Row; name; vars; num_keys; end
 type When; expr; vars; end
 type Assign; var; expr; vars; end
 type In; var; expr; vars; end
 type Hint; var; end
-type Return; name; vars; num_keys; end
+type Return; name; vars; num_keys; end  
 
 function plan_query(query)
   # unwrap block
@@ -240,12 +161,12 @@ function plan_query(query)
   end
   
   # for each var, collect list of relation/column pairs that need to be intersected
-  sources = Dict(var => Tuple{Int64, Int64}[] for var in vars)
+  relation_sources = Dict(var => Tuple{Int64, Int64}[] for var in vars)
   for (clause_ix, clause) in enumerate(clauses)
     if typeof(clause) == Row 
       for (var_ix, var) in enumerate(clause.vars)
         if var != :_
-          push!(sources[var], (clause_ix, var_ix))
+          push!(relation_sources[var], (clause_ix, var_ix))
         end
       end
     end
@@ -254,20 +175,19 @@ function plan_query(query)
   # for each Row clause, figure out what order to sort the index in
   sort_orders = Dict(clause_ix => Int64[] for clause_ix in 1:length(clauses))
   for var in vars 
-    for (clause_ix, var_ix) in sources[var]
+    for (clause_ix, var_ix) in relation_sources[var]
       push!(sort_orders[clause_ix], var_ix)
     end
   end
   
-  # assign a slot in the los/ats/his arrays for each relation/column pair
-  ixes = Tuple{Int64, Any}[]
-  for (clause_ix, var_ixes) in sort_orders
-    for var_ix in var_ixes
-      push!(ixes, (clause_ix, var_ix))
+  index_sources = Dict(var => (Int64[], Int64[]) for var in vars)
+  for (var, sources) in relation_sources
+    for (clause_ix, var_ix) in sources
+      col_ix = findfirst(sort_orders[clause_ix], var_ix) 
+      push!(index_sources[var][1], clause_ix)
+      push!(index_sources[var][2], col_ix)
     end
-    push!(ixes, (clause_ix, :buffer))
   end
-  ix_for = Dict(column => ix for (ix, column) in enumerate(ixes))
   
   # --- codegen ---
   
@@ -279,21 +199,6 @@ function plan_query(query)
       index_init = :($(Symbol("index_$clause_ix")) = index($(Symbol("relation_$clause_ix")), $order))
       push!(index_inits, index_init)
     end
-  end
-  
-  # for each var, collect up the columns to be intersected
-  columns_inits = []
-  for var in vars
-    columns = [:($(Symbol("index_$clause_ix"))[$var_ix]) for (clause_ix, var_ix) in sources[var]]
-    columns_init = :($(Symbol("columns_$var")) = [$(columns...)])
-    push!(columns_inits, columns_init)
-  end
-  
-  # for each var, make list of ixes into the global state
-  ixes_inits = []
-  for var in vars 
-    ixes_init = :($(Symbol("ixes_$var")) = $(Int64[ix_for[source] for source in sources[var]]))
-    push!(ixes_inits, ixes_init)
   end
   
   # for each var that is assigned an expr, make a wrapper function
@@ -325,7 +230,7 @@ function plan_query(query)
   # initialize arrays for storing results
   results_inits = []
   for var in vars    
-    typs = [:(eltype($(Symbol("index_$clause_ix"))[$var_ix])) for (clause_ix, var_ix) in sources[var]]
+    typs = [:(eltype($(Symbol("relation_$clause_ix")).columns[$var_ix])) for (clause_ix, var_ix) in relation_sources[var]]
     if haskey(var_assigned_by, var)
       clause = var_assigned_by[var]
       (args, _) = eval_funs[var]
@@ -346,29 +251,12 @@ function plan_query(query)
     push!(results_inits, results_init)
   end
   
-  # initilize global state
-  los = [1 for _ in ixes]
-  ats = [1 for _ in ixes]
-  his = []
-  for (clause_ix, var_ix) in ixes
-    if var_ix == :buffer
-      push!(his, 0)
-    else 
-      push!(his, :(length($(Symbol("index_$clause_ix"))[$var_ix]) + 1))
-    end
-  end
-  
   # combine all the init steps
   init = quote
     $(index_inits...)
-    $(columns_inits...)
-    $(ixes_inits...)
     $((eval_funs[var][2] for var in vars if haskey(eval_funs, var))...)
     $((when_fun for (ix, (args, when_fun)) in when_funs)...)
     $(results_inits...)
-    los = [$(los...)]
-    ats = [$(ats...)]
-    his = [$(his...)]
   end
   
   # figure out at which point in the variable order each When clause can be run
@@ -392,8 +280,6 @@ function plan_query(query)
   # build up the main loop from the inside out
   for var_ix in length(vars):-1:1
     var = vars[var_ix]
-    var_columns = Symbol("columns_$var")
-    var_ixes = Symbol("ixes_$var")
     
     # run any When clauses
     for when in whens[var_ix]
@@ -413,43 +299,23 @@ function plan_query(query)
     clause = get(var_assigned_by, var, ())
     (args, eval_fun) = get(eval_funs, var, ([], ()))
     eval_call = :($(esc(Symbol("eval_$var")))($(args...)))
+    (clause_ixes, col_ixes) = index_sources[var]
+    indexes = [Symbol("index_$clause_ix") for clause_ix in clause_ixes]
+    cols = [:(Val{$col_ix}) for col_ix in col_ixes]
     if typeof(clause) == Assign
-      body = quote
-        let $var = $eval_call
-          if assign($var_columns, los, ats, his, $var_ixes, $var, -1)
-            $body
-          end
-        end
-      end
+      error("TODO")
     elseif typeof(clause) == In
-      body = quote 
-        let
-          local iter = $eval_call
-          local state = start(iter)
-          local $var
-          while $need_more_results && !done(iter, state)
-            ($var, state) = next(iter, state)
-            if assign($var_columns, los, ats, his, $var_ixes, $var, -1)
-              $body
-            end
-          end
-        end
-      end
+      error("TODO")
     else 
+      dones = [:(span($index, $col) > 0) for (index, col) in zip(indexes, cols)]
+      nexts = [:(next!($index, $col)) for (index, col) in zip(indexes, cols)]
+      skips = [:((state_ix != $ix) || skip!($index, $col, $var)) for (ix, (index, col)) in enumerate(zip(indexes, cols))]
       body = quote 
-        @inbounds let
-          local min_i = shortest(los, ats, his, $var_ixes)
-          local ix = $var_ixes[min_i]
-          local column = $var_columns[min_i]
-          ats[ix] = los[ix]
-          while $need_more_results && (ats[ix] < his[ix])
-            let $var = column[ats[ix]]
-              los[ix+1] = ats[ix]
-              ats[ix] = gallop(column, $var, ats[ix], his[ix], <=)
-              his[ix+1] = ats[ix]
-              if assign($var_columns, los, ats, his, $var_ixes, $var, min_i)
-                $body
-              end
+        let state_ix = @min_by_span([$(indexes...)], [$(cols...)])
+          while @switch state_ix $(dones...)
+            $var = @switch state_ix $(nexts...)
+            if $(reduce((a,b) -> :($a && $b), skips))
+              $body
             end
           end
         end

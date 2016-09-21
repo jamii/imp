@@ -21,6 +21,17 @@ function f(edge)
   end
 end
 
+@show macroexpand(quote
+@query begin
+  edge(a,b)
+  @when a < b
+  edge(b,c)
+  @when b < c
+  edge(c,a)
+  return (a, b, c)
+end
+end)
+
 function test()
   @test f(edge1).columns == (
   [1, 2],

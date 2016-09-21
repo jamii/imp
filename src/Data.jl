@@ -242,15 +242,16 @@ type Index{T}
   his::Vector{Int64}
 end
 
-function index{T}(relation::Relation{T}, order::Vector{Int64})
-  columns::T = get!(relation.indexes, order) do
-    columns = tuple([(ix in order) ? copy(column) : Vector{eltype(column)}() for (ix, column) in enumerate(relation.columns)]...)
-    quicksort!(tuple([columns[ix] for ix in order]...))
+@inline function index{T}(relation::Relation{T}, order::Vector{Int64})
+  columns = get!(relation.indexes, order) do
+    columns = tuple([copy(relation.columns[ix]) for ix in order]...)
+    quicksort!(columns)
     columns
   end
-  los = push!([1 for _ in order], 0)
-  ats = push!([1 for _ in order], 0)
-  his = push!([length(columns[ix])+1 for ix in order], 0)
+  n = length(order) + 1
+  los = [1 for _ in 1:n]
+  ats = [1 for _ in 1:n]
+  his = [length(relation)+1 for _ in 1:n]
   Index(columns, los, ats, his)
 end
 
@@ -259,12 +260,15 @@ function span{T,C}(index::Index{T}, ::Type{Val{C}})
   index.his[C] - index.ats[C]
 end
 
+function start!{T,C}(index::Index{T}, ::Type{Val{C}})
+  index.ats[C] = index.los[C]
+end
+
 function next!{T,C}(index::Index{T}, ::Type{Val{C}})
   val = index.columns[C][index.ats[C]]
   index.los[C+1] = index.ats[C]
   index.ats[C] = gallop(index.columns[C], val, index.ats[C], index.his[C], <=)
   index.his[C+1] = index.ats[C]
-  index.ats[C+1] = index.los[C+1]
   val
 end
 
@@ -277,7 +281,6 @@ function skip!{T,C}(index::Index{T}, ::Type{Val{C}}, val)
   if index.los[C+1] >= index.his[C+1]
     return false
   end
-  index.ats[C+1] = index.los[C+1]
   return true
 end
 
@@ -388,7 +391,7 @@ function Atom.render(editor::Atom.Editor, relation::Relation)
   Atom.render(editor, relation.columns)
 end
 
-export Relation, @relation, index, span, next!, skip!, replace!, gallop, diff
+export Relation, @relation, index, span, start!, next!, skip!, replace!, gallop, diff
 
 function test()
   for i in 1:10000

@@ -196,7 +196,7 @@ function plan_query(query)
   for (clause_ix, clause) in enumerate(clauses)
     if typeof(clause) == Row 
       order = sort_orders[clause_ix]
-      index_init = :($(Symbol("index_$clause_ix")) = index($(Symbol("relation_$clause_ix")), $order))
+      index_init = :($(Symbol("index_$clause_ix")) = index($(esc(clause.name)), $order))
       push!(index_inits, index_init)
     end
   end
@@ -230,7 +230,7 @@ function plan_query(query)
   # initialize arrays for storing results
   results_inits = []
   for var in vars    
-    typs = [:(eltype($(Symbol("relation_$clause_ix")).columns[$var_ix])) for (clause_ix, var_ix) in relation_sources[var]]
+    typs = [:(eltype($(esc(clauses[clause_ix].name)).columns[$var_ix])) for (clause_ix, var_ix) in relation_sources[var]]
     if haskey(var_assigned_by, var)
       clause = var_assigned_by[var]
       (args, _) = eval_funs[var]
@@ -307,10 +307,12 @@ function plan_query(query)
     elseif typeof(clause) == In
       error("TODO")
     else 
+      starts = [:(start!($index, $col)) for (index, col) in zip(indexes, cols)]
       dones = [:(span($index, $col) > 0) for (index, col) in zip(indexes, cols)]
       nexts = [:(next!($index, $col)) for (index, col) in zip(indexes, cols)]
-      skips = [:((state_ix != $ix) || skip!($index, $col, $var)) for (ix, (index, col)) in enumerate(zip(indexes, cols))]
+      skips = [:((state_ix == $ix) || skip!($index, $col, $var)) for (ix, (index, col)) in enumerate(zip(indexes, cols))]
       body = quote 
+        $(starts...)
         let state_ix = @min_by_span([$(indexes...)], [$(cols...)])
           while @switch state_ix $(dones...)
             $var = @switch state_ix $(nexts...)
@@ -324,22 +326,15 @@ function plan_query(query)
     
   end
   
-  query_symbol = gensym("query")
-  relation_symbols = [Symbol("relation_$clause_ix") for (clause_ix, clause) in enumerate(clauses) if typeof(clause) == Row]
-  relation_names = [esc(clause.name) for clause in clauses if typeof(clause) == Row]
   results_symbols = [Symbol("results_$var") for var in return_clause.vars]
-          
+  result = :(Relation(tuple($(results_symbols...)), $(return_clause.num_keys)))        
   quote 
-    function $query_symbol($(relation_symbols...))
-      $init
-      $body
-      Relation(tuple($(results_symbols...)), $(return_clause.num_keys))
-    end
-    result = $query_symbol($(relation_names...))
+    $init
+    $body
     $(if return_clause.name != ()
-      :(merge!($(esc(return_clause.name)), result))
+      :(merge!($(esc(return_clause.name)), $result))
     else
-      :result
+      result
     end) 
   end
 end

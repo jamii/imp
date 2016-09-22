@@ -197,13 +197,17 @@ function finger(index)
   Finger{0}(1, length(index[1])+1)
 end
   
-function Base.length{C}(index, finger::Finger{C})
+@generated function Base.length{C}(index, finger::Finger{C})
   # not technically correct - may be repeated values
-  finger.hi - finger.lo
+  quote
+    $(Expr(:meta, :inline))
+    finger.hi - finger.lo
+  end
 end
 
 @generated function project{C}(index, finger::Finger{C}, val)
   quote
+    $(Expr(:meta, :inline))
     column = index[$(C+1)]
     down_lo = gallop(column, val, finger.lo, finger.hi, <)
     down_hi = gallop(column, val, down_lo, finger.hi, <=)
@@ -213,24 +217,34 @@ end
 
 @generated function Base.start{C}(index, finger::Finger{C})
   quote 
+    $(Expr(:meta, :inline))
     column = index[$(C+1)]
     hi = gallop(column, column[finger.lo], finger.lo, finger.hi, <=)
     Finger{$(C+1)}(finger.lo, hi)
   end
 end
 
-function Base.done{C, C2}(index, finger::Finger{C}, down_finger::Finger{C2})
-  down_finger.hi >= finger.hi
+@generated function Base.done{C, C2}(index, finger::Finger{C}, down_finger::Finger{C2})
+  quote
+    $(Expr(:meta, :inline))
+    down_finger.hi >= finger.hi
+  end
 end
 
-function Base.next{C,C2}(index, finger::Finger{C}, down_finger::Finger{C2})
-  column = index[C2]
-  hi = gallop(column, column[down_finger.hi], down_finger.hi, finger.hi, <=)
-  Finger{C2}(down_finger.hi, hi)
+@generated function Base.next{C,C2}(index, finger::Finger{C}, down_finger::Finger{C2})
+  quote 
+    $(Expr(:meta, :inline))
+    column = index[$(C2)]
+    hi = gallop(column, column[down_finger.hi], down_finger.hi, finger.hi, <=)
+    Finger{$(C2)}(down_finger.hi, hi)
+  end
 end
 
-function head{C}(index, finger::Finger{C})
-  index[C][finger.lo]
+@generated function head{C}(index, finger::Finger{C})
+  quote 
+    $(Expr(:meta, :inline))
+    index[$C][finger.lo]
+  end
 end
 
 function Base.length(relation::Relation)

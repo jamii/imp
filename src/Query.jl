@@ -11,9 +11,14 @@ macro switch(ix_var, cases...)
   body
 end
 
+macro switch_on(ix_var, cases...)
+  lines = [:(if $(esc(ix_var)) == $ix; $(esc(cases[ix])); end) for ix in 1:length(cases)]
+  quote $(lines...); Void end
+end
+
 macro switch_off(ix_var, cases...)
   lines = [:(if $(esc(ix_var)) != $ix; $(esc(cases[ix])); end) for ix in 1:length(cases)]
-  quote $(lines...) end
+  quote $(lines...); Void end
 end
 
 macro min_by_length(indexes, fingers)
@@ -311,24 +316,25 @@ function plan_query(query)
       end
     else 
       starts = [:($down_finger = start($index, $finger)) for (index, finger, down_finger) in zip(indexes, fingers, down_fingers)]
-      heads = [:($(esc(var)) = head($index, $down_finger)) for (index, down_finger) in zip(indexes, down_fingers)]
+      heads = [:(head($index, $down_finger)) for (index, down_finger) in zip(indexes, down_fingers)]
       nexts = [:($down_finger = next($index, $finger, $down_finger)) for (index, finger, down_finger) in zip(indexes, fingers, down_fingers)]
       dones = [:(!done($index, $finger, $down_finger)) for (index, finger, down_finger) in zip(indexes, fingers, down_fingers)]
       body = quote 
         let 
+          $([:(local $down_finger = Finger{$col_ix}(0,0)) for (down_finger, col_ix) in zip(down_fingers, col_ixes)]...)
           local ix = @min_by_length([$(indexes...)], [$(fingers...)])
-          @switch ix $(starts...)
+          @switch_on ix $(starts...)
           local $(esc(var))
           local more = true
           while $need_more_results && more
-            @switch ix $(heads...)
+            $(esc(var)) = @switch ix $(heads...)
             @switch_off ix $(projects...)
             if $(reduce((a,b) -> :($a && $b), lengths))
               $body
             end
             more = @switch ix $(dones...)
             if more
-              @switch ix $(nexts...)
+              @switch_on ix $(nexts...)
             end
           end
         end

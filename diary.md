@@ -5461,7 +5461,7 @@ function head{C}(index, finger::Finger{C})
 end
 ```
 
-Still have 50m allocations though. 
+Still have 5m allocations though. 
 
 ``` julia
 function foo()
@@ -5473,4 +5473,28 @@ function foo()
 end
 ```
 
-This doesn't allocate at all. So fingers definitely *can* be stack-allocated. The lowered code doesn't look any different to me. Not sure what else to do.
+This doesn't allocate at all. So fingers definitely *can* be stack-allocated. The lowered code doesn't look any different to me. Not sure what else to do. 
+
+Inlining all the finger functions has no effect.
+
+Changing the switch macros to avoid accidental returns actually increases the number of allocations to 7m. That's interesting. It shouldn't do anything...
+
+### 2016 Sep 22
+
+Yesterday was a bit long, so I want to just try a few simple things today and switch project for the rest of the day.
+
+Unlike the type system, there's no insight into how Julia decides whether or not to stack-allocate something, so I've just been repeatedly guessing. I could really do with a tool that explains the decision. I sent a question to the mailing list, asking if there is a better debugging process than just trying things at random.
+
+Judging by the order of occurence, it looks like the allocations are for `start` and `project` but not for `next`. 
+
+Poking around inside the llvm bitcode I'm about 50% confident that the allocation for `next` is being reusued, but it's still not on the stack. But while I'm in there I notice that there are a lot of checks for undefined variables. 
+
+Of course - if the compiler can't prove that a variable might be null, it can't possibly stack-allocate it. So what if I just zero out the fingers at the beginning:
+
+``` julia
+$([:(local $down_finger = Finger{$col_ix}(0,0)) for (down_finger, col_ix) in zip(down_fingers, col_ixes)]...)
+```
+
+Down to 2.5m allocations. Excellent. That also explains why messing with `switch` affected the number of allocations - it made it harder for the compiler to figure out that the variable was definitely allocated.
+
+Solving the same problem for `var` reduces the allocations to 32. Happy days.

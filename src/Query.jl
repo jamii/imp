@@ -227,11 +227,9 @@ function plan_query(query)
   index_inits = []
   for (clause_ix, clause) in enumerate(clauses)
     if typeof(clause) == Row 
-      order = sort_orders[clause_ix]
-      typs = [:(Vector{eltype($(esc(clause.name)).columns[$ix])}) for ix in order]
-      typ = :(Tuple{$(typs...)})
+      order = Val{tuple(sort_orders[clause_ix]...)}
       index_init = quote
-        local $(Symbol("index_$clause_ix"))::$typ = index($(esc(clause.name)), $order)
+        local $(Symbol("index_$clause_ix")) = index($(esc(clause.name)), $order)
         local $(Symbol("finger_$(clause_ix)_1")) = finger($(Symbol("index_$clause_ix")))
       end
       push!(index_inits, index_init.args...)

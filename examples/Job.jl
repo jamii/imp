@@ -61,15 +61,6 @@ function q4a()
   end
 end
 
-function bar()
-  @query begin
-    movie_keyword(_, t_id, _)
-    title(t_id, _, _, _, _)
-    @when t_id < -1
-    return (t_id::Int64,)
-  end
-end
-
 function test()
   @test Base.return_types(q1a) == [Relation{Tuple{Vector{String}, Vector{String}, Vector{Int64}}}]
   @test Base.return_types(q2a) == [Relation{Tuple{Vector{String}}}]

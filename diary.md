@@ -5498,3 +5498,21 @@ $([:(local $down_finger = Finger{$col_ix}(0,0)) for (down_finger, col_ix) in zip
 Down to 2.5m allocations. Excellent. That also explains why messing with `switch` affected the number of allocations - it made it harder for the compiler to figure out that the variable was definitely allocated.
 
 Solving the same problem for `var` reduces the allocations to 32. Happy days.
+
+Bench numbers 0.33 28 60 34. 
+
+Let's comb through the llvm bitcode a little more to make sure there are no other surprises, and then I'll move on.
+
+There's some messy allocation and generic calls resulting from the fact that the return type of `index` is not inferrable. I don't see a way around this that also leaves the return type of `head` inferrable. The latter is much more important, so this stays for now. It will only matter in subqueries, and I have other possible solutions for those.
+
+I will move it into the index function itself though, so that other data-structures can have their own individual hacks.
+
+``` julia
+@generated function index{T, O}(relation::Relation{T}, ::Type{Val{O}})
+  order = collect(O)
+  typs = [:(typeof(relation.columns[$ix])) for ix in order]
+  quote
+    index(relation, $order)::Tuple{$(typs...)}
+  end
+end
+```

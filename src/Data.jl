@@ -166,6 +166,14 @@ function index{T}(relation::Relation{T}, order::Vector{Int64})
   end
 end
 
+@generated function index{T, O}(relation::Relation{T}, ::Type{Val{O}})
+  order = collect(O)
+  typs = [:(typeof(relation.columns[$ix])) for ix in order]
+  quote
+    index(relation, $order)::Tuple{$(typs...)}
+  end
+end
+
 # gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
 function gallop{T}(column::Vector{T}, value::T, lo::Int64, hi::Int64, cmp) 
   @inbounds if (lo < hi) && cmp(column[lo], value)

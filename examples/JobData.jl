@@ -28,11 +28,11 @@ function read_job()
   relations
 end
 
-if !isfile("../imdb/imp.jld")
+if !isfile("../imdb/imdb.jld")
   job = @time read_job()
-  @time save("../imdb/imp.jld", "job", job)
+  @time save("../imdb/imdb.jld", "job", job)
 else 
-  job = @time load("../imdb/imp.jld", "job")
+  job = @time load("../imdb/imdb.jld", "job")
 end
 
 gc()

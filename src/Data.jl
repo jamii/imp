@@ -196,63 +196,49 @@ function gallop{T}(column::Vector{T}, value::T, lo::Int64, hi::Int64, cmp)
   lo 
 end 
 
-immutable Finger{C}
+type Finger{T}
+  column::Vector{T}
   lo::Int64
   hi::Int64
 end
 
-function finger(index)
-  Finger{0}(1, length(index[1])+1)
+@inline function finger(relation::Relation, index)
+  Finger(Void[], 1, length(index[1])+1)
+end
+
+@inline function finger{col_ix}(relation::Relation, index, finger, ::Type{Val{col_ix}})
+  Finger(index[col_ix], 0, 0)
 end
   
-@generated function Base.length{C}(index, finger::Finger{C})
+@inline function Base.length(finger::Finger)
   # not technically correct - may be repeated values
-  quote
-    $(Expr(:meta, :inline))
-    finger.hi - finger.lo
+  finger.hi - finger.lo
+end
+
+@inline function project{T,T2}(finger::Finger{T}, down_finger::Finger{T2}, val)
+  down_finger.lo = gallop(down_finger.column, val, finger.lo, finger.hi, <)
+  down_finger.hi = gallop(down_finger.column, val, down_finger.lo, finger.hi, <=)
+  down_finger.lo < down_finger.hi
+end
+
+@inline function Base.start{T,T2}(finger::Finger{T}, down_finger::Finger{T2})
+  down_finger.lo = finger.lo
+  down_finger.hi = gallop(down_finger.column, down_finger.column[down_finger.lo], down_finger.lo, finger.hi, <=)
+  down_finger.lo < down_finger.hi
+end
+
+@inline function Base.next{T,T2}(finger::Finger{T}, down_finger::Finger{T2})
+  if down_finger.hi >= finger.hi
+    false
+  else
+    down_finger.lo = down_finger.hi
+    down_finger.hi = gallop(down_finger.column, down_finger.column[down_finger.lo], down_finger.lo, finger.hi, <=)
+    true
   end
 end
 
-@generated function project{C}(index, finger::Finger{C}, val)
-  quote
-    $(Expr(:meta, :inline))
-    column = index[$(C+1)]
-    down_lo = gallop(column, val, finger.lo, finger.hi, <)
-    down_hi = gallop(column, val, down_lo, finger.hi, <=)
-    Finger{$(C+1)}(down_lo, down_hi)
-  end
-end
-
-@generated function Base.start{C}(index, finger::Finger{C})
-  quote 
-    $(Expr(:meta, :inline))
-    column = index[$(C+1)]
-    hi = gallop(column, column[finger.lo], finger.lo, finger.hi, <=)
-    Finger{$(C+1)}(finger.lo, hi)
-  end
-end
-
-@generated function Base.done{C, C2}(index, finger::Finger{C}, down_finger::Finger{C2})
-  quote
-    $(Expr(:meta, :inline))
-    down_finger.hi >= finger.hi
-  end
-end
-
-@generated function Base.next{C,C2}(index, finger::Finger{C}, down_finger::Finger{C2})
-  quote 
-    $(Expr(:meta, :inline))
-    column = index[$(C2)]
-    hi = gallop(column, column[down_finger.hi], down_finger.hi, finger.hi, <=)
-    Finger{$(C2)}(down_finger.hi, hi)
-  end
-end
-
-@generated function head{C}(index, finger::Finger{C})
-  quote 
-    $(Expr(:meta, :inline))
-    index[$C][finger.lo]
-  end
+@inline function head{C, C2}(finger::Finger{C}, down_finger::Finger{C2})
+  down_finger.column[down_finger.lo]
 end
 
 function Base.length(relation::Relation)

@@ -5516,3 +5516,79 @@ I will move it into the index function itself though, so that other data-structu
   end
 end
 ```
+
+I guess the next thing to do is build a new index type. I have a bunch of ideas, but let's start tomorrow with something really simple - nested hashtables.
+
+### 2016 Sep 23
+
+I wrote most of the nested hashtables implementation before getting bogged down in details of the finger protocol again. I ended up going back to something similar to my original mutable implementation, except with individual fingers rather than some hard-to-type agglomeration of state. While the actual instructions executed are probably the same, it feels much easier to reason about.
+
+``` julia
+type Finger{T}
+  column::Vector{T}
+  lo::Int64
+  hi::Int64
+end
+
+function finger(relation::Relation, index)
+  Finger(Void[], 1, length(index[1])+1)
+end
+
+@inline function finger(relation::Relation, index, finger, col_ix)
+  Finger(index[col_ix-1], 0, 0)
+end
+  
+function Base.length(finger::Finger)
+  # not technically correct - may be repeated values
+  finger.hi - finger.lo
+end
+
+function project{T,T2}(finger::Finger{T}, down_finger::Finger{T2}, val)
+  down_finger.lo = gallop(down_finger.column, val, finger.lo, finger.hi, <)
+  down_finger.hi = gallop(down_finger.column, val, down_finger.lo, finger.hi, <=)
+  down_finger.lo < down_finger.hi
+end
+
+function Base.start{T,T2}(finger::Finger{T}, down_finger::Finger{T2})
+  down_finger.lo = finger.lo
+  down_finger.hi = gallop(down_finger.column, down_finger.column[down_finger.lo], down_finger.lo, finger.hi, <=)
+  down_finger.lo < down_finger.hi
+end
+
+function Base.next{T,T2}(finger::Finger{T}, down_finger::Finger{T2})
+  if down_finger.hi >= finger.hi
+    false
+  else
+    down_finger.lo = down_finger.hi
+    down_finger.hi = gallop(down_finger.column, down_finger.column[down_finger.lo], down_finger.lo, finger.hi, <=)
+    true
+  end
+end
+
+function head{C, C2}(finger::Finger{C}, down_finger::Finger{C2})
+  down_finger.column[down_finger.lo]
+end
+```
+
+``` julia
+starts = [:(start($finger, $down_finger)) for (finger, down_finger) in fingers]
+projects = [:((ix == $ix) || project($finger, $down_finger, $(esc(var)))) for (ix, (finger, down_finger)) in enumerate(fingers)]
+heads = [:(head($finger, $down_finger)) for (finger, down_finger) in fingers]
+nexts = [:(next($finger, $down_finger)) for (finger, down_finger) in fingers]
+body = quote 
+  let 
+    local ix = @min_by_length($(fingers...))
+    local more = @switch ix $(starts...)
+    local $(esc(var))
+    while $need_more_results && more
+      $(esc(var)) = @switch ix $(heads...)
+      if $(reduce((a,b) -> :($a && $b), projects))
+        $body
+      end
+      more = @switch ix $(nexts...)
+    end
+  end
+end
+```
+
+Times now are 0.35 31 68 40. The slight slowdown didn't occur from the move to the mutable api, but only after I moved the columns into the individual fingers. Best guess is the extra field access is a little more expensive than fetching the column out of a register? I'll live, I guess.

@@ -11,29 +11,17 @@ macro switch(ix_var, cases...)
   body
 end
 
-macro switch_on(ix_var, cases...)
-  lines = [:(if $(esc(ix_var)) == $ix; $(esc(cases[ix])); end) for ix in 1:length(cases)]
-  quote $(lines...); Void end
-end
-
-macro switch_off(ix_var, cases...)
-  lines = [:(if $(esc(ix_var)) != $ix; $(esc(cases[ix])); end) for ix in 1:length(cases)]
-  quote $(lines...); Void end
-end
-
-macro min_by_length(indexes, fingers)
-  indexes = indexes.args
-  fingers = fingers.args
+macro min_by_length(fingers...)
   quote 
     min_ix = 1
-    min_length = length($(esc(indexes[1])), $(esc(fingers[1])))
+    min_length = length($(esc(fingers[1])))
     $([quote 
-      next_length = length($(esc(indexes[ix])), $(esc(fingers[ix])))
+      next_length = length($(esc(fingers[ix])))
       if next_length < min_length
         min_ix = $ix
         min_length = next_length
       end
-    end for ix in 2:length(indexes)]...)
+    end for ix in 2:length(fingers)]...)
     min_ix
   end
 end
@@ -223,18 +211,18 @@ function plan_query(query)
   
   # --- codegen ---
   
-  # for each Row clause, get the correct index
+  # for each Row clause, get the correct index and create fingers
   index_inits = []
   for (clause_ix, clause) in enumerate(clauses)
     if typeof(clause) == Row 
+      n = length(sort_orders[clause_ix])
       order = Val{tuple(sort_orders[clause_ix]...)}
-      index_init = quote
-        local $(Symbol("index_$clause_ix")) = index($(esc(clause.name)), $order)
-        local $(Symbol("finger_$(clause_ix)_1")) = finger($(Symbol("index_$clause_ix")))
-      end
-      push!(index_inits, index_init.args...)
+      index_init = :(local $(Symbol("index_$clause_ix")) = index($(esc(clause.name)), $order))
+      finger1_init = :(local $(Symbol("finger_$(clause_ix)_0")) = finger($(esc(clause.name)), $(Symbol("index_$clause_ix"))))
+      fingers_init = [:(local $(Symbol("finger_$(clause_ix)_$(col_ix)")) = finger($(esc(clause.name)), $(Symbol("index_$clause_ix")), $(Symbol("finger_$(clause_ix)_$(col_ix-1)")), Val{$col_ix})) for col_ix in 1:n]
+      push!(index_inits, index_init, finger1_init, fingers_init...)
     end
-  end
+  end  
   
   # initialize arrays for storing results
   results_inits = []
@@ -283,57 +271,48 @@ function plan_query(query)
     # find valid values for this variable
     clause = get(var_assigned_by, var, ())
     (clause_ixes, col_ixes) = index_sources[var]
-    indexes = [Symbol("index_$clause_ix") for clause_ix in clause_ixes]
-    fingers = [Symbol("finger_$(clause_ix)_$(col_ix)") for (clause_ix, col_ix) in zip(clause_ixes, col_ixes)]
-    down_fingers = [Symbol("finger_$(clause_ix)_$(col_ix+1)") for (clause_ix, col_ix) in zip(clause_ixes, col_ixes)]
-    projects = [:($down_finger = project($index, $finger, $(esc(var)))) for (index, finger, down_finger) in zip(indexes, fingers, down_fingers)]
-    lengths = [:(length($index, $down_finger) > 0) for (index, down_finger) in zip(indexes, down_fingers)]
+    fingers = [(Symbol("finger_$(clause_ix)_$(col_ix-1)"), Symbol("finger_$(clause_ix)_$(col_ix)"))
+               for (clause_ix, col_ix) in zip(clause_ixes, col_ixes)]
     if typeof(clause) == Assign
+      projects = [:(project($finger, $down_finger, $(esc(var)))) for (finger, down_finger) in fingers]
       body = quote
         let $(esc(var)) = $(esc(clause.expr))
-          $(projects...)
-          if $(reduce((a,b) -> :($a && $b), true, lengths))
+          if $(reduce((a,b) -> :($a && $b), true, projects))
             $body
           end
         end
       end
     elseif typeof(clause) == In
+      projects = [:(project($finger, $down_finger, $(esc(var)))) for (finger, down_finger) in fingers]
       body = quote
         let
           local iter = $(esc(clause.expr))
           local state = start(iter)
           local $(esc(var)) 
           while $need_more_results && !done(iter, state)
-            $(projects...)
             ($(esc(var)), state) = next(iter, state)
-            if $(reduce((a,b) -> :($a && $b), true, lengths))
+            if $(reduce((a,b) -> :($a && $b), true, projects))
               $body
             end
           end
         end
       end
     else 
-      starts = [:($down_finger = start($index, $finger)) for (index, finger, down_finger) in zip(indexes, fingers, down_fingers)]
-      heads = [:(head($index, $down_finger)) for (index, down_finger) in zip(indexes, down_fingers)]
-      nexts = [:($down_finger = next($index, $finger, $down_finger)) for (index, finger, down_finger) in zip(indexes, fingers, down_fingers)]
-      dones = [:(!done($index, $finger, $down_finger)) for (index, finger, down_finger) in zip(indexes, fingers, down_fingers)]
+      starts = [:(start($finger, $down_finger)) for (finger, down_finger) in fingers]
+      projects = [:((ix == $ix) || project($finger, $down_finger, $(esc(var)))) for (ix, (finger, down_finger)) in enumerate(fingers)]
+      heads = [:(head($finger, $down_finger)) for (finger, down_finger) in fingers]
+      nexts = [:(next($finger, $down_finger)) for (finger, down_finger) in fingers]
       body = quote 
         let 
-          $([:(local $down_finger = Finger{$col_ix}(0,0)) for (down_finger, col_ix) in zip(down_fingers, col_ixes)]...)
-          local ix = @min_by_length([$(indexes...)], [$(fingers...)])
-          @switch_on ix $(starts...)
+          local ix = @min_by_length($(fingers...))
+          local more = @switch ix $(starts...)
           local $(esc(var))
-          local more = true
           while $need_more_results && more
             $(esc(var)) = @switch ix $(heads...)
-            @switch_off ix $(projects...)
-            if $(reduce((a,b) -> :($a && $b), lengths))
+            if $(reduce((a,b) -> :($a && $b), projects))
               $body
             end
-            more = @switch ix $(dones...)
-            if more
-              @switch_on ix $(nexts...)
-            end
+            more = @switch ix $(nexts...)
           end
         end
       end

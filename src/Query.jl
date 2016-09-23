@@ -1,6 +1,6 @@
 module Query
 
-using Data
+using Nested
 using Match
 
 macro switch(ix_var, cases...)
@@ -55,6 +55,23 @@ function parse_typ(expr)
     _ => :Any
   end
 end
+
+function parse_relation(expr)
+  (head, tail) = @match expr begin
+    Expr(:(=>), [head, tail], _) => (head, tail)
+    head => (head, :(()))
+  end
+  (name, keys) = @match head begin
+    Expr(:call, [name, keys...], _) => (name, keys)
+    Expr(:tuple, keys, _) => ((), keys)
+    _ => error("Can't parse $expr as relation")
+  end
+  vals = @match tail begin 
+    Expr(:tuple, vals, _) => vals
+    _ => [tail]
+  end
+  (name, keys, vals)
+end
   
 type Row; name; vars; num_keys; end
 type When; expr; vars; end
@@ -83,12 +100,12 @@ function plan_query(query)
         _ => error("Don't know what to do with $head")
       end
       Expr(:return, [expr], _) => begin 
-        (name, keys, vals) = Data.parse_relation(expr) 
+        (name, keys, vals) = parse_relation(expr) 
         typed_vars = Any[keys..., vals...]
         Return(name, map(parse_var, typed_vars), map(parse_typ, typed_vars), length(keys)) 
       end
       _ => begin
-        (name, keys, vals) = Data.parse_relation(line)
+        (name, keys, vals) = parse_relation(line)
         Row(name, Any[keys..., vals...], length(keys))
       end
     end

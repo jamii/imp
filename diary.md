@@ -5592,3 +5592,5 @@ end
 ```
 
 Times now are 0.35 31 68 40. The slight slowdown didn't occur from the move to the mutable api, but only after I moved the columns into the individual fingers. Best guess is the extra field access is a little more expensive than fetching the column out of a register? I'll live, I guess.
+
+I finished the core of the nested relations implementation, but it's currently missing results on some queries. I'll finish debugging tomorrow.

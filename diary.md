@@ -5594,3 +5594,41 @@ end
 Times now are 0.35 31 68 40. The slight slowdown didn't occur from the move to the mutable api, but only after I moved the columns into the individual fingers. Best guess is the extra field access is a little more expensive than fetching the column out of a register? I'll live, I guess.
 
 I finished the core of the nested relations implementation, but it's currently missing results on some queries. I'll finish debugging tomorrow.
+
+### 2016 Sep 24
+
+Feeling a little unmotivated today so I'm working on fixing minor annoyances in my environment. 
+
+I fixed palm detection on my touchpad, disabled the unity multi-touch gestures that I keep using by accident, and in the process accidentally fixed a race condition where some of my window manager keyboard shortcuts would get swallowed. 
+
+``` bash
+jamie@machine:~$ sudo cat /etc/modprobe.d/synaptics.conf 
+blacklist i2c-designware-platform    
+jamie@machine:~$ tail -n 2 .bashrc
+pkill syndaemon
+syndaemon -i 0.2 -K -d
+```
+
+I disabled coasting to avoid the notorious ctrl-zoom bug.
+
+``` bash
+jamie@machine:~$ tail -n 1 .bashrc
+synclient CoastingSpeed=0
+```
+
+I moved all of my Julia and Atom packages off master and onto stable versions, now that Julia 0.5 is officially released. I also updated Atom by hand, since the automatic update fails.
+
+The default Atom spell checker does not work if your system locale is not en-US. I switched to the spell-check-test package which allows specifying alternate locales.
+
+If I have one atom window open and I accidentally close it, restarting atom will restore that window. If have two atom windows open and I accidentally close one, it's gone forever. The project-manager package is a decent workaround for this.
+
+I've had problems with graphical corruption in Atom. The internet seems to believe that SNA is the most likely culprit, so I'm tentatively switching to UXA and I'll see if it happens again in the next few days.
+
+``` bash
+jamie@machine:~$ sudo cat /etc/X11/xorg.conf
+Section "Device"
+	Identifier "Intel Graphics"
+	Driver "intel"
+	Option "AccelMethod" "uxa"
+EndSection
+```

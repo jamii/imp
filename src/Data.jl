@@ -326,6 +326,10 @@ function Base.push!{T}(relation::Relation{T}, values)
   # TODO remove dupes
 end
 
+function sorted_columns(relation)
+  relation.columns
+end
+
 import Atom
 function Atom.render(editor::Atom.Editor, relation::Relation)
   Atom.render(editor, relation.columns)

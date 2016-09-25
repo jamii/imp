@@ -2,7 +2,7 @@ module JobData
 
 # separate module because this takes a long time, don't want to rerun it every test
 
-using Data
+using Nested
 using DataFrames
 using JLD
 
@@ -28,11 +28,11 @@ function read_job()
   relations
 end
 
-if !isfile("../imdb/imdb.jld")
+if !isfile("../imdb/imdb_nested.jld")
   job = @time read_job()
-  @time save("../imdb/imdb.jld", "job", job)
+  @time save("../imdb/imdb_nested.jld", "job", job)
 else 
-  job = @time load("../imdb/imdb.jld", "job")
+  job = @time load("../imdb/imdb_nested.jld", "job")
 end
 
 gc()

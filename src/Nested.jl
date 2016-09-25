@@ -60,8 +60,9 @@ end
 @generated function reshape_index!{T, order}(::Type{T}, from_index_1, to_index_1, ::Type{Val{order}})
   n = length(T.parameters)
   index_types = typeof_index(T.parameters, order)
-  index_gets = map(1:n) do ix
-    :($(Symbol("to_index_$(ix+1)")) = get!($(index_types[ix+1]), $(Symbol("to_index_$ix")), $(Symbol("val_$(order[ix])"))))
+  index_gets = map(1:length(order)) do to_ix
+    from_ix = order[to_ix]
+    :($(Symbol("to_index_$(to_ix+1)")) = get!($(index_types[to_ix+1]), $(Symbol("to_index_$(to_ix)")), $(Symbol("val_$(from_ix)"))))
   end
   body = quote $(index_gets...) end
   for i in n:-1:1
@@ -131,6 +132,31 @@ end
   finger.index.keys[down_finger.state]
 end
 
-export Relation, index, Finger, finger, project, head
+@generated function sorted_columns{T}(relation::Relation{T})
+  n = length(T.parameters)
+  index_types = typeof_index(T.parameters)
+  pushes = map(1:n) do i
+    :(push!(columns[$i], $(Symbol("key_$i"))))
+  end
+  body = quote $(pushes...) end
+  for i in n:-1:1
+    body = quote
+      $(Symbol("keys_$i")) = collect(keys($(Symbol("index_$i"))))
+      sort!($(Symbol("keys_$i")))
+      foreach($(Symbol("keys_$i"))) do $(Symbol("key_$i"))
+        $(Symbol("index_$(i+1)")) = $(Symbol("index_$i"))[$(Symbol("key_$i"))]
+        $body
+      end
+    end
+  end
+  quote
+    columns = tuple($([:(Vector{$(T.parameters[i])}()) for i in 1:n]...))
+    index_1 = relation.unique
+    $body
+    columns
+  end
+end
+
+export Relation, index, Finger, finger, project, head, sorted_columns
 
 end

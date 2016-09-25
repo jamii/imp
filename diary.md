@@ -5691,4 +5691,6 @@ Next we go to `a=2` which is legit, but then somehow hit `b=2` again.
 
 Aha - `next` needs to set `down_finger.index` as well as `down_finger.state`. Oops.
 
-This query works now.
+This query works now. The test doesn't, because it looks at internal state. I need to add an method that dumps out the columns for tests.
+
+I'll have to remove the return type tests entirely, but they aren't all that useful now that I've given up on inference anyway.

@@ -5632,3 +5632,63 @@ Section "Device"
 	Option "AccelMethod" "uxa"
 EndSection
 ```
+
+### 2016 Sep 25
+
+Graph queries for nested hashes are missing a result. Let's try debugging again now that I'm fresh.
+
+The finger implementation looks correct.
+
+The indexes for the graph are correct.
+
+Dumping the assigned vars:
+
+``` julia
+a = 4
+b = 2
+a = 2
+b = 2
+a = 3
+b = 2
+a = 1
+b = 2
+c = 3
+```
+
+All the possible values of `a` are checked. It also checks `a=2, b=2` and `a=3, b=2` which are not possible combinations. In fact, `b=2` every time.
+
+Let's also dump the fingers:
+
+``` julia
+(#542#finger_1_0,#543#finger_1_1) = (Nested.Finger{Dict{Int64,Dict{Int64,Void}}}(Dict(4=>Dict(2=>nothing),2=>Dict(3=>nothing),3=>Dict(4=>nothing,1=>nothing),1=>Dict(2=>nothing)),-1),Nested.Finger{Dict{Int64,Void}}(Dict{Int64,Void}(),-1))
+(#550#finger_5_0,#551#finger_5_1) = (Nested.Finger{Dict{Int64,Dict{Int64,Void}}}(Dict(4=>Dict(3=>nothing),2=>Dict(4=>nothing,1=>nothing),3=>Dict(2=>nothing),1=>Dict(3=>nothing)),-1),Nested.Finger{Dict{Int64,Void}}(Dict{Int64,Void}(),-1))
+a = 4
+(#543#finger_1_1,#544#finger_1_2) = (Nested.Finger{Dict{Int64,Void}}(Dict(2=>nothing),2),Nested.Finger{Void}(nothing,-1))
+(#546#finger_3_0,#547#finger_3_1) = (Nested.Finger{Dict{Int64,Dict{Int64,Void}}}(Dict(4=>Dict(2=>nothing),2=>Dict(3=>nothing),3=>Dict(4=>nothing,1=>nothing),1=>Dict(2=>nothing)),-1),Nested.Finger{Dict{Int64,Void}}(Dict{Int64,Void}(),-1))
+b = 2
+a = 2
+(#543#finger_1_1,#544#finger_1_2) = (Nested.Finger{Dict{Int64,Void}}(Dict(2=>nothing),6),Nested.Finger{Void}(nothing,17))
+(#546#finger_3_0,#547#finger_3_1) = (Nested.Finger{Dict{Int64,Dict{Int64,Void}}}(Dict(4=>Dict(2=>nothing),2=>Dict(3=>nothing),3=>Dict(4=>nothing,1=>nothing),1=>Dict(2=>nothing)),-1),Nested.Finger{Dict{Int64,Void}}(Dict(3=>nothing),-1))
+b = 2
+a = 3
+(#543#finger_1_1,#544#finger_1_2) = (Nested.Finger{Dict{Int64,Void}}(Dict(2=>nothing),7),Nested.Finger{Void}(nothing,17))
+(#546#finger_3_0,#547#finger_3_1) = (Nested.Finger{Dict{Int64,Dict{Int64,Void}}}(Dict(4=>Dict(2=>nothing),2=>Dict(3=>nothing),3=>Dict(4=>nothing,1=>nothing),1=>Dict(2=>nothing)),-1),Nested.Finger{Dict{Int64,Void}}(Dict(3=>nothing),-1))
+b = 2
+a = 1
+(#543#finger_1_1,#544#finger_1_2) = (Nested.Finger{Dict{Int64,Void}}(Dict(2=>nothing),16),Nested.Finger{Void}(nothing,17))
+(#546#finger_3_0,#547#finger_3_1) = (Nested.Finger{Dict{Int64,Dict{Int64,Void}}}(Dict(4=>Dict(2=>nothing),2=>Dict(3=>nothing),3=>Dict(4=>nothing,1=>nothing),1=>Dict(2=>nothing)),-1),Nested.Finger{Dict{Int64,Void}}(Dict(3=>nothing),-1))
+b = 2
+(#547#finger_3_1,#548#finger_3_2) = (Nested.Finger{Dict{Int64,Void}}(Dict(3=>nothing),-1),Nested.Finger{Void}(nothing,-1))
+(#551#finger_5_1,#552#finger_5_2) = (Nested.Finger{Dict{Int64,Void}}(Dict(3=>nothing),-1),Nested.Finger{Void}(nothing,-1))
+c = 3
+```
+
+On the second line, it finds `b=2` from one of the fingers and then projects in the other and fails. This is incorrect, both have a key for `b=2`.
+
+Ah, the project doesn't fail, it hits `a<b` on the next line. I forgot about those.
+
+Next we go to `a=2` which is legit, but then somehow hit `b=2` again. 
+
+Aha - `next` needs to set `down_finger.index` as well as `down_finger.state`. Oops.
+
+This query works now.

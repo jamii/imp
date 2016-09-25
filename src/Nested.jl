@@ -117,16 +117,13 @@ end
   
 @inline function Base.start(finger::Finger, down_finger::Finger)
   down_finger.state = start(finger.index)
-  if done(finger.index, down_finger.state)
-    false
-  else
-    down_finger.index = finger.index.vals[down_finger.state]
-    true
-  end
+  down_finger.index = get(finger.index.vals, down_finger.state, down_finger.index)
+  !done(finger.index, down_finger.state)
 end
 
 @inline function Base.next(finger::Finger, down_finger::Finger)
   down_finger.state = Base.skip_deleted(finger.index, down_finger.state+1)
+  down_finger.index = get(finger.index.vals, down_finger.state, down_finger.index)
   !done(finger.index, down_finger.state)
 end
 

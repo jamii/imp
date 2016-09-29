@@ -5725,6 +5725,94 @@ Peeking at the code for a simple query, it looks like the types in the indexes a
 
 Times are still poor. Let's have the hashtable lookup bail out early on empty slots - forgot to include that earlier.
 
+Numbers are still not great. 0.64 110 190 140. 
+
 ### 2016 Sep 29
 
 I still sometimes run out of memory when trying to run the benchmarks with hashtables. Which is ridiculous. It's a 6GB dataset on disk but the columns alone are taking up 20GB in memory. I've been putting off dealing with that for a while, but it looks like it's time.
+
+Julia can measure memory allocation by line, but that's just going to tell me that the allocation all comes from loading the huge datasets into memory. 
+
+Let's just load a single file as one string and see what happens:
+
+``` bash
+jamie@machine:~/imp$ du -h ../imdb/movie_info.csv 
+920M	../imdb/movie_info.csv
+```
+
+``` julia
+@time begin 
+  s = readstring(open("../imdb/movie_info.csv"))
+  nothing
+end
+# 0.223532 seconds (150 allocations: 919.144 MB, 6.54% gc time)
+```
+
+(The weird construction is so that the Atom plugin doesn't try to render the whole string. It really needs some way to lazily render large data-structures.)
+
+``` bash
+PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     TIME+ COMMAND     
+842 jamie     20   0 10.485g 1.947g  63168 R  99.7  6.2   0:37.76 julia 
+```
+
+``` julia
+@time gc()
+# 0.132644 seconds (648 allocations: 33.249 KB, 98.78% gc time)
+```
+
+The gc reports taking 0.13s. It takes about 10s to show up in Atom, and then julia-client crashes. [Reliably](https://github.com/JunoLab/atom-julia-client/issues/247).
+
+But julia-client aside, just reading in the whole file results in a reasonable amount of allocation. What about parsing the csv using DataFrames.jl?
+
+``` julia
+job = @time read_job("movie_info")
+# 52.275075 seconds (348.80 M allocations: 10.628 GB, 6.00% gc time)
+```
+
+``` bash
+PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     TIME+ COMMAND  
+2652 jamie     20   0 11.562g 5.583g  13140 S   0.0 17.9   1:12.23 julia 
+```
+
+``` julia 
+gc()
+```
+
+``` bash
+PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     TIME+ COMMAND
+2652 jamie     20   0 9896544 3.560g  13732 S   0.0 11.4   1:14.83 julia  
+```
+
+So ~3.5gb just to split it into strings. That seems wrong.
+
+``` julia
+length(Set(job.columns[4].data)) # 2720930
+length(Set(job.columns[5].data)) # 133610
+sum([1 for s in job.columns[4].data if s == ""]) # 0
+sum([1 for s in job.columns[5].data if s == ""]) # 13398750
+```
+
+Are empty strings interned in Julia?
+
+``` julia
+pointer_from_objref("") == pointer_from_objref("") # false
+```
+
+Nope.
+
+``` julia
+ss = Dict{String, String}()
+job.columns[4].data = String[get!(ss, s, s) for s in job.columns[4].data]
+job.columns[5].data = String[get!(ss, s, s) for s in job.columns[5].data]
+gc()
+```
+
+This is taking forever...
+
+Drops memory usage to 2.8gb. Better than nothing. Stills seems like a lot of overhead for a <1gb file.
+
+Small numbers are only a few bytes in ascii, but always 8 bytes as an Int64. Postgres treats `integer` as 32 bits. SQLite stores it adaptively depending on the max value. Let's copy SQLite.
+
+The first three columns of this table end up being Int32, Int32, Int8. Only saves about 140mb, but at least the increased locality might help when joining.
+
+It seems like the remaining overhead must be entirely from breaking up into many tiny string allocations. Can't fix that easily unless Julia unifies String and SubString at some point in the future.

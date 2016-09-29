@@ -6,6 +6,37 @@ using Hashed
 using DataFrames
 using JLD
 
+function intern{T}(column::Vector{T})
+  if !isbits(T)
+    interned = Dict{T, T}()
+    for i in 1:length(column)
+      column[i] = get!(interned, column[i], column[i])
+    end
+  end
+end
+
+function zero_na{T}(column::Vector{T}, na::BitVector)
+  if T <: Integer
+    for ix in 1:length(column)
+      if na[ix]
+        column[ix] = zero(T)
+      end
+    end
+  end
+end
+
+function compress{T}(column::Vector{T}) 
+  if T <: Integer
+    minval, maxval = minimum(column), maximum(column)
+    for T2 in [Int8, Int16, Int32, Int64]
+      if (minval > typemin(T2)) && (maxval < typemax(T2))
+        return convert(Vector{T2}, column)
+      end
+    end
+  end
+  return column
+end
+
 function read_job()
   schema = readdlm(open("data/job_schema.csv"), ',', header=false, quotes=true, comments=false)
   table_column_names = Dict()
@@ -21,6 +52,12 @@ function read_job()
       column_types = table_column_types[table_name]
       @show table_name column_names column_types
       frame = readtable(open("../imdb/$(table_name).csv"), header=false, eltypes=column_types)
+      for ix in 1:length(frame.columns)
+        column = frame.columns[ix]
+        intern(column.data)
+        zero_na(column.data, column.na)
+        frame.columns[ix] = DataArrays.DataArray(compress(column.data), column.na)
+      end
       columns = tuple((frame[ix].data for ix in 1:length(column_names))...)
       relations[table_name] = Relation(columns, 1)
     end
@@ -29,10 +66,10 @@ function read_job()
 end
 
 if true # !isfile("../imdb/imdb_hashed.jld")
-  job = @time read_job()
+  const job = @time read_job()
   # @time save("../imdb/imdb_hashed.jld", "job", job)
 else 
-  job = @time load("../imdb/imdb_hashed.jld", "job")
+  const job = @time load("../imdb/imdb_hashed.jld", "job")
 end
 
 gc()

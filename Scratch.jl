@@ -1,5 +1,6 @@
 include("src/Data.jl")
 Data.test()
+include("src/Hashed.jl")
 include("examples/JobData.jl")
 
 include("src/Query.jl")
@@ -10,5 +11,7 @@ Chinook.test()
 include("examples/Job.jl")
 Job.test()
 
-include("src/UI.jl")
-include("examples/Minesweeper.jl")
+Job.bench()
+
+# include("src/UI.jl")
+# include("examples/Minesweeper.jl")

@@ -1,6 +1,6 @@
 module Query
 
-using Nested
+using Hashed
 using Match
 
 macro switch(ix_var, cases...)

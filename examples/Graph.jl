@@ -1,6 +1,6 @@
 module Graph
 
-using Nested
+using Hashed
 using Query
 using BenchmarkTools
 using Base.Test

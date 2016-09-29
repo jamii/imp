@@ -4,7 +4,7 @@ using Match
 using Base.Test
 using BenchmarkTools
 
-@generated function cmp_in{T <: Tuple}(xs::T, ys::T, x_at::Int64, y_at::Int64)
+@generated function cmp_in{T <: Tuple}(xs::T, ys::T, x_at::Int, y_at::Int)
   n = length(T.parameters)
   if n == 0
     :(return 0)
@@ -19,7 +19,7 @@ using BenchmarkTools
   end
 end
 
-@generated function swap_in{T <: Tuple}(xs::T, i::Int64, j::Int64)
+@generated function swap_in{T <: Tuple}(xs::T, i::Int, j::Int)
   n = length(T.parameters)
   quote
     $(Expr(:meta, :inline))
@@ -34,7 +34,7 @@ end
   end
 end
 
-@generated function push_in!{T <: Tuple}(result::T, cs::T, i::Int64)
+@generated function push_in!{T <: Tuple}(result::T, cs::T, i::Int)
   n = length(T.parameters)
   quote
     $(Expr(:meta, :inline))
@@ -105,18 +105,18 @@ end
 # TODO should be typed {K,V} instead of {T}, but pain in the ass to change now
 type Relation{T <: Tuple} # where T is a tuple of columns
   columns::T
-  num_keys::Int64
-  indexes::Dict{Vector{Int64},Tuple}
+  num_keys::Int
+  indexes::Dict{Vector{Int},Tuple}
 end
 
-function Relation(columns, num_keys::Int64)
+function Relation(columns, num_keys::Int)
   deduped::typeof(columns) = map((column) -> Vector{eltype(column)}(), columns)
   quicksort!(columns)
   key = columns[1:num_keys]
   val = columns[num_keys+1:1]
   dedup_sorted!(columns, key, val, deduped)
   order = collect(1:length(columns))
-  Relation(deduped, num_keys, Dict{Vector{Int64}, Tuple}(order => deduped))
+  Relation(deduped, num_keys, Dict{Vector{Int}, Tuple}(order => deduped))
 end
 
 function parse_relation(expr)
@@ -137,18 +137,18 @@ function parse_relation(expr)
 end
 
 # examples:
-# @relation (Int64, Float64)
-# @relation (Int64,) => Int64
-# @relation height_at(Int64) => Float64
+# @relation (Int, Float64)
+# @relation (Int,) => Int
+# @relation height_at(Int) => Float64
 # @relation married(String, String)
-# @relation state() => (Int64, Symbol)
+# @relation state() => (Int, Symbol)
 macro relation(expr) 
   (name, keys, vals) = parse_relation(expr)
   typs = [keys..., vals...]
   order = collect(1:length(typs))
   body = quote 
     columns = tuple($([:(Vector{$(esc(typ))}()) for typ in typs]...))
-    indexes = Dict{Vector{Int64},Tuple}($order => columns)
+    indexes = Dict{Vector{Int},Tuple}($order => columns)
     Relation(columns, $(length(keys)), indexes)
   end
   if name != ()
@@ -158,7 +158,7 @@ macro relation(expr)
   end
 end
 
-function index{T}(relation::Relation{T}, order::Vector{Int64})
+function index{T}(relation::Relation{T}, order::Vector{Int})
   get!(relation.indexes, order) do
     columns = tuple([copy(relation.columns[ix]) for ix in order]...)
     quicksort!(columns)
@@ -175,7 +175,7 @@ end
 end
 
 # gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
-function gallop{T}(column::Vector{T}, value::T, lo::Int64, hi::Int64, cmp) 
+function gallop{T}(column::Vector{T}, value::T, lo::Int, hi::Int, cmp) 
   @inbounds if (lo < hi) && cmp(column[lo], value)
     step = 1
     while (lo + step < hi) && cmp(column[lo + step], value)
@@ -198,8 +198,8 @@ end
 
 type Finger{T}
   column::Vector{T}
-  lo::Int64
-  hi::Int64
+  lo::Int
+  hi::Int
 end
 
 @inline function finger(relation::Relation, index)
@@ -287,9 +287,7 @@ function diff{T}(old::Relation{T}, new::Relation{T})
     (o, i) -> push_in!(old_only_columns, o, i),
     (n, i) -> push_in!(new_only_columns, n, i),
     (o, n, oi, ni) -> ())
-  old_only_indexes = Dict{Vector{Int64}, Tuple}(order => old_only_columns)
-  new_only_indexes = Dict{Vector{Int64}, Tuple}(order => new_only_columns)
-  (Relation(old_only_columns, old.num_keys, old_only_indexes), Relation(new_only_columns, new.num_keys, new_only_indexes))
+  (old_only_columns, new_only_columns)
 end
 
 function Base.merge{T}(old::Relation{T}, new::Relation{T})
@@ -302,7 +300,7 @@ function Base.merge{T}(old::Relation{T}, new::Relation{T})
     (o, i) -> push_in!(result_columns, o, i),
     (n, i) -> push_in!(result_columns, n, i),
     (o, n, oi, ni) -> push_in!(result_columns, n, ni))
-  result_indexes = Dict{Vector{Int64}, Tuple}(order => result_columns)
+  result_indexes = Dict{Vector{Int}, Tuple}(order => result_columns)
   Relation(result_columns, old.num_keys, result_indexes)
 end
 
@@ -340,7 +338,7 @@ export Relation, @relation, Index, index, Finger, finger, project, head
 function test()
   for i in 1:10000
     srand(i)
-    x = rand(Int64, i)
+    x = rand(Int, i)
     sx = sort(copy(x))
     quicksort!((x,))
     @test x == sx
@@ -370,16 +368,16 @@ function test()
     @test length(c) == length(x1) + length(x2)
   end
   
-  @test Base.return_types(Relation, (Tuple{Vector{Int64}, Vector{String}}, Int64)) == [Relation{Tuple{Vector{Int64}, Vector{String}}}]
+  @test Base.return_types(Relation, (Tuple{Vector{Int}, Vector{String}}, Int)) == [Relation{Tuple{Vector{Int}, Vector{String}}}]
 end
 
 function bench()
   srand(999)
-  x = rand(Int64, 10000)
+  x = rand(Int, 10000)
   @show @benchmark quicksort!((copy($x),))
   
   srand(999)
-  y = [string(i) for i in rand(Int64, 10000)]
+  y = [string(i) for i in rand(Int, 10000)]
   @show @benchmark quicksort!((copy($y),))
   
   srand(999)

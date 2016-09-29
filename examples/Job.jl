@@ -1,6 +1,6 @@
 module Job
 
-using Data
+using Hashed
 using Query
 using JobData
 using Base.Test
@@ -62,25 +62,6 @@ function q4a()
 end
 
 function test()
-  @test Base.return_types(q1a) == [Relation{Tuple{Vector{String}, Vector{String}, Vector{Int64}}}]
-  @test Base.return_types(q2a) == [Relation{Tuple{Vector{String}}}]
-  @test Base.return_types(q3a) == [Relation{Tuple{Vector{String}}}]
-  @test Base.return_types(q4a) == [Relation{Tuple{Vector{String}, Vector{String}}}]
-  
-  # SQLite does daft things with nulls - tests commented out until I can figure out how to resolve that
-  # db = SQLite.DB("../imdb/imdb.sqlite")
-  # for q in 1:4
-  #   results_imp = eval(Symbol("q$(q)a"))()
-  #   query = rstrip(readline("../job/$(q)a.sql"))
-  #   query = replace(query, "MIN", "")
-  #   frame = SQLite.query(db, query)
-  #   num_columns = length(results_imp.columns)
-  #   results_sqlite = Relation(tuple((frame[ix].values for ix in 1:num_columns)...), num_columns)
-  #   (imp_only, sqlite_only) = Data.diff(results_imp, results_sqlite)
-  #   @show q 
-  #   @test imp_only.columns == sqlite_only.columns # ie both empty - but @test will print both otherwise
-  # end
-  
   for q in 1:4
     results_imp = eval(Symbol("q$(q)a"))()
     query = rstrip(readline("../job/$(q)a.sql"))
@@ -88,12 +69,12 @@ function test()
     query = replace(query, "MIN", "")
     query = "copy ($query) to '/tmp/results.csv' with CSV DELIMITER ',';"
     run(`sudo -u postgres psql -c $query`)
-    frame = DataFrames.readtable(open("/tmp/results.csv"), header=false, eltypes=[eltype(c) for c in results_imp.columns])
-    num_columns = length(results_imp.columns)
+    frame = DataFrames.readtable(open("/tmp/results.csv"), header=false, eltypes=[eltype(c) for c in sorted_columns(results_imp)])
+    num_columns = length(sorted_columns(results_imp))
     results_pg = Relation(tuple((frame[ix].data for ix in 1:num_columns)...), num_columns)
-    (imp_only, pg_only) = Data.diff(results_imp, results_pg)
+    (imp_only, pg_only) = Hashed.diff(results_imp, results_pg)
     @show q 
-    @test imp_only.columns == pg_only.columns # ie both empty - but @test will print both otherwise
+    @test imp_only == pg_only # ie both empty - but @test will print both otherwise
   end
 end
 
@@ -102,7 +83,7 @@ function bench_imp()
   for q in 1:4
     @show q
     trial = @show @benchmark $(eval(Symbol("q$(q)a")))()
-    push!(medians, @show (median(trial.times) / 1000000))
+    push!(medians, median(trial.times) / 1000000)
   end
   medians
 end

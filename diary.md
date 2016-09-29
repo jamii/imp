@@ -5694,3 +5694,37 @@ Aha - `next` needs to set `down_finger.index` as well as `down_finger.state`. Oo
 This query works now. The test doesn't, because it looks at internal state. I need to add an method that dumps out the columns for tests.
 
 I'll have to remove the return type tests entirely, but they aren't all that useful now that I've given up on inference anyway.
+
+Nested hashtables now work ok for simple queries, but they are far too memory inefficient to load the JOB data, even with 32GB of RAM. But that's ok, they weren't intended to be the final solution and they helped me hash out the finger protocol.
+
+### 2016 Sep 28
+
+Totally forgot to diarize today.
+
+I made a Franken-hashtable today that uses the sorted columns as backing storage, and builds a hashtable of ranges pointing into each column. 
+
+``` julia
+type Index{C}
+  columns::C
+  hashtables::Vector{Vector{UnitRange{Int}}}
+  probe_ranges::Vector{UnitRange{Int}}
+end
+```
+
+I'm using Robin Hood hashing, mostly because it's easy to implement. The theory says that the maximum probe distance at 90% occupancy should be around 6. I'm seeing ~50. Some quick experiments confirm that some buckets are seeing ~20 collisions, so a probe distance of 6 is out of the question with this hash function. I'll stick to 66% occupancy instead.
+
+Each finger keeps track of the last hash so the down finger only has to combine that with it's new key, rather than rehashing the whole row.
+
+I'm able to get the JOB data loaded, although JLD doesn't play nicely with the UnitRanges in the hashtables so saving/loading is a mess.
+
+Max probe lengths on the JOB tables hover around 20.
+
+Benchmark times are poor. As usual there are a ton of allocations that need to be tracked down.
+
+Peeking at the code for a simple query, it looks like the types in the indexes aren't known. Simple fix.
+
+Times are still poor. Let's have the hashtable lookup bail out early on empty slots - forgot to include that earlier.
+
+### 2016 Sep 29
+
+I still sometimes run out of memory when trying to run the benchmarks with hashtables. Which is ridiculous. It's a 6GB dataset on disk but the columns alone are taking up 20GB in memory. I've been putting off dealing with that for a while, but it looks like it's time.

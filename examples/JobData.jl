@@ -3,63 +3,41 @@ module JobData
 # separate module because this takes a long time, don't want to rerun it every test
 
 using Hashed
-using DataFrames
 using JLD
-
-function intern{T}(column::Vector{T})
-  if !isbits(T)
-    interned = Dict{T, T}()
-    for i in 1:length(column)
-      column[i] = get!(interned, column[i], column[i])
-    end
-  end
-end
-
-function zero_na{T}(column::Vector{T}, na::BitVector)
-  if T <: Integer
-    for ix in 1:length(column)
-      if na[ix]
-        column[ix] = zero(T)
-      end
-    end
-  end
-end
-
-function compress{T}(column::Vector{T}) 
-  if T <: Integer
-    minval, maxval = minimum(column), maximum(column)
-    for T2 in [Int8, Int16, Int32, Int64]
-      if (minval > typemin(T2)) && (maxval < typemax(T2))
-        return convert(Vector{T2}, column)
-      end
-    end
-  end
-  return column
-end
 
 function read_job()
   schema = readdlm(open("data/job_schema.csv"), ',', header=false, quotes=true, comments=false)
-  table_column_names = Dict()
-  table_column_types = Dict()
+  table_column_names = Dict{String, Vector{String}}()
+  table_column_types = Dict{String, Vector{String}}()
   for column in 1:size(schema)[1]
     table_name, ix, column_name, column_type = schema[column, 1:4]
     push!(get!(table_column_names, table_name, []), column_name)
-    push!(get!(table_column_types, table_name, []), (column_type == "integer" ? Int64 : String))
+    push!(get!(table_column_types, table_name, []), column_type)
   end
-  relations = Dict()
+  relations = Dict{String, Relation}()
   for (table_name, column_names) in table_column_names
     if isfile("../imdb/$(table_name).csv")
       column_types = table_column_types[table_name]
       @show table_name column_names column_types
-      frame = readtable(open("../imdb/$(table_name).csv"), header=false, eltypes=column_types)
-      for ix in 1:length(frame.columns)
-        column = frame.columns[ix]
-        intern(column.data)
-        zero_na(column.data, column.na)
-        frame.columns[ix] = DataArrays.DataArray(compress(column.data), column.na)
+      columns = Vector[]
+      for (column_name, column_type) in zip(column_names, column_types)
+        query = "select $column_name from $table_name"
+        lines::Vector{String} = readlines(`sqlite3 ../imdb/imdb.sqlite $query`)
+        if column_type == "integer"
+          numbers = Int64[(line == "" || line == "\n") ? 0 : parse(Int64, line) for line in lines]
+          minval = minimum(numbers)
+          maxval = maximum(numbers)
+          typ = first(typ for typ in [Int8, Int16, Int32, Int64] if (minval > typemin(typ)) && (maxval < typemax(typ)))
+          push!(columns, convert(Vector{typ}, numbers))
+        else 
+          interned = Dict{String, String}()
+          for ix in 1:length(lines)
+            lines[ix] = get!(interned, lines[ix], lines[ix])
+          end
+          push!(columns, lines)
+        end
       end
-      columns = tuple((frame[ix].data for ix in 1:length(column_names))...)
-      relations[table_name] = Relation(columns, 1)
+      relations[table_name] = Relation(tuple(columns...), 1)
     end
   end
   relations

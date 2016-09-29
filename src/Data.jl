@@ -328,10 +328,10 @@ function sorted_columns(relation)
   relation.columns
 end
 
-import Atom
-function Atom.render(editor::Atom.Editor, relation::Relation)
-  Atom.render(editor, relation.columns)
-end
+# import Atom
+# function Atom.render(editor::Atom.Editor, relation::Relation)
+#   Atom.render(editor, relation.columns)
+# end
 
 export Relation, @relation, Index, index, Finger, finger, project, head
 

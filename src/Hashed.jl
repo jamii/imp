@@ -21,7 +21,7 @@ function set_range(hashtable, size, key, range)
   slot = h
   while true
     range2 = hashtable[slot]
-    if range2 == 0:-1
+    if range2 == Int32(0):Int32(-1)
       hashtable[slot] = range
       return
     else
@@ -38,7 +38,7 @@ function set_range(hashtable, size, key, range)
 end
 
 function hashtable(key)
-  ranges = UnitRange{Int}[]
+  ranges = UnitRange{Int32}[]
   lo = 1
   len = length(key[1])
   while lo <= len
@@ -51,7 +51,7 @@ function hashtable(key)
   end
   
   size = Int(ceil(length(ranges) * 1.5))
-  hashtable = [0:-1 for _ in 1:size]
+  hashtable = [Int32(0):Int32(-1) for _ in 1:size]
   for range in ranges
     set_range(hashtable, size, key, range)
   end
@@ -61,17 +61,17 @@ end
 
 function probe_range(key, hashtable)
   size = length(hashtable)
-  min_probe_range = typemax(Int)
-  max_probe_range = 0
+  min_probe_range::Int32 = typemax(Int32)
+  max_probe_range::Int32 = 0
   for (slot, range) in enumerate(hashtable)
-    if range != 0:-1
+    if range != Int32(0):Int32(-1)
       h = (hash_in(key, range.start) % size) + 1
       min_probe_range = min(min_probe_range, distance(size, slot, h))
       max_probe_range = max(max_probe_range, distance(size, slot, h))
     end
   end
-  if min_probe_range == typemax(Int)
-    0:-1
+  if min_probe_range == typemax(Int32)
+    Int32(0):Int32(-1)
   else
     min_probe_range:max_probe_range
   end
@@ -79,8 +79,8 @@ end
   
 type Index{C}
   columns::C
-  hashtables::Vector{Vector{UnitRange{Int}}}
-  probe_ranges::Vector{UnitRange{Int}}
+  hashtables::Vector{Vector{UnitRange{Int32}}}
+  probe_ranges::Vector{UnitRange{Int32}}
 end
 
 function Index(columns)
@@ -129,8 +129,8 @@ function get_range(column, hashtable, probe_range, range, hash, key)
   slot = h + probe_range.start
   while distance(size, slot, h) <= probe_range.stop
     range2 = hashtable[slot]
-    if (range2 == 0:-1)
-      return 0:-1
+    if (range2 == Int32(0):Int32(-1))
+      return Int32(0):Int32(-1)
     elseif (range2.start >= range.start) && 
       (range2.stop <= range.stop) && 
       (column[range2.start] == key)
@@ -138,23 +138,23 @@ function get_range(column, hashtable, probe_range, range, hash, key)
     end
     slot = (slot % size) + 1
   end
-  return 0:-1
+  return Int32(0):Int32(-1)
 end
 
 type Finger{T}
   column::Vector{T}
-  hashtable::Vector{UnitRange{Int}}
-  probe_range::UnitRange{Int}
+  hashtable::Vector{UnitRange{Int32}}
+  probe_range::UnitRange{Int32}
   hash::UInt
-  range::UnitRange{Int}
+  range::UnitRange{Int32}
 end
 
 @inline function finger(relation::Relation, index::Index)
-  Finger(Void[], UnitRange{Int}[], 0:-1, UInt(0), 1:length(index.columns[1]))
+  Finger(Void[], UnitRange{Int32}[], Int32(0):Int32(-1), UInt(0), Int32(1):Int32(length(index.columns[1])))
 end
 
 @inline function finger{col_ix}(relation::Relation, index, finger, ::Type{Val{col_ix}})
-  Finger(index.columns[col_ix], index.hashtables[col_ix], index.probe_ranges[col_ix], UInt(0), 0:-1)
+  Finger(index.columns[col_ix], index.hashtables[col_ix], index.probe_ranges[col_ix], UInt(0), Int32(0):Int32(-1))
 end
   
 @inline function Base.length(finger::Finger)

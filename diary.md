@@ -5816,3 +5816,94 @@ Small numbers are only a few bytes in ascii, but always 8 bytes as an Int64. Pos
 The first three columns of this table end up being Int32, Int32, Int8. Only saves about 140mb, but at least the increased locality might help when joining.
 
 It seems like the remaining overhead must be entirely from breaking up into many tiny string allocations. Can't fix that easily unless Julia unifies String and SubString at some point in the future.
+
+Interning probably won't survive load/save with JLD, so I might have to re-intern on loading...
+
+Anyway, back to hashtables. I was trying to figure out why they are so slow. The Julia profiler is not particularly helpful - most of the trace is in Hashed.get_range as expected, but it also places a lot of time in Relation. But timing each part of the query with @time disagrees, and I trust the latter more.
+
+I suspect the memory overhead of the current hash-table representation is a problem. I can test that by changing UnitRange{Int64} to UnitRange{Int32} and seeing how it affects the timings.
+
+Slightly better: 0.56 83 160 130. Not enough to matter. No more hashtables.
+
+Constantly loading this dataset is a huge time-sink, so let's see if I can make it faster. I have an idea that DataFrames is loading stuff row-wise, which means dynamic dispatch on types (unless it's doing something clever with generated types). Let's try doing stuff column-wise instead. I'll use sqlite to avoid having to do any csv parsing.
+
+``` julia
+function read_job()
+  schema = readdlm(open("data/job_schema.csv"), ',', header=false, quotes=true, comments=false)
+  table_column_names = Dict()
+  table_column_types = Dict()
+  for column in 1:size(schema)[1]
+    table_name, ix, column_name, column_type = schema[column, 1:4]
+    push!(get!(table_column_names, table_name, []), column_name)
+    push!(get!(table_column_types, table_name, []), column_type)
+  end
+  relations = Dict()
+  for (table_name, column_names) in table_column_names
+    if isfile("../imdb/$(table_name).csv")
+      column_types = table_column_types[table_name]
+      @show table_name column_names column_types
+      columns = []
+      for (column_name, column_type) in zip(column_names, column_types)
+        query = "select $column_name from $table_name"
+        lines = readlines(`sqlite3 ../imdb/imdb.sqlite $query`)
+        if column_type == "integer"
+          numbers = Int64[line == "" ? 0 : parse(Int64, line) for line in lines]
+          minval, maxval = minimum(numbers), maximum(numbers)
+          typ = first(typ for typ in [Int8, Int16, Int32, Int64] if (minval > typemin(typ)) && (maxval < typemax(typ)))
+          column = convert(Vector{typ}, numbers)
+        else 
+          interned = Dict{String, String}()
+          column = String[get!(interned, line, line) for line in lines]
+        end
+        push!(columns, column)
+      end
+      relations[table_name] = Relation(tuple(columns...), 1)
+    end
+  end
+  relations
+end
+```
+
+A few back-and-forths with code_warntype refine this to:
+
+``` julia
+function read_job()
+  schema = readdlm(open("data/job_schema.csv"), ',', header=false, quotes=true, comments=false)
+  table_column_names = Dict{String, Vector{String}}()
+  table_column_types = Dict{String, Vector{String}}()
+  for column in 1:size(schema)[1]
+    table_name, ix, column_name, column_type = schema[column, 1:4]
+    push!(get!(table_column_names, table_name, []), column_name)
+    push!(get!(table_column_types, table_name, []), column_type)
+  end
+  relations = Dict{String, Relation}()
+  for (table_name, column_names) in table_column_names
+    if isfile("../imdb/$(table_name).csv")
+      column_types = table_column_types[table_name]
+      @show table_name column_names column_types
+      columns = Vector[]
+      for (column_name, column_type) in zip(column_names, column_types)
+        query = "select $column_name from $table_name"
+        lines::Vector{String} = readlines(`sqlite3 ../imdb/imdb.sqlite $query`)
+        if column_type == "integer"
+          numbers = Int64[(line == "" || line == "\n") ? 0 : parse(Int64, line) for line in lines]
+          minval = minimum(numbers)
+          maxval = maximum(numbers)
+          typ = first(typ for typ in [Int8, Int16, Int32, Int64] if (minval > typemin(typ)) && (maxval < typemax(typ)))
+          push!(columns, convert(Vector{typ}, numbers))
+        else 
+          interned = Dict{String, String}()
+          for ix in 1:length(lines)
+            lines[ix] = get!(interned, lines[ix], lines[ix])
+          end
+          push!(columns, lines)
+        end
+      end
+      relations[table_name] = Relation(tuple(columns...), 1)
+    end
+  end
+  relations
+end
+```
+
+Got to go now, will see how long it takes tomorrow.

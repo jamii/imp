@@ -475,9 +475,9 @@ function q7c()
   end
 end
 
-function query_names(q=1)
+function query_names()
   query_names = []
-  for num in q:33
+  for num in 1:33
     for char in "abcdef"
       query_name = "$num$char"
       if isdefined(Symbol("q$query_name"))
@@ -488,8 +488,8 @@ function query_names(q=1)
   query_names
 end
 
-function test(q=1)
-  for query_name in query_names(q)
+function test(qs = query_names())
+  for query_name in qs
     results_imp = eval(Symbol("q$(query_name)"))()
     query = rstrip(readline("../job/$(query_name).sql"))
     query = query[1:(length(query)-1)] # drop ';' at end

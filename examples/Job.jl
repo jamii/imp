@@ -1,6 +1,6 @@
 module Job
 
-using Hashed
+using Data
 using Query
 using JobData
 using Base.Test
@@ -69,10 +69,10 @@ function test()
     query = replace(query, "MIN", "")
     query = "copy ($query) to '/tmp/results.csv' with CSV DELIMITER ',';"
     run(`sudo -u postgres psql -c $query`)
-    frame = DataFrames.readtable(open("/tmp/results.csv"), header=false, eltypes=[eltype(c) for c in sorted_columns(results_imp)])
-    num_columns = length(sorted_columns(results_imp))
+    frame = DataFrames.readtable(open("/tmp/results.csv"), header=false, eltypes=[eltype(c) for c in results_imp.columns])
+    num_columns = length(results_imp)
     results_pg = Relation(tuple((frame[ix].data for ix in 1:num_columns)...), num_columns)
-    (imp_only, pg_only) = Hashed.diff(results_imp, results_pg)
+    (imp_only, pg_only) = Data.diff(results_imp, results_pg)
     @show q 
     @test imp_only == pg_only # ie both empty - but @test will print both otherwise
   end

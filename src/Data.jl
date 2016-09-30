@@ -241,10 +241,6 @@ end
   down_finger.column[down_finger.lo]
 end
 
-function Base.length(relation::Relation)
-  length(relation.columns) == 0 ? 0 : length(relation.columns[1])
-end
-
 function foreach_diff{T <: Tuple, K <: Tuple}(old::T, new::T, old_key::K, new_key::K, old_only, new_only, old_and_new)
   @inbounds begin
     old_at = 1
@@ -324,8 +320,12 @@ function Base.push!{T}(relation::Relation{T}, values)
   # TODO remove dupes
 end
 
-function sorted_columns(relation)
-  relation.columns
+@inline function Base.length(relation::Relation)
+  length(relation.columns)
+end
+
+@inline function Base.getindex(relation, ix)
+  relation.columns[ix]
 end
 
 # import Atom

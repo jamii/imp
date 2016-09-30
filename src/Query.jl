@@ -1,6 +1,6 @@
 module Query
 
-using Hashed
+using Data
 using Match
 
 macro switch(ix_var, cases...)
@@ -184,7 +184,7 @@ function plan_query(query)
   # use types of return relation if available
   if return_clause.name != ()
     for (ix, var) in enumerate(return_clause.vars)
-      return_clause.typs[ix] = :(eltype($(return_clause.name).columns[$ix]))
+      return_clause.typs[ix] = :(eltype($(return_clause.name)[$ix]))
     end
   end
   

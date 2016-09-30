@@ -1,6 +1,6 @@
 module Graph
 
-using Hashed
+using Data
 using Query
 using BenchmarkTools
 using Base.Test
@@ -8,7 +8,6 @@ using Base.Test
 srand(999)
 const edge1 = Relation(([1, 2, 3, 3, 4], [2, 3, 1, 4, 2]), 2)
 const edge2 = Relation((rand(1:Int64(1E5), Int64(1E6)), rand(1:Int64(1E5), Int64(1E6))), 2)
-# edge3 = read_columns("/home/jamie/soc-LiveJournal1.txt", [Int32, Int32], comments=true)
 
 function f(edge) 
   @query begin
@@ -22,11 +21,9 @@ function f(edge)
 end
 
 function test()
-  @test sorted_columns(f(edge1)) == (
-  [1, 2],
-  [2, 3],
-  [3, 4],
-  )
+  @test f(edge1)[1] == [1, 2]
+  @test f(edge1)[2] == [2, 3]
+  @test f(edge1)[3] == [3, 4]
 end
 
 function bench()

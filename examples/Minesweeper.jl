@@ -9,15 +9,15 @@ using Hiccup
 @tags button
 
 function count(relation)
-  length(relation)
+  length(relation[1])
 end
 
 function exists(relation)
-  length(relation) > 0
+  length(relation[1]) > 0
 end
 
 function fix(flow, relation)
-  order = collect(1:length(relation.columns))
+  order = collect(1:length(relation))
   while true
     old_state = relation.columns
     flow()

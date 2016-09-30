@@ -2,7 +2,7 @@ module JobData
 
 # separate module because this takes a long time, don't want to rerun it every test
 
-using Hashed
+using Data
 
 function read_job()
   schema = readdlm(open("data/job_schema.csv"), ',', header=false, quotes=true, comments=false)
@@ -41,8 +41,6 @@ function read_job()
   end
   tables
 end
-
-job = @time read_job()
 
 if !isfile("../imdb/imdb.imp")
   job = @time read_job()

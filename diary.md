@@ -5907,3 +5907,71 @@ end
 ```
 
 Got to go now, will see how long it takes tomorrow.
+
+### 2016 Sep 30
+
+The load time is cut in half. Still much too long. I'll try saving just the columns, so at least I don't have to rebuild whenever I change the representation of relations.
+
+Let's try using substrings to reduce allocation.
+
+``` julia
+function read_job()
+  db = SQLite.DB("../imdb/imdb.sqlite")
+  schema = readdlm(open("data/job_schema.csv"), ',', header=false, quotes=true, comments=false)
+  table_column_names = Dict{String, Vector{String}}()
+  table_column_types = Dict{String, Vector{String}}()
+  for column in 1:size(schema)[1]
+    table_name, ix, column_name, column_type = schema[column, 1:4]
+    push!(get!(table_column_names, table_name, []), column_name)
+    push!(get!(table_column_types, table_name, []), column_type)
+  end
+  tables = Dict{String, Tuple}()
+  for (table_name, column_names) in table_column_names
+    if isfile("../imdb/$(table_name).csv")
+      column_types = table_column_types[table_name]
+      @show table_name column_names column_types
+      columns = Vector[]
+      for (column_name, column_type) in zip(column_names, column_types)
+        query = "select $column_name from $table_name"
+        lines::Vector{SubString{String}} = split(readstring(`sqlite3 ../imdb/imdb.sqlite $query`), '\n')
+        if column_type == "integer"
+          numbers = Int64[(line == "") ? 0 : parse(Int64, line) for line in lines]
+          minval = minimum(numbers)
+          maxval = maximum(numbers)
+          typ = first(typ for typ in [Int8, Int16, Int32, Int64] if (minval > typemin(typ)) && (maxval < typemax(typ)))
+          push!(columns, convert(Vector{typ}, numbers))
+        else 
+          push!(columns, lines)
+        end
+      end
+      tables[table_name] = tuple(columns...)
+    end
+  end
+  tables
+end
+```
+
+Still a ton of allocation. Of course, because SubString contains a pointer so it can't be stack-allocated. It's also immutable, so I can't just allocate one and mutate it in a loop. Worst of both worlds.
+
+This is really frustrating. I'm taking one big string and turning it into one big chunk of integers, and there is no way to use the string api to do this without creating a new heap object for every line.
+
+It looks like the [fix](https://github.com/JuliaLang/julia/pull/18632) for this is pretty close to landing. Hopefully in the next month or two I get to stop complaining about this. Maybe I should just finish the JOB benchmarks with the code as it stands, and then come back to performance work later once it's less frustrating.
+
+For some reason JLD is now hanging when I try to save the columns. I tried Feather. which [crashed](https://github.com/JuliaStats/Feather.jl/issues/21). I tried HDF5 but now it's hanging before I even get to saving. Is my SSD dying? So frustrating.
+
+<break>
+
+I've spent 10 days now working on indexes. It feels like it's been a meandering and aimless slog. I think the reason for this is that I don't have a concrete problem to solve. I only wanted indexes at this point for a 'fair' comparison with sqlite so that I can write a progress report without feeling dishonest. 
+
+Engineering is mostly about tradeoffs. To decide which tradeoffs to make I need concrete use-cases against which to evaluate them and a good-enough point so I know when to stop working. The most common mistake I make in programming is to try and build something without those. I end up constantly changing my mind, flailing back and forth between different designs. It's stressful and exhausting. 
+
+So no more indexes. Let's do the minimum possible to finish:
+
+* Remove Hashed indexes
+* Return to single indexes per column
+* Replace gallop with binary search
+* Handle parameters in benchmark setup code 
+* Write all benchmarks
+* Benchmark insert time
+* Measure import and load time 
+* Write report

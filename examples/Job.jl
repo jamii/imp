@@ -16,11 +16,11 @@ function q1a()
     title.title(t, title)
     title.production_year(t, production_year)
     movie_companies.movie(mc, t)
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, "production companies")
     movie_companies.note(mc, note)
     @when !contains(note, "(as Metro-Goldwyn-Mayer Pictures)") &&
       (contains(note, "(co-production)") || contains(note, "(presents)"))
-    movie_companies.company_type(mc, ct)
-    company_type.kind(ct, "production companies")
     return (note::String, title::String, production_year::Int64)
   end
 end
@@ -107,7 +107,7 @@ end
 function bench_imp()
   medians = []
   for query_name in query_names()
-    @show q
+    @show query_name
     trial = @show @benchmark $(eval(Symbol("q$(query_name)")))()
     push!(medians, median(trial.times) / 1000000)
   end
@@ -121,9 +121,8 @@ function bench_sqlite()
   medians = []
   for query_name in query_names()
     query = rstrip(readline("../job/$(query_name).sql"))
-    @time SQLite.query(db, query)
     trial = @show @benchmark SQLite.query($db, $query)
-    push!(medians, @show (median(trial.times) / 1000000))
+    push!(medians, median(trial.times) / 1000000)
   end
   medians
 end
@@ -136,9 +135,9 @@ function bench_pg()
     bench = "explain analyze $query"
     cmd = `sudo -u postgres psql -c $bench`
     times = Float64[]
-    @show q
+    @show query_name
     @show @benchmark push!($times, parse(Float64, match(r"Execution time: (\S*) ms", readstring($cmd))[1]))
-    push!(medians, @show median(times))
+    push!(medians, median(times))
   end
   medians
 end

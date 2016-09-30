@@ -5969,7 +5969,8 @@ So no more indexes. Let's do the minimum possible to finish:
 
 * Remove Hashed indexes
 * Return to single indexes per column
-* Replace gallop with binary search
+* Correctly count number of values in finger
+* Replace gallop by binary search
 * Handle parameters in benchmark setup code 
 * Write all benchmarks
 * Benchmark insert time
@@ -5978,3 +5979,9 @@ So no more indexes. Let's do the minimum possible to finish:
 * Write benchmark repro
 * Fix minesweeper
 * Add readme
+
+Hashed indexes are gone.
+
+Bunch of faff with serialization - most Julia serialization libraries I tried don't work. Still have horrible load times. But I have the original dataframes saved and back to single indexes.
+
+Bench times for single indexes: 3.04 58.5 99.5 52.5. Looking all the way back, I previously had 1.66 68.8 116 46 for single indexes. 

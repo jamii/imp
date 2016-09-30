@@ -5969,9 +5969,6 @@ So no more indexes. Let's do the minimum possible to finish:
 
 * Remove Hashed indexes
 * Return to single indexes per column
-* Correctly count number of values in finger
-* Replace gallop by binary search
-* Handle parameters in benchmark setup code 
 * Write all benchmarks
 * Benchmark insert time
 * Measure import and load time 

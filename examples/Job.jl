@@ -514,7 +514,7 @@ end
 function bench()
   for (query_name, imp, sqlite, pg) in zip(query_names(), bench_imp(), bench_sqlite(), bench_pg())
     # if (imp > sqlite) || (imp > pg)
-      println("$query_name imp=$imp sqlite=$sqlite pg=$pg")
+      println("$query_name imp=$imp pg=$pg sqlite=$sqlite")
     # end
   end
 end
@@ -538,6 +538,7 @@ function bench_sqlite()
   @show @benchmark SQLite.query($db, $query)
   medians = []
   for query_name in query_names()
+    @show query_name
     query = rstrip(readline("../job/$(query_name).sql"))
     trial = @show @benchmark SQLite.query($db, $query)
     push!(medians, median(trial.times) / 1000000)

@@ -5982,3 +5982,38 @@ Hashed indexes are gone.
 Bunch of faff with serialization - most Julia serialization libraries I tried don't work. Still have horrible load times. But I have the original dataframes saved and back to single indexes.
 
 Bench times for single indexes: 3.04 58.5 99.5 52.5. Looking all the way back, I previously had 1.66 68.8 116 46 for single indexes. 
+
+I added the first 26 of 116 queries. Very time-consuming work.
+
+Benchmarks so far:
+
+```
+1a imp=3.053742 sqlite=272.002707 pg=8.245
+1b imp=0.025493 sqlite=270.378863 pg=0.3545
+1c imp=0.3997515 sqlite=269.570717 pg=6.4695
+1d imp=0.0296175 sqlite=268.658936 pg=0.409
+2a imp=52.3988785 sqlite=248.268076 pg=668.3215
+2b imp=50.513265 sqlite=244.603772 pg=637.964
+2c imp=46.459809 sqlite=247.278891 pg=609.987
+2d imp=67.589642 sqlite=248.307465 pg=829.885
+3a imp=103.3306 sqlite=108.787906 pg=200.249
+3b imp=55.1109555 sqlite=54.162339 pg=131.461
+3c imp=145.452778 sqlite=239.3878935 pg=370.3905
+4a imp=52.49697 sqlite=1007.083345 pg=134.812
+4b imp=51.2409345 sqlite=115.5015855 pg=72.392
+4c imp=59.6302305 sqlite=2306.46438 pg=146.917
+5a imp=97.826341 sqlite=498.090845 pg=201.365
+5b imp=94.930138 sqlite=498.81496 pg=197.129
+5c imp=106.009394 sqlite=586.696994 pg=258.47
+6a imp=2.037003 sqlite=15.344694 pg=18.965
+6b imp=1153.088708 sqlite=90.9772715 pg=273.2355
+6c imp=0.0359965 sqlite=11.6395965 pg=14.14
+6d imp=1137.420032 sqlite=2259.020631 pg=7490.549
+6e imp=2.098454 sqlite=15.563986 pg=21.8
+6f imp=3175.456101 sqlite=2186.361888 pg=7876.016
+7a imp=3.101584 sqlite=737.849858 pg=1095.4915
+7b imp=2.202317 sqlite=122.181171 pg=291.897
+7c imp=597.880991 sqlite=8784.628611 pg=3715.3475
+```
+
+In 6b and 6d I do a table scan with a regex. Apparently a bad idea. In 6f I'm suffering from not having factorized queries - a lot of those movies will be repeatedly visited. For all three I would probably be better off starting at title and taking advantage of the early bailout. I'm not going to change any queries until I have the first-attempt results for all of them though, since what I want to demonstrate in this report is that query planning by hand is feasible.

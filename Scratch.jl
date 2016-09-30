@@ -1,6 +1,5 @@
 include("src/Data.jl")
 Data.test()
-include("src/Hashed.jl")
 include("examples/JobData.jl")
 
 include("src/Query.jl")

@@ -5975,3 +5975,6 @@ So no more indexes. Let's do the minimum possible to finish:
 * Benchmark insert time
 * Measure import and load time 
 * Write report
+* Write benchmark repro
+* Fix minesweeper
+* Add readme

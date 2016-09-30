@@ -10,24 +10,30 @@ import SQLite
 
 function q1a()
   @query begin 
-    info_type(it_id, "top 250 rank")
-    movie_info_idx(_, t_id, it_id, _, _)
-    title(t_id, title, _, _, production_year)
-    movie_companies(_, t_id, _, ct_id, note)
-    company_type(ct_id, "production companies")
+    info_type.info(it, "top 250 rank")
+    movie_info_idx.info_type(mi, it)
+    movie_info_idx.movie(mi, t)
+    title.title(t, title)
+    title.production_year(t, production_year)
+    movie_companies.movie(mc, t)
+    movie_companies.note(mc, note)
     @when !contains(note, "(as Metro-Goldwyn-Mayer Pictures)") &&
       (contains(note, "(co-production)") || contains(note, "(presents)"))
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, "production companies")
     return (note::String, title::String, production_year::Int64)
   end
 end
 
 function q2a()
   @query begin
-    keyword(k_id, "character-name-in-title", _)
-    movie_keyword(_, t_id, k_id)
-    title(t_id, title, _, _, _)
-    movie_companies(_, t_id, cn_id, _, _)
-    company_name(cn_id, _, "[de]", _, _, _, _)
+    keyword.keyword(k, "character-name-in-title")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[de]")
     return (title::String,)
   end
 end
@@ -37,11 +43,14 @@ function q3a()
   infos = Set(["Sweden", "Norway", "Germany", "Denmark", "Swedish", "Denish", "Norwegian", "German"])
   @query begin 
     @when contains(keyword, "sequel")
-    keyword(k_id, keyword, _)
-    movie_keyword(_, t_id, k_id)
-    title(t_id, title, _, _, production_year)
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.title(t, title)
+    title.production_year(t, production_year)
     @when production_year > 2005
-    movie_info(_, t_id, _, info, _)
+    movie_info.movie(mi, t)
+    movie_info.info(mi, info)
     @when info in infos
     return (title::String,)
   end
@@ -50,21 +59,38 @@ end
 function q4a()
   @query begin
     @when contains(keyword, "sequel")
-    keyword(k_id, keyword, _)
-    movie_keyword(_, t_id, k_id)
-    title(t_id, title, _, _, production_year)
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.title(t, title)
+    title.production_year(t, production_year)
     @when production_year > 2005
-    info_type(it_id, "rating")
-    movie_info_idx(_, t_id, it_id, info, _)
+    movie_info_idx.movie(mi, t)
+    movie_info_idx.info_type(mi, it)
+    info_type.info(it, "rating")
+    movie_info_idx.info(mi, info)
     @when info > "5.0"
     return (info::String, title::String)
   end
 end
 
+function query_names()
+  query_names = []
+  for num in 1:4
+    for char in "abcdef"
+      query_name = "$num$char"
+      if isdefined(Symbol("q$query_name"))
+        push!(query_names, query_name)
+      end
+    end
+  end
+  query_names
+end
+
 function test()
-  for q in 1:4
-    results_imp = eval(Symbol("q$(q)a"))()
-    query = rstrip(readline("../job/$(q)a.sql"))
+  for query_name in query_names()
+    results_imp = eval(Symbol("q$(query_name)"))()
+    query = rstrip(readline("../job/$(query_name).sql"))
     query = query[1:(length(query)-1)] # drop ';' at end
     query = replace(query, "MIN", "")
     query = "copy ($query) to '/tmp/results.csv' with CSV DELIMITER ',';"
@@ -73,16 +99,16 @@ function test()
     num_columns = length(results_imp)
     results_pg = Relation(tuple((frame[ix].data for ix in 1:num_columns)...), num_columns)
     (imp_only, pg_only) = Data.diff(results_imp, results_pg)
-    @show q 
+    @show query_name
     @test imp_only == pg_only # ie both empty - but @test will print both otherwise
   end
 end
 
 function bench_imp()
   medians = []
-  for q in 1:4
+  for query_name in query_names()
     @show q
-    trial = @show @benchmark $(eval(Symbol("q$(q)a")))()
+    trial = @show @benchmark $(eval(Symbol("q$(query_name)")))()
     push!(medians, median(trial.times) / 1000000)
   end
   medians
@@ -93,8 +119,8 @@ function bench_sqlite()
   SQLite.execute!(db, "PRAGMA cache_size = -1000000000;")
   SQLite.execute!(db, "PRAGMA temp_store = memory;")
   medians = []
-  for q in 1:4
-    query = rstrip(readline("../job/$(q)a.sql"))
+  for query_name in query_names()
+    query = rstrip(readline("../job/$(query_name).sql"))
     @time SQLite.query(db, query)
     trial = @show @benchmark SQLite.query($db, $query)
     push!(medians, @show (median(trial.times) / 1000000))
@@ -104,8 +130,8 @@ end
 
 function bench_pg()
   medians = []
-  for q in 1:4
-    query = rstrip(readline("../job/$(q)a.sql"))
+  for query_name in query_names()
+    query = rstrip(readline("../job/$(query_name).sql"))
     query = query[1:(length(query)-1)] # drop ';' at end
     bench = "explain analyze $query"
     cmd = `sudo -u postgres psql -c $bench`

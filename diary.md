@@ -6017,3 +6017,7 @@ Benchmarks so far:
 ```
 
 In 6b and 6d I do a table scan with a regex. Apparently a bad idea. In 6f I'm suffering from not having factorized queries - a lot of those movies will be repeatedly visited. For all three I would probably be better off starting at title and taking advantage of the early bailout. I'm not going to change any queries until I have the first-attempt results for all of them though, since what I want to demonstrate in this report is that query planning by hand is feasible.
+
+### 2016 Oct 1
+
+Up to q14 now. Tedious.

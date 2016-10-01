@@ -475,6 +475,241 @@ function q7c()
   end
 end
 
+function q8a()
+  @query begin
+    cast_info.note(ci, "(voice: English version)")
+    cast_info.role(ci, rt)
+    role_type.role(rt, "actress")
+    cast_info.person(ci, n)
+    name.name(n, name)
+    @when contains(name, "Yo") && !contains(name, "Yu")
+    aka_name.person(an, n)
+    aka_name.name(an, aka_name)
+    cast_info.movie(ci, t)
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.note(mc, note)
+    @when contains(note, "(Japan)") && !contains(note, "(USA)")
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[jp]")
+    return (aka_name::String, title::String)
+  end
+end
+
+function q8b()
+  @query begin
+    cast_info.note(ci, "(voice: English version)")
+    cast_info.role(ci, rt)
+    role_type.role(rt, "actress")
+    cast_info.person(ci, n)
+    name.name(n, name)
+    @when contains(name, "Yo") && !contains(name, "Yu")
+    aka_name.person(an, n)
+    aka_name.name(an, aka_name)
+    cast_info.movie(ci, t)
+    title.production_year(t, production_year)
+    @when 2006 <= production_year <= 2007
+    title.title(t, title)
+    @when startswith(title, "One Piece") || startswith(title, "Dragon Ball Z")
+    movie_companies.movie(mc, t)
+    movie_companies.note(mc, note)
+    @when contains(note, "(Japan)") && !contains(note, "(USA)")
+    @when contains(note, "(2006)") || contains(note, "(2007)")
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[jp]")
+    return (aka_name::String, title::String)
+  end
+end
+
+function q8c()
+  @query begin
+    role_type.role(rt, "writer")
+    cast_info.role(ci, rt)
+    cast_info.person(ci, n)
+    aka_name.person(an, n)
+    aka_name.name(an, aka_name)
+    cast_info.movie(ci, t)
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[us]")
+    return (aka_name::String, title::String)
+  end
+end
+
+function q8d()
+  @query begin
+    role_type.role(rt, "costume designer")
+    cast_info.role(ci, rt)
+    cast_info.person(ci, n)
+    aka_name.person(an, n)
+    aka_name.name(an, aka_name)
+    cast_info.movie(ci, t)
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[us]")
+    return (aka_name::String, title::String)
+  end
+end
+
+function q9a()
+  ci_notes = ["(voice)", "(voice: Japanese version)", "(voice) (uncredited)", "(voice: English version)"]
+  @query begin
+    role_type.role(rt, "actress")
+    cast_info.role(ci, rt)
+    cast_info.note(ci, ci_note)
+    ci_note in ci_notes 
+    cast_info.person(ci, n)
+    name.gender(n, "f")
+    name.name(n, name)
+    @when contains(name, "Ang")
+    aka_name.person(an, n)
+    aka_name.name(an, aka_name)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    cast_info.movie(ci ,t)    
+    title.production_year(t, production_year)
+    @when 2005 <= production_year <= 2015
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)    
+    company_name.country_code(cn, "[us]")
+    movie_companies.note(mc, mc_note)
+    @when contains(mc_note, "(USA)") || contains(mc_note, "(worldwide)")
+    return (aka_name::String, char_name::String, title::String)
+  end
+end
+
+function q9b()
+  @query begin
+    role_type.role(rt, "actress")
+    cast_info.role(ci, rt)
+    cast_info.note(ci, "(voice)")
+    cast_info.person(ci, n)
+    name.gender(n, "f")
+    name.name(n, name)
+    @when contains(name, "Angel")
+    aka_name.person(an, n)
+    aka_name.name(an, aka_name)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    cast_info.movie(ci ,t)    
+    title.production_year(t, production_year)
+    @when 2007 <= production_year <= 2010
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)    
+    company_name.country_code(cn, "[us]")
+    movie_companies.note(mc, mc_note)
+    @when contains(mc_note, "(USA)") || contains(mc_note, "(worldwide)")
+    @when ismatch(r"\(200.\)", mc_note)
+    return (aka_name::String, char_name::String, name::String, title::String)
+  end
+end
+
+function q9c()
+  ci_notes = ["(voice)", "(voice: Japanese version)", "(voice) (uncredited)", "(voice: English version)"]
+  @query begin
+    role_type.role(rt, "actress")
+    cast_info.role(ci, rt)
+    cast_info.note(ci, ci_note)
+    ci_note in ci_notes 
+    cast_info.person(ci, n)
+    name.gender(n, "f")
+    name.name(n, name)
+    @when contains(name, "An")
+    aka_name.person(an, n)
+    aka_name.name(an, aka_name)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    cast_info.movie(ci ,t)    
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)    
+    company_name.country_code(cn, "[us]")
+    return (aka_name::String, char_name::String, name::String, title::String)
+  end
+end
+
+function q9d()
+  ci_notes = ["(voice)", "(voice: Japanese version)", "(voice) (uncredited)", "(voice: English version)"]
+  @query begin
+    role_type.role(rt, "actress")
+    cast_info.role(ci, rt)
+    cast_info.note(ci, ci_note)
+    ci_note in ci_notes 
+    cast_info.person(ci, n)
+    name.gender(n, "f")
+    name.name(n, name)
+    aka_name.person(an, n)
+    aka_name.name(an, aka_name)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    cast_info.movie(ci ,t)    
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)    
+    company_name.country_code(cn, "[us]")
+    return (aka_name::String, char_name::String, name::String, title::String)
+  end
+end
+
+function q10a()
+  @query begin
+    company_name.country_code(cn, "[ru]")
+    movie_companies.company(mc, cn)
+    movie_companies.movie(mc, t)    
+    title.production_year(t, production_year)
+    @when production_year > 2005
+    cast_info.movie(ci, t)
+    cast_info.role(ci, rt)
+    role_type.role(rt, "actor")
+    cast_info.note(ci, note)
+    @when contains(note, "(voice)") && contains(note, "(uncredited)")
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    title.title(t, title)
+    return (char_name::String, title::String)
+  end
+end
+
+function q10b()
+  @query begin
+    company_name.country_code(cn, "[ru]")
+    movie_companies.company(mc, cn)
+    movie_companies.movie(mc, t)    
+    title.production_year(t, production_year)
+    @when production_year > 2010
+    cast_info.movie(ci, t)
+    cast_info.role(ci, rt)
+    role_type.role(rt, "actor")
+    cast_info.note(ci, note)
+    @when contains(note, "(producer)")
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    title.title(t, title)
+    return (char_name::String, title::String)
+  end
+end
+
+function q10c()
+  @query begin
+    company_name.country_code(cn, "[us]")
+    movie_companies.company(mc, cn)
+    movie_companies.movie(mc, t)    
+    title.production_year(t, production_year)
+    @when production_year > 1990
+    cast_info.movie(ci, t)
+    cast_info.note(ci, note)
+    @when contains(note, "(producer)")
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    title.title(t, title)
+    return (char_name::String, title::String)
+  end
+end
+
 function query_names()
   query_names = []
   for num in 1:33
@@ -511,17 +746,17 @@ function test(qs = query_names())
   end
 end
 
-function bench()
-  for (query_name, imp, sqlite, pg) in zip(query_names(), bench_imp(), bench_sqlite(), bench_pg())
+function bench(qs = query_names())
+  for (query_name, imp, sqlite, pg) in zip(qs, bench_imp(qs), bench_sqlite(qs), bench_pg(qs))
     # if (imp > sqlite) || (imp > pg)
       println("$query_name imp=$imp pg=$pg sqlite=$sqlite")
     # end
   end
 end
 
-function bench_imp()
+function bench_imp(qs = query_names())
   medians = []
-  for query_name in query_names()
+  for query_name in qs
     @show query_name
     trial = @show @benchmark $(eval(Symbol("q$(query_name)")))()
     push!(medians, median(trial.times) / 1000000)
@@ -529,7 +764,7 @@ function bench_imp()
   medians
 end
 
-function bench_sqlite()
+function bench_sqlite(qs = query_names())
   db = SQLite.DB("../imdb/imdb.sqlite")
   SQLite.execute!(db, "PRAGMA cache_size = -1000000000;")
   SQLite.execute!(db, "PRAGMA temp_store = memory;")
@@ -537,7 +772,7 @@ function bench_sqlite()
   query = "select * from movie_info limit 1"
   @show @benchmark SQLite.query($db, $query)
   medians = []
-  for query_name in query_names()
+  for query_name in qs
     @show query_name
     query = rstrip(readline("../job/$(query_name).sql"))
     trial = @show @benchmark SQLite.query($db, $query)
@@ -546,9 +781,9 @@ function bench_sqlite()
   medians
 end
 
-function bench_pg()
+function bench_pg(qs = query_names())
   medians = []
-  for query_name in query_names()
+  for query_name in qs
     query = rstrip(readline("../job/$(query_name).sql"))
     query = query[1:(length(query)-1)] # drop ';' at end
     bench = "explain analyze $query"

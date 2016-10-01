@@ -8,6 +8,17 @@ using BenchmarkTools
 import DataFrames
 import SQLite
 
+macro query_not(clause)
+  quote 
+    exists = @query begin 
+      exists = true
+      $clause
+      return (exists::Bool,)
+    end
+    length(exists[1]) == 0
+  end
+end
+
 function q1a()
   @query begin 
     info_type.info(it, "top 250 rank")
@@ -707,6 +718,281 @@ function q10c()
     char_name.name(chn, char_name)
     title.title(t, title)
     return (char_name::String, title::String)
+  end
+end
+
+function q11a()
+  @query begin
+    keyword.keyword(k, "sequel")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.production_year(t, production_year)
+    @when 1950 <= production_year <= 2000
+    movie_companies.movie(mc, t)
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, "production companies")
+    movie_companies.company(mc, cn)
+    company_name.name(cn, name)
+    @when contains(name, "Film") || contains(name, "Warner")
+    company_name.country_code(cn, code)
+    @when code != "[pl]"
+    movie_link.movie(ml, t)
+    movie_link.link_type(ml, lt)
+    link_type.link(lt, link)
+    @when contains(link, "follow")
+    title.title(t, title)
+    @when @query_not movie_companies.note($mc, _)
+    return (name::String, link::String, title::String)
+  end
+end
+
+function q11b()
+  @query begin
+    keyword.keyword(k, "sequel")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.production_year(t, Int16(1998))
+    title.title(t, title)
+    @when contains(title, "Money")
+    movie_companies.movie(mc, t)
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, "production companies")
+    movie_companies.company(mc, cn)
+    company_name.name(cn, name)
+    @when contains(name, "Film") || contains(name, "Warner")
+    company_name.country_code(cn, code)
+    @when code != "[pl]"
+    movie_link.movie(ml, t)
+    movie_link.link_type(ml, lt)
+    link_type.link(lt, link)
+    @when contains(link, "follows")
+    @when @query_not movie_companies.note($mc, _)
+    return (name::String, link::String, title::String)
+  end
+end
+
+function q11c()
+  keywords = ["sequel", "revenge", "based-on-novel"]
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.production_year(t, production_year)
+    @when production_year > 1950
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, kind)
+    @when kind != "production companies"
+    movie_companies.company(mc, cn)
+    company_name.name(cn, name)
+    @when startswith(name, "20th Century Fox") || startswith(name, "Twentieth Century Fox")
+    company_name.country_code(cn, code)
+    @when code != "[pl]"
+    movie_companies.note(mc, note)
+    movie_link.movie(ml, t)
+    movie_link.link_type(ml, lt)
+    link_type.link(lt, _)
+    return (name::String, note::String, title::String)
+  end
+end
+
+function q11d()
+  keywords = ["sequel", "revenge", "based-on-novel"]
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.production_year(t, production_year)
+    @when production_year > 1950
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, kind)
+    @when kind != "production companies"
+    movie_companies.company(mc, cn)
+    company_name.name(cn, name)
+    company_name.country_code(cn, code)
+    @when code != "[pl]"
+    movie_companies.note(mc, note)
+    movie_link.movie(ml, t)
+    movie_link.link_type(ml, lt)
+    link_type.link(lt, _)
+    return (name::String, note::String, title::String)
+  end
+end
+
+function q12a()
+  genres = ["Drama", "Horror"]
+  @query begin
+    genre in genres
+    movie_info.info(mi, genre)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "genres")
+    movie_info.movie(mi, t)
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "rating")
+    movie_info_idx.info(mii, rating)
+    @when rating > "8.0"
+    title.production_year(t, production_year)
+    @when 2005 <= production_year <= 2008
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[us]")
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, "production companies")
+    company_name.name(cn, name)
+    title.title(t, title)
+    return (name::String, rating::String, title::String)
+  end
+end
+
+function q12b()
+  kinds = Set(["production companies", "distributors"])
+  @query begin
+    info_type.info(it2, "bottom 10 rank")
+    movie_info_idx.info_type(mii, it2)
+    movie_info_idx.movie(mii, t)
+    title.production_year(t, production_year)
+    @when production_year > 2000
+    title.title(t, title)
+    @when startswith(title, "Birdemic") || contains(title, "Movie")
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[us]")
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, kind)
+    @when kind in kinds
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "budget")
+    movie_info.info(mi, budget)
+    return (budget::String, title::String)
+  end
+end
+
+function q12c()
+  genres = ["Drama", "Horror", "Western", "Family"]
+  @query begin
+    genre in genres
+    movie_info.info(mi, genre)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "genres")
+    movie_info.movie(mi, t)
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "rating")
+    movie_info_idx.info(mii, rating)
+    @when rating > "7.0"
+    title.production_year(t, production_year)
+    @when 2000 <= production_year <= 2010
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[us]")
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, "production companies")
+    company_name.name(cn, name)
+    title.title(t, title)
+    return (name::String, rating::String, title::String)
+  end
+end
+
+function q13a()
+  @query begin
+    company_name.country_code(cn, "[de]")
+    movie_companies.company(mc, cn)
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, "production companies")
+    movie_companies.movie(mc, t)
+    title.kind(t, kt)
+    kind_type.kind(kt, "movie")
+    title.title(t, title)
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it1)
+    info_type.info(it1, "rating")
+    movie_info_idx.info(mii, rating)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it2)
+    info_type.info(it2, "release dates")
+    movie_info.info(mi, release_date)
+    return (release_date::String, rating::String, title::String)
+  end
+end
+
+function q13b()
+  @query begin
+    company_name.country_code(cn, "[us]")
+    movie_companies.company(mc, cn)
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, "production companies")
+    movie_companies.movie(mc, t)
+    title.kind(t, kt)
+    kind_type.kind(kt, "movie")
+    title.title(t, title)
+    @when contains(title, "Champion") || contains(title, "Loser")
+    movie_companies.company(mc, cn)
+    company_name.name(cn, name)
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it1)
+    info_type.info(it1, "rating")
+    movie_info_idx.info(mii, rating)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it2)
+    info_type.info(it2, "release dates")
+    movie_info.info(mi, _)
+    return (name::String, rating::String, title::String)
+  end
+end
+
+function q13c()
+  @query begin
+    company_name.country_code(cn, "[us]")
+    movie_companies.company(mc, cn)
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, "production companies")
+    movie_companies.movie(mc, t)
+    title.kind(t, kt)
+    kind_type.kind(kt, "movie")
+    title.title(t, title)
+    @when startswith(title, "Champion") || startswith(title, "Loser")
+    movie_companies.company(mc, cn)
+    company_name.name(cn, name)
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it1)
+    info_type.info(it1, "rating")
+    movie_info_idx.info(mii, rating)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it2)
+    info_type.info(it2, "release dates")
+    movie_info.info(mi, _)
+    return (name::String, rating::String, title::String)
+  end
+end
+
+function q13d()
+  @query begin
+    company_name.country_code(cn, "[us]")
+    movie_companies.company(mc, cn)
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, "production companies")
+    movie_companies.movie(mc, t)
+    title.kind(t, kt)
+    kind_type.kind(kt, "movie")
+    title.title(t, title)
+    movie_companies.company(mc, cn)
+    company_name.name(cn, name)
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it1)
+    info_type.info(it1, "rating")
+    movie_info_idx.info(mii, rating)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it2)
+    info_type.info(it2, "release dates")
+    movie_info.info(mi, release_date)
+    return (name::String, rating::String, title::String)
   end
 end
 

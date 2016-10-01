@@ -996,9 +996,178 @@ function q13d()
   end
 end
 
-function query_names()
+function q14a()
+  keywords = ["murder", "murder-in-title", "blood", "violence"]
+  countries = Set(["Sweden","Norway","Germany","Denmark","Swedish","Denish","Norwegian","German","USA","American"])
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.kind(t, kt)
+    kind_type.kind(kt, "movie")
+    title.production_year(t, production_year)
+    @when production_year > 2010
+    title.title(t, title)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "countries")
+    movie_info.info(mi, country)
+    @when country in countries
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "rating")
+    movie_info_idx.info(mii, rating)
+    @when rating < "8.5"
+    return (rating::String, title::String)
+  end
+end
+
+function q14b()
+  keywords = ["murder", "murder-in-title"]
+  countries = Set(["Sweden","Norway","Germany","Denmark","Swedish","Denish","Norwegian","German","USA","American"])
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.kind(t, kt)
+    kind_type.kind(kt, "movie")
+    title.production_year(t, production_year)
+    @when production_year > 2010
+    title.title(t, title)
+    @when contains(title, "murder") || contains(title, "Murder") || contains(title, "Mord")
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "countries")
+    movie_info.info(mi, country)
+    @when country in countries
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "rating")
+    movie_info_idx.info(mii, rating)
+    @when rating > "6.0"
+    return (rating::String, title::String)
+  end
+end
+
+function q14c()
+  keywords = ["murder", "murder-in-title", "blood", "violence"]
+  countries = Set(["Sweden","Norway","Germany","Denmark","Swedish","Denish","Norwegian","German","USA","American"])
+  kinds = Set(["movie", "episode"])
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.kind(t, kt)
+    kind_type.kind(kt, kind)
+    @when kind in kinds
+    title.production_year(t, production_year)
+    @when production_year > 2005
+    title.title(t, title)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "countries")
+    movie_info.info(mi, country)
+    @when country in countries
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "rating")
+    movie_info_idx.info(mii, rating)
+    @when rating < "8.5"
+    return (rating::String, title::String)
+  end
+end
+
+
+function q15a()
+  @query begin
+    company_name.country_code(cn, "[us]")
+    movie_companies.company(mc, cn)
+    movie_companies.note(mc, note)
+    @when ismatch(r"\(200.\)", note) && contains(note, "(worldwide)")
+    movie_companies.movie(mc, t)
+    title.production_year(t, production_year)
+    @when production_year > 2000
+    title.title(t, title)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it)
+    info_type.info(it, "release dates")
+    movie_info.note(mi, note)
+    @when contains(note, "internet")
+    movie_info.info(mi, release_date)
+    @when ismatch(r"USA:.* 200.", release_date)
+    return (release_date::String, title::String)
+  end
+end
+
+function q15b()
+  @query begin
+    company_name.country_code(cn, "[us]")
+    company_name.name(cn, "YouTube")
+    movie_companies.company(mc, cn)
+    movie_companies.note(mc, note)
+    @when ismatch(r"\(200.\)", note) && contains(note, "(worldwide)")
+    movie_companies.movie(mc, t)
+    title.production_year(t, production_year)
+    @when 2005 <= production_year <= 2010
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it)
+    info_type.info(it, "release dates")
+    movie_info.note(mi, note)
+    @when contains(note, "internet")
+    movie_info.info(mi, release_date)
+    @when ismatch(r"USA:.* 200.", release_date)
+    aka_title.movie(at, t)
+    aka_title.title(at, aka_title)
+    return (release_date::String, aka_title::String)
+  end
+end
+
+function q15c()
+  @query begin
+    company_name.country_code(cn, "[us]")
+    movie_companies.company(mc, cn)
+    movie_companies.movie(mc, t)
+    title.production_year(t, production_year)
+    title.title(t, title)
+    @when production_year > 1990
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it)
+    info_type.info(it, "release dates")
+    movie_info.note(mi, note)
+    @when contains(note, "internet")
+    movie_info.info(mi, release_date)
+    @when ismatch(r"USA:.* (199|200).", release_date)
+    return (release_date::String, title::String)
+  end
+end
+
+function q15d()
+  @query begin
+    company_name.country_code(cn, "[us]")
+    movie_companies.company(mc, cn)
+    movie_companies.movie(mc, t)
+    title.production_year(t, production_year)
+    title.title(t, title)
+    @when production_year > 1990
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it)
+    info_type.info(it, "release dates")
+    movie_info.note(mi, note)
+    @when contains(note, "internet")
+    aka_title.movie(at, t)
+    aka_title.title(at, aka_title)
+    return (title::String, aka_title::String)
+  end
+end
+
+test(query_names(15:15))
+
+function query_names(nums=1:33)
   query_names = []
-  for num in 1:33
+  for num in nums
     for char in "abcdef"
       query_name = "$num$char"
       if isdefined(Symbol("q$query_name"))

@@ -758,6 +758,7 @@ function bench_imp(qs = query_names())
   medians = []
   for query_name in qs
     @show query_name
+    eval(Symbol("q$(query_name)"))()
     trial = @show @benchmark $(eval(Symbol("q$(query_name)")))()
     push!(medians, median(trial.times) / 1000000)
   end
@@ -775,6 +776,7 @@ function bench_sqlite(qs = query_names())
   for query_name in qs
     @show query_name
     query = rstrip(readline("../job/$(query_name).sql"))
+    SQLite.query(db, query)
     trial = @show @benchmark SQLite.query($db, $query)
     push!(medians, median(trial.times) / 1000000)
   end
@@ -790,6 +792,7 @@ function bench_pg(qs = query_names())
     cmd = `sudo -u postgres psql -c $bench`
     times = Float64[]
     @show query_name
+    readstring(cmd)
     @show @benchmark push!($times, parse(Float64, match(r"Execution time: (\S*) ms", readstring($cmd))[1]))
     push!(medians, median(times))
   end

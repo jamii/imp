@@ -1169,6 +1169,167 @@ function q15d()
   end
 end
 
+function q16a()
+  @query begin
+    keyword.keyword(k, "character-name-in-title")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.episode_nr(t, episode_nr)
+    @when 50 <= episode_nr < 100
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[us]")
+    cast_info.movie(ci, t)
+    cast_info.person(ci, n)
+    aka_name.person(an, n)
+    aka_name.name(an, aka_name)
+    return (aka_name::String, title::String)
+  end
+end
+
+function q16b()
+  @query begin
+    keyword.keyword(k, "character-name-in-title")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[us]")
+    cast_info.movie(ci, t)
+    cast_info.person(ci, n)
+    aka_name.person(an, n)
+    aka_name.name(an, aka_name)
+    return (aka_name::String, title::String)
+  end
+end
+
+function q16c()
+  @query begin
+    keyword.keyword(k, "character-name-in-title")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.episode_nr(t, episode_nr)
+    @when episode_nr < 100
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[us]")
+    cast_info.movie(ci, t)
+    cast_info.person(ci, n)
+    aka_name.person(an, n)
+    aka_name.name(an, aka_name)
+    return (aka_name::String, title::String)
+  end
+end
+
+function q16d()
+  @query begin
+    keyword.keyword(k, "character-name-in-title")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.episode_nr(t, episode_nr)
+    @when 5 <= episode_nr < 100
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[us]")
+    cast_info.movie(ci, t)
+    cast_info.person(ci, n)
+    aka_name.person(an, n)
+    aka_name.name(an, aka_name)
+    return (aka_name::String, title::String)
+  end
+end
+
+function q17a()
+  @query begin
+    keyword.keyword(k, "character-name-in-title")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    cast_info.movie(ci, t)
+    cast_info.person(ci, n)
+    name.name(n, name)
+    @when startswith(name, "B")
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[us]")
+    return (name::String, name::String)
+  end
+end
+
+function q17b()
+  @query begin
+    keyword.keyword(k, "character-name-in-title")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    cast_info.movie(ci, t)
+    cast_info.person(ci, n)
+    name.name(n, name)
+    @when startswith(name, "Z")
+    movie_companies.movie(_, t)
+    return (name::String, name::String)
+  end
+end
+
+function q17c()
+  @query begin
+    keyword.keyword(k, "character-name-in-title")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    cast_info.movie(ci, t)
+    cast_info.person(ci, n)
+    name.name(n, name)
+    @when startswith(name, "X")
+    movie_companies.movie(_, t)
+    return (name::String, name::String)
+  end
+end
+
+function q17d()
+  @query begin
+    keyword.keyword(k, "character-name-in-title")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    cast_info.movie(ci, t)
+    cast_info.person(ci, n)
+    name.name(n, name)
+    @when contains(name, "Bert")
+    movie_companies.movie(_, t)
+    return (name::String,)
+  end
+end
+
+function q17e()
+  @query begin
+    keyword.keyword(k, "character-name-in-title")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[us]")
+    cast_info.movie(ci, t)
+    cast_info.person(ci, n)
+    name.name(n, name)
+    return (name::String,)
+  end
+end
+
+function q17f()
+  @query begin
+    keyword.keyword(k, "character-name-in-title")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    cast_info.movie(ci, t)
+    cast_info.person(ci, n)
+    name.name(n, name)
+    @when contains(name, "B")
+    movie_companies.movie(_, t)
+    return (name::String,)
+  end
+end
+
 function query_names(nums=1:33)
   query_names = []
   for num in nums

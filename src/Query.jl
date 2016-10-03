@@ -243,8 +243,8 @@ function plan_query(query)
   
   # initialize arrays for storing results
   results_inits = []
-  for (var, typ) in zip(return_clause.vars, return_clause.typs)
-    results_init = :(local $(Symbol("results_$var")) = Vector{$(esc(typ))}())
+  for (ix, typ) in enumerate(return_clause.typs)
+    results_init = :(local $(Symbol("results_$ix")) = Vector{$(esc(typ))}())
     push!(results_inits, results_init)
   end
   
@@ -262,8 +262,8 @@ function plan_query(query)
   
   # store results 
   body = quote
-    $([:(push!($(Symbol("results_$var")), $(esc(var))))
-    for var in return_clause.vars]...)
+    $([:(push!($(Symbol("results_$ix")), $(esc(var))))
+    for (ix, var) in enumerate(return_clause.vars)]...)
     need_more_results = false
   end
   
@@ -338,7 +338,7 @@ function plan_query(query)
   end
   
   # put everything together
-  results_symbols = [Symbol("results_$var") for var in return_clause.vars]
+  results_symbols = [Symbol("results_$ix") for (ix, var) in enumerate(return_clause.vars)]
   result = :(Relation(tuple($(results_symbols...)), $(return_clause.num_keys)))        
   quote 
     let

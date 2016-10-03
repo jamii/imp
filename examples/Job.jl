@@ -2067,6 +2067,106 @@ function q25c()
   end
 end
 
+function q26a()
+  keywords = Set(["superhero","marvel-comics","based-on-comic","tv-special","fight","violence","magnet","web","claw","laser"])
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.kind(t, kt)
+    kind_type.kind(kt, "movie")
+    title.production_year(t, production_year)
+    @when production_year > 2000
+    title.title(t, title)
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it)
+    info_type.info(it, "rating")
+    movie_info_idx.info(mii, rating)
+    @when rating > "7.0"
+    cast_info.movie(ci, t)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    @when contains(char_name, "man") || contains(char_name, "Man")
+    cast_info.person(ci, n)
+    name.name(n, name)
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, "cast")
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, cct2_kind)
+    @when contains(cct2_kind, "complete")
+    return (char_name::String, rating::String, name::String, title::String)
+  end
+end
+
+function q26b()
+  keywords = Set(["superhero","marvel-comics","based-on-comic","fight"])
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.kind(t, kt)
+    kind_type.kind(kt, "movie")
+    title.production_year(t, production_year)
+    @when production_year > 2005
+    title.title(t, title)
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it)
+    info_type.info(it, "rating")
+    movie_info_idx.info(mii, rating)
+    @when rating > "8.0"
+    cast_info.movie(ci, t)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    @when contains(char_name, "man") || contains(char_name, "Man")
+    cast_info.person(ci, n)
+    name.name(n, name)
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, "cast")
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, cct2_kind)
+    @when contains(cct2_kind, "complete")
+    return (char_name::String, rating::String, title::String)
+  end
+end
+
+function q26c()
+  keywords = Set(["superhero","marvel-comics","based-on-comic","tv-special","fight","violence","magnet","web","claw","laser"])
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.kind(t, kt)
+    kind_type.kind(kt, "movie")
+    title.production_year(t, production_year)
+    @when production_year > 2000
+    title.title(t, title)
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it)
+    info_type.info(it, "rating")
+    movie_info_idx.info(mii, rating)
+    cast_info.movie(ci, t)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    @when contains(char_name, "man") || contains(char_name, "Man")
+    cast_info.person(ci, n)
+    name.name(n, name)
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, "cast")
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, cct2_kind)
+    @when contains(cct2_kind, "complete")
+    return (char_name::String, rating::String, title::String)
+  end
+end
+
+# test(query_names(26:33))
+
 function query_names(nums=1:33)
   query_names = []
   for num in nums

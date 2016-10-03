@@ -2271,7 +2271,132 @@ function q27c()
   end
 end
 
-# test(query_names(27:33))
+function q28a()
+  keywords = ["murder", "murder-in-title", "blood", "violence"]
+  countries = Set(["Sweden","Norway","Germany","Denmark","Swedish","Denish","Norwegian","German","USA","American"])
+  kinds = Set(["movie", "episode"])
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.kind(t, kt)
+    kind_type.kind(kt, kind)
+    @when kind in kinds
+    title.production_year(t, production_year)
+    @when production_year > 2000
+    title.title(t, title)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "countries")
+    movie_info.info(mi, country)
+    @when country in countries
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "rating")
+    movie_info_idx.info(mii, rating)
+    @when rating < "8.5"
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, code)
+    @when code != "[us]"
+    company_name.name(cn, name)
+    movie_companies.note(mc, mc_note)
+    @when !contains(mc_note, "(USA)") && ismatch(r"\(200.*\)", mc_note)
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, "crew")
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, cct2_kind)
+    @when cct2_kind != "complete+verified"
+    return (name::String, rating::String, title::String)
+  end
+end
+
+function q28b()
+  keywords = ["murder", "murder-in-title", "blood", "violence"]
+  countries = Set(["Sweden","Germany","Swedish","German"])
+  kinds = Set(["movie", "episode"])
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.kind(t, kt)
+    kind_type.kind(kt, kind)
+    @when kind in kinds
+    title.production_year(t, production_year)
+    @when production_year > 2005
+    title.title(t, title)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "countries")
+    movie_info.info(mi, country)
+    @when country in countries
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "rating")
+    movie_info_idx.info(mii, rating)
+    @when rating > "6.5"
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, code)
+    @when code != "[us]"
+    company_name.name(cn, name)
+    movie_companies.note(mc, mc_note)
+    @when !contains(mc_note, "(USA)") && ismatch(r"\(200.*\)", mc_note)
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, "crew")
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, cct2_kind)
+    @when cct2_kind != "complete+verified"
+    return (name::String, rating::String, title::String)
+  end
+end
+
+function q28c()
+  keywords = ["murder", "murder-in-title", "blood", "violence"]
+  countries = Set(["Sweden","Norway","Germany","Denmark","Swedish","Denish","Norwegian","German","USA","American"])
+  kinds = Set(["movie", "episode"])
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.kind(t, kt)
+    kind_type.kind(kt, kind)
+    @when kind in kinds
+    title.production_year(t, production_year)
+    @when production_year > 2005
+    title.title(t, title)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "countries")
+    movie_info.info(mi, country)
+    @when country in countries
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "rating")
+    movie_info_idx.info(mii, rating)
+    @when rating < "8.5"
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, code)
+    @when code != "[us]"
+    company_name.name(cn, name)
+    movie_companies.note(mc, mc_note)
+    @when !contains(mc_note, "(USA)") && ismatch(r"\(200.*\)", mc_note)
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, "cast")
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, "complete")
+    return (name::String, rating::String, title::String)
+  end
+end
+
+# test(query_names(28:33))
 
 function query_names(nums=1:33)
   query_names = []

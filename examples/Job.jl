@@ -1330,6 +1330,655 @@ function q17f()
   end
 end
 
+function q18a()
+  ci_notes = ["(producer)", "(executive producer)"]
+  @query begin
+    ci_note in ci_notes
+    cast_info.note(ci, ci_note)
+    cast_info.person(ci, n)
+    name.gender(n, "m")
+    name.name(n, name)
+    @when contains(name, "Tim")
+    cast_info.movie(ci, t)
+    title.title(t, title)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "budget")
+    movie_info.info(mi, budget)
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "votes")
+    movie_info_idx.info(mii, votes)
+    return (budget::String, votes::String, title::String)
+  end
+end
+
+function q18b()
+  ci_notes = ["(writer)", "(head writer)", "(written by)", "(story)", "(story editor)"]
+  genres = ["Horror", "Thriller"]
+  @query begin
+    genre in genres
+    movie_info.info(mi, genre)
+    info_type.info(it1, "genres")
+    movie_info.info_type(mi, it1)
+    movie_info.movie(mi, t)
+    title.production_year(t, production_year)
+    @when 2008 <= production_year <= 2014
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "rating")
+    movie_info_idx.info(mii, rating)
+    @when rating > "8.0"
+    title.title(t, title)
+    cast_info.movie(ci, t)
+    cast_info.note(ci, ci_note)
+    @when ci_note in ci_notes
+    cast_info.person(ci, n)
+    name.gender(n, "f")
+    return (genre::String, rating::String, title::String)
+  end
+end
+
+function q19a()
+  ci_notes = ["(voice)", "(voice: Japanese version)", "(voice) (uncredited)", "(voice: English version)"]
+  @query begin
+    ci_note in ci_notes 
+    cast_info.note(ci, ci_note)
+    cast_info.role(ci, rt)
+    role_type.role(rt, "actress")
+    cast_info.movie(ci, t)    
+    title.production_year(t, production_year)
+    @when 2005 <= production_year <= 2009
+    cast_info.person(ci, n)
+    name.gender(n, "f")
+    name.name(n, name)
+    @when contains(name, "Ang")
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)    
+    company_name.country_code(cn, "[us]")
+    movie_companies.note(mc, mc_note)
+    @when contains(mc_note, "(USA)") || contains(mc_note, "(worldwide)")
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it)
+    info_type.info(it, "release dates")
+    movie_info.info(mi, release_date)
+    @when ismatch(r"Japan:.*200.", release_date) || ismatch(r"USA:.*200.", release_date)
+    aka_name.person(_, n)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, _)
+    return (name::String, title::String)
+  end
+end
+
+function q19b()
+  @query begin
+    cast_info.note(ci, "(voice)")
+    cast_info.role(ci, rt)
+    role_type.role(rt, "actress")
+    cast_info.movie(ci, t)    
+    title.production_year(t, production_year)
+    @when 2007 <= production_year <= 2008
+    cast_info.person(ci, n)
+    name.gender(n, "f")
+    name.name(n, name)
+    @when contains(name, "Angel")
+    title.title(t, title)
+    @when ismatch(r"Kung.*Fu.*Panda", title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)    
+    company_name.country_code(cn, "[us]")
+    movie_companies.note(mc, mc_note)
+    @when ismatch(r"\(200.*\)", mc_note)
+    @when contains(mc_note, "(USA)") || contains(mc_note, "(worldwide)")
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it)
+    info_type.info(it, "release dates")
+    movie_info.info(mi, release_date)
+    @when ismatch(r"Japan:.*2007", release_date) || ismatch(r"USA:.*2008", release_date)
+    aka_name.person(_, n)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, _)
+    return (name::String, title::String)
+  end
+end
+
+function q19c()
+  ci_notes = ["(voice)", "(voice: Japanese version)", "(voice) (uncredited)", "(voice: English version)"]
+  @query begin
+    ci_note in ci_notes 
+    cast_info.note(ci, ci_note)
+    cast_info.role(ci, rt)
+    role_type.role(rt, "actress")
+    cast_info.movie(ci, t)    
+    title.production_year(t, production_year)
+    @when production_year > 2000
+    cast_info.person(ci, n)
+    name.gender(n, "f")
+    name.name(n, name)
+    @when contains(name, "An")
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)    
+    company_name.country_code(cn, "[us]")
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it)
+    info_type.info(it, "release dates")
+    movie_info.info(mi, release_date)
+    @when ismatch(r"Japan:.*200.", release_date) || ismatch(r"USA:.*200.", release_date)
+    aka_name.person(_, n)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, _)
+    return (name::String, title::String)
+  end
+end
+
+function q19d()
+  ci_notes = ["(voice)", "(voice: Japanese version)", "(voice) (uncredited)", "(voice: English version)"]
+  @query begin
+    ci_note in ci_notes 
+    cast_info.note(ci, ci_note)
+    cast_info.role(ci, rt)
+    role_type.role(rt, "actress")
+    cast_info.movie(ci, t)    
+    title.production_year(t, production_year)
+    @when production_year > 2000
+    cast_info.person(ci, n)
+    name.gender(n, "f")
+    name.name(n, name)
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)    
+    company_name.country_code(cn, "[us]")
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it)
+    info_type.info(it, "release dates")
+    movie_info.info(mi, _)
+    aka_name.person(_, n)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, _)
+    return (name::String, title::String)
+  end
+end
+
+function q20a()
+  keywords = Set(["superhero","sequel","second-part","marvel-comics","based-on-comic","tv-special","fight","violence"])
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.kind(t, kt)
+    kind_type.kind(kt, "movie")
+    title.production_year(t, production_year)
+    @when production_year > 1950
+    title.title(t, title)
+    cast_info.movie(ci, t)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    @when !contains(char_name, "Sherlock")
+    @when ismatch(r"Tony.*Stark", char_name) || ismatch(r"Iron.*Man", char_name)
+    cast_info.person(ci, n)
+    name.name(n, _)
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, "cast")
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, cct2_kind)
+    @when contains(cct2_kind, "complete")
+    return (title::String,)
+  end
+end
+
+function q20b()
+  keywords = Set(["superhero","sequel","second-part","marvel-comics","based-on-comic","tv-special","fight","violence"])
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.kind(t, kt)
+    kind_type.kind(kt, "movie")
+    title.production_year(t, production_year)
+    @when production_year > 2000
+    title.title(t, title)
+    cast_info.movie(ci, t)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    @when !contains(char_name, "Sherlock")
+    @when ismatch(r"Tony.*Stark", char_name) || ismatch(r"Iron.*Man", char_name)
+    cast_info.person(ci, n)
+    name.name(n, name)
+    @when ismatch(r"Downey.*Robert", name)
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, "cast")
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, cct2_kind)
+    @when contains(cct2_kind, "complete")
+    return (title::String,)
+  end
+end
+
+function q20c()
+  keywords = Set(["superhero","marvel-comics","based-on-comic","tv-special","fight","violence","magnet","web","claw","laser"])
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.kind(t, kt)
+    kind_type.kind(kt, "movie")
+    title.production_year(t, production_year)
+    @when production_year > 2000
+    title.title(t, title)
+    cast_info.movie(ci, t)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    @when contains(char_name, "man") || contains(char_name, "Man")
+    cast_info.person(ci, n)
+    name.name(n, name)
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, "cast")
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, cct2_kind)
+    @when contains(cct2_kind, "complete")
+    return (name::String, title::String,)
+  end
+end
+
+function q21a()
+  infos = Set(["Sweden","Norway","Germany","Denmark","Swedish","Denish","Norwegian","German"])
+  @query begin
+    keyword.keyword(k, "sequel")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.production_year(t, production_year)
+    @when 1950 <= production_year <= 2000
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, "production companies")
+    movie_companies.company(mc, cn)
+    company_name.name(cn, name)
+    @when contains(name, "Film") || contains(name, "Warner")
+    company_name.country_code(cn, code)
+    @when code != "[pl]"
+    @when @query_not movie_companies.note($mc, _)
+    movie_info.movie(mi, t)
+    movie_info.info(mi, info)
+    @when info in infos
+    movie_link.movie(ml, t)
+    movie_link.link_type(ml, lt)
+    link_type.link(lt, link)
+    @when contains(link, "follow")
+    return (name::String, link::String, title::String)
+  end
+end
+
+function q21b()
+  infos = Set(["Germany","German"])
+  @query begin
+    keyword.keyword(k, "sequel")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.production_year(t, production_year)
+    @when 2000 <= production_year <= 2010
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, "production companies")
+    movie_companies.company(mc, cn)
+    company_name.name(cn, name)
+    @when contains(name, "Film") || contains(name, "Warner")
+    company_name.country_code(cn, code)
+    @when code != "[pl]"
+    @when @query_not movie_companies.note($mc, _)
+    movie_info.movie(mi, t)
+    movie_info.info(mi, info)
+    @when info in infos
+    movie_link.movie(ml, t)
+    movie_link.link_type(ml, lt)
+    link_type.link(lt, link)
+    @when contains(link, "follow")
+    return (name::String, link::String, title::String)
+  end
+end
+
+function q21c()
+  infos = Set(["Sweden","Norway","Germany","Denmark","Swedish","Denish","Norwegian","German","English"])
+  @query begin
+    keyword.keyword(k, "sequel")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.production_year(t, production_year)
+    @when 1950 <= production_year <= 2010
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, "production companies")
+    movie_companies.company(mc, cn)
+    company_name.name(cn, name)
+    @when contains(name, "Film") || contains(name, "Warner")
+    company_name.country_code(cn, code)
+    @when code != "[pl]"
+    @when @query_not movie_companies.note($mc, _)
+    movie_info.movie(mi, t)
+    movie_info.info(mi, info)
+    @when info in infos
+    movie_link.movie(ml, t)
+    movie_link.link_type(ml, lt)
+    link_type.link(lt, link)
+    @when contains(link, "follow")
+    return (name::String, link::String, title::String)
+  end
+end
+
+function q22a()
+  keywords = ["murder", "murder-in-title", "blood", "violence"]
+  kinds = Set(["movie", "episode"])
+  countries = Set(["Germany","German","USA","American"])
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.production_year(t, production_year)
+    @when production_year > 2008
+    title.kind(t, kt)
+    kind_type.kind(kt, kind)
+    @when kind in kinds
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, code)
+    @when code != "[us]"
+    company_name.name(cn, name)
+    movie_companies.note(mc, mc_note)
+    @when !contains(mc_note, "(USA)") && ismatch(r"\(200.*\)", mc_note)
+    title.title(t, title)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "countries")
+    movie_info.info(mi, country)
+    @when country in countries
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "rating")
+    movie_info_idx.info(mii, rating)
+    @when rating < "7.0"
+    return (name::String, rating::String, title::String)
+  end
+end
+
+function q22b()
+  keywords = ["murder", "murder-in-title", "blood", "violence"]
+  kinds = Set(["movie", "episode"])
+  countries = Set(["Germany","German","USA","American"])
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.kind(t, kt)
+    kind_type.kind(kt, "movie")
+    title.production_year(t, production_year)
+    @when production_year > 2009
+    title.kind(t, kt)
+    kind_type.kind(kt, kind)
+    @when kind in kinds
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, code)
+    @when code != "[us]"
+    company_name.name(cn, name)
+    movie_companies.note(mc, mc_note)
+    @when !contains(mc_note, "(USA)") && ismatch(r"\(200.\)", mc_note)
+    title.title(t, title)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "countries")
+    movie_info.info(mi, country)
+    @when country in countries
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "rating")
+    movie_info_idx.info(mii, rating)
+    @when rating < "7.0"
+    return (name::String, rating::String, title::String)
+  end
+end
+
+function q22c()
+  keywords = ["murder", "murder-in-title", "blood", "violence"]
+  kinds = Set(["movie", "episode"])
+  countries = Set(["Sweden","Norway","Germany","Denmark","Swedish","Danish","Norwegian","German","USA","American"])
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.production_year(t, production_year)
+    @when production_year > 2005
+    title.kind(t, kt)
+    kind_type.kind(kt, kind)
+    @when kind in kinds
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, code)
+    @when code != "[us]"
+    company_name.name(cn, name)
+    movie_companies.note(mc, mc_note)
+    @when !contains(mc_note, "(USA)") && ismatch(r"\(200.*\)", mc_note)
+    title.title(t, title)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "countries")
+    movie_info.info(mi, country)
+    @when country in countries
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "rating")
+    movie_info_idx.info(mii, rating)
+    @when rating < "8.5"
+    return (name::String, rating::String, title::String)
+  end
+end
+
+function q22d()
+  keywords = ["murder", "murder-in-title", "blood", "violence"]
+  kinds = Set(["movie", "episode"])
+  countries = Set(["Sweden","Norway","Germany","Denmark","Swedish","Danish","Norwegian","German","USA","American"])
+  @query begin
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.production_year(t, production_year)
+    @when production_year > 2005
+    title.kind(t, kt)
+    kind_type.kind(kt, kind)
+    @when kind in kinds
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, code)
+    @when code != "[us]"
+    company_name.name(cn, name)
+    title.title(t, title)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "countries")
+    movie_info.info(mi, country)
+    @when country in countries
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "rating")
+    movie_info_idx.info(mii, rating)
+    @when rating < "8.5"
+    return (name::String, rating::String, title::String)
+  end
+end
+
+function q23a()
+  @query begin
+    kind = "movie"
+    comp_cast_type.kind(cct, "complete+verified")
+    complete_cast.status(cc, cct)
+    complete_cast.movie(cc, t)    
+    title.production_year(t, production_year)
+    @when production_year > 2000
+    title.kind(t, kt)
+    kind_type.kind(kt, kind)
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[us]")
+    movie_companies.company_type(mc, _)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it)
+    info_type.info(it, "release dates")
+    movie_info.note(mi, note)
+    @when contains(note, "internet")
+    movie_info.info(mi, info)
+    @when ismatch(r"USA:.* 199.", info) || ismatch(r"USA:.* 200.", info)
+    movie_keyword.movie(_, t)
+    return (kind::String, title::String)
+  end
+end
+
+function q23b()
+  keywords = ["nerd", "loner", "alienation", "dignity"]
+  @query begin
+    kind = "movie"
+    keyword in keywords
+    keyword.keyword(k, keyword)
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.production_year(t, production_year)
+    @when production_year > 2000
+    title.kind(t, kt)
+    kind_type.kind(kt, kind)
+    complete_cast.movie(cc, t)    
+    complete_cast.status(cc, cct)
+    comp_cast_type.kind(cct, "complete+verified")
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[us]")
+    movie_companies.company_type(mc, _)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it)
+    info_type.info(it, "release dates")
+    movie_info.note(mi, note)
+    @when contains(note, "internet")
+    movie_info.info(mi, info)
+    @when ismatch(r"USA:.* 200.", info)
+    return (kind::String, title::String)
+  end
+end
+
+function q23c()
+  kinds = Set(["movie", "tv movie", "video movie", "video game"])
+  @query begin
+    comp_cast_type.kind(cct, "complete+verified")
+    complete_cast.status(cc, cct)
+    complete_cast.movie(cc, t)    
+    title.production_year(t, production_year)
+    @when production_year > 1990
+    title.kind(t, kt)
+    kind_type.kind(kt, kind)
+    @when kind in kinds
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[us]")
+    movie_companies.company_type(mc, _)
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it)
+    info_type.info(it, "release dates")
+    movie_info.note(mi, note)
+    @when contains(note, "internet")
+    movie_info.info(mi, info)
+    @when ismatch(r"USA:.* 199.", info) || ismatch(r"USA:.* 200.", info)
+    movie_keyword.movie(_, t)
+    return (kind::String, title::String)
+  end
+end
+
+function q24a()
+  keywords = ["hero", "martial-arts", "hand-to-hand-combat"]
+  ci_notes = ["(voice)", "(voice: Japanese version)", "(voice) (uncredited)", "(voice: English version)"]
+  @query begin
+    ci_note in ci_notes 
+    cast_info.note(ci, ci_note)
+    cast_info.role(ci, rt)
+    role_type.role(rt, "actress")
+    cast_info.person(ci, n)
+    name.gender(n, "f")
+    name.name(n, name)
+    @when contains(name, "An")
+    aka_name.person(an, n)
+    aka_name.name(an, aka_name)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    cast_info.movie(ci ,t)    
+    title.production_year(t, production_year)
+    @when production_year > 2010
+    movie_keyword.movie(mk, t)
+    movie_keyword.keyword(mk, k)
+    keyword.keyword(k, keyword)
+    @when keyword in keywords
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)    
+    company_name.country_code(cn, "[us]")
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it)
+    info_type.info(it, "release dates")
+    movie_info.info(mi, info)
+    @when ismatch(r"Japan:.*201.", info) || ismatch(r"USA:.*201.", info)
+    return (char_name::String, name::String, title::String)
+  end
+end
+
+function q24b()
+  keywords = ["hero", "martial-arts", "hand-to-hand-combat", "computer-animated-movie"]
+  ci_notes = ["(voice)", "(voice: Japanese version)", "(voice) (uncredited)", "(voice: English version)"]
+  @query begin
+    company_name.name(cn, "DreamWorks Animation")
+    company_name.country_code(cn, "[us]")
+    movie_companies.company(mc, cn)   
+    movie_companies.movie(mc, t) 
+    title.title(t, title)
+    @when startswith(title, "Kung Fu Panda")
+    title.production_year(t, production_year)
+    @when production_year > 2010
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it)
+    info_type.info(it, "release dates")
+    movie_info.info(mi, info)
+    @when ismatch(r"Japan:.*201.", info) || ismatch(r"USA:.*201.", info)
+    cast_info.movie(ci, t)    
+    cast_info.role(ci, rt)
+    role_type.role(rt, "actress")
+    cast_info.note(ci, ci_note)
+    @when ci_note in ci_notes 
+    cast_info.person(ci, n)
+    name.gender(n, "f")
+    name.name(n, name)
+    @when contains(name, "An")
+    aka_name.person(an, n)
+    aka_name.name(an, aka_name)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    movie_keyword.movie(mk, t)
+    movie_keyword.keyword(mk, k)
+    keyword.keyword(k, keyword)
+    @when keyword in keywords
+    return (char_name::String, name::String, title::String)
+  end
+end
+
 function query_names(nums=1:33)
   query_names = []
   for num in nums
@@ -1353,7 +2002,7 @@ function test(qs = query_names())
     run(`sudo -u postgres psql -c $query`)
     frame = DataFrames.readtable(open("/tmp/results.csv"), header=false, eltypes=[eltype(c) for c in results_imp.columns])
     num_columns = length(results_imp)
-    @show query_name
+    @show query_name now()
     if length(frame.columns) == 0
       @test length(results_imp[1]) == 0
     else
@@ -1367,17 +2016,16 @@ function test(qs = query_names())
 end
 
 function bench(qs = query_names())
+  println("query_name imp pg sqlite")
   for (query_name, imp, sqlite, pg) in zip(qs, bench_imp(qs), bench_sqlite(qs), bench_pg(qs))
-    # if (imp > sqlite) || (imp > pg)
-      println("$query_name imp=$imp pg=$pg sqlite=$sqlite")
-    # end
+    println("$query_name $imp $pg $sqlite")
   end
 end
 
 function bench_imp(qs = query_names())
   medians = []
   for query_name in qs
-    @show query_name
+    @show query_name now()
     eval(Symbol("q$(query_name)"))()
     trial = @show @benchmark $(eval(Symbol("q$(query_name)")))()
     push!(medians, median(trial.times) / 1000000)
@@ -1394,7 +2042,7 @@ function bench_sqlite(qs = query_names())
   @show @benchmark SQLite.query($db, $query)
   medians = []
   for query_name in qs
-    @show query_name
+    @show query_name now()
     query = rstrip(readline("../job/$(query_name).sql"))
     SQLite.query(db, query)
     trial = @show @benchmark SQLite.query($db, $query)
@@ -1411,7 +2059,7 @@ function bench_pg(qs = query_names())
     bench = "explain analyze $query"
     cmd = `sudo -u postgres psql -c $bench`
     times = Float64[]
-    @show query_name
+    @show query_name now()
     readstring(cmd)
     @show @benchmark push!($times, parse(Float64, match(r"Execution time: (\S*) ms", readstring($cmd))[1]))
     push!(medians, median(times))

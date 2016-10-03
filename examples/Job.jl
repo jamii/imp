@@ -2523,7 +2523,118 @@ function q29c()
   end
 end
 
-# test(query_names(29:33))
+function q30a()
+  genres = ["Horror","Thriller"]
+  ci_notes = Set(["(writer)","(head writer)","(written by)","(story)","(story editor)"])
+  keywords = Set(["murder", "violence", "blood", "gore", "death", "female-nudity", "hospital"])
+  kinds = Set(["cast", "crew"])
+  @query begin
+    genre in genres
+    movie_info.info(mi, genre)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "genres")
+    movie_info.movie(mi, t)
+    title.production_year(t, production_year)
+    @when production_year > 2000
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "votes")
+    movie_info_idx.info(mii, votes)
+    title.title(t, title)
+    movie_keyword.movie(mk, t)
+    movie_keyword.keyword(mk, k)
+    keyword.keyword(k, keyword)
+    @when keyword in keywords
+    cast_info.movie(ci, t)
+    cast_info.person(ci, n)
+    name.gender(n, "m")
+    cast_info.note(ci, ci_note)
+    @when ci_note in ci_notes
+    name.name(n, name)  
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, kind)
+    @when kind in kinds
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, "complete+verified")
+    return (genre::String, votes::String, name::String, title::String)
+  end
+end
+
+function q30b()
+  genres = ["Horror","Thriller"]
+  ci_notes = Set(["(writer)","(head writer)","(written by)","(story)","(story editor)"])
+  keywords = Set(["murder", "violence", "blood", "gore", "death", "female-nudity", "hospital"])
+  kinds = Set(["cast", "crew"])
+  @query begin
+    genre in genres
+    movie_info.info(mi, genre)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "genres")
+    movie_info.movie(mi, t)
+    title.production_year(t, production_year)
+    @when production_year > 2000
+    title.title(t, title)
+    @when contains(title, "Freddy") || contains(title, "Jason") || startswith(title, "Saw")
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "votes")
+    movie_info_idx.info(mii, votes)
+    movie_keyword.movie(mk, t)
+    movie_keyword.keyword(mk, k)
+    keyword.keyword(k, keyword)
+    @when keyword in keywords
+    cast_info.movie(ci, t)
+    cast_info.person(ci, n)
+    name.gender(n, "m")
+    cast_info.note(ci, ci_note)
+    @when ci_note in ci_notes
+    name.name(n, name)  
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, kind)
+    @when kind in kinds
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, "complete+verified")
+    return (genre::String, votes::String, name::String, title::String)
+  end
+end
+
+function q30c()
+  genres = ["Horror","Action","Sci-Fi","Thriller","Crime","War"]
+  ci_notes = Set(["(writer)","(head writer)","(written by)","(story)","(story editor)"])
+  keywords = Set(["murder", "violence", "blood", "gore", "death", "female-nudity", "hospital"])
+  @query begin
+    genre in genres
+    movie_info.info(mi, genre)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "genres")
+    movie_info.movie(mi, t)
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "votes")
+    movie_info_idx.info(mii, votes)
+    title.title(t, title)
+    movie_keyword.movie(mk, t)
+    movie_keyword.keyword(mk, k)
+    keyword.keyword(k, keyword)
+    @when keyword in keywords
+    cast_info.movie(ci, t)
+    cast_info.person(ci, n)
+    name.gender(n, "m")
+    cast_info.note(ci, ci_note)
+    @when ci_note in ci_notes
+    name.name(n, name)  
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, "cast")
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, "complete+verified")
+    return (genre::String, votes::String, name::String, title::String)
+  end
+end
+
+# test(query_names(30:33))
 
 function query_names(nums=1:33)
   query_names = []

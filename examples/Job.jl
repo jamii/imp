@@ -2768,7 +2768,108 @@ function q32b()
   end
 end
 
-# test(query_names(31:33))
+function q33a()
+  links = ["sequel", "follows", "followed by"]
+  @query begin
+    info_type.info(it, "rating")
+    kind_type.kind(kt, "tv series")
+    link in links
+    link_type.link(lt, link)
+    movie_link.link_type(ml, lt)
+    movie_link.linked_movie(ml, t2)
+    title.kind(t2, kt)
+    title.production_year(t2, production_year)
+    @when 2005 <= production_year <= 2008
+    title.title(t2, title2)
+    movie_info_idx.movie(mii2, t2)
+    movie_info_idx.info_type(mii2, it)
+    movie_info_idx.info(mii2, rating2)
+    @when rating2 < "3.0"
+    movie_companies.movie(mc2, t2)
+    movie_companies.company(mc2, cn2)
+    company_name.name(cn2, name2)
+    movie_link.movie(ml, t1)
+    title.kind(t1, kt)
+    title.title(t1, title1)
+    movie_companies.movie(mc1, t1)
+    movie_companies.company(mc1, cn1)
+    company_name.country_code(cn1, "[us]")
+    company_name.name(cn1, name1)
+    movie_info_idx.info_type(mii1, it)
+    movie_info_idx.movie(mii1, t1)
+    movie_info_idx.info(mii1, rating1)
+    return (name1::String, name2::String, rating1::String, rating2::String, title1::String, title2::String)
+  end
+end
+
+function q33b()
+  @query begin
+    company_name.country_code(cn1, "[nl]")
+    movie_companies.company(mc1, cn1)
+    movie_companies.movie(mc1, t1)
+    title.kind(t1, kt)
+    title.title(t1, title1)
+    movie_link.movie(ml, t1)
+    link_type.link(lt, link)
+    @when contains(link, "follow")
+    info_type.info(it, "rating")
+    kind_type.kind(kt, "tv series")
+    movie_link.link_type(ml, lt)
+    movie_link.linked_movie(ml, t2)
+    title.kind(t2, kt)
+    title.production_year(t2, Int16(2007))
+    title.title(t2, title2)
+    movie_info_idx.movie(mii2, t2)
+    movie_info_idx.info_type(mii2, it)
+    movie_info_idx.info(mii2, rating2)
+    @when rating2 < "3.0"
+    movie_companies.movie(mc2, t2)
+    movie_companies.company(mc2, cn2)
+    company_name.name(cn2, name2)
+    company_name.name(cn1, name1)
+    movie_info_idx.info_type(mii1, it)
+    movie_info_idx.movie(mii1, t1)
+    movie_info_idx.info(mii1, rating1)
+    return (name1::String, name2::String, rating1::String, rating2::String, title1::String, title2::String)
+  end
+end
+    
+function q33c()
+  kt_kinds = ["tv series", "episode"]
+  links = ["sequel", "follows", "followed by"]
+  @query begin
+    info_type.info(it, "rating")
+    kt_kind in kt_kinds
+    kind_type.kind(kt, kt_kind)
+    link in links
+    link_type.link(lt, link)
+    movie_link.link_type(ml, lt)
+    movie_link.linked_movie(ml, t2)
+    title.kind(t2, kt)
+    title.production_year(t2, production_year)
+    @when 2000 <= production_year <= 2010
+    title.title(t2, title2)
+    movie_info_idx.movie(mii2, t2)
+    movie_info_idx.info_type(mii2, it)
+    movie_info_idx.info(mii2, rating2)
+    @when rating2 < "3.5"
+    movie_companies.movie(mc2, t2)
+    movie_companies.company(mc2, cn2)
+    company_name.name(cn2, name2)
+    movie_link.movie(ml, t1)
+    title.kind(t1, kt)
+    title.title(t1, title1)
+    movie_companies.movie(mc1, t1)
+    movie_companies.company(mc1, cn1)
+    company_name.country_code(cn1, code)
+    @when code != "[us]"
+    company_name.name(cn1, name1)
+    movie_info_idx.info_type(mii1, it)
+    movie_info_idx.movie(mii1, t1)
+    movie_info_idx.info(mii1, rating1)
+    return (name1::String, name2::String, rating1::String, rating2::String, title1::String, title2::String)
+  end
+end
 
 function query_names(nums=1:33)
   query_names = []

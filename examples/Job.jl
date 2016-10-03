@@ -2396,7 +2396,134 @@ function q28c()
   end
 end
 
-# test(query_names(28:33))
+function q29a()
+  ci_notes = Set(["(voice)", "(voice) (uncredited)", "(voice: English version)"])
+  @query begin
+    char_name = "Queen"
+    title = "Shrek 2"
+    title.title(t, title)
+    title.production_year(t, production_year)
+    @when 2000 <= production_year <= 2010
+    cast_info.movie(ci, t)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    cast_info.person(ci, n)    
+    name.gender(n, "f")
+    name.name(n, name)
+    @when contains(name, "An")
+    cast_info.role(ci, rt)
+    role_type.role(rt, "actress")
+    cast_info.note(ci, ci_note)
+    @when ci_note in ci_notes
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[us]")
+    movie_keyword.movie(mk, t)
+    movie_keyword.keyword(mk, k)
+    keyword.keyword(k, "computer-animation")
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it)
+    info_type.info(it, "release dates")
+    movie_info.info(mi, mi_info)
+    @when ismatch(r"Japan:.*200.", mi_info) || ismatch(r"USA:.*200.", mi_info)
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, "cast")
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, "complete+verified")
+    aka_name.person(an, n)
+    person_info.person(pi, n)
+    person_info.info_type(pi, it2)
+    info_type.info(it2, "trivia")
+    return (char_name::String, name::String, title::String)
+  end
+end
+
+function q29b()
+  ci_notes = Set(["(voice)", "(voice) (uncredited)", "(voice: English version)"])
+  @query begin
+    char_name = "Queen"
+    title = "Shrek 2"
+    title.title(t, title)
+    title.production_year(t, production_year)
+    @when 2000 <= production_year <= 2005
+    cast_info.movie(ci, t)
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    cast_info.person(ci, n)    
+    name.gender(n, "f")
+    name.name(n, name)
+    @when contains(name, "An")
+    cast_info.role(ci, rt)
+    role_type.role(rt, "actress")
+    cast_info.note(ci, ci_note)
+    @when ci_note in ci_notes
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[us]")
+    movie_keyword.movie(mk, t)
+    movie_keyword.keyword(mk, k)
+    keyword.keyword(k, "computer-animation")
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it)
+    info_type.info(it, "release dates")
+    movie_info.info(mi, mi_info)
+    @when ismatch(r"USA:.*200.", mi_info)
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, "cast")
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, "complete+verified")
+    aka_name.person(an, n)
+    person_info.person(pi, n)
+    person_info.info_type(pi, it2)
+    info_type.info(it2, "height")
+    return (char_name::String, name::String, title::String)
+  end
+end
+
+function q29c()
+  ci_notes = Set(["(voice)", "(voice: Japanese version)", "(voice) (uncredited)", "(voice: English version)"])
+  @query begin
+    keyword.keyword(k, "computer-animation")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.title(t, title)
+    title.production_year(t, production_year)
+    @when 2000 <= production_year <= 2010
+    cast_info.movie(ci, t)
+    cast_info.person(ci, n)    
+    cast_info.role(ci, rt)
+    role_type.role(rt, "actress")
+    name.gender(n, "f")
+    name.name(n, name)
+    @when contains(name, "An")
+    cast_info.person_role(ci, chn)
+    char_name.name(chn, char_name)
+    cast_info.note(ci, ci_note)
+    @when ci_note in ci_notes
+    movie_companies.movie(mc, t)
+    movie_companies.company(mc, cn)
+    company_name.country_code(cn, "[us]")
+    movie_info.movie(mi, t)
+    movie_info.info_type(mi, it)
+    info_type.info(it, "release dates")
+    movie_info.info(mi, mi_info)
+    @when ismatch(r"Japan:.*200.", mi_info) || ismatch(r"USA:.*200.", mi_info)
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, "cast")
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, "complete+verified")
+    aka_name.person(an, n)
+    person_info.person(pi, n)
+    person_info.info_type(pi, it2)
+    info_type.info(it2, "trivia")
+    return (char_name::String, name::String, title::String)
+  end
+end
+
+# test(query_names(29:33))
 
 function query_names(nums=1:33)
   query_names = []

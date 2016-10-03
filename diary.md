@@ -6021,3 +6021,7 @@ In 6b and 6d I do a table scan with a regex. Apparently a bad idea. In 6f I'm su
 ### 2016 Oct 1
 
 Up to q14 now. Tedious.
+
+### 2016 Oct 3
+
+Finished! Did I mention tedious?

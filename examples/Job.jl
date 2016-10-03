@@ -1979,6 +1979,94 @@ function q24b()
   end
 end
 
+function q25a()
+  ci_notes = Set(["(writer)","(head writer)","(written by)","(story)","(story editor)"])
+  keywords = Set(["murder", "blood", "gore", "death", "female-nudity"])
+  @query begin
+    genre = "Horror"
+    movie_info.info(mi, genre)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "genres")
+    movie_info.movie(mi, t)
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "votes")
+    movie_info_idx.info(mii, votes)
+    title.title(t, title)
+    movie_keyword.movie(mk, t)
+    movie_keyword.keyword(mk, k)
+    keyword.keyword(k, keyword)
+    @when keyword in keywords
+    cast_info.movie(ci, t)
+    cast_info.person(ci, n)
+    name.gender(n, "m")
+    cast_info.note(ci, ci_note)
+    @when ci_note in ci_notes
+    name.name(n, name)
+    return (genre::String, votes::String, name::String, title::String)
+  end
+end
+
+function q25b()
+  ci_notes = Set(["(writer)","(head writer)","(written by)","(story)","(story editor)"])
+  keywords = Set(["murder", "blood", "gore", "death", "female-nudity"])
+  @query begin
+    genre = "Horror"
+    movie_info.info(mi, genre)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "genres")
+    movie_info.movie(mi, t)
+    title.production_year(t, production_year)
+    @when production_year > 2010
+    title.title(t, title)
+    @when startswith(title, "Vampire")
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "votes")
+    movie_info_idx.info(mii, votes)
+    movie_keyword.movie(mk, t)
+    movie_keyword.keyword(mk, k)
+    keyword.keyword(k, keyword)
+    @when keyword in keywords
+    cast_info.movie(ci, t)
+    cast_info.person(ci, n)
+    name.gender(n, "m")
+    cast_info.note(ci, ci_note)
+    @when ci_note in ci_notes
+    name.name(n, name)
+    return (genre::String, votes::String, name::String, title::String)
+  end
+end
+
+function q25c()
+  genres = ["Horror","Action","Sci-Fi","Thriller","Crime","War"]
+  ci_notes = Set(["(writer)","(head writer)","(written by)","(story)","(story editor)"])
+  keywords = Set(["murder", "violence", "blood", "gore", "death", "female-nudity", "hospital"])
+  @query begin
+    genre in genres
+    movie_info.info(mi, genre)
+    movie_info.info_type(mi, it1)
+    info_type.info(it1, "genres")
+    movie_info.movie(mi, t)
+    movie_info_idx.movie(mii, t)
+    movie_info_idx.info_type(mii, it2)
+    info_type.info(it2, "votes")
+    movie_info_idx.info(mii, votes)
+    title.title(t, title)
+    movie_keyword.movie(mk, t)
+    movie_keyword.keyword(mk, k)
+    keyword.keyword(k, keyword)
+    @when keyword in keywords
+    cast_info.movie(ci, t)
+    cast_info.person(ci, n)
+    name.gender(n, "m")
+    cast_info.note(ci, ci_note)
+    @when ci_note in ci_notes
+    name.name(n, name)
+    return (genre::String, votes::String, name::String, title::String)
+  end
+end
+
 function query_names(nums=1:33)
   query_names = []
   for num in nums

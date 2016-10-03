@@ -2165,7 +2165,113 @@ function q26c()
   end
 end
 
-# test(query_names(26:33))
+function q27a()
+  kinds = Set(["cast", "crew"])
+  mi_infos = Set(["Sweden", "Germany", "Swedish", "German"])
+  @query begin
+    keyword.keyword(k, "sequel")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.production_year(t, production_year)
+    @when 1950 <= production_year <= 2000
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, "production companies")
+    movie_companies.company(mc, cn)
+    company_name.name(cn, name)
+    @when contains(name, "Film") || contains(name, "Warner")
+    company_name.country_code(cn, code)
+    @when code != "[pl]"
+    movie_link.movie(ml, t)
+    movie_link.link_type(ml, lt)
+    link_type.link(lt, link)
+    @when contains(link, "follow")
+    movie_info.movie(mi, t)
+    movie_info.info(mi, mi_info)
+    @when mi_info in mi_infos
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, cct1_kind)
+    @when cct1_kind in kinds
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, "complete")
+    @when @query_not movie_companies.note($mc, _)
+    return (name::String, link::String, title::String)
+  end
+end
+
+function q27b()
+  kinds = Set(["cast", "crew"])
+  mi_infos = Set(["Sweden", "Germany", "Swedish", "German"])
+  @query begin
+    keyword.keyword(k, "sequel")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.production_year(t, Int16(1998))
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, "production companies")
+    movie_companies.company(mc, cn)
+    company_name.name(cn, name)
+    @when contains(name, "Film") || contains(name, "Warner")
+    company_name.country_code(cn, code)
+    @when code != "[pl]"
+    movie_link.movie(ml, t)
+    movie_link.link_type(ml, lt)
+    link_type.link(lt, link)
+    @when contains(link, "follow")
+    movie_info.movie(mi, t)
+    movie_info.info(mi, mi_info)
+    @when mi_info in mi_infos
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, cct1_kind)
+    @when cct1_kind in kinds
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, "complete")
+    @when @query_not movie_companies.note($mc, _)
+    return (name::String, link::String, title::String)
+  end
+end
+
+function q27c()
+  mi_infos = Set(["Sweden","Norway","Germany","Denmark","Swedish","Denish","Norwegian","German","English"])
+  @query begin
+    keyword.keyword(k, "sequel")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t)
+    title.production_year(t, production_year)
+    @when 1950 <= production_year <= 2010
+    title.title(t, title)
+    movie_companies.movie(mc, t)
+    movie_companies.company_type(mc, ct)
+    company_type.kind(ct, "production companies")
+    movie_companies.company(mc, cn)
+    company_name.name(cn, name)
+    @when contains(name, "Film") || contains(name, "Warner")
+    company_name.country_code(cn, code)
+    @when code != "[pl]"
+    movie_link.movie(ml, t)
+    movie_link.link_type(ml, lt)
+    link_type.link(lt, link)
+    @when contains(link, "follow")
+    movie_info.movie(mi, t)
+    movie_info.info(mi, mi_info)
+    @when mi_info in mi_infos
+    complete_cast.movie(cc, t)
+    complete_cast.subject(cc, cct1)
+    comp_cast_type.kind(cct1, "cast")
+    complete_cast.status(cc, cct2)
+    comp_cast_type.kind(cct2, kind)
+    @when startswith(kind, "complete")
+    @when @query_not movie_companies.note($mc, _)
+    return (name::String, link::String, title::String)
+  end
+end
+
+# test(query_names(27:33))
 
 function query_names(nums=1:33)
   query_names = []

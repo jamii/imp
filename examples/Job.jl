@@ -2738,6 +2738,36 @@ function q31c()
   end
 end
 
+function q32a()
+  @query begin
+    keyword.keyword(k, "10,000-mile-club")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t1)
+    title.title(t1, title1)
+    movie_link.movie(ml, t1)
+    movie_link.link_type(ml, lt)
+    link_type.link(lt, link)
+    movie_link.linked_movie(ml, t2)
+    title.title(t2, title2)
+    return (link::String, title1::String, title2::String)
+  end
+end
+
+function q32b()
+  @query begin
+    keyword.keyword(k, "character-name-in-title")
+    movie_keyword.keyword(mk, k)
+    movie_keyword.movie(mk, t1)
+    title.title(t1, title1)
+    movie_link.movie(ml, t1)
+    movie_link.link_type(ml, lt)
+    link_type.link(lt, link)
+    movie_link.linked_movie(ml, t2)
+    title.title(t2, title2)
+    return (link::String, title1::String, title2::String)
+  end
+end
+
 # test(query_names(31:33))
 
 function query_names(nums=1:33)

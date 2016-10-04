@@ -97,4 +97,10 @@ frames = nothing
 
 gc()
 
+# for (table_name, column_names) in table_column_names
+#   for column_name in column_names
+#     println("create index index_$(table_name)_$(column_name) on $(table_name)($(column_name));")
+#   end
+# end
+
 end

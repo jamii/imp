@@ -6732,3 +6732,5 @@ end
 ```
 
 That's about 20x faster than postgres and 320x faster than the original. Maybe I should go ahead and write a factorizing compiler?
+
+[Tuning postgres](https://wiki.postgresql.org/wiki/Tuning_Your_PostgreSQL_Server) resulted in worse performance.

@@ -175,17 +175,17 @@ end
 end
 
 # gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
-function gallop{T}(column::Vector{T}, value::T, lo::Int, hi::Int, cmp) 
-  @inbounds if (lo < hi) && cmp(column[lo], value)
+function gallop{T}(column::Vector{T}, value::T, lo::Int, hi::Int, threshold) 
+  @inbounds if (lo < hi) && (cmp(column[lo], value) < threshold)
     step = 1
-    while (lo + step < hi) && cmp(column[lo + step], value)
+    while (lo + step < hi) && (cmp(column[lo + step], value) < threshold)
       lo = lo + step 
       step = step << 1
     end
     
     step = step >> 1
     while step > 0
-      if (lo + step < hi) && cmp(column[lo + step], value)
+      if (lo + step < hi) && (cmp(column[lo + step], value) < threshold)
         lo = lo + step 
       end
       step = step >> 1
@@ -216,14 +216,14 @@ end
 end
 
 @inline function project{T,T2}(finger::Finger{T}, down_finger::Finger{T2}, val)
-  down_finger.lo = gallop(down_finger.column, val, finger.lo, finger.hi, <)
-  down_finger.hi = gallop(down_finger.column, val, down_finger.lo, finger.hi, <=)
+  down_finger.lo = gallop(down_finger.column, val, finger.lo, finger.hi, 0)
+  down_finger.hi = gallop(down_finger.column, val, down_finger.lo, finger.hi, 1)
   down_finger.lo < down_finger.hi
 end
 
 @inline function Base.start{T,T2}(finger::Finger{T}, down_finger::Finger{T2})
   down_finger.lo = finger.lo
-  down_finger.hi = gallop(down_finger.column, down_finger.column[down_finger.lo], down_finger.lo, finger.hi, <=)
+  down_finger.hi = gallop(down_finger.column, down_finger.column[down_finger.lo], down_finger.lo, finger.hi, 1)
   down_finger.lo < down_finger.hi
 end
 
@@ -232,7 +232,7 @@ end
     false
   else
     down_finger.lo = down_finger.hi
-    down_finger.hi = gallop(down_finger.column, down_finger.column[down_finger.lo], down_finger.lo, finger.hi, <=)
+    down_finger.hi = gallop(down_finger.column, down_finger.column[down_finger.lo], down_finger.lo, finger.hi, 1)
     true
   end
 end

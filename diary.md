@@ -6203,3 +6203,532 @@ Imp would definitely benefit from having range lookups (eg 2000 <= production_ye
 I have a suspicion that factorized queries would do better. In a lot of the query plans I was having to choose which joins to repeatedly evaluate, when a factorized query wouldn't have to repeat any of them. There are also places where I suspect that I'm repeatedly visiting the same keys.
 
 Rerunning the benchmarks now with the extra indexes. I'm expecting to see pg and sqlite to overtake Imp. 
+
+### 2016 Oct 5
+
+```
+1a 3.1202115 6.9595 714.755314
+1b 0.0257545 0.266 1253.4464195
+1c 0.4013495 5.2855 596.911987
+1d 0.0310445 0.2915 1549.806406
+2a 57.964222 528.5129999999999 226.979648
+2b 57.0518545 514.4715 226.992055
+2c 50.192977 492.427 224.74445
+2d 73.451781 683.819 231.8685845
+3a 103.396302 176.97500000000002 362.172093
+3b 55.3837195 115.32 5.396267
+3c 142.2892345 323.4915 2926.0697205
+4a 53.6762765 114.16 1032.958873
+4b 50.9984105 14.268 174.5805495
+4c 59.424809 125.87 2312.750792
+5a 95.082645 201.503 509.9380735
+5b 97.3775635 202.708 510.5966295
+5c 111.208154 251.058 594.544603
+6a 1.957761 5.06 2.6287995
+6b 1006.102863 217.701 64.005839
+6c 0.031437 0.505 0.277817
+6d 1000.947793 6468.033 2320.37252
+6e 1.830566 7.081 3.063485
+6f 2934.395963 6784.543 2358.775037
+7a 2.8209975 6.5225 4.782431
+7b 1.960479 2.05 0.800264
+7c 552.2459225 3381.3705 2528.5973425
+8a 35.107938 2988.8050000000003 58.6299025
+8b 34.801288 190.562 97.5034705
+8c 3574.727053 8322.726 15994.57942
+8d 392.911171 4598.378000000001 2152.827988
+9a 975.9131825 296.693 3814.6485415
+9b 506.1561515 287.195 586.138012
+9c 989.774157 1842.02 4187.451232
+9d 1506.518 4976.998 5004.8475245
+10a 343.275878 536.877 5716.062919
+10b 95.312548 183.611 5484.824958
+10c 14496.398719 6897.331 28601.112296
+11a 6.811867 38.295 450.2559045
+11b 3.238811 20.11 452.9634425
+11c 34.8917255 172.79399999999998 1817.943096
+11d 35.194864 160.855 21247.530559
+12a 197.6314385 300.378 1567.7824555
+12b 0.34365 0.68 1672.541799
+12c 273.457263 1383.03 2382.885773
+13a 659.979154 2933.4440000000004 1779.096776
+13b 1049.678017 1114.0035 1079.116244
+13c 1029.872256 1072.366 953.9510605
+13d 3073.325846 4858.845499999999 4603.9182085
+14a 81.2734675 343.55 508.1616175
+14b 23.130869 136.6515 273.506766
+14c 216.014408 746.6220000000001 1609.584826
+15a 540.610489 701.432 7930.997191
+15b 2.782742 3.563 1168.457507
+15c 3700.361472 667.654 1.169465944449e6
+15d 3519.1675725 787.214 1.198311287141e6
+16a 12.5486395 209.297 47.10287
+16b 8540.832453 19933.58 10504.133574
+16c 579.138577 1629.88 806.040774
+16d 440.858181 1305.267 620.568618
+17a 1791.891394 12908.545 5364.176037
+17b 1691.674157 8691.878 11440.365504
+17c 1680.976286 8355.929 11418.454143
+17d 1717.838847 8461.689 11650.675027
+17e 5248.298737 13241.499 5375.40818
+17f 1821.900949 11355.119 11748.35144
+18a 818.59906 10105.076 1574.11824
+18b 96.975638 259.153 0.2503385
+19a 604.091671 298.06 3881.0141455
+19b 470.478289 210.752 746.163688
+19c 639.070404 1675.016 4969.1130775
+19d 988.719035 15530.924 10587.216846
+20a 697.9063015 3183.5555 3589.6914605
+20b 295.4850945 2228.325 900.5101145
+20c 221.0699405 1211.642 2063.360925
+21a 12.228561 47.725 485.073355
+21b 11.24698 43.069 481.065692
+21c 12.712685 48.596 483.426167
+22a 324.2410095 468.607 1059.349457
+22b 97.917814 300.765 715.962638
+22c 1102.837342 2144.779 6873.302364
+22d 2157.846096 1038.7235 14583.581357
+23a 259.119604 381.3295 96696.354517
+23b 16.7828095 27.257 765.868064
+23c 667.43128 451.844 227790.97049
+24a 510.320524 309.669 3996.475217
+24b 1.64739 3.75 3952.9654885
+25a 1044.864274 3597.538 1486.341207
+25b 30.467337 378.8765 41.4811205
+25c 8029.421799 10246.668 5307.931861
+26a 105.9152885 1906.107 1304.715799
+26b 20.623313 48.375 523.0151345
+26c 247.196486 1733.723 2118.861378
+27a 8.936741 45.89 478.353622
+27b 3.5890685 44.2795 477.592084
+27c 8.8660915 82.846 481.728975
+28a 287.8502915 1017.9929999999999 1386.401539
+28b 137.398647 903.4725 521.4545765
+28c 174.171348 355.126 2206.824854
+29a 0.2221165 492.3995 3920.3215215
+29b 0.227203 21.439 3966.124948
+29c 19.9306195 631.2484999999999 5179.043264
+30a 815.20509 5289.308 565.059446
+30b 86.6437595 509.36400000000003 32.753604
+30c 4705.838128 3557.5755 2714.830581
+31a 460.270231 2697.607 607.882617
+31b 100.4009585 493.0725 106.1555815
+31c 744.030692 2713.9759999999997 5114.846874
+32a 0.004895 0.105 0.162307
+32b 20.813718 132.73399999999998 55.7848295
+33a 52.25795 23.877 49.8586
+33b 79.896146 23.746499999999997 62.552559
+33c 741.256199 50.125 822.530545
+```
+
+Both postgres and sqlite do worse on some queries if you give them the option of using more indexes. I think I knew this theoretically but I'm still really shocked to see it happen so easily. 
+
+SQLite also does really well on some of these queries, but when I look into individual examples I find that it does so by returning the wrong answers. That's not ideal.
+
+``` julia
+function test_sqlite(qs = query_names())
+  db = SQLite.DB("../imdb/imdb.sqlite")
+  SQLite.execute!(db, "PRAGMA cache_size = -1000000000;")
+  SQLite.execute!(db, "PRAGMA temp_store = memory;")
+  for query_name in qs
+    results_imp = eval(Symbol("q$(query_name)"))()
+    query = rstrip(readline("../job/$(query_name).sql"))
+    query = query[1:(length(query)-1)] # drop ';' at end
+    query = replace(query, "MIN", "")
+    frame = SQLite.query(db, query)
+    num_columns = length(results_imp)
+    if length(frame.columns) == 0
+      correct = (length(results_imp[1]) == 0)
+    else
+      results_sqlite = Relation(tuple((convert(typeof(results_imp.columns[ix]), frame[ix].values) for ix in 1:num_columns)...), num_columns)
+      (imp_only, sqlite_only) = Data.diff(results_imp, results_sqlite)
+      imp_only = map((c) -> c[1:min(10, length(c))], imp_only)
+      sqlite_only = map((c) -> c[1:min(10, length(c))], sqlite_only)
+      correct = (imp_only == sqlite_only)
+    end
+    println("$query_name $correct")
+  end
+end
+```
+
+```
+1a true
+1b false
+1c true
+1d false
+2a true
+2b true
+2c true
+2d true
+3a false
+3b false
+3c false
+4a true
+4b true
+4c true
+5a true
+5b true
+5c false
+6a true
+6b true
+6c true
+6d true
+6e true
+6f false
+7a true
+7b true
+7c false
+8a false
+8b true
+8c false
+8d true
+9a false
+9b false
+9c false
+9d true
+10a true
+10b true
+10c false
+11a false
+11b false
+11c true
+11d false
+12a true
+12b true
+12c true
+13a true
+13b false
+13c true
+13d true
+14a true
+14b true
+14c true
+15a true
+15b true
+15c false
+15d false
+16a true
+16b false
+16c true
+16d true
+17a false
+17b false
+17c true
+17d false
+17e true
+17f false
+18a false
+18b false
+19a false
+19b true
+19c false
+19d false
+20a false
+20b true
+20c true
+21a false
+21b false
+21c false
+22a false
+22b false
+22c false
+22d false
+23a true
+23b true
+23c true
+24a false
+24b false
+25a true
+25b true
+25c true
+26a true
+26b true
+26c true
+27a false
+27b false
+27c false
+28a false
+28b true
+28c false
+29a true
+29b true
+29c false
+30a false
+30b true
+30c true
+31a true
+31b true
+31c true
+32a true
+32b true
+33a true
+33b true
+33c true
+```
+
+SQLite isn't even playing the same game here. I'm going to have to exclude it from the results.
+
+If we just compare Imp to Postgres, and look at relative times:
+
+```
+imp	pg (fk only)	pg (all)
+1.00	2.20	2.27
+1.00	11.37	10.11
+1.00	12.02	12.55
+1.00	9.71	8.83
+1.00	10.11	9.52
+1.00	9.91	9.33
+1.00	10.38	9.88
+1.00	10.93	10.31
+1.00	1.94	1.91
+1.00	2.44	2.39
+1.00	2.51	2.46
+1.00	2.53	2.46
+3.12	4.31	1.00
+1.00	2.57	2.50
+1.00	2.05	2.06
+1.00	2.06	2.08
+1.00	2.49	2.33
+1.00	9.68	2.72
+4.73	1.15	1.00
+1.00	298.62	13.07
+1.00	6.42	6.28
+1.00	9.81	3.82
+1.00	2.34	2.30
+1.00	329.97	2.20
+1.00	123.88	1.00
+1.00	6.09	6.10
+1.00	80.14	79.75
+1.00	11.00	5.37
+1.00	2.47	2.45
+1.00	12.55	12.28
+3.38	2.16	1.00
+1.88	2.20	1.00
+1.00	1.80	1.80
+1.00	3.36	3.32
+1.00	1.63	1.56
+1.00	2.16	1.87
+2.17	1.02	1.00
+1.00	7.97	5.35
+1.00	8.94	6.10
+1.00	5.82	4.87
+1.00	5.00	4.49
+1.00	1.89	1.49
+1.00	1.89	1.93
+1.00	5.15	4.96
+1.00	4.55	4.42
+1.00	1.05	1.04
+1.00	1.03	1.02
+1.00	1.55	1.50
+1.00	4.41	4.09
+1.00	6.53	5.80
+1.00	3.63	3.35
+1.00	1.29	1.29
+1.00	11.03	1.20
+5.78	1.00	1.00
+4.64	1.00	1.00
+1.00	17.72	15.97
+1.00	2.39	2.34
+1.00	2.93	2.84
+1.00	3.00	2.91
+1.00	7.24	7.13
+1.00	5.11	5.07
+1.00	4.99	4.91
+1.00	4.94	4.87
+1.00	2.54	2.47
+1.00	6.18	6.09
+1.00	12.42	12.47
+1.00	3.88	2.96
+2.11	2.19	1.00
+2.34	1.69	1.00
+1.00	2.90	2.54
+1.00	15.28	15.03
+1.00	4.57	4.47
+1.00	8.48	8.21
+1.00	5.69	5.44
+1.00	6.26	3.83
+1.00	5.32	3.78
+1.00	5.26	3.75
+1.00	1.68	1.52
+1.00	3.79	3.50
+1.00	2.11	1.85
+2.05	1.07	1.00
+1.00	1.43	1.44
+1.00	2.44	1.55
+1.55	1.01	1.00
+1.40	1.25	1.00
+1.00	23.49	2.26
+1.00	3.49	3.44
+1.00	19.63	12.16
+1.00	1.32	1.33
+1.00	11.86	19.53
+1.00	13.55	2.46
+1.00	9.34	7.60
+1.00	2.97	5.26
+1.00	5.03	12.62
+1.00	3.08	9.53
+1.00	15.70	3.66
+1.00	2.60	6.77
+1.00	6.00	2.11
+1.00	557.94	2135.18
+1.00	76.70	92.30
+1.00	33.80	33.03
+1.00	7.64	6.99
+1.00	9.46	6.05
+1.22	1.00	1.00
+1.00	6.58	6.24
+1.00	5.51	5.13
+1.00	4.09	3.92
+1.00	2437.95	22.39
+1.00	7.66	6.96
+2.40	1.03	1.00
+3.14	2.19	1.00
+24.41	1.00	1.57
+```
+
+I'd say 8a, 29a and 29b are clear failures for postgres. 33c is a clear failure for Imp. Otherwise, I think it's fair to say that both imp and pg have good plans, with Imp leading by a constant factor that's most likely due to the in-memory, read-optimized indexes rather than the query compiler itself.
+
+Let's see what pg did different for 33c.
+
+```
+Aggregate  (cost=3988.02..3988.03 rows=1 width=84)
+  ->  Nested Loop  (cost=927.04..3988.01 rows=1 width=84)
+        ->  Nested Loop  (cost=926.62..3987.55 rows=1 width=69)
+              ->  Nested Loop  (cost=926.19..3986.89 rows=1 width=77)
+                    Join Filter: (it2.id = mi_idx2.info_type_id)
+                    ->  Nested Loop  (cost=925.76..3979.64 rows=13 width=71)
+                          ->  Nested Loop  (cost=925.34..3970.07 rows=21 width=56)
+                                Join Filter: (kt1.id = t1.kind_id)
+                                ->  Nested Loop  (cost=925.34..3966.76 rows=74 width=60)
+                                      Join Filter: (ml.movie_id = t1.id)
+                                      ->  Nested Loop  (cost=924.91..3927.85 rows=74 width=51)
+                                            ->  Index Scan using index_info_type_id on info_type it2  (cost=0.14..14.12 rows=1 width=4)
+                                                  Filter: ((info)::text = 'rating'::text)
+                                            ->  Nested Loop  (cost=924.77..3912.99 rows=74 width=47)
+                                                  Join Filter: (ml.movie_id = mc1.movie_id)
+                                                  ->  Hash Join  (cost=924.34..3903.16 rows=15 width=39)
+                                                        Hash Cond: (t2.kind_id = kt2.id)
+                                                        ->  Nested Loop  (cost=923.22..3901.70 rows=54 width=43)
+                                                              ->  Hash Join  (cost=922.79..3354.28 rows=130 width=18)
+                                                                    Hash Cond: (mi_idx1.info_type_id = it1.id)
+                                                                    ->  Merge Join  (cost=920.37..3295.38 rows=14713 width=22)
+                                                                          Merge Cond: (mi_idx1.movie_id = ml.movie_id)
+                                                                          ->  Index Scan using index_movie_info_idx_movie_id on movie_info_idx mi_idx1  (cost=0.43..43808.01 rows=1380035 width=14)
+                                                                          ->  Sort  (cost=919.92..932.42 rows=5000 width=8)
+                                                                                Sort Key: ml.movie_id
+                                                                                ->  Nested Loop  (cost=37.49..612.73 rows=5000 width=8)
+                                                                                      ->  Seq Scan on link_type lt  (cost=0.00..1.25 rows=3 width=4)
+                                                                                            Filter: ((link)::text = ANY ('{sequel,follows,"followed by"}'::text[]))
+                                                                                      ->  Bitmap Heap Scan on movie_link ml  (cost=37.49..185.08 rows=1875 width=12)
+                                                                                            Recheck Cond: (link_type_id = lt.id)
+                                                                                            ->  Bitmap Index Scan on index_movie_link_link_type_id  (cost=0.00..37.02 rows=1875 width=0)
+                                                                                                  Index Cond: (link_type_id = lt.id)
+                                                                    ->  Hash  (cost=2.41..2.41 rows=1 width=4)
+                                                                          ->  Seq Scan on info_type it1  (cost=0.00..2.41 rows=1 width=4)
+                                                                                Filter: ((info)::text = 'rating'::text)
+                                                              ->  Index Scan using index_title_id on title t2  (cost=0.43..4.20 rows=1 width=25)
+                                                                    Index Cond: (id = ml.linked_movie_id)
+                                                                    Filter: ((production_year >= 2000) AND (production_year <= 2010))
+                                                        ->  Hash  (cost=1.09..1.09 rows=2 width=4)
+                                                              ->  Seq Scan on kind_type kt2  (cost=0.00..1.09 rows=2 width=4)
+                                                                    Filter: ((kind)::text = ANY ('{"tv series",episode}'::text[]))
+                                                  ->  Index Scan using index_movie_companies_movie_id on movie_companies mc1  (cost=0.43..0.59 rows=5 width=8)
+                                                        Index Cond: (movie_id = mi_idx1.movie_id)
+                                      ->  Index Scan using index_title_id on title t1  (cost=0.43..0.51 rows=1 width=25)
+                                            Index Cond: (id = mc1.movie_id)
+                                ->  Materialize  (cost=0.00..1.10 rows=2 width=4)
+                                      ->  Seq Scan on kind_type kt1  (cost=0.00..1.09 rows=2 width=4)
+                                            Filter: ((kind)::text = ANY ('{"tv series",episode}'::text[]))
+                          ->  Index Scan using index_company_name_id on company_name cn1  (cost=0.42..0.45 rows=1 width=23)
+                                Index Cond: (id = mc1.company_id)
+                                Filter: ((country_code)::text <> '[us]'::text)
+                    ->  Index Scan using index_movie_info_idx_movie_id on movie_info_idx mi_idx2  (cost=0.43..0.53 rows=2 width=14)
+                          Index Cond: (movie_id = t2.id)
+                          Filter: (info < '3.5'::text)
+              ->  Index Scan using index_movie_companies_movie_id on movie_companies mc2  (cost=0.43..0.62 rows=5 width=8)
+                    Index Cond: (movie_id = t2.id)
+        ->  Index Scan using index_company_name_id on company_name cn2  (cost=0.42..0.44 rows=1 width=23)
+              Index Cond: (id = mc2.company_id)
+```
+
+Not all that different. It puts the production year and country code higher up than I did, but copying that doesn't help much. 
+
+I thought maybe the problem here is that I hitting all the movie_companies and all the infos before I get to return, so there are going to be huge numbers of dupes. But no, I'm only producing 114 rows total for 96 unique results.
+
+Oh, I guess I'm also redoing all the t1 work for every t2 company. That seems like a bad idea. Let's factor it out into multiple queries:
+
+``` julia
+function q33c_factored()
+  rating_type = @query begin 
+    info_type.info(it, "rating")
+    return (it::Int8,)
+  end
+  kind_types = @query begin
+    kt_kind in ["tv series", "episode"]
+    kind_type.kind(kt, kt_kind)
+    return (kt::Int8,)
+  end
+  movie_links = @query begin
+    link in ["sequel", "follows", "followed by"]
+    link_type.link(lt, link)
+    movie_link.link_type(ml, lt)
+    return (ml::Int16,)
+  end
+  linked_movies = @query begin
+    rating_type(it)
+    movie_links(ml)
+    movie_link.linked_movie(ml, t2)
+    title.kind(t2, kt)
+    kind_types(kt)
+    title.production_year(t2, production_year)
+    @when 2000 <= production_year <= 2010
+    movie_info_idx.movie(mii2, t2)
+    movie_info_idx.info_type(mii2, it)
+    movie_info_idx.info(mii2, rating2)
+    @when rating2 < "3.5"
+    return (ml::Int16, t2::Int32, rating2::String)
+  end
+  linking_movies = @query begin
+    rating_type(it)
+    linked_movies(ml, _, _)
+    movie_link.movie(ml, t1)
+    title.kind(t1, kt)
+    kind_types(kt)
+    movie_companies.movie(mc1, t1)
+    movie_companies.company(mc1, cn1)
+    company_name.country_code(cn1, code)
+    @when code != "[us]"
+    title.title(t1, title1)
+    movie_info_idx.movie(mii1, t1)
+    movie_info_idx.info_type(mii1, it)
+    movie_info_idx.info(mii1, rating1)
+    company_name.name(cn1, name1)
+    return (ml::Int16, t1::Int32, name1::String, rating1::String, title1::String)
+  end
+  @query begin
+    linking_movies(ml, t1, name1, rating1, title1)
+    linked_movies(ml, t2, rating2)
+    title.title(t2, title2)
+    movie_companies.movie(mc2, t2)
+    movie_companies.company(mc2, cn2)
+    company_name.name(cn2, name2)
+    return (name1::String, name2::String, rating1::String, rating2::String, title1::String, title2::String)
+  end
+end
+```
+
+```
+@benchmark(q33c_factored()) = BenchmarkTools.Trial: 
+  samples:          1957
+  evals/sample:     1
+  time tolerance:   5.00%
+  memory tolerance: 1.00%
+  memory estimate:  89.27 kb
+  allocs estimate:  510
+  minimum time:     1.69 ms (0.00% GC)
+  median time:      2.44 ms (0.00% GC)
+  mean time:        2.55 ms (2.67% GC)
+  maximum time:     22.87 ms (88.64% GC)
+```
+
+That's about 25x faster than postgres. Maybe I should go ahead and write a factorizing compiler?

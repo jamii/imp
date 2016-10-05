@@ -6731,4 +6731,4 @@ end
   maximum time:     22.87 ms (88.64% GC)
 ```
 
-That's about 25x faster than postgres. Maybe I should go ahead and write a factorizing compiler?
+That's about 20x faster than postgres and 320x faster than the original. Maybe I should go ahead and write a factorizing compiler?

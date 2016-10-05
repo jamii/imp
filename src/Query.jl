@@ -77,7 +77,7 @@ type Row; name; vars; num_keys; end
 type When; expr; vars; end
 type Assign; var; expr; vars; end
 type In; var; expr; vars; end
-type Hint; var; end
+type Hint; vars; end
 type Return; name; vars; typs; num_keys; end  
 
 function plan_query(query)
@@ -92,11 +92,11 @@ function plan_query(query)
   for line in lines
     clause = @match line begin
       Expr(:line, _, _) => :line
-      line::Symbol => Hint(line)
       Expr(:call, [:in, var, expr], _) => In(var, expr, collect_vars(expr))
       Expr(:(=), [var, expr], _) => Assign(var, expr, collect_vars(expr))
-      Expr(:macrocall, [head, expr], _) => @match head begin
-        Symbol("@when") => When(expr, collect_vars(expr))
+      Expr(:macrocall, [head, args...], _) => @match head begin
+        Symbol("@when") => When(args[1], collect_vars(args[1]))
+        Symbol("@hint") => Hint(args)
         _ => error("Don't know what to do with $head")
       end
       Expr(:return, [expr], _) => begin 
@@ -158,12 +158,12 @@ function plan_query(query)
   # collect vars mentioned in this query, in order of mention
   mentioned_vars = []
   for clause in clauses 
-    if typeof(clause) in [Row, When, Assign, In]
+    if typeof(clause) in [Row, When, Assign, In, Hint]
       for var in clause.vars
         push!(mentioned_vars, var)
       end 
     end
-    if typeof(clause) in [Assign, In, Hint]
+    if typeof(clause) in [Assign, In]
       push!(mentioned_vars, clause.var)
     end
   end

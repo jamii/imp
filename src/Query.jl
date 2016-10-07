@@ -325,7 +325,9 @@ function plan_query(query)
       $(index_inits...)
       $(intersection_inits...)
       $(results_inits...)
-      $body
+      let 
+        $body 
+      end
       $(if return_clause.name != ()
         :(merge!($(esc(return_clause.name)), $result))
       else

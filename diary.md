@@ -6847,4 +6847,6 @@ As a bonus, compilation time is waaaaay lower.
 
 As usual, there are type inference failures and I'll pick them off one by one.
 
-I can't get proper benchmarks because I'm on a bus and benchmarking without mains power is sketchy, but it looks like this might actually be faster too.
+I can't get proper benchmarks because I'm on a bus and benchmarking without mains power is sketchy, but it looks like this might actually be faster too. I had no idea in advance which way it would fall. There is more cache pressure from filling the buffers, but there is less code and better code locality (because it runs an entire intersection at once rather than jumping back and forth between different intersections) and I also reduced the number of comparisons in project (which could also have been done for the old version).
+
+I'm also down to about 600 lines of code, of which maybe 200 can be deleted once unboxing improves.

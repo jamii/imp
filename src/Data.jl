@@ -91,6 +91,49 @@ function quicksort!{T <: Tuple}(cs::T)
   quicksort!(cs, 1, length(cs[1]))
 end
 
+# TODO should be typed {K,V} instead of {T}, but pain in the ass to change now
+type Relation{T <: Tuple} # where T is a tuple of columns
+  columns::T
+  num_keys::Int
+  indexes::Dict{Vector{Int},T}
+end
+
+function index{T}(relation::Relation{T}, order::Vector{Int})
+  get!(relation.indexes, order) do
+    columns = tuple(((ix in order) ? copy(column) : Vector{eltype(column)}() for (ix, column) in enumerate(relation.columns))...)
+    quicksort!(tuple((columns[ix] for ix in order)...))
+    columns
+  end::T
+end
+
+# gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
+function gallop{T}(column::Vector{T}, value::T, lo::Int, hi::Int, threshold) 
+  @inbounds if (lo < hi) && (cmp(column[lo], value) < threshold)
+    step = 1
+    while (lo + step < hi) && (cmp(column[lo + step], value) < threshold)
+      lo = lo + step 
+      step = step << 1
+    end
+    
+    step = step >> 1
+    while step > 0
+      if (lo + step < hi) && (cmp(column[lo + step], value) < threshold)
+        lo = lo + step 
+      end
+      step = step >> 1
+    end
+    
+    lo += 1
+  end
+  lo 
+end 
+
+function project(column::Vector, range, val)
+  lo = gallop(column, val, range.start, range.stop, 0)
+  hi = gallop(column, val, lo, range.stop, 1)
+  lo:hi
+end
+
 function dedup_sorted!{T}(columns::T, key, val, deduped::T)
   at = 1
   hi = length(columns[1])
@@ -102,13 +145,6 @@ function dedup_sorted!{T}(columns::T, key, val, deduped::T)
   end
 end
 
-# TODO should be typed {K,V} instead of {T}, but pain in the ass to change now
-type Relation{T <: Tuple} # where T is a tuple of columns
-  columns::T
-  num_keys::Int
-  indexes::Dict{Vector{Int},Tuple}
-end
-
 function Relation(columns, num_keys::Int)
   deduped::typeof(columns) = map((column) -> Vector{eltype(column)}(), columns)
   quicksort!(columns)
@@ -116,7 +152,7 @@ function Relation(columns, num_keys::Int)
   val = columns[num_keys+1:1]
   dedup_sorted!(columns, key, val, deduped)
   order = collect(1:length(columns))
-  Relation(deduped, num_keys, Dict{Vector{Int}, Tuple}(order => deduped))
+  Relation(deduped, num_keys, Dict{Vector{Int}, typeof(deduped)}(order => deduped))
 end
 
 function parse_relation(expr)
@@ -148,97 +184,13 @@ macro relation(expr)
   order = collect(1:length(typs))
   body = quote 
     columns = tuple($([:(Vector{$(esc(typ))}()) for typ in typs]...))
-    indexes = Dict{Vector{Int},Tuple}($order => columns)
-    Relation(columns, $(length(keys)), indexes)
+    Relation(columns, $(length(keys)))
   end
   if name != ()
     :(const $(esc(name)) = $body)
   else
     body
   end
-end
-
-function index{T}(relation::Relation{T}, order::Vector{Int})
-  get!(relation.indexes, order) do
-    columns = tuple([copy(relation.columns[ix]) for ix in order]...)
-    quicksort!(columns)
-    columns
-  end
-end
-
-@generated function index{T, O}(relation::Relation{T}, ::Type{Val{O}})
-  order = collect(O)
-  typs = [:(typeof(relation.columns[$ix])) for ix in order]
-  quote
-    index(relation, $order)::Tuple{$(typs...)}
-  end
-end
-
-# gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
-function gallop{T}(column::Vector{T}, value::T, lo::Int, hi::Int, threshold) 
-  @inbounds if (lo < hi) && (cmp(column[lo], value) < threshold)
-    step = 1
-    while (lo + step < hi) && (cmp(column[lo + step], value) < threshold)
-      lo = lo + step 
-      step = step << 1
-    end
-    
-    step = step >> 1
-    while step > 0
-      if (lo + step < hi) && (cmp(column[lo + step], value) < threshold)
-        lo = lo + step 
-      end
-      step = step >> 1
-    end
-    
-    lo += 1
-  end
-  lo 
-end 
-
-type Finger{T}
-  column::Vector{T}
-  lo::Int
-  hi::Int
-end
-
-@inline function finger(relation::Relation, index)
-  Finger(Void[], 1, length(index[1])+1)
-end
-
-@inline function finger{col_ix}(relation::Relation, index, finger, ::Type{Val{col_ix}})
-  Finger(index[col_ix], 0, 0)
-end
-  
-@inline function Base.length(finger::Finger)
-  # not technically correct - may be repeated values
-  finger.hi - finger.lo
-end
-
-@inline function project{T,T2}(finger::Finger{T}, down_finger::Finger{T2}, val)
-  down_finger.lo = gallop(down_finger.column, val, finger.lo, finger.hi, 0)
-  down_finger.hi = gallop(down_finger.column, val, down_finger.lo, finger.hi, 1)
-  down_finger.lo < down_finger.hi
-end
-
-@inline function Base.start{T,T2}(finger::Finger{T}, down_finger::Finger{T2})
-  down_finger.lo = finger.lo
-  down_finger.hi = gallop(down_finger.column, down_finger.column[down_finger.lo], down_finger.lo, finger.hi, 1)
-  down_finger.lo < down_finger.hi
-end
-
-@inline function Base.next{T,T2}(finger::Finger{T}, down_finger::Finger{T2})
-  if down_finger.hi >= finger.hi
-    false
-  else
-    down_finger.lo = down_finger.hi
-    down_finger.hi = gallop(down_finger.column, down_finger.column[down_finger.lo], down_finger.lo, finger.hi, 1)
-    true
-  end
-end
-
-@inline function head{C, C2}(finger::Finger{C}, down_finger::Finger{C2})
-  down_finger.column[down_finger.lo]
 end
 
 function foreach_diff{T <: Tuple, K <: Tuple}(old::T, new::T, old_key::K, new_key::K, old_only, new_only, old_and_new)
@@ -328,7 +280,7 @@ end
   relation.columns[ix]
 end
 
-export Relation, @relation, Index, index, Finger, finger, project, head
+export Relation, @relation, index, gallop, project, parse_relation
 
 function test()
   for i in 1:10000

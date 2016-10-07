@@ -6734,3 +6734,117 @@ end
 That's about 20x faster than postgres and 320x faster than the original. Maybe I should go ahead and write a factorizing compiler?
 
 [Tuning postgres](https://wiki.postgresql.org/wiki/Tuning_Your_PostgreSQL_Server) resulted in worse performance.
+
+### 2016 Oct 6
+
+I wrote up my results so far and showed them to a few people, and everyone I showed it to said that the report was too short and didn't make sense without going into the code. 
+
+But the code is really ugly. So I further delaying the report by going back to clean things up.
+
+I realized I could simplify a lot of the codegen if I was willing to give up on the depth-first model and eat some extra allocations in the query - one buffer per variable. I'm now running an entire intersection at once:
+
+``` julia
+immutable Intersection{C, B}
+  columns::C
+  buffer::B
+end
+
+function Intersection(columns)
+  buffer = Vector{NTuple{length(columns), UnitRange{Int64}}}()
+  Intersection(columns, buffer)
+end
+
+function project(column::Vector, range, val)
+  lo = gallop(column, val, range.start, range.stop, 0)
+  hi = gallop(column, val, lo, range.stop, 1)
+  lo:hi
+end
+
+@generated function project_at{N}(intersection, ranges::NTuple{N}, val)
+  :(@ntuple $N ix -> project(intersection.columns[ix], ranges[ix], val))
+end
+
+function intersect_at(intersection, ranges)
+  empty!(intersection.buffer)
+  min_ix = indmin(map(length, ranges))
+  while ranges[min_ix].start < ranges[min_ix].stop
+    val = intersection.columns[min_ix][ranges[min_ix].start]
+    projected_ranges = project_at(intersection, ranges, val)
+    if all(r -> r.start < r.stop, projected_ranges)
+      push!(intersection.buffer, projected_ranges)
+    end
+    ranges = map((old, new) -> new.stop:old.stop, ranges, projected_ranges)
+  end 
+  intersection.buffer
+end
+
+function intersect_at(intersection, ranges, val)
+  empty!(intersection.buffer)
+  projected_ranges = project_at(intersection, ranges, val)
+  if all(r -> r.start < r.stop, projected_ranges)
+    push!(intersection.buffer, projected_ranges)
+  end
+  intersection.buffer
+end
+
+function val_at(intersection, ranges)
+  intersection.columns[1][ranges[1].start]
+end
+```
+
+This replaces both the finger interface and much of the codegen. The generated code for the queries is now a little more readable:
+
+``` julia
+begin  # /home/jamie/imp/src/Query.jl, line 339:
+    let  # /home/jamie/imp/src/Query.jl, line 340:
+        local #2173#index_1 = (Query.index)(edge,[1,2])
+        local #2179#range_1_0 = 1:(Query.length)(#2173#index_1[1]) + 1
+        local #2174#index_3 = (Query.index)(edge,[1,2])
+        local #2175#index_5 = (Query.index)(edge,[2,1])
+        local #2180#range_3_0 = 1:(Query.length)(#2174#index_3[1]) + 1
+        local #2181#range_5_0 = 1:(Query.length)(#2175#index_5[1]) + 1 # /home/jamie/imp/src/Query.jl, line 341:
+        local #2182#intersection_a = (Query.Intersection)((Query.tuple)(#2173#index_1[1],#2175#index_5[2]))
+        local #2183#intersection_b = (Query.Intersection)((Query.tuple)(#2173#index_1[2],#2174#index_3[1]))
+        local #2184#intersection_c = (Query.Intersection)((Query.tuple)(#2174#index_3[2],#2175#index_5[1])) # /home/jamie/imp/src/Query.jl, line 342:
+        local #2176#results_1 = (Query.Vector){Int64}()
+        local #2177#results_2 = (Query.Vector){Int64}()
+        local #2178#results_3 = (Query.Vector){Int64}() # /home/jamie/imp/src/Query.jl, line 343:
+        begin  # /home/jamie/imp/src/Query.jl, line 327:
+            for (#2185#range_1_1,#2186#range_5_1) = (Query.intersect_at)(#2182#intersection_a,(#2179#range_1_0,#2181#range_5_0)) # /home/jamie/imp/src/Query.jl, line 328:
+                local a = (Query.val_at)(#2182#intersection_a,(#2185#range_1_1,#2186#range_5_1)) # /home/jamie/imp/src/Query.jl, line 329:
+                begin  # /home/jamie/imp/src/Query.jl, line 327:
+                    for (#2187#range_1_2,#2188#range_3_1) = (Query.intersect_at)(#2183#intersection_b,(#2185#range_1_1,#2180#range_3_0)) # /home/jamie/imp/src/Query.jl, line 328:
+                        local b = (Query.val_at)(#2183#intersection_b,(#2187#range_1_2,#2188#range_3_1)) # /home/jamie/imp/src/Query.jl, line 329:
+                        if a < b # /home/jamie/imp/src/Query.jl, line 292:
+                            begin  # /home/jamie/imp/src/Query.jl, line 327:
+                                for (#2189#range_3_2,#2190#range_5_2) = (Query.intersect_at)(#2184#intersection_c,(#2188#range_3_1,#2186#range_5_1)) # /home/jamie/imp/src/Query.jl, line 328:
+                                    local c = (Query.val_at)(#2184#intersection_c,(#2189#range_3_2,#2190#range_5_2)) # /home/jamie/imp/src/Query.jl, line 329:
+                                    begin  # /home/jamie/imp/src/Query.jl, line 298:
+                                        #2191#need_more_results = true # /home/jamie/imp/src/Query.jl, line 299:
+                                        if b < c # /home/jamie/imp/src/Query.jl, line 292:
+                                            begin  # /home/jamie/imp/src/Query.jl, line 281:
+                                                (Query.push!)(#2176#results_1,a)
+                                                (Query.push!)(#2177#results_2,b)
+                                                (Query.push!)(#2178#results_3,c) # /home/jamie/imp/src/Query.jl, line 283:
+                                                #2191#need_more_results = false
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end # /home/jamie/imp/src/Query.jl, line 344:
+        (Query.Relation)((Query.tuple)(#2176#results_1,#2177#results_2,#2178#results_3),3)
+    end
+end
+end
+```
+
+As a bonus, compilation time is waaaaay lower.
+
+As usual, there are type inference failures and I'll pick them off one by one.
+
+I can't get proper benchmarks because I'm on a bus and benchmarking without mains power is sketchy, but it looks like this might actually be faster too.

@@ -2,28 +2,49 @@ module Query
 
 using Data
 using Match
+using Base.Cartesian
 
-macro switch(ix_var, cases...)
-  body = :(error("Missing case in switch"))
-  for ix in length(cases):-1:1
-    body = :(($(esc(ix_var)) == $ix) ? $(esc(cases[ix])) : $body)
-  end
-  body
+immutable Intersection{C, B}
+  columns::C
+  buffer::B
 end
 
-macro min_by_length(fingers...)
-  quote 
-    min_ix = 1
-    min_length = length($(esc(fingers[1])))
-    $([quote 
-      next_length = length($(esc(fingers[ix])))
-      if next_length < min_length
-        min_ix = $ix
-        min_length = next_length
-      end
-    end for ix in 2:length(fingers)]...)
-    min_ix
+@generated function Intersection(columns)
+  quote
+    buffer = $(Vector{NTuple{length(columns.parameters), UnitRange{Int64}}})()
+    Intersection(columns, buffer)
   end
+end
+
+@generated function project_at{N}(intersection, ranges::NTuple{N}, val)
+  :(@ntuple $N ix -> project(intersection.columns[ix], ranges[ix], val))
+end
+
+function intersect_at(intersection, ranges)
+  empty!(intersection.buffer)
+  min_ix = indmin(map(length, ranges))
+  while ranges[min_ix].start < ranges[min_ix].stop
+    val = intersection.columns[min_ix][ranges[min_ix].start]
+    projected_ranges = project_at(intersection, ranges, val)
+    if all(r -> r.start < r.stop, projected_ranges)
+      push!(intersection.buffer, projected_ranges)
+    end
+    ranges = map((old, new) -> new.stop:old.stop, ranges, projected_ranges)
+  end 
+  intersection.buffer
+end
+
+function intersect_at(intersection, ranges, val)
+  empty!(intersection.buffer)
+  projected_ranges = project_at(intersection, ranges, val)
+  if all(r -> r.start < r.stop, projected_ranges)
+    push!(intersection.buffer, projected_ranges)
+  end
+  intersection.buffer
+end
+
+function val_at(intersection, ranges)
+  intersection.columns[1][ranges[1].start]
 end
 
 function collect_vars(expr, vars)
@@ -54,23 +75,6 @@ function parse_typ(expr)
     Expr(:(::), [var, typ], _) => typ
     _ => :Any
   end
-end
-
-function parse_relation(expr)
-  (head, tail) = @match expr begin
-    Expr(:(=>), [head, tail], _) => (head, tail)
-    head => (head, :(()))
-  end
-  (name, keys) = @match head begin
-    Expr(:call, [name, keys...], _) => (name, keys)
-    Expr(:tuple, keys, _) => ((), keys)
-    _ => error("Can't parse $expr as relation")
-  end
-  vals = @match tail begin 
-    Expr(:tuple, vals, _) => vals
-    _ => [tail]
-  end
-  (name, keys, vals)
 end
   
 type Row; name; vars; num_keys; end
@@ -217,29 +221,26 @@ function plan_query(query)
     end
   end
   
-  index_sources = Dict(var => (Int64[], Int64[]) for var in vars)
-  for (var, sources) in relation_sources
-    for (clause_ix, var_ix) in sources
-      col_ix = findfirst(sort_orders[clause_ix], var_ix) 
-      push!(index_sources[var][1], clause_ix)
-      push!(index_sources[var][2], col_ix)
-    end
-  end
-  
   # --- codegen ---
   
-  # for each Row clause, get the correct index and create fingers
+  # for each Row clause, get the correct index and create initial ranges
   index_inits = []
   for (clause_ix, clause) in enumerate(clauses)
     if typeof(clause) == Row 
       n = length(sort_orders[clause_ix])
-      order = Val{tuple(sort_orders[clause_ix]...)}
-      index_init = :(local $(Symbol("index_$clause_ix")) = index($(esc(clause.name)), $order))
-      finger1_init = :(local $(Symbol("finger_$(clause_ix)_0")) = finger($(esc(clause.name)), $(Symbol("index_$clause_ix"))))
-      fingers_init = [:(local $(Symbol("finger_$(clause_ix)_$(col_ix)")) = finger($(esc(clause.name)), $(Symbol("index_$clause_ix")), $(Symbol("finger_$(clause_ix)_$(col_ix-1)")), Val{$col_ix})) for col_ix in 1:n]
-      push!(index_inits, index_init, finger1_init, fingers_init...)
+      index_init = :(local $(Symbol("index_$clause_ix")) = index($(esc(clause.name)), $(sort_orders[clause_ix])))
+      range_init = :(local $(Symbol("range_$(clause_ix)_0")) = 1:(length($(Symbol("index_$clause_ix"))[1])+1))
+      push!(index_inits, index_init, range_init)
     end
   end  
+  
+  # for each var, make an Intersection
+  intersection_inits = []
+  for var in vars
+    columns = [:($(Symbol("index_$clause_ix"))[$var_ix]) for (clause_ix, var_ix) in relation_sources[var]]
+    intersection_init = :(local $(Symbol("intersection_$var")) = Intersection(tuple($(columns...))))
+    push!(intersection_inits, intersection_init)
+  end
   
   # initialize arrays for storing results
   results_inits = []
@@ -285,56 +286,35 @@ function plan_query(query)
     end
     need_more_results = var_ix > return_after ? :need_more_results : true
     
-    # find valid values for this variable
+    # run the intersection for this variable
     clause = get(var_assigned_by, var, ())
-    (clause_ixes, col_ixes) = index_sources[var]
-    fingers = [(Symbol("finger_$(clause_ix)_$(col_ix-1)"), Symbol("finger_$(clause_ix)_$(col_ix)"))
-               for (clause_ix, col_ix) in zip(clause_ixes, col_ixes)]
+    intersection = Symbol("intersection_$var")
+    range_ixes = [(clause_ix, findfirst(sort_orders[clause_ix], var_ix)) for (clause_ix, var_ix) in relation_sources[var]]
+    before_ranges = Expr(:tuple, (Symbol("range_$(clause_ix)_$(range_ix-1)") for (clause_ix, range_ix) in range_ixes)...)
+    after_ranges = Expr(:tuple, (Symbol("range_$(clause_ix)_$(range_ix)") for (clause_ix, range_ix) in range_ixes)...)
     if typeof(clause) == Assign
-      projects = [:(project($finger, $down_finger, $(esc(var)))) for (finger, down_finger) in fingers]
       body = quote
-        let $(esc(var)) = $(esc(clause.expr))
-          if $(reduce((a,b) -> :($a && $b), true, projects))
+        local $(esc(var)) = $(esc(clause.expr))
+        for $after_ranges in intersect_at($intersection, $before_ranges, $(esc(var)))
+          $body
+        end
+      end
+    elseif typeof(clause) == In
+      body = quote
+        for $(esc(var)) = $(esc(clause.expr))
+          for $after_ranges in intersect_at($intersection, $before_ranges, $(esc(var)))
             $body
           end
         end
       end
-    elseif typeof(clause) == In
-      projects = [:(project($finger, $down_finger, $(esc(var)))) for (finger, down_finger) in fingers]
+    else
       body = quote
-        let
-          local iter = $(esc(clause.expr))
-          local state = start(iter)
-          local $(esc(var)) 
-          while $need_more_results && !done(iter, state)
-            ($(esc(var)), state) = next(iter, state)
-            if $(reduce((a,b) -> :($a && $b), true, projects))
-              $body
-            end
-          end
-        end
-      end
-    else 
-      starts = [:(start($finger, $down_finger)) for (finger, down_finger) in fingers]
-      projects = [:((ix == $ix) || project($finger, $down_finger, $(esc(var)))) for (ix, (finger, down_finger)) in enumerate(fingers)]
-      heads = [:(head($finger, $down_finger)) for (finger, down_finger) in fingers]
-      nexts = [:(next($finger, $down_finger)) for (finger, down_finger) in fingers]
-      body = quote 
-        let 
-          local ix = @min_by_length($(fingers...))
-          local more = @switch ix $(starts...)
-          local $(esc(var))
-          while $need_more_results && more
-            $(esc(var)) = @switch ix $(heads...)
-            if $(reduce((a,b) -> :($a && $b), projects))
-              $body
-            end
-            more = @switch ix $(nexts...)
-          end
+        for $after_ranges in intersect_at($intersection, $before_ranges)
+          local $(esc(var)) = val_at($intersection, $after_ranges)
+          $body
         end
       end
     end
-    
   end
   
   # put everything together
@@ -343,6 +323,7 @@ function plan_query(query)
   quote 
     let
       $(index_inits...)
+      $(intersection_inits...)
       $(results_inits...)
       $body
       $(if return_clause.name != ()

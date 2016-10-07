@@ -6885,3 +6885,9 @@ else
   end end).args[2]
 end
 ```
+
+Bah, still slow. Back to dfs :(
+
+I noticed a problem with my benchmarks. On longer queries, it seems to always run exactly two samples and then include a gc in the second sample, regardless of how much allocation the function performed. So those queries are being charged half of the cost of a full gc, instead of it being amortized over the number of executions it would take to trigger a gc. This *might* be why the bfs version with buffers looked like it had such large regressions.
+
+Notably, I reran 33c and got 6.5ms instead of 740ms.

@@ -2990,8 +2990,8 @@ function test_sqlite(qs = query_names())
 end
 
 function bench(qs = query_names())
-  println("query_name imp pg sqlite")
-  for (query_name, imp, sqlite, pg) in zip(qs, bench_imp(qs), bench_sqlite(qs), bench_pg(qs))
+  println("query_name imp pg")
+  for (query_name, imp, pg) in zip(qs, bench_imp(qs), bench_pg(qs))
     println("$query_name $imp $pg $sqlite")
   end
 end
@@ -3001,7 +3001,7 @@ function bench_imp(qs = query_names())
   for query_name in qs
     @show query_name now()
     eval(Symbol("q$(query_name)"))()
-    trial = @show @benchmark $(eval(Symbol("q$(query_name)")))()
+    trial = @show @benchmark $(eval(Symbol("q$(query_name)")))() evals=3
     push!(medians, median(trial.times) / 1000000)
   end
   medians
@@ -3019,7 +3019,7 @@ function bench_sqlite(qs = query_names())
     @show query_name now()
     query = rstrip(readline("../job/$(query_name).sql"))
     SQLite.query(db, query)
-    trial = @show @benchmark SQLite.query($db, $query)
+    trial = @show @benchmark SQLite.query($db, $query) evals=3
     push!(medians, median(trial.times) / 1000000)
   end
   medians
@@ -3035,7 +3035,7 @@ function bench_pg(qs = query_names())
     times = Float64[]
     @show query_name now()
     readstring(cmd)
-    @show @benchmark push!($times, parse(Float64, match(r"Execution time: (\S*) ms", readstring($cmd))[1]))
+    @show @benchmark push!($times, parse(Float64, match(r"Execution time: (\S*) ms", readstring($cmd))[1])) evals=3
     push!(medians, median(times))
   end
   medians

@@ -4,47 +4,21 @@ using Data
 using Match
 using Base.Cartesian
 
-immutable Intersection{C, B}
-  columns::C
-  buffer::B
+@generated function project_at{N}(intersection, ranges::NTuple{N}, val, min)
+  :(@ntuple $N ix -> 
+  if ix != min
+    project(intersection[ix], ranges[ix], val)
+  else 
+    ranges[ix].start:gallop(intersection[ix], val, ranges[ix].start+1, ranges[ix].stop, 1)
+  end)
 end
 
-@generated function Intersection(columns)
-  quote
-    buffer = $(Vector{NTuple{length(columns.parameters), UnitRange{Int64}}})()
-    Intersection(columns, buffer)
-  end
+@generated function feasible_at{N}(ranges::NTuple{N})
+  :(@nall $N ix -> ranges[ix].start < ranges[ix].stop)
 end
 
-@generated function project_at{N}(intersection, ranges::NTuple{N}, val)
-  :(@ntuple $N ix -> project(intersection.columns[ix], ranges[ix], val))
-end
-
-function intersect_at(intersection, ranges)
-  empty!(intersection.buffer)
-  min_ix = indmin(map(length, ranges))
-  while ranges[min_ix].start < ranges[min_ix].stop
-    val = intersection.columns[min_ix][ranges[min_ix].start]
-    projected_ranges = project_at(intersection, ranges, val)
-    if all(r -> r.start < r.stop, projected_ranges)
-      push!(intersection.buffer, projected_ranges)
-    end
-    ranges = map((old, new) -> new.stop:old.stop, ranges, projected_ranges)
-  end 
-  intersection.buffer
-end
-
-function intersect_at(intersection, ranges, val)
-  empty!(intersection.buffer)
-  projected_ranges = project_at(intersection, ranges, val)
-  if all(r -> r.start < r.stop, projected_ranges)
-    push!(intersection.buffer, projected_ranges)
-  end
-  intersection.buffer
-end
-
-function val_at(intersection, ranges)
-  intersection.columns[1][ranges[1].start]
+@generated function next_at{N}(state::NTuple{N}, ranges::NTuple{N})
+  :(@ntuple $N ix -> ranges[ix].stop:state[ix].stop)
 end
 
 function collect_vars(expr, vars)
@@ -238,7 +212,7 @@ function plan_query(query)
   intersection_inits = []
   for var in vars
     columns = [:($(Symbol("index_$clause_ix"))[$var_ix]) for (clause_ix, var_ix) in relation_sources[var]]
-    intersection_init = :(local $(Symbol("intersection_$var")) = Intersection(tuple($(columns...))))
+    intersection_init = :(local $(Symbol("intersection_$var")) = tuple($(columns...)))
     push!(intersection_inits, intersection_init)
   end
   
@@ -295,7 +269,8 @@ function plan_query(query)
     if typeof(clause) == Assign
       body = (quote let
         local $(esc(var)) = $(esc(clause.expr))
-        for $after_ranges in intersect_at($intersection, $before_ranges, $(esc(var)))
+        $after_ranges = project_at($intersection, $before_ranges, $(esc(var)), 0)
+        if feasible_at($after_ranges)
           $body
         end
       end end).args[2]
@@ -303,23 +278,27 @@ function plan_query(query)
       body = (quote let
         local iter = $(esc(clause.expr))
         local state = start(iter)
+        local $(esc(var))
         while $need_more_results && !done(iter, state)
           ($(esc(var)), state) = next(iter, state)
-          for $after_ranges in intersect_at($intersection, $before_ranges, $(esc(var)))
+          $after_ranges = project_at($intersection, $before_ranges, $(esc(var)), 0)
+          if feasible_at($after_ranges)
             $body
           end
         end
       end end).args[2]
     else
       body = (quote let
-        local iter = intersect_at($intersection, $before_ranges)
-        local state = start(iter)
-        local $(after_ranges.args...)
-        while $need_more_results && !done(iter, state)
-          ($after_ranges, state) = next(iter, state)
-          local $(esc(var)) = val_at($intersection, $after_ranges)
-          $body
-        end
+        local state = $before_ranges
+        local min_ix = indmin(map(length, state))
+        while $need_more_results && state[min_ix].start < state[min_ix].stop
+          local $(esc(var)) = $intersection[min_ix][state[min_ix].start]
+          $after_ranges = project_at($intersection, state, $(esc(var)), min_ix)
+          if feasible_at($after_ranges)
+            $body
+          end
+          state = next_at(state, $after_ranges)
+        end 
       end end).args[2]
     end
   end

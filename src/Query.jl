@@ -293,27 +293,34 @@ function plan_query(query)
     before_ranges = Expr(:tuple, (Symbol("range_$(clause_ix)_$(range_ix-1)") for (clause_ix, range_ix) in range_ixes)...)
     after_ranges = Expr(:tuple, (Symbol("range_$(clause_ix)_$(range_ix)") for (clause_ix, range_ix) in range_ixes)...)
     if typeof(clause) == Assign
-      body = quote
+      body = (quote let
         local $(esc(var)) = $(esc(clause.expr))
         for $after_ranges in intersect_at($intersection, $before_ranges, $(esc(var)))
           $body
         end
-      end
+      end end).args[2]
     elseif typeof(clause) == In
-      body = quote
-        for $(esc(var)) = $(esc(clause.expr))
+      body = (quote let
+        local iter = $(esc(clause.expr))
+        local state = start(iter)
+        while $need_more_results && !done(iter, state)
+          ($(esc(var)), state) = next(iter, state)
           for $after_ranges in intersect_at($intersection, $before_ranges, $(esc(var)))
             $body
           end
         end
-      end
+      end end).args[2]
     else
-      body = quote
-        for $after_ranges in intersect_at($intersection, $before_ranges)
+      body = (quote let
+        local iter = intersect_at($intersection, $before_ranges)
+        local state = start(iter)
+        local $(after_ranges.args...)
+        while $need_more_results && !done(iter, state)
+          ($after_ranges, state) = next(iter, state)
           local $(esc(var)) = val_at($intersection, $after_ranges)
           $body
         end
-      end
+      end end).args[2]
     end
   end
   

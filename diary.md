@@ -6850,3 +6850,38 @@ As usual, there are type inference failures and I'll pick them off one by one.
 I can't get proper benchmarks because I'm on a bus and benchmarking without mains power is sketchy, but it looks like this might actually be faster too. I had no idea in advance which way it would fall. There is more cache pressure from filling the buffers, but there is less code and better code locality (because it runs an entire intersection at once rather than jumping back and forth between different intersections) and I also reduced the number of comparisons in project (which could also have been done for the old version).
 
 I'm also down to about 600 lines of code, of which maybe 200 can be deleted once unboxing improves.
+
+Argh. I was seeing really big slowdowns on some of the queries and started to panic a little, but it turns out I forgot to include the `return_after` optimization when I changed to bfs. This uglifies the code again. It would be prettier to wrap the return_after part in a function and call return to break out of the loop, but then I would lose the ability to easily check the code with `@code_warntype`. 
+
+``` julia 
+if typeof(clause) == Assign
+  body = (quote let
+    local $(esc(var)) = $(esc(clause.expr))
+    for $after_ranges in intersect_at($intersection, $before_ranges, $(esc(var)))
+      $body
+    end
+  end end).args[2]
+elseif typeof(clause) == In
+  body = (quote let
+    local iter = $(esc(clause.expr))
+    local state = start(iter)
+    while $need_more_results && !done(iter, state)
+      ($(esc(var)), state) = next(iter, state)
+      for $after_ranges in intersect_at($intersection, $before_ranges, $(esc(var)))
+        $body
+      end
+    end
+  end end).args[2]
+else
+  body = (quote let
+    local iter = intersect_at($intersection, $before_ranges)
+    local state = start(iter)
+    local $(after_ranges.args...)
+    while $need_more_results && !done(iter, state)
+      ($after_ranges, state) = next(iter, state)
+      local $(esc(var)) = val_at($intersection, $after_ranges)
+      $body
+    end
+  end end).args[2]
+end
+```

@@ -7051,3 +7051,5 @@ Any[8.384,0.488,6.06,0.4995,579.993,574.173,562.608,717.823,148.766,108.611,262.
 ```
 
 Some queries are better, some are worse.
+
+I finished up the report. Just waiting for a last round of feedback and some non-1am editing for flow.

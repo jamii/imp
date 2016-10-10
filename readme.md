@@ -3,3 +3,5 @@ Imp = [Spreadsheets](https://www.youtube.com/watch?v=TMIBfzSqguQ) + [Relations](
 The goal is to achieve the immediate, incremental, self-explaining experience of spreadsheets in a system suited to building interactive, graphical applications.
 
 Follow the [diary](diary.md) for daily updates in excruciating and unfiltered detail.
+
+If you're interested in supporting work on Imp, please [get in touch](mailto:jamie@scattered-thoughts.net).

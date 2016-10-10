@@ -2971,12 +2971,23 @@ function bench_pg(qs = query_names())
   for query_name in qs
     query = rstrip(readline("../job/$(query_name).sql"))
     query = query[1:(length(query)-1)] # drop ';' at end
-    bench = "explain analyze $query"
+    bench = "explain (analyze, buffers) $query"
     cmd = `sudo -u postgres psql -c $bench`
     times = Float64[]
     @show query_name now()
     readstring(cmd)
-    @show @benchmark push!($times, parse(Float64, match(r"Execution time: (\S*) ms", readstring($cmd))[1])) evals=3
+    trial = @benchmark begin
+      result = readstring($cmd)
+      time = parse(Float64, match(r"Execution time: (\S*) ms", result)[1])
+      missed_buffer = ismatch(r"Buffers [^\n]* read=", result)
+      if missed_buffer == true
+        println("Miss!")
+        println(result)
+        @assert false
+      end
+      push!($times, time) 
+    end evals=3
+    @show trial
     push!(medians, median(times))
   end
   medians

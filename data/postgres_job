@@ -25,27 +25,27 @@ create database imdb;
 \copy role_type from 'imdb/role_type.csv' csv escape '\'
 \copy title from 'imdb/title.csv' csv escape '\'
 
-\copy aka_name to 'imdb/pg_aka_name.csv' csv escape '"'
-\copy aka_title to 'imdb/pg_aka_title.csv' csv escape '"'
-\copy cast_info to 'imdb/pg_cast_info.csv' csv escape '"'
-\copy char_name to 'imdb/pg_char_name.csv' csv escape '"'
-\copy comp_cast_type to 'imdb/pg_comp_cast_type.csv' csv escape '"'
-\copy company_name to 'imdb/pg_company_name.csv' csv escape '"'
-\copy company_type to 'imdb/pg_company_type.csv' csv escape '"'
-\copy complete_cast to 'imdb/pg_complete_cast.csv' csv escape '"'
-\copy info_type to 'imdb/pg_info_type.csv' csv escape '"'
-\copy keyword to 'imdb/pg_keyword.csv' csv escape '"'
-\copy kind_type to 'imdb/pg_kind_type.csv' csv escape '"'
-\copy link_type to 'imdb/pg_link_type.csv' csv escape '"'
-\copy movie_companies to 'imdb/pg_movie_companies.csv' csv escape '"'
-\copy movie_info to 'imdb/pg_movie_info.csv' csv escape '"'
-\copy movie_info_idx to 'imdb/pg_movie_info_idx.csv' csv escape '"'
-\copy movie_keyword to 'imdb/pg_movie_keyword.csv' csv escape '"'
-\copy movie_link to 'imdb/pg_movie_link.csv' csv escape '"'
-\copy name to 'imdb/pg_name.csv' csv escape '"'
-\copy person_info to 'imdb/pg_person_info.csv' csv escape '"'
-\copy role_type to 'imdb/pg_role_type.csv' csv escape '"'
-\copy title to 'imdb/pg_title.csv' csv escape '"' 
+-- \copy aka_name to 'imdb/pg_aka_name.csv' csv escape '"'
+-- \copy aka_title to 'imdb/pg_aka_title.csv' csv escape '"'
+-- \copy cast_info to 'imdb/pg_cast_info.csv' csv escape '"'
+-- \copy char_name to 'imdb/pg_char_name.csv' csv escape '"'
+-- \copy comp_cast_type to 'imdb/pg_comp_cast_type.csv' csv escape '"'
+-- \copy company_name to 'imdb/pg_company_name.csv' csv escape '"'
+-- \copy company_type to 'imdb/pg_company_type.csv' csv escape '"'
+-- \copy complete_cast to 'imdb/pg_complete_cast.csv' csv escape '"'
+-- \copy info_type to 'imdb/pg_info_type.csv' csv escape '"'
+-- \copy keyword to 'imdb/pg_keyword.csv' csv escape '"'
+-- \copy kind_type to 'imdb/pg_kind_type.csv' csv escape '"'
+-- \copy link_type to 'imdb/pg_link_type.csv' csv escape '"'
+-- \copy movie_companies to 'imdb/pg_movie_companies.csv' csv escape '"'
+-- \copy movie_info to 'imdb/pg_movie_info.csv' csv escape '"'
+-- \copy movie_info_idx to 'imdb/pg_movie_info_idx.csv' csv escape '"'
+-- \copy movie_keyword to 'imdb/pg_movie_keyword.csv' csv escape '"'
+-- \copy movie_link to 'imdb/pg_movie_link.csv' csv escape '"'
+-- \copy name to 'imdb/pg_name.csv' csv escape '"'
+-- \copy person_info to 'imdb/pg_person_info.csv' csv escape '"'
+-- \copy role_type to 'imdb/pg_role_type.csv' csv escape '"'
+-- \copy title to 'imdb/pg_title.csv' csv escape '"' 
 
 create index index_cast_info_id on cast_info(id);
 create index index_cast_info_person_id on cast_info(person_id);
@@ -155,6 +155,9 @@ create index index_movie_companies_movie_id on movie_companies(movie_id);
 create index index_movie_companies_company_id on movie_companies(company_id);
 create index index_movie_companies_company_type_id on movie_companies(company_type_id);
 create index index_movie_companies_note on movie_companies(note);
+
+alter system set geqo = off;
+alter system set shared_buffers = 1048576;
 
 VACUUM;
 ANALYZE;

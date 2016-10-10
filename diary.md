@@ -7012,3 +7012,42 @@ New benchmarks:
 "33b" 56.88 ms
 "33c" 5.10 ms
 ```
+
+Following the advice of [malisper](https://github.com/malisper) I disabled the genetic optimizer in postgres, increasing the query planning time to multiple seconds but dramatically improving the quality of the plans. I also increased the size of `shared_buffers` to 8gb and added an assertion in the benchmark harness that there are no buffer misses. 
+
+``` julia
+function bench_pg(qs = query_names())
+  medians = []
+  for query_name in qs
+    query = rstrip(readline("../job/$(query_name).sql"))
+    query = query[1:(length(query)-1)] # drop ';' at end
+    bench = "explain (analyze, buffers) $query"
+    cmd = `sudo -u postgres psql -c $bench`
+    times = Float64[]
+    @show query_name now()
+    readstring(cmd)
+    trial = @benchmark begin
+      result = readstring($cmd)
+      time = parse(Float64, match(r"Execution time: (\S*) ms", result)[1])
+      missed_buffer = ismatch(r"Buffers [^\n]* read=", result)
+      if missed_buffer == true
+        println("Miss!")
+        println(result)
+        @assert false
+      end
+      push!($times, time) 
+    end evals=3
+    @show trial
+    push!(medians, median(times))
+  end
+  medians
+end
+```
+
+Updated results for pg:
+
+```
+Any[8.384,0.488,6.06,0.4995,579.993,574.173,562.608,717.823,148.766,108.611,262.496,121.608,17.775,126.95,205.613,204.72,233.988,17.2675,179.119,1.443,4020.29,17.279,4420.67,9.888,3.5715,3290.45,2001.78,161.021,9185.58,5408.18,303.381,294.729,1779.26,5369.51,388.797,175.678,7214.28,56.2895,34.1675,186.62,178.331,275.39,1.138,1324.61,3560.86,1227.57,1125.06,5442.63,261.023,112.609,593.089,679.625,8.149,646.972,843.843,174.935,21178.3,1719.74,1381.67,11364.6,4670.83,4392.36,4418.51,10329.0,8133.33,7233.86,235.051,301.255,184.303,1619.21,16241.8,2174.88,1526.24,890.889,72.671,57.3285,63.346,411.781,233.087,1987.7,925.014,391.474,43.981,378.682,541.283,483.223,2302.06,286.858,6186.31,1573.1,119.445,1321.33,56.237,60.613,33.318,1079.37,719.925,879.48,56.557,5.4465,1775.88,2642.17,363.429,2466.51,2592.47,365.791,2624.17,0.165,143.5,30.939,33.864,35.1965]
+```
+
+There are some in here that I don't understand - they don't seem to agree with the same results run by hand. Need to dig into this some more.

@@ -45,7 +45,7 @@ function intersect(need_more_results, columns, los, his, next_los, next_his, var
   columns_rot = [columns[1+mod(ix-2,n)] for ix in 1:n]
   next_los_rot = [next_los[1+mod(ix-2,n)] for ix in 1:n]
   quote
-    @inbounds begin
+    begin
       $([:($next_lo = $lo) for (next_lo, lo) in zip(next_los, los)]...)
       total = 1
       while $need_more_results

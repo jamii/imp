@@ -253,7 +253,7 @@ function plan_query(query)
       index_init = :(local $(Symbol("index_$clause_ix")) = index($(esc(clause.name)), $sort_order))
       columns = [:(local $(Symbol("index_$(clause_ix)_$(var_ix)")) = $(Symbol("index_$clause_ix"))[$var_ix]) for var_ix in sort_order]
       lo_init = :(local $(Symbol("lo_$(clause_ix)_0")) = 1)
-      hi_init = :(local $(Symbol("hi_$(clause_ix)_0")) = 1 + length($(Symbol("index_$(clause_ix)"))[1]))
+      hi_init = :(local $(Symbol("hi_$(clause_ix)_0")) = 1 + length($(Symbol("index_$(clause_ix)_$(first(sort_order))"))))
       push!(index_inits, index_init, columns..., lo_init, hi_init)
     end
   end  

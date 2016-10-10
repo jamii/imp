@@ -2870,64 +2870,6 @@ function q33c()
   end
 end
 
-function q33c_factored()
-  rating_type = @query begin 
-    info_type.info(it, "rating")
-    return (it::Int8,)
-  end
-  kind_types = @query begin
-    kt_kind in ["tv series", "episode"]
-    kind_type.kind(kt, kt_kind)
-    return (kt::Int8,)
-  end
-  movie_links = @query begin
-    link in ["sequel", "follows", "followed by"]
-    link_type.link(lt, link)
-    movie_link.link_type(ml, lt)
-    return (ml::Int16,)
-  end
-  linked_movies = @query begin
-    rating_type(it)
-    movie_links(ml)
-    movie_link.linked_movie(ml, t2)
-    title.kind(t2, kt)
-    kind_types(kt)
-    title.production_year(t2, production_year)
-    @when 2000 <= production_year <= 2010
-    movie_info_idx.movie(mii2, t2)
-    movie_info_idx.info_type(mii2, it)
-    movie_info_idx.info(mii2, rating2)
-    @when rating2 < "3.5"
-    return (ml::Int16, t2::Int32, rating2::String)
-  end
-  linking_movies = @query begin
-    rating_type(it)
-    linked_movies(ml, _, _)
-    movie_link.movie(ml, t1)
-    title.kind(t1, kt)
-    kind_types(kt)
-    movie_companies.movie(mc1, t1)
-    movie_companies.company(mc1, cn1)
-    company_name.country_code(cn1, code)
-    @when code != "[us]"
-    title.title(t1, title1)
-    movie_info_idx.movie(mii1, t1)
-    movie_info_idx.info_type(mii1, it)
-    movie_info_idx.info(mii1, rating1)
-    company_name.name(cn1, name1)
-    return (ml::Int16, t1::Int32, name1::String, rating1::String, title1::String)
-  end
-  @query begin
-    linking_movies(ml, t1, name1, rating1, title1)
-    linked_movies(ml, t2, rating2)
-    title.title(t2, title2)
-    movie_companies.movie(mc2, t2)
-    movie_companies.company(mc2, cn2)
-    company_name.name(cn2, name2)
-    return (name1::String, name2::String, rating1::String, rating2::String, title1::String, title2::String)
-  end
-end
-
 function query_names(nums=1:33)
   query_names = []
   for num in nums

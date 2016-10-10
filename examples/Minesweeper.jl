@@ -12,8 +12,15 @@ function count(relation)
   length(relation[1])
 end
 
-function exists(relation)
-  length(relation[1]) > 0
+macro exists(clause)
+  quote 
+    exists = @query begin 
+      exists = true
+      $clause
+      return (exists::Bool,)
+    end
+    length(exists[1]) == 1
+  end
 end
 
 function fix(flow, relation)
@@ -44,7 +51,7 @@ function run(num_x, num_y, num_mines)
     return state() => :game_in_progress
   end
   
-  while count(@query mine(x,y)) < num_mines
+  while length(mine[1]) < num_mines
     @query begin 
       nx = rand(1:num_x)
       ny = rand(1:num_y)
@@ -55,13 +62,12 @@ function run(num_x, num_y, num_mines)
   @query begin 
     x in 1:num_x
     y in 1:num_y
-    neighbouring_mines = @query begin
+    c = count(@query begin
       nx in (x-1):(x+1)
       ny in (y-1):(y+1)
       @when (nx != x) || (ny != y)
       mine(nx, ny) 
-    end
-    c = count(neighbouring_mines)
+    end)
     return mine_count(x, y) => c
   end
   
@@ -86,7 +92,10 @@ function run(num_x, num_y, num_mines)
     end
     
     @query begin 
-      num_cleared = count(@query cleared(x,y))
+      num_cleared = count(@query begin 
+        cleared(x,y)
+        return (x::Int64, y::Int64)
+      end)
       @when num_cleared + num_mines >= num_x * num_y
       return state() => :game_won
     end
@@ -101,8 +110,8 @@ function run(num_x, num_y, num_mines)
       state() => current_state
       x in 1:num_x
       y in 1:num_y
-      is_cleared = exists(@query cleared($x,$y))
-      is_mine = exists(@query mine($x,$y))
+      is_cleared = @exists cleared($x,$y)
+      is_mine = @exists mine($x,$y)
       mine_count(x, y) => count
       cell_node = @match (current_state, is_mine, is_cleared, count) begin
         (:game_in_progress, _, true, 0) => button("_")
@@ -118,16 +127,16 @@ function run(num_x, num_y, num_mines)
     
     @query begin
       y in 1:num_y
-      row_node = hbox((@query cell(x,$y) => cell_node).columns[3])
+      row_node = hbox((@query cell(x,$y) => cell_node)[3])
       return row(y) => row_node
     end
     
     @query begin
-      grid_node = vbox((@query row(y) => row_node).columns[2])
+      grid_node = vbox((@query row(y) => row_node)[2])
       return grid() => grid_node
     end
     
-    Blink.body!(window, grid.columns[1][1])
+    Blink.body!(window, grid[1][1])
     
   end
   

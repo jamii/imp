@@ -1080,7 +1080,6 @@ function q14c()
   end
 end
 
-
 function q15a()
   @query begin
     company_name.country_code(cn, "[us]")

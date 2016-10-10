@@ -106,34 +106,6 @@ function index{T}(relation::Relation{T}, order::Vector{Int})
   end::T
 end
 
-# gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
-function gallop{T}(column::Vector{T}, value::T, lo::Int, hi::Int, threshold) 
-  @inbounds if (lo < hi) && (cmp(column[lo], value) < threshold)
-    step = 1
-    while (lo + step < hi) && (cmp(column[lo + step], value) < threshold)
-      lo = lo + step 
-      step = step << 1
-    end
-    
-    step = step >> 1
-    while step > 0
-      if (lo + step < hi) && (cmp(column[lo + step], value) < threshold)
-        lo = lo + step 
-      end
-      step = step >> 1
-    end
-    
-    lo += 1
-  end
-  lo 
-end 
-
-function project(column::Vector, range, val)
-  lo = gallop(column, val, range.start, range.stop, 0)
-  hi = gallop(column, val, lo, range.stop, 1)
-  lo:hi
-end
-
 function dedup_sorted!{T}(columns::T, key, val, deduped::T)
   at = 1
   hi = length(columns[1])
@@ -276,11 +248,11 @@ end
   length(relation.columns)
 end
 
-@inline function Base.getindex(relation, ix)
+@inline function Base.getindex(relation::Relation, ix)
   relation.columns[ix]
 end
 
-export Relation, @relation, index, gallop, project, parse_relation
+export Relation, @relation, index, project, parse_relation
 
 function test()
   for i in 1:10000

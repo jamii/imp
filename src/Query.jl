@@ -4,23 +4,71 @@ using Data
 using Match
 using Base.Cartesian
 
-@generated function project_at{N}(intersection, ranges::NTuple{N}, val, min)
-  :(@ntuple $N ix -> 
-  if ix != min
-    project(intersection[ix], ranges[ix], val)
-  else 
-    ranges[ix].start:gallop(intersection[ix], val, ranges[ix].start+1, ranges[ix].stop, 1)
-  end)
+# gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
+function gallop{T}(column::Vector{T}, value::T, lo::Int, hi::Int, threshold) 
+  c = -1
+  @inbounds if (lo < hi) && (c2 = cmp(column[lo], value); c *= c2; c2 < threshold)
+    step = 1
+    while (lo + step < hi) && (c2 = cmp(column[lo + step], value); c *= c2; c2 < threshold)
+      lo = lo + step 
+      step = step << 1
+    end
+    
+    step = step >> 1
+    while step > 0
+      if (lo + step < hi) && (c2 = cmp(column[lo + step], value); c *= c2; c2 < threshold)
+        lo = lo + step 
+      end
+      step = step >> 1
+    end
+    
+    lo += 1
+  end
+  (lo, c) 
+end 
+
+function project(need_more_results, columns, los, his, next_los, next_his, var, body)
+  for (column, lo, hi, next_lo, next_hi) in zip(columns, los, his, next_los, next_his)
+    body = quote
+      $next_lo, c = gallop($column, $var, $lo, $hi, 0)
+      if (c == 0)
+        $next_hi, _ = gallop($column, $var, $next_lo+1, $hi, 1)
+        $body
+      end
+    end
+  end
+  body
 end
 
-@generated function feasible_at{N}(ranges::NTuple{N})
-  :(@nall $N ix -> ranges[ix].start < ranges[ix].stop)
+function intersect(need_more_results, columns, los, his, next_los, next_his, var, body)
+  n = length(columns)
+  columns_rot = [columns[1+mod(ix-2,n)] for ix in 1:n]
+  next_los_rot = [next_los[1+mod(ix-2,n)] for ix in 1:n]
+  quote
+    @inbounds begin
+      $([:($next_lo = $lo) for (next_lo, lo) in zip(next_los, los)]...)
+      total = 1
+      while $need_more_results
+        if total == $n
+          $([:(($next_hi, _) = gallop($column, $column[$next_lo], $next_lo+1, $hi, 1)) for (next_hi, column, next_lo, hi) in zip(next_his, columns, next_los, his)]...)
+          $var = $(columns[1])[$(next_los[1])]
+          $body
+          $([:($next_lo = $next_hi) for (next_lo, next_hi) in zip(next_los, next_his)]...)
+          $([:(if $next_lo >= $hi; break; end) for (next_lo, hi) in zip(next_los, his)]...)
+          total = 1
+        end
+        $([quote
+        if total < $n
+          $next_lo, c = gallop($column, $column_rot[$next_lo_rot], $next_lo, $hi, 0)
+          total = (c == 0) ? total + 1 : 1
+          if $next_lo >= $hi; break; end
+        end
+      end for (next_lo, column, column_rot, next_lo_rot, hi) in zip(next_los, columns, columns_rot, next_los_rot, his)]...)
+      end
+    end
+  end
 end
-
-@generated function next_at{N}(state::NTuple{N}, ranges::NTuple{N})
-  :(@ntuple $N ix -> ranges[ix].stop:state[ix].stop)
-end
-
+  
 function collect_vars(expr, vars)
   if isa(expr, Symbol)
     push!(vars, expr)
@@ -201,20 +249,14 @@ function plan_query(query)
   index_inits = []
   for (clause_ix, clause) in enumerate(clauses)
     if typeof(clause) == Row 
-      n = length(sort_orders[clause_ix])
-      index_init = :(local $(Symbol("index_$clause_ix")) = index($(esc(clause.name)), $(sort_orders[clause_ix])))
-      range_init = :(local $(Symbol("range_$(clause_ix)_0")) = 1:(length($(Symbol("index_$clause_ix"))[1])+1))
-      push!(index_inits, index_init, range_init)
+      sort_order = sort_orders[clause_ix]
+      index_init = :(local $(Symbol("index_$clause_ix")) = index($(esc(clause.name)), $sort_order))
+      columns = [:(local $(Symbol("index_$(clause_ix)_$(var_ix)")) = $(Symbol("index_$clause_ix"))[$var_ix]) for var_ix in sort_order]
+      lo_init = :(local $(Symbol("lo_$(clause_ix)_0")) = 1)
+      hi_init = :(local $(Symbol("hi_$(clause_ix)_0")) = 1 + length($(Symbol("index_$(clause_ix)"))[1]))
+      push!(index_inits, index_init, columns..., lo_init, hi_init)
     end
   end  
-  
-  # for each var, make an Intersection
-  intersection_inits = []
-  for var in vars
-    columns = [:($(Symbol("index_$clause_ix"))[$var_ix]) for (clause_ix, var_ix) in relation_sources[var]]
-    intersection_init = :(local $(Symbol("intersection_$var")) = tuple($(columns...)))
-    push!(intersection_inits, intersection_init)
-  end
   
   # initialize arrays for storing results
   results_inits = []
@@ -222,6 +264,9 @@ function plan_query(query)
     results_init = :(local $(Symbol("results_$ix")) = Vector{$(esc(typ))}())
     push!(results_inits, results_init)
   end
+  
+  # declare vars
+  var_inits = [:(local $(esc(var))) for var in vars]
   
   # figure out at which point in the variable order each When clause can be run
   whens = [[] for _ in vars]
@@ -262,44 +307,28 @@ function plan_query(query)
     
     # run the intersection for this variable
     clause = get(var_assigned_by, var, ())
-    intersection = Symbol("intersection_$var")
+    columns = [Symbol("index_$(clause_ix)_$(var_ix)") for (clause_ix, var_ix) in relation_sources[var]]
     range_ixes = [(clause_ix, findfirst(sort_orders[clause_ix], var_ix)) for (clause_ix, var_ix) in relation_sources[var]]
-    before_ranges = Expr(:tuple, (Symbol("range_$(clause_ix)_$(range_ix-1)") for (clause_ix, range_ix) in range_ixes)...)
-    after_ranges = Expr(:tuple, (Symbol("range_$(clause_ix)_$(range_ix)") for (clause_ix, range_ix) in range_ixes)...)
+    los = [Symbol("lo_$(clause_ix)_$(range_ix-1)") for (clause_ix, range_ix) in range_ixes]
+    next_los = [Symbol("lo_$(clause_ix)_$(range_ix)") for (clause_ix, range_ix) in range_ixes]
+    his = [Symbol("hi_$(clause_ix)_$(range_ix-1)") for (clause_ix, range_ix) in range_ixes]
+    next_his = [Symbol("hi_$(clause_ix)_$(range_ix)") for (clause_ix, range_ix) in range_ixes]
     if typeof(clause) == Assign
-      body = (quote let
-        local $(esc(var)) = $(esc(clause.expr))
-        $after_ranges = project_at($intersection, $before_ranges, $(esc(var)), 0)
-        if feasible_at($after_ranges)
-          $body
-        end
-      end end).args[2]
+      body = :(let
+        $(esc(var)) = $(esc(clause.expr))
+        $(project(need_more_results, columns, los, his, next_los, next_his, esc(var), body))
+      end)
     elseif typeof(clause) == In
-      body = (quote let
+      body = :(let
         local iter = $(esc(clause.expr))
         local state = start(iter)
-        local $(esc(var))
         while $need_more_results && !done(iter, state)
           ($(esc(var)), state) = next(iter, state)
-          $after_ranges = project_at($intersection, $before_ranges, $(esc(var)), 0)
-          if feasible_at($after_ranges)
-            $body
-          end
+          $(project(need_more_results, columns, los, his, next_los, next_his, esc(var), body))
         end
-      end end).args[2]
+      end)
     else
-      body = (quote let
-        local state = $before_ranges
-        local min_ix = indmin(map(length, state))
-        while $need_more_results && state[min_ix].start < state[min_ix].stop
-          local $(esc(var)) = $intersection[min_ix][state[min_ix].start]
-          $after_ranges = project_at($intersection, state, $(esc(var)), min_ix)
-          if feasible_at($after_ranges)
-            $body
-          end
-          state = next_at(state, $after_ranges)
-        end 
-      end end).args[2]
+      body = intersect(need_more_results, columns, los, his, next_los, next_his, esc(var), body)
     end
   end
   
@@ -309,9 +338,9 @@ function plan_query(query)
   quote 
     let
       $(index_inits...)
-      $(intersection_inits...)
       $(results_inits...)
       let 
+        $(var_inits...) # declare vars local in here so they can't shadow relation names
         $body 
       end
       $(if return_clause.name != ()

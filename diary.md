@@ -6891,3 +6891,7 @@ Bah, still slow. Back to dfs :(
 I noticed a problem with my benchmarks. On longer queries, it seems to always run exactly two samples and then include a gc in the second sample, regardless of how much allocation the function performed. So those queries are being charged half of the cost of a full gc, instead of it being amortized over the number of executions it would take to trigger a gc. This *might* be why the bfs version with buffers looked like it had such large regressions.
 
 Notably, I reran 33c and got 6.5ms instead of 740ms.
+
+### 2016 Oct 10
+
+Clear signs of wheel-spinning last week. Most of the last month has been spent trying to persuade Julia to generate the code that I want. That was waste of effort. I'm just going to generate it myself. The resulting code is ugly but I'll live. The report can just explain the problem, and I can write another post when the unboxing pull-request lands in Julia. It also means that there is no longer a clear interface between indexes and queries, but I only wanted that to experiment with different indexes anyway and I'm not doing that anymore. 

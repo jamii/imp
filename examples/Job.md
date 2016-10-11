@@ -8,4 +8,6 @@ Postgres was tested using PostgreSQL 9.5.4 64-bit setup by [this script](../data
 
 I use [BenchmarkTools.jl](https://github.com/JuliaCI/BenchmarkTools.jl) to decide the number of trials, with a minimum of 3 and with a single warmup beforehand. I measure wall time for Imp and execution time for Postgres (as reported by `EXPLAIN ANALYZE`), and report the median.
 
+The tests were run on a 2016 laptop with Xeon E3-1505M cpu and 2x16GB DDR4 RAM.
+
 Full results are [here](https://docs.google.com/spreadsheets/d/1X3kBUYrTZSBfUPzJ2DLtdjp97rcPBE-AKner5KUzScc/edit#gid=1683406048)

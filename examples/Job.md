@@ -1,4 +1,4 @@
-[Join Order Benchmark](http://www.vldb.org/pvldb/vol7/p853-klonatos.pdf)
+[Join Order Benchmark](http://www.vldb.org/pvldb/vol9/p204-leis.pdf)
 
 I used the original [dataset](http://homepages.cwi.nl/%7Eboncz/job/imdb.tgz) and [queries and schema](http://www-db.in.tum.de/~leis/qo/job.tgz) posted by the author.
 

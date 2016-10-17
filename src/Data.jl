@@ -215,13 +215,13 @@ function Base.merge{T}(old::Relation{T}, new::Relation{T})
   order = collect(1:length(old.columns))
   old_index = old.indexes[order]
   new_index = new.indexes[order]
-  result_columns = tuple([Vector{eltype(column)}() for column in old.columns]...)
+  result_columns::T = tuple((Vector{eltype(column)}() for column in old.columns)...)
   foreach_diff(old_index, new_index, old_index[1:old.num_keys], new_index[1:new.num_keys], 
     (o, i) -> push_in!(result_columns, o, i),
     (n, i) -> push_in!(result_columns, n, i),
     (o, n, oi, ni) -> push_in!(result_columns, n, ni))
   result_indexes = Dict{Vector{Int}, Tuple}(order => result_columns)
-  Relation(result_columns, old.num_keys, result_indexes)
+  Relation{T}(result_columns, old.num_keys, result_indexes)
 end
 
 function replace!{T}(old::Relation{T}, new::Relation{T})

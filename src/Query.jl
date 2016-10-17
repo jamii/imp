@@ -247,6 +247,7 @@ function plan_query(query)
   
   # for each Row clause, get the correct index and create initial ranges
   index_inits = []
+  index_checks = []
   for (clause_ix, clause) in enumerate(clauses)
     if typeof(clause) == Row 
       sort_order = sort_orders[clause_ix]
@@ -255,6 +256,8 @@ function plan_query(query)
       lo_init = :(local $(Symbol("lo_$(clause_ix)_0")) = 1)
       hi_init = :(local $(Symbol("hi_$(clause_ix)_0")) = 1 + length($(Symbol("index_$(clause_ix)_$(first(sort_order))"))))
       push!(index_inits, index_init, columns..., lo_init, hi_init)
+      index_check = :($(Symbol("lo_$(clause_ix)_0")) < $(Symbol("hi_$(clause_ix)_0")))
+      push!(index_checks, index_check)
     end
   end  
   
@@ -334,14 +337,16 @@ function plan_query(query)
   
   # put everything together
   results_symbols = [Symbol("results_$ix") for (ix, var) in enumerate(return_clause.vars)]
-  result = :(Relation(tuple($(results_symbols...)), $(return_clause.num_keys)))        
+  result = :(Relation(tuple($(results_symbols...)), $(return_clause.num_keys))) 
   quote 
     let
       $(index_inits...)
       $(results_inits...)
-      let 
-        $(var_inits...) # declare vars local in here so they can't shadow relation names
-        $body 
+      if $(reduce((a,b) -> :($a && $b), true, index_checks))
+        let 
+          $(var_inits...) # declare vars local in here so they can't shadow relation names
+          $body 
+        end
       end
       $(if return_clause.name != ()
         :(merge!($(esc(return_clause.name)), $result))

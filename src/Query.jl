@@ -27,7 +27,7 @@ function gallop{T}(column::Vector{T}, value::T, lo::Int, hi::Int, threshold)
   (lo, c) 
 end 
 
-function project(need_more_results, columns, los, his, next_los, next_his, var, body)
+function project(columns, los, his, next_los, next_his, var, body)
   for (column, lo, hi, next_lo, next_hi) in zip(columns, los, his, next_los, next_his)
     body = quote
       $next_lo, c = gallop($column, $var, $lo, $hi, 0)
@@ -40,7 +40,7 @@ function project(need_more_results, columns, los, his, next_los, next_his, var, 
   body
 end
 
-function intersect(need_more_results, columns, los, his, next_los, next_his, var, body)
+function intersect(columns, los, his, next_los, next_his, var, body)
   n = length(columns)
   columns_rot = [columns[1+mod(ix-2,n)] for ix in 1:n]
   next_los_rot = [next_los[1+mod(ix-2,n)] for ix in 1:n]
@@ -48,7 +48,7 @@ function intersect(need_more_results, columns, los, his, next_los, next_his, var
     begin
       $([:($next_lo = $lo) for (next_lo, lo) in zip(next_los, los)]...)
       total = 1
-      while $need_more_results
+      while true
         if total == $n
           $([:(($next_hi, _) = gallop($column, $column[$next_lo], $next_lo+1, $hi, 1)) for (next_hi, column, next_lo, hi) in zip(next_his, columns, next_los, his)]...)
           $var = $(columns[1])[$(next_los[1])]
@@ -287,7 +287,7 @@ function plan_query(query)
   body = quote
     $([:(push!($(Symbol("results_$ix")), $(esc(var))))
     for (ix, var) in enumerate(return_clause.vars)]...)
-    need_more_results = false
+    @goto next_result
   end
   
   # build up the main loop from the inside out
@@ -302,11 +302,10 @@ function plan_query(query)
     # after return_after, only need to find one solution, not all solutions
     if var_ix == return_after
       body = quote
-        need_more_results = true
         $body
+        @label next_result
       end
     end
-    need_more_results = var_ix > return_after ? :need_more_results : true
     
     # run the intersection for this variable
     clause = get(var_assigned_by, var, ())
@@ -317,21 +316,15 @@ function plan_query(query)
     his = [Symbol("hi_$(clause_ix)_$(range_ix-1)") for (clause_ix, range_ix) in range_ixes]
     next_his = [Symbol("hi_$(clause_ix)_$(range_ix)") for (clause_ix, range_ix) in range_ixes]
     if typeof(clause) == Assign
-      body = :(let
-        $(esc(var)) = $(esc(clause.expr))
-        $(project(need_more_results, columns, los, his, next_los, next_his, esc(var), body))
+      body = :(let $(esc(var)) = $(esc(clause.expr))
+        $(project(columns, los, his, next_los, next_his, esc(var), body))
       end)
     elseif typeof(clause) == In
-      body = :(let
-        local iter = $(esc(clause.expr))
-        local state = start(iter)
-        while $need_more_results && !done(iter, state)
-          ($(esc(var)), state) = next(iter, state)
-          $(project(need_more_results, columns, los, his, next_los, next_his, esc(var), body))
-        end
+      body = :(for $(esc(var)) in $(esc(clause.expr))
+        $(project(columns, los, his, next_los, next_his, esc(var), body))
       end)
     else
-      body = intersect(need_more_results, columns, los, his, next_los, next_his, esc(var), body)
+      body = intersect(columns, los, his, next_los, next_his, esc(var), body)
     end
   end
   

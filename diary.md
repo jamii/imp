@@ -7053,3 +7053,46 @@ Any[8.384,0.488,6.06,0.4995,579.993,574.173,562.608,717.823,148.766,108.611,262.
 Some queries are better, some are worse.
 
 I finished up the report. Just waiting for a last round of feedback and some non-1am editing for flow.
+
+### 2016 Oct 24
+
+Ok, let's get going again.
+
+Last month I used the benchmark against postgres as a goal to work towards. I wrote the blog post first and then spent the month working to make everything in it true. 
+
+Today I started doing the same for the project as whole. I put up a [sketch](https://github.com/jamii/jamii.github.com/blob/master/_drafts/imp.markdown) of what I want the eventual overview to look like. 
+
+I also need to pick another short-term goal. I'm leaning towards building a simple stock exchange and trading interface. It's the kind of thing that someone might want to do in a spreadsheet, but it's made difficult by the variable size collections and quantity of data. 
+
+Here's a sketch of the core logic for a single market:
+
+``` julia
+bitstype 64 Order
+@enum Side Buy Sell
+
+@relation order(Order) => (DateTime, Dec64, Int64, Side)
+@relation matched(Order, Order) => (Dec64, Int64)
+@relation remaining(Side, Dec64, DateTime, Order) => Int64
+
+@query begin
+  @minimum remaining(Buy, buy_price, buy_time, buy_order) => buy_quantity
+  @maximum remaining(Sell, sell_price, sell_time, sell_order) => sell_quantity
+  @when buy_price >= sell_price
+  price = (buy_time < sell_time) ? buy_price : sell_price
+  quantity = min(buy_quantity, sell_quantity)
+  return matched(buy_order, sell_order) => (price, quantity)
+end
+
+@query begin
+  order(order) => (time, price, quantity, side)
+  bought = @query match(order, matched_order) => (_, matched_quantity)
+  sold = @query match(matched_order, order) => (_, matched_quantity)
+  remaining = quantity - sum(bought[3]) - sum(sold[3])
+  @when remaining > 0
+  return remaining(side, price, time, order) => remaining
+end
+```
+
+`@minimum` doesn't currently exist and is awkward to fake using `=` and `@query`, so now is a good time to figure out what to do with aggregates in general.
+
+I want to think of aggregates in general as functions that take a query and return a new relation (possibly containing only one row in the case of simple aggregates like sum), but ideally without having to allocate the intermediate relation. 

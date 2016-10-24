@@ -7096,3 +7096,5 @@ end
 `@minimum` doesn't currently exist and is awkward to fake using `=` and `@query`, so now is a good time to figure out what to do with aggregates in general.
 
 I want to think of aggregates in general as functions that take a query and return a new relation (possibly containing only one row in the case of simple aggregates like sum), but ideally without having to allocate the intermediate relation. 
+
+Meanwhile, I belatedly discovered that Julia has an undocumented goto macro, which means I don't have to manually desugar loops in order to break out in a controlled way. 

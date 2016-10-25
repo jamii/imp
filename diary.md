@@ -7098,3 +7098,17 @@ end
 I want to think of aggregates in general as functions that take a query and return a new relation (possibly containing only one row in the case of simple aggregates like sum), but ideally without having to allocate the intermediate relation. 
 
 Meanwhile, I belatedly discovered that Julia has an undocumented goto macro, which means I don't have to manually desugar loops in order to break out in a controlled way. 
+
+### 2016 Oct 25
+
+Here are some things that I might want to do with a query:
+
+* Materialize the results into a relation
+* Aggregate the results into a single value
+* Take the first result, last results, 42nd-57th results etc
+* Check whether a specific value is in the results 
+* Materialize the factorized results, without computing the full results 
+
+At the moment I'm struggling because I'm mashing them all into a single chunk of codegen. The original triejoin paper instead defines an trie iterator protocol that both indexes and queries implement. If I did something similar, I could just generate code for the iterator and implement the materialization, aggregates, first/last/range etc as functions of the query. 
+
+That feels like another huge compiler time-sink though. Not sure that I want to dive into that again.

@@ -235,13 +235,7 @@ function Base.merge!{T}(old::Relation{T}, new::Relation{T})
 end
 
 function Base.push!{T}(relation::Relation{T}, values)
-  @assert length(relation.columns) == length(values)
-  for ix in 1:length(values)
-    push!(relation.columns[ix], values[ix])
-  end
-  empty!(relation.indexes)
-  # TODO can preserve indexes when inserted value is at end or beginning
-  # TODO remove dupes
+  merge!(relation, Relation(map((v) -> [v], values), relation.num_keys))
 end
 
 @inline function Base.length(relation::Relation)

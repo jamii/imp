@@ -25,7 +25,7 @@ function Blink.Window(flow, event_tables)
   handle(w, "event") do args 
     values = args["values"]
     insert!(values, 1, event_number)
-    push!(event_tables[args["table"]], values)
+    push!(event_tables[args["table"]], tuple(values...))
     flow(w, event_number)
     event_number += 1
   end
@@ -38,11 +38,11 @@ macro Window(flow, event_tables...)
 end
 
 function hbox(nodes)
-  Hiccup.div(nodes)
+  Hiccup.div(Dict(:style => "display: flex; flex-direction: row"), nodes)
 end
 
 function vbox(nodes)
-  Hiccup.div(nodes)
+  Hiccup.div(Dict(:style => "display: flex; flex-direction: column"), nodes)
 end
 
 function Base.cmp{T1, T2}(n1::Hiccup.Node{T1}, n2::Hiccup.Node{T2})

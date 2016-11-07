@@ -7112,3 +7112,40 @@ Here are some things that I might want to do with a query:
 At the moment I'm struggling because I'm mashing them all into a single chunk of codegen. The original triejoin paper instead defines an trie iterator protocol that both indexes and queries implement. If I did something similar, I could just generate code for the iterator and implement the materialization, aggregates, first/last/range etc as functions of the query. 
 
 That feels like another huge compiler time-sink though. Not sure that I want to dive into that again.
+
+### 2016 Nov 7
+
+Wow, a month without any real work. For the sake of just getting something done, I started on a little debugging UI:
+
+``` julia
+function debug(relation)
+  @relation displaying() => (Int64, String)
+  
+  @query return displaying() => (0, relation[1][1])
+  
+  @Window(displaying) do window, event_number
+    
+    header = @query begin
+      relation(name) => _
+      displayed = @exists displaying() => (_, $name)
+      style = displayed ? "font-weight: bold" : ""
+      node = button(Dict(:onclick => @event(displaying() => name), :style => style), name)
+      return (name::String,) => node::Node
+    end
+    
+    grid = @query begin
+      displaying() => (_, name)
+      relation(name) => relation
+      c in 1:length(relation)
+      style = "margin-left: 2em"
+      node = vbox(map((v) -> Hiccup.div(Dict(:style=>style), string(v)), relation[c]))
+      return (c::Int64,) => node::Node
+    end
+    
+    Blink.body!(window, vbox([hbox(header[2]), hbox(grid[2])]))
+    
+  end
+end
+```
+
+It required tweaking a couple of things elsewhere. Most notably, I changed event push to take account of unique keys properly, so that I only ever store the last chosen relation here.

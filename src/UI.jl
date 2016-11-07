@@ -4,6 +4,7 @@ module UI
 # Blink.AtomShell.install()
 # Pkg.add("Hiccup")
 
+using Data
 using Blink
 using Hiccup
 
@@ -14,8 +15,8 @@ function event(table_name, values)
 end
 
 macro event(expr)
-  @assert expr.head == :call
-  :(event($(string(expr.args[1])), [$(map(esc, expr.args[2:end])...)]))
+  (name, keys, vals) = Data.parse_relation(expr)
+  :(event($(string(name)), [$(map(esc, keys)...), $(map(esc, vals)...)]))
 end
 
 function Blink.Window(flow, event_tables)

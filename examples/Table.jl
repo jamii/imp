@@ -21,6 +21,8 @@ end
 
 function debug(relation)
   @relation displaying() => (Int64, String)
+  @relation editing() => (Int64, Int64)
+  @relation contents() => Tuple
   
   @query return displaying() => (0, relation[1][1])
   
@@ -34,18 +36,43 @@ function debug(relation)
       return (name::String,) => node::Node
     end
     
-    grid = @query begin
+    picker = hbox(tables[2])
+    
+    cell = @query begin
       displaying() => (_, name)
       relation(name) => relation
       c in 1:length(relation)
-      typ = eltype(relation[c])
-      style = "margin-left: 2em"
-      node = vbox(map((v) -> Hiccup.div(Dict(:style=>style), string(v)), relation[c]))
-      node2 = vbox([Hiccup.div(Dict(:style=>style), string(typ)), node]) 
-      return (c::Int64,) => node2::Node
+      column = relation[c]
+      r in 1:length(column)
+      value = column[r]
+      node = Hiccup.div(string(value))
+      return (c::Int64, r::Int64) => node::Node
     end
     
-    Blink.body!(window, vbox([hbox(tables[2]), hbox(grid[2])]), fade=false)
+    @query begin
+      displaying() => (_, name)
+      relation(name) => relation
+      c in 1:length(relation)
+      column = relation[c]
+      typ = eltype(column)
+      style = "border-bottom: 1px solid #aaa;"
+      node = Hiccup.div(Dict(:style=>style), string(typ))
+      return cell(c::Int64, 0::Int64) => node::Node
+    end
+    
+    column = @query begin
+      displaying() => (_, name)
+      relation(name) => relation
+      c in 1:length(relation)
+      cells = @query cell($c, r) => n
+      style = "margin-left: 2em"
+      node = Hiccup.div(Dict(:style=>style), vbox(cells[3]))
+      return (c::Int64,) => node::Node
+    end
+    
+    grid = hbox(column[2])
+    
+    Blink.body!(window, vbox([picker, grid]), fade=false)
     
   end
   

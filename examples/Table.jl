@@ -26,7 +26,7 @@ function debug(relation)
   
   window = @Window(displaying) do window, event_number
     
-    header = @query begin
+    tables = @query begin
       relation(name) => _
       displayed = @exists displaying() => (_, $name)
       style = displayed ? "font-weight: bold" : ""
@@ -38,12 +38,14 @@ function debug(relation)
       displaying() => (_, name)
       relation(name) => relation
       c in 1:length(relation)
+      typ = eltype(relation[c])
       style = "margin-left: 2em"
       node = vbox(map((v) -> Hiccup.div(Dict(:style=>style), string(v)), relation[c]))
-      return (c::Int64,) => node::Node
+      node2 = vbox([Hiccup.div(Dict(:style=>style), string(typ)), node]) 
+      return (c::Int64,) => node2::Node
     end
     
-    Blink.body!(window, vbox([hbox(header[2]), hbox(grid[2])]), fade=false)
+    Blink.body!(window, vbox([hbox(tables[2]), hbox(grid[2])]), fade=false)
     
   end
   

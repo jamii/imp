@@ -6,7 +6,7 @@ using UI
 using Match
 using Blink
 using Hiccup
-@tags button
+@tags button, textarea
 
 macro exists(clause)
   quote 
@@ -19,14 +19,54 @@ macro exists(clause)
   end
 end
 
+macro not(clause)
+  quote 
+    exists = @query begin 
+      exists = true
+      $clause
+      return (exists::Bool,)
+    end
+    length(exists[1]) == 0
+  end
+end
+
 function debug(relation)
   @relation displaying() => (Int64, String)
   @relation editing() => (Int64, Int64)
-  @relation contents() => Tuple
+  @relation contents(String, Int64) => String
+  @relation edited() => (Int64, Int64, Int64, String)
+  
+  @query return relation("displaying") => displaying
+  @query return relation("editing") => editing
+  @query return relation("contents") => contents
+  @query return relation("edited") => edited
   
   @query return displaying() => (0, relation[1][1])
   
-  window = @Window(displaying) do window, event_number
+  @query begin
+    relation(name) => relation
+    c in 1:length(relation)
+    return contents(name, c) => ""
+  end
+  
+  window = @Window(displaying, editing, edited) do window, event_number
+    
+    # on edit, stringify row into contents
+    @query begin
+      editing() => ($event_number, r)
+      displaying() => (_, name)
+      relation(name) => relation
+      c in 1:length(relation)
+      value = string(relation[c][r])
+      return contents(name, c) => value
+    end
+    
+    # on change, copy value into contents
+    @query begin
+      edited() => ($event_number, c, r, value)
+      displaying() => (_, name)
+      return contents(name, c) => value
+    end
     
     tables = @query begin
       relation(name) => _
@@ -41,11 +81,20 @@ function debug(relation)
     cell = @query begin
       displaying() => (_, name)
       relation(name) => relation
+      contents(name) => contents
       c in 1:length(relation)
       column = relation[c]
+      contents(name, c) => edited_value
       r in 1:length(column)
       value = column[r]
-      node = Hiccup.div(string(value))
+      is_editing = @exists editing(_, $r)
+      style = "height: 2em"
+      onkeyup = "Blink.msg('event', {'table': 'edited', 'values': [$c, $r, this.value]})"
+      node = if is_editing
+        textarea(Dict(:style=>style, :rows=>1, :onkeyup=>onkeyup), edited_value)
+      else
+        Hiccup.div(Dict(:style=>style, :onclick => @event(editing() => r)), string(value))
+      end
       return (c::Int64, r::Int64) => node::Node
     end
     
@@ -76,7 +125,7 @@ function debug(relation)
     
   end
   
-  tick_every(window, 1000)
+  # tick_every(window, 1000)
 end
 
 import Minesweeper

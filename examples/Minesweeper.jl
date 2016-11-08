@@ -143,7 +143,7 @@ function run(num_x, num_y, num_mines)
   (state, mine, mine_count, cleared, clicked, cell, row, grid)
 end
 
-(state, mine, mine_count, cleared, clicked, cell, row, grid) = run(30, 30, 100)
+# (state, mine, mine_count, cleared, clicked, cell, row, grid) = run(30, 30, 100)
 
 
 end

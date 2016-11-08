@@ -22,10 +22,14 @@ end
 function Blink.Window(flow, event_tables)
   w = Window()
   event_number = 1
-  handle(w, "event") do args 
-    values = args["values"]
+  handle(w, "event") do event
+    values = event["values"]
     insert!(values, 1, event_number)
-    push!(event_tables[args["table"]], tuple(values...))
+    push!(event_tables[event["table"]], tuple(values...))
+    flow(w, event_number)
+    event_number += 1
+  end
+  handle(w, "tick") do event
     flow(w, event_number)
     event_number += 1
   end
@@ -35,6 +39,10 @@ end
 
 macro Window(flow, event_tables...)
   :(Window($(esc(flow)), Dict($([:($(string(table)) => $(esc(table))) for table in event_tables]...))))
+end
+
+function tick_every(window, interval_ms)
+  @js window setInterval(() -> Blink.msg("tick", d()), $interval_ms)
 end
 
 function hbox(nodes)
@@ -67,6 +75,6 @@ function Base.isless(n1::Hiccup.Node, n2::Hiccup.Node)
   cmp(n1, n2) == -1
 end
 
-export event, @event, Window, @Window, hbox, vbox
+export event, @event, Window, @Window, tick_every, hbox, vbox
 
 end

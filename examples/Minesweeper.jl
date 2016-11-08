@@ -136,7 +136,7 @@ function run(num_x, num_y, num_mines)
       return grid() => grid_node
     end
     
-    Blink.body!(window, grid[1][1])
+    Blink.body!(window, grid[1][1], fade=false)
     
   end
   

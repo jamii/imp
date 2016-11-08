@@ -24,7 +24,7 @@ function debug(relation)
   
   @query return displaying() => (0, relation[1][1])
   
-  @Window(displaying) do window, event_number
+  window = @Window(displaying) do window, event_number
     
     header = @query begin
       relation(name) => _
@@ -43,9 +43,11 @@ function debug(relation)
       return (c::Int64,) => node::Node
     end
     
-    Blink.body!(window, vbox([hbox(header[2]), hbox(grid[2])]))
+    Blink.body!(window, vbox([hbox(header[2]), hbox(grid[2])]), fade=false)
     
   end
+  
+  tick_every(window, 1000)
 end
 
 import Minesweeper

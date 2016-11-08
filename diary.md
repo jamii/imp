@@ -7149,3 +7149,7 @@ end
 ```
 
 It required tweaking a couple of things elsewhere. Most notably, I changed event push to take account of unique keys properly, so that I only ever store the last chosen relation here.
+
+### 2016 Nov 8
+
+Got most of the way towards making the tables editable, but got bogged down in the details of passing data back and forth between Julia and the browser. I didn't really think through events properly.

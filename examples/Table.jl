@@ -34,7 +34,7 @@ function debug(relation)
   @relation displaying() => (Int64, String)
   @relation editing() => (Int64, Int64)
   @relation contents(String, Int64) => String
-  @relation edited() => (Int64, Int64, Int64, String)
+  @relation edited() => (Int64, Int64, String)
   
   @query return relation("displaying") => displaying
   @query return relation("editing") => editing
@@ -63,7 +63,7 @@ function debug(relation)
     
     # on change, copy value into contents
     @query begin
-      edited() => ($event_number, c, r, value)
+      edited() => ($event_number, c, value)
       displaying() => (_, name)
       return contents(name, c) => value
     end
@@ -81,20 +81,12 @@ function debug(relation)
     cell = @query begin
       displaying() => (_, name)
       relation(name) => relation
-      contents(name) => contents
       c in 1:length(relation)
       column = relation[c]
-      contents(name, c) => edited_value
       r in 1:length(column)
       value = column[r]
-      is_editing = @exists editing(_, $r)
-      style = "height: 2em"
-      onkeyup = "Blink.msg('event', {'table': 'edited', 'values': [$c, $r, this.value]})"
-      node = if is_editing
-        textarea(Dict(:style=>style, :rows=>1, :onkeyup=>onkeyup), edited_value)
-      else
-        Hiccup.div(Dict(:style=>style, :onclick => @event(editing() => r)), string(value))
-      end
+      style = "height: 2em; flex: $(100/length(column))%"
+      node = Hiccup.div(Dict(:style=>style, :onclick => @event(editing() => r)), string(value))
       return (c::Int64, r::Int64) => node::Node
     end
     
@@ -104,22 +96,36 @@ function debug(relation)
       c in 1:length(relation)
       column = relation[c]
       typ = eltype(column)
-      style = "border-bottom: 1px solid #aaa;"
+      style = "border-bottom: 1px solid #aaa; height: 2em; flex: $(100/length(column))%"
       node = Hiccup.div(Dict(:style=>style), string(typ))
       return cell(c::Int64, 0::Int64) => node::Node
     end
     
-    column = @query begin
+    edit = @query begin
       displaying() => (_, name)
       relation(name) => relation
-      c in 1:length(relation)
-      cells = @query cell($c, r) => n
-      style = "margin-left: 2em"
-      node = Hiccup.div(Dict(:style=>style), vbox(cells[3]))
+      contents(name, c) => edited_value
+      column = relation[c]
+      style = "height: 2em; flex: $(100/length(column))%"
+      onkeyup = "Blink.msg('event', {'table': 'edited', 'values': [$c, this.value, event.]})"
+      node = textarea(Dict(:style=>style, :rows=>1, :onkeyup=>onkeyup), edited_value)
       return (c::Int64,) => node::Node
     end
     
-    grid = hbox(column[2])
+    row = @query begin
+      displaying() => (_, name)
+      relation(name) => relation
+      r in 0:length(relation[1])
+      is_editing = @exists editing(_, $r)
+      node = if is_editing
+        hbox(@query(edit(c) => n)[2])
+      else
+        hbox(@query(cell(c, $r) => n)[3])
+      end
+      return (r::Int64,) => node::Node
+    end
+    
+    grid = vbox(row[2])
     
     Blink.body!(window, vbox([picker, grid]), fade=false)
     

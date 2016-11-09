@@ -7153,3 +7153,13 @@ It required tweaking a couple of things elsewhere. Most notably, I changed event
 ### 2016 Nov 8
 
 Got most of the way towards making the tables editable, but got bogged down in the details of passing data back and forth between Julia and the browser. I didn't really think through events properly.
+
+### 2016 Nov 9 
+
+Really crude awful committing now works for the editor. I never got around to writing a delete function for relations so it only does the right thing if the unique key is left unchanged.
+
+I tried to switch to Escher for the dom diffing but after a few hours ended up with just a [handful of filed issues](https://github.com/shashi/Escher.jl/issues/created_by/jamii) and no hello world. 
+
+Trying to update some of the other packages I rely on and finding that package manager is hanging when trying to clone. Cloning the same url directly with git at the command line works fine. No idea what's going on there.
+
+Frustrating.

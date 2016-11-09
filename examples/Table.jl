@@ -35,11 +35,13 @@ function debug(relation)
   @relation editing() => (Int64, Int64)
   @relation contents(String, Int64) => String
   @relation edited() => (Int64, Int64, String)
+  @relation finished() => (Int64, Int64)
   
   @query return relation("displaying") => displaying
   @query return relation("editing") => editing
   @query return relation("contents") => contents
   @query return relation("edited") => edited
+  @query return relation("finished") => finished
   
   @query return displaying() => (0, relation[1][1])
   
@@ -49,7 +51,7 @@ function debug(relation)
     return contents(name, c) => ""
   end
   
-  window = @Window(displaying, editing, edited) do window, event_number
+  window = @Window(displaying, editing, edited, finished) do window, event_number
     
     # on edit, stringify row into contents
     @query begin
@@ -66,6 +68,17 @@ function debug(relation)
       edited() => ($event_number, c, value)
       displaying() => (_, name)
       return contents(name, c) => value
+    end
+    
+    # on finish, commit value
+    @query begin
+      finished() => ($event_number, 13)
+      displaying() => (_, name)
+      values = @query contents($name, c) => value
+      row = tuple(map(eval, map(parse, values[3]))...)
+      relation(name) => relation
+      unsafe = push!(relation, row)
+      return editing() => (-1, -1)
     end
     
     tables = @query begin
@@ -107,8 +120,9 @@ function debug(relation)
       contents(name, c) => edited_value
       column = relation[c]
       style = "height: 2em; flex: $(100/length(column))%"
-      onkeyup = "Blink.msg('event', {'table': 'edited', 'values': [$c, this.value, event.]})"
-      node = textarea(Dict(:style=>style, :rows=>1, :onkeyup=>onkeyup), edited_value)
+      onkeyup = "Blink.msg('event', {'table': 'edited', 'values': [$c, this.value]})"
+      onkeydown = "Blink.msg('event', {'table': 'finished', 'values': [event.keyCode]})"
+      node = textarea(Dict(:style=>style, :rows=>1, :onkeyup=>onkeyup, :onkeydown=>onkeydown), edited_value)
       return (c::Int64,) => node::Node
     end
     

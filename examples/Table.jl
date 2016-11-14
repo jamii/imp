@@ -30,6 +30,14 @@ macro not(clause)
   end
 end
 
+function render_node(value)
+  Hiccup.span(string(value))
+end
+
+function render_node(value::Node)
+  value
+end
+
 function debug(relation)
   @relation displaying() => (Int64, String)
   @relation editing() => (Int64, Int64)
@@ -99,7 +107,7 @@ function debug(relation)
       r in 1:length(column)
       value = column[r]
       style = "height: 2em; flex: $(100/length(column))%"
-      node = Hiccup.div(Dict(:style=>style, :onclick => @event(editing() => r)), string(value))
+      node = Hiccup.div(Dict(:style=>style, :onclick => @event(editing() => r)), render_node(value))
       return (c::Int64, r::Int64) => node::Node
     end
     

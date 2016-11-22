@@ -2,7 +2,6 @@ module Query
 
 using Data
 using Match
-using Base.Cartesian
 
 # gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
 function gallop{T}(column::Vector{T}, value::T, lo::Int, hi::Int, threshold) 
@@ -165,6 +164,14 @@ function plan_query(query)
       end
     end
     push!(clauses, clause)
+  end
+  
+  # collect relation names
+  relation_names = Set{Symbol}()
+  for clause in clauses
+    if typeof(clause) == Row 
+      push!(relation_names, clause.name)
+    end
   end
   
   # collect vars created in this query
@@ -331,7 +338,7 @@ function plan_query(query)
   # put everything together
   results_symbols = [Symbol("results_$ix") for (ix, var) in enumerate(return_clause.vars)]
   result = :(Relation(tuple($(results_symbols...)), $(return_clause.num_keys))) 
-  quote 
+  code = quote 
     let
       $(index_inits...)
       $(results_inits...)
@@ -348,12 +355,37 @@ function plan_query(query)
       end) 
     end
   end
+  
+  (code, collect(relation_names))
 end
 
 macro query(query)
-  plan_query(query)
+  (code, _) = plan_query(query)
+  code
 end
 
-export @query
+type View
+  relation_names::Vector{Symbol}
+  query
+  code
+  eval::Function
+end
+
+macro view(query)
+  (code, relation_names) = plan_query(query)
+  escs = [:($(esc(relation_name)) = $relation_name) for relation_name in relation_names]
+  code = quote
+    $(escs...)
+    $code
+  end
+  :(View($relation_names, $(Expr(:quote, query)), $(Expr(:quote, code)), $(Expr(:->, relation_names..., code))))
+end
+
+function (view::View){T}(state::Dict{Symbol, Relation{T}})
+  args = map((s) -> state[s], view.relation_names)
+  view.eval(args...)
+end
+
+export @query, @view
 
 end

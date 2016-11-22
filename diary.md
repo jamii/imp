@@ -7163,3 +7163,109 @@ I tried to switch to Escher for the dom diffing but after a few hours ended up w
 Trying to update some of the other packages I rely on and finding that package manager is hanging when trying to clone. Cloning the same url directly with git at the command line works fine. No idea what's going on there.
 
 Frustrating.
+
+### 2016 Nov 22
+
+Eugh. Is this thing still on?
+
+The way I've been working with relations at the moment requires blowing away all the state and opening a new UI window whenever I change anything. Clearly that's not good.
+
+To fix this, I have to switch from the current imperative updates to something more declarative. The input state is all going to want to go in a data-structure somewhere, which means that the queries need to be amended to read names out of that structure. I added a new macro that takes a query expression and returns a callable object with some useful metadata.
+
+``` julia
+type View
+  relation_names::Vector{Symbol}
+  query
+  code
+  eval::Function
+end
+
+macro view(query)
+  (code, relation_names) = plan_query(query)
+  escs = [:($(esc(relation_name)) = $relation_name) for relation_name in relation_names]
+  code = quote
+    $(escs...)
+    $code
+  end
+  :(View($relation_names, $(Expr(:quote, query)), $(Expr(:quote, code)), $(Expr(:->, relation_names..., code))))
+end
+
+function (view::View){R <: Relation}(state::Dict{Symbol, R})
+  args = map((s) -> state[s], view.relation_names)
+  view.eval(args...)
+end
+```
+
+Then a bunch of these get wrapped together in a Flow:
+
+``` julia
+type Flow
+  relations::Dict{Symbol, Relation}
+  views::Vector{Pair{Symbol, View}} # TODO make views a dict, do topo sort
+  cached::Dict{Symbol, Relation}
+  watchers::Set{Any}
+end
+
+function Flow()
+  Flow(Dict{Symbol, Relation}(), Vector{Pair{Symbol, View}}(), Dict{Symbol, Relation}(), Set{Any}())
+end
+
+function refresh(flow::Flow)
+  old_cached = flow.cached
+  cached = copy(flow.relations)
+  for (name, view) in flow.views
+    cached[name] = view(cached)
+  end
+  flow.cached = cached
+  for watcher in flow.watchers
+    watcher(old_cached, cached)
+  end
+end
+
+function Base.getindex(flow::Flow, name::Symbol)
+  flow.cached[name]
+end
+
+function Base.setindex!(flow::Flow, relation::Relation, name::Symbol)
+  flow.relations[name] = relation
+  refresh(flow)
+end
+
+function setviews(flow::Flow, views::Vector{Pair{Symbol, View}})
+  flow.views = views
+  refresh(flow)
+end
+
+function watch(watcher, flow::Flow)
+  push!(flow.watchers, watcher)
+end
+```
+
+The idea is to structure programs like this:
+
+``` julia
+flow = Flow()
+
+# set up state
+flow[:foo] = @relation ...
+flow[:bar] = @relation ...
+
+# set up views 
+setviews(flow, [
+  :quux => @view ...
+])
+
+# open a UI
+window = Window(flow)
+watch(flow) do _, cached
+  Blink.body!(window, cached[:body][1][1])
+end
+```
+
+Then re-evalling any part of the file results in updates to the currently open window, without blowing any state away. 
+
+Right now this can't handle fixpoints or unions, because I've been doing those imperatively before, and it doesn't handle subqueries/aggregates because their metadata doesn't get parsed up in the view. Those are fixable. 
+
+It also doesn't handle loops over time. The way that Dedalus and Eve handle time is by having a single, serial timeline built in to the language. (Eve has plans for distributed execution, but I don't think they've published anything yet). Time is used to break non-monotonic fixpoints, but also for efficient mutation and for functions that are more easily expressed in sequential form. Tying the latter to the single timeline seems problematic.
+
+I much prefer the model in Timely Dataflow, which allows multiple loops and nested loops. I think this can be done in a way that allows writing reactive programs without baking time into the language.

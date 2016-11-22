@@ -40,6 +40,10 @@ function setviews(flow::Flow, views::Vector{Pair{Symbol, View}})
   refresh(flow)
 end
 
+function watch(watcher, flow::Flow)
+  push!(flow.watchers, watcher)
+end
+
 export Flow, setviews
 
 end

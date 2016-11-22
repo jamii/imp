@@ -381,11 +381,11 @@ macro view(query)
   :(View($relation_names, $(Expr(:quote, query)), $(Expr(:quote, code)), $(Expr(:->, relation_names..., code))))
 end
 
-function (view::View){T}(state::Dict{Symbol, Relation{T}})
+function (view::View){R <: Relation}(state::Dict{Symbol, R})
   args = map((s) -> state[s], view.relation_names)
   view.eval(args...)
 end
 
-export @query, @view
+export @query, @view, View
 
 end

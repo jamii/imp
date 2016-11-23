@@ -402,7 +402,7 @@ macro view(query)
     $(escs...)
     $code
   end
-  :(View($input_names, $(Expr(:quote, query)), $(Expr(:quote, code)), $(Expr(:->, input_names..., code))))
+  @show :(View($input_names, $(Expr(:quote, query)), $(Expr(:quote, code)), $(Expr(:->, Expr(:tuple, input_names...), code))))
 end
 
 function (view::View){R <: Relation}(state::Dict{Symbol, R})

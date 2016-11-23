@@ -100,10 +100,11 @@ end
   
 type Row; name; vars; num_keys; end
 type When; expr; vars; end
-type Assign; var; expr; vars; end
+type Assign; var; expr; vars; escape end
 type In; var; expr; vars; end
 type Hint; vars; end
 type Return; name; vars; typs; num_keys; end  
+type SubQuery; code; input_names; return_clause; end
 
 function plan_query(query)
   # unwrap block
@@ -118,10 +119,11 @@ function plan_query(query)
     clause = @match line begin
       Expr(:line, _, _) => :line
       Expr(:call, [:in, var, expr], _) => In(var, expr, collect_vars(expr))
-      Expr(:(=), [var, expr], _) => Assign(var, expr, collect_vars(expr))
+      Expr(:(=), [var, expr], _) => Assign(var, expr, collect_vars(expr), true)
       Expr(:macrocall, [head, args...], _) => @match head begin
         Symbol("@when") => When(args[1], collect_vars(args[1]))
         Symbol("@hint") => Hint(args)
+        Symbol("@query") => SubQuery(plan_query(args[1])...)
         _ => error("Don't know what to do with $head")
       end
       Expr(:return, [expr], _) => begin 
@@ -159,7 +161,7 @@ function plan_query(query)
             Expr(:$, [value], _) => value
             value => value 
           end
-          insert!(clauses, 1, Assign(var, value, collect_vars(value)))
+          insert!(clauses, 1, Assign(var, value, collect_vars(value), true))
         end
       end
     end
@@ -167,10 +169,28 @@ function plan_query(query)
   end
   
   # collect relation names
-  relation_names = Set{Symbol}()
+  input_names = Set{Symbol}()
   for clause in clauses
     if typeof(clause) == Row 
-      push!(relation_names, clause.name)
+      push!(input_names, clause.name)
+    elseif typeof(clause) == SubQuery
+      for name in clause.input_names
+        push!(input_names, name)
+      end
+    end
+  end
+  
+  # rewrite SubQuery in terms of Assign
+  for clause_ix in length(clauses):-1:1
+    clause = clauses[clause_ix]
+    if typeof(clause) == SubQuery
+      deleteat!(clauses, clause_ix)
+      var = gensym("query")
+      for (var_ix, return_var) in enumerate(clause.return_clause.vars)
+        insert!(clauses, clause_ix, Assign(return_var, :($var[$var_ix]), [var], true))
+      end
+      # TODO should include input vars, but currently hard to grab those without also grabbing relation names
+      insert!(clauses, clause_ix, Assign(var, clause.code, [], false))
     end
   end
   
@@ -290,11 +310,14 @@ function plan_query(query)
   # figure out at which point in the variable order we have all the variables we need to return
   return_after = maximum(push!(indexin(return_clause.vars, vars), 0))
   
+  # label for early return
+  next_result = gensym("next_result")
+  
   # store results 
   body = quote
     $([:(push!($(Symbol("results_$ix")), $(esc(var))))
     for (ix, var) in enumerate(return_clause.vars)]...)
-    @goto next_result
+    @goto $next_result
   end
   
   # build up the main loop from the inside out
@@ -310,7 +333,7 @@ function plan_query(query)
     if var_ix == return_after
       body = quote
         $body
-        @label next_result
+        @label $next_result
       end
     end
     
@@ -323,7 +346,8 @@ function plan_query(query)
     his = [Symbol("hi_$(clause_ix)_$(range_ix-1)") for (clause_ix, range_ix) in range_ixes]
     next_his = [Symbol("hi_$(clause_ix)_$(range_ix)") for (clause_ix, range_ix) in range_ixes]
     if typeof(clause) == Assign
-      body = :(let $(esc(var)) = $(esc(clause.expr))
+      expr = clause.escape ? esc(clause.expr) : clause.expr
+      body = :(let $(esc(var)) = $expr
         $(project(columns, los, his, next_los, next_his, esc(var), body))
       end)
     elseif typeof(clause) == In
@@ -356,33 +380,33 @@ function plan_query(query)
     end
   end
   
-  (code, collect(relation_names))
+  (code, collect(input_names), return_clause)
 end
 
 macro query(query)
-  (code, _) = plan_query(query)
+  (code, _, _) = plan_query(query)
   code
 end
 
 type View
-  relation_names::Vector{Symbol}
+  input_names::Vector{Symbol}
   query
   code
   eval::Function
 end
 
 macro view(query)
-  (code, relation_names) = plan_query(query)
-  escs = [:($(esc(relation_name)) = $relation_name) for relation_name in relation_names]
+  (code, input_names, _) = plan_query(query)
+  escs = [:($(esc(input_name)) = $input_name) for input_name in input_names]
   code = quote
     $(escs...)
     $code
   end
-  :(View($relation_names, $(Expr(:quote, query)), $(Expr(:quote, code)), $(Expr(:->, relation_names..., code))))
+  :(View($input_names, $(Expr(:quote, query)), $(Expr(:quote, code)), $(Expr(:->, input_names..., code))))
 end
 
 function (view::View){R <: Relation}(state::Dict{Symbol, R})
-  args = map((s) -> state[s], view.relation_names)
+  args = map((s) -> state[s], view.input_names)
   view.eval(args...)
 end
 

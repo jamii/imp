@@ -51,6 +51,19 @@ function cost_of_playlist()
   end
 end
 
+function cost_of_playlist2()
+  @query begin
+    playlist(p, pn)
+    @query begin 
+      playlist_track($p, t)
+      track(t, _, _, _, _, _, _, _, price)
+      return (t::Int64, price::Float64)
+    end
+    total = sum(price)
+    return (pn::String, total::Float64)
+  end
+end
+
 function revenue_per_track()
   @query begin
     track(t, tn, _, _, _, _, _, _, price)
@@ -63,12 +76,28 @@ function revenue_per_track()
   end
 end
 
+function revenue_per_track2()
+  @query begin
+    track(t, tn, _, _, _, _, _, _, price)
+    @query begin 
+      playlist_track(p, $t)
+      return (p::Int64,)
+    end
+    total = price * length(p)
+    return (tn::String, total::Float64)
+  end
+end
+
 function test()
   @test who_is_metal()[1] == String["AC/DC","Accept","Black Sabbath","Iron Maiden","Metallica","Motörhead","Mötley Crüe","Ozzy Osbourne","Scorpions"]
   @test cost_of_playlist()[1] == String["90’s Music","Audiobooks","Brazilian Music","Classical","Classical 101 - Deep Cuts","Classical 101 - Next Steps","Classical 101 - The Basics","Grunge","Heavy Metal Classic","Movies","Music","Music Videos","On-The-Go 1","TV Shows"]
   @test cost_of_playlist()[2] == Float64[1462.2299999999984,0.0,38.61000000000001,74.25,24.74999999999999,24.74999999999999,24.74999999999999,14.850000000000001,25.74,0.0,3257.0999999999954,0.99,0.99,423.8700000000001]
   @test revenue_per_track()[1][1:10] == String["\"40\"","\"?\"","\"Eine Kleine Nachtmusik\" Serenade In G, K. 525: I. Allegro","#1 Zero","#9 Dream","'Round Midnight","(Anesthesia) Pulling Teeth","(Da Le) Yaleo","(I Can't Help) Falling In Love With You","(Oh) Pretty Woman"]
   @test revenue_per_track()[2][1:10] == Float64[1.98,3.98,3.96,1.98,1.98,1.98,1.98,2.9699999999999998,2.9699999999999998,1.98]
+  @test cost_of_playlist2()[1] == String["90’s Music","Audiobooks","Brazilian Music","Classical","Classical 101 - Deep Cuts","Classical 101 - Next Steps","Classical 101 - The Basics","Grunge","Heavy Metal Classic","Movies","Music","Music Videos","On-The-Go 1","TV Shows"]
+  @test cost_of_playlist2()[2] == Float64[1462.2299999999984,0.0,38.61000000000001,74.25,24.74999999999999,24.74999999999999,24.74999999999999,14.850000000000001,25.74,0.0,3257.0999999999954,0.99,0.99,423.8700000000001]
+  @test revenue_per_track2()[1][1:10] == String["\"40\"","\"?\"","\"Eine Kleine Nachtmusik\" Serenade In G, K. 525: I. Allegro","#1 Zero","#9 Dream","'Round Midnight","(Anesthesia) Pulling Teeth","(Da Le) Yaleo","(I Can't Help) Falling In Love With You","(Oh) Pretty Woman"]
+  @test revenue_per_track2()[2][1:10] == Float64[1.98,3.98,3.96,1.98,1.98,1.98,1.98,2.9699999999999998,2.9699999999999998,1.98]
 end
 
 function bench()

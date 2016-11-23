@@ -7269,3 +7269,39 @@ Right now this can't handle fixpoints or unions, because I've been doing those i
 It also doesn't handle loops over time. The way that Dedalus and Eve handle time is by having a single, serial timeline built in to the language. (Eve has plans for distributed execution, but I don't think they've published anything yet). Time is used to break non-monotonic fixpoints, but also for efficient mutation and for functions that are more easily expressed in sequential form. Tying the latter to the single timeline seems problematic.
 
 I much prefer the model in Timely Dataflow, which allows multiple loops and nested loops. I think this can be done in a way that allows writing reactive programs without baking time into the language.
+
+### 2016 Nov 23
+
+Quickly added subqueries to the syntax. Instead of writing:
+
+``` julia
+@view begin
+  playlist(p, pn)
+  tracks = @query begin 
+    playlist_track($p, t)
+    track(t, _, _, _, _, _, _, _, price)
+    return (t::Int64, price::Float64)
+  end
+  total = sum(tracks[2])
+  return (pn::String, total::Float64)
+end
+```
+
+I can now write:
+
+``` julia
+@view begin
+  playlist(p, pn)
+  @query begin 
+    playlist_track(p, t)
+    track(t, _, _, _, _, _, _, _, price)
+    return (t::Int64, price::Float64)
+  end
+  total = sum(price)
+  return (pn::String, total::Float64)
+end
+```
+
+And the subquery metadata gets propagated up to the final view.
+
+At least in theory. In practice I broke something somewhere and it's pulling NaNs out of thin air...

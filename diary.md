@@ -7327,3 +7327,5 @@ end
 ```
 
 Writing fixpoint is less easy, because it doesn't know what output name it's going to be assigned. It's also impossible to write fixpoint over multiple views because the current interface only allow returning one result. Ooops.
+
+I've made and undone changes for an hour or two now. I think it's clear I need to sit down and think about exactly what I want out of this.

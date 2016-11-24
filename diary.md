@@ -7311,3 +7311,5 @@ At least in theory. In practice I broke something somewhere and it's pulling NaN
 It was variable clashes between the two macros. I suspected as much, but actually figuring out which variable was beyond me last night. Fixed now.
 
 The compiler is an unholy mess. The root of the problem is that without stack allocation it's expensive to abstract out any part of the query into functions. Instead I have to mash everything together into one huge function and carefully keep track of scopes and variable collisions myself. I don't know what to do about that, short of just accepting the performance hit. Based on the slowdowns I had whenever I allocated by mistake, it might about an order of magnitude.
+
+I tweaked the way flows work so that views always merge into some existing relation rather than defining a new one, which gives us back union, but then reconsidered after thinking about the effects on debugging - it means that the value of a given view changes during flow refresh.

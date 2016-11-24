@@ -430,8 +430,8 @@ macro view(query)
 end
 
 function (view::View){R <: Relation}(state::Dict{Symbol, R})
-  args = map((s) -> state[s], view.input_names)
-  view.eval(args...)
+  inputs = map((s) -> state[s], view.input_names)
+  view.eval(inputs...)
 end
 
 export @query, @view, View

@@ -4,9 +4,9 @@ using Data
 using Query
 
 type Flow
-  relations::Dict{Symbol, Relation}
+  inputs::Dict{Symbol, Relation}
   views::Vector{Pair{Symbol, View}} # TODO make views a dict, do topo sort
-  cached::Dict{Symbol, Relation}
+  outputs::Dict{Symbol, Relation}
   watchers::Set{Any}
 end
 
@@ -15,23 +15,23 @@ function Flow()
 end
 
 function refresh(flow::Flow)
-  old_cached = flow.cached
-  cached = copy(flow.relations)
+  old_outputs = flow.outputs
+  new_outputs = copy(flow.inputs)
   for (name, view) in flow.views
-    cached[name] = view(cached)
+    new_outputs[name] = view(new_outputs)
   end
-  flow.cached = cached
+  flow.new_outputs = new_outputs
   for watcher in flow.watchers
-    watcher(old_cached, cached)
+    watcher(old_outputs, new_outputs)
   end
 end
 
 function Base.getindex(flow::Flow, name::Symbol)
-  flow.cached[name]
+  flow.outputs[name]
 end
 
-function Base.setindex!(flow::Flow, relation::Relation, name::Symbol)
-  flow.relations[name] = relation
+function Base.setindex!(flow::Flow, input::Relation, name::Symbol)
+  flow.inputs[name] = input
   refresh(flow)
 end
 

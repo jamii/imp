@@ -3,15 +3,23 @@ module Flows
 using Data
 using Query
 
+type Union <: AbstractView
+  views::Vector{AbstractView}
+end
+
+function (union::Union)(inputs::Dict{Symbol, Relation})
+  reduce(merge, (view(inputs) for view in union.views))
+end
+
 type Flow
   inputs::Dict{Symbol, Relation}
-  views::Vector{Pair{Symbol, View}} # TODO make views a dict, do topo sort
+  views::Vector{Pair{Symbol, AbstractView}} # TODO make views a dict, do topo sort
   outputs::Dict{Symbol, Relation}
   watchers::Set{Any}
 end
 
 function Flow()
-  Flow(Dict{Symbol, Relation}(), Vector{Pair{Symbol, View}}(), Dict{Symbol, Relation}(), Set{Any}())
+  Flow(Dict{Symbol, Relation}(), Vector{Pair{Symbol, AbstractView}}(), Dict{Symbol, Relation}(), Set{Any}())
 end
 
 function refresh(flow::Flow)
@@ -35,7 +43,7 @@ function Base.setindex!(flow::Flow, input::Relation, name::Symbol)
   refresh(flow)
 end
 
-function setviews(flow::Flow, views::Vector{Pair{Symbol, View}})
+function setviews(flow::Flow, views::Vector{Pair{Symbol, AbstractView}})
   flow.views = views
   refresh(flow)
 end

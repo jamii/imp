@@ -411,7 +411,9 @@ macro query(query)
   plan_query(parse_query(query)..., Set())
 end
 
-type View
+abstract AbstractView
+
+type View <: AbstractView
   input_names::Vector{Symbol}
   query
   code
@@ -429,9 +431,8 @@ macro view(query)
   :(View($(collect(input_names)), $(Expr(:quote, query)), $(Expr(:quote, code)), $(Expr(:->, Expr(:tuple, input_names...), code))))
 end
 
-function (view::View){R <: Relation}(state::Dict{Symbol, R})
-  inputs = map((s) -> state[s], view.input_names)
-  view.eval(inputs...)
+function (view::View)(inputs::Dict{Symbol, Relation})
+  view.eval(map((name) -> inputs[name], view.input_names))
 end
 
 export @query, @view, View

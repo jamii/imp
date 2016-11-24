@@ -7305,3 +7305,9 @@ end
 And the subquery metadata gets propagated up to the final view.
 
 At least in theory. In practice I broke something somewhere and it's pulling NaNs out of thin air...
+
+### 2016 Nov 24
+
+It was variable clashes between the two macros. I suspected as much, but actually figuring out which variable was beyond me last night. Fixed now.
+
+The compiler is an unholy mess. The root of the problem is that without stack allocation it's expensive to abstract out any part of the query into functions. Instead I have to mash everything together into one huge function and carefully keep track of scopes and variable collisions myself. I don't know what to do about that, short of just accepting the performance hit. Based on the slowdowns I had whenever I allocated by mistake, it might about an order of magnitude.

@@ -56,7 +56,7 @@ function cost_of_playlist2()
   @query begin
     playlist(p, pn)
     @query begin 
-      playlist_track($p, t)
+      playlist_track(p, t)
       track(t, _, _, _, _, _, _, _, price)
       return (t::Int64, price::Float64)
     end
@@ -81,7 +81,7 @@ function revenue_per_track2()
   @query begin
     track(t, tn, _, _, _, _, _, _, price)
     @query begin 
-      playlist_track(p, $t)
+      playlist_track(p, t)
       return (p::Int64,)
     end
     total = price * length(p)

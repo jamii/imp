@@ -29,6 +29,8 @@ end
 function project(columns, los, his, next_los, next_his, var, body)
   for (column, lo, hi, next_lo, next_hi) in zip(columns, los, his, next_los, next_his)
     body = quote
+      local $next_lo
+      local $next_hi
       $next_lo, c = gallop($column, $var, $lo, $hi, 0)
       if (c == 0)
         $next_hi, _ = gallop($column, $var, $next_lo+1, $hi, 1)
@@ -43,23 +45,24 @@ function intersect(columns, los, his, next_los, next_his, var, body)
   n = length(columns)
   columns_rot = [columns[1+mod(ix-2,n)] for ix in 1:n]
   next_los_rot = [next_los[1+mod(ix-2,n)] for ix in 1:n]
+  total = gensym("total")
   quote
     begin
-      $([:($next_lo = $lo) for (next_lo, lo) in zip(next_los, los)]...)
-      total = 1
+      $([:(local $next_hi, $next_lo = $lo) for (next_hi, next_lo, lo) in zip(next_his, next_los, los)]...)
+      $total = 1
       while true
-        if total == $n
+        if $total == $n
           $([:(($next_hi, _) = gallop($column, $column[$next_lo], $next_lo+1, $hi, 1)) for (next_hi, column, next_lo, hi) in zip(next_his, columns, next_los, his)]...)
           $var = $(columns[1])[$(next_los[1])]
           $body
           $([:($next_lo = $next_hi) for (next_lo, next_hi) in zip(next_los, next_his)]...)
           $([:(if $next_lo >= $hi; break; end) for (next_lo, hi) in zip(next_los, his)]...)
-          total = 1
+          $total = 1
         end
         $([quote
-        if total < $n
+        if $total < $n
           $next_lo, c = gallop($column, $column_rot[$next_lo_rot], $next_lo, $hi, 0)
-          total = (c == 0) ? total + 1 : 1
+          $total = (c == 0) ? $total + 1 : 1
           if $next_lo >= $hi; break; end
         end
       end for (next_lo, column, column_rot, next_lo_rot, hi) in zip(next_los, columns, columns_rot, next_los_rot, his)]...)
@@ -104,9 +107,9 @@ type Assign; var; expr; vars; escape end
 type In; var; expr; vars; end
 type Hint; vars; end
 type Return; name; vars; typs; num_keys; end  
-type SubQuery; code; input_names; return_clause; end
+type SubQuery; query; var; clauses; vars; created_vars; input_names; return_clause; end
 
-function plan_query(query)
+function parse_query(query)
   # unwrap block
   lines = @match query begin
     Expr(:block, lines, _) => lines
@@ -123,7 +126,7 @@ function plan_query(query)
       Expr(:macrocall, [head, args...], _) => @match head begin
         Symbol("@when") => When(args[1], collect_vars(args[1]))
         Symbol("@hint") => Hint(args)
-        Symbol("@query") => SubQuery(plan_query(args[1])...)
+        Symbol("@query") => SubQuery(line, gensym("query"), parse_query(args[1])...)
         _ => error("Don't know what to do with $head")
       end
       Expr(:return, [expr], _) => begin 
@@ -180,20 +183,6 @@ function plan_query(query)
     end
   end
   
-  # rewrite SubQuery in terms of Assign
-  for clause_ix in length(clauses):-1:1
-    clause = clauses[clause_ix]
-    if typeof(clause) == SubQuery
-      deleteat!(clauses, clause_ix)
-      var = gensym("query")
-      for (var_ix, return_var) in enumerate(clause.return_clause.vars)
-        insert!(clauses, clause_ix, Assign(return_var, :($var[$var_ix]), [var], true))
-      end
-      # TODO should include input vars, but currently hard to grab those without also grabbing relation names
-      insert!(clauses, clause_ix, Assign(var, clause.code, [], false))
-    end
-  end
-  
   # collect vars created in this query
   created_vars = Set()
   for clause in clauses
@@ -208,6 +197,17 @@ function plan_query(query)
   end
   delete!(created_vars, :_) # _ is a wildcard, not a real var
   
+  # collect vars created in subqueries
+  subcreated_vars = Set()
+  for clause in clauses
+    if typeof(clause) == SubQuery
+      push!(created_vars, clause.var)
+      for var in clause.return_clause.vars
+        push!(subcreated_vars, var)
+      end
+    end
+  end
+  
   # collect vars mentioned in this query, in order of mention
   mentioned_vars = []
   for clause in clauses 
@@ -219,10 +219,16 @@ function plan_query(query)
     if typeof(clause) in [Assign, In]
       push!(mentioned_vars, clause.var)
     end
+    if typeof(clause) == SubQuery
+      push!(mentioned_vars, clause.var)
+      for var in clause.vars
+        push!(mentioned_vars, var)
+      end
+    end
   end
   
   # use mention order to decide execution order
-  vars = unique((var for var in mentioned_vars if var in created_vars))
+  vars = unique((var for var in mentioned_vars if (var in created_vars) || (var in subcreated_vars)))
   
   # add a return if needed
   returns = [clause for clause in clauses if typeof(clause) == Return]
@@ -241,11 +247,29 @@ function plan_query(query)
     end
   end
   
+  (clauses, vars, created_vars, input_names, return_clause)
+end
+
+function plan_query(clauses, vars, created_vars, input_names, return_clause, outside_vars)
+  # rewrite SubQuery in terms of Assign
+  for clause_ix in length(clauses):-1:1
+    clause = clauses[clause_ix]
+    if typeof(clause) == SubQuery
+      deleteat!(clauses, clause_ix)
+      code = plan_query(clause.clauses, clause.vars, clause.created_vars, clause.input_names, clause.return_clause, created_vars)
+      for (var_ix, return_var) in enumerate(clause.return_clause.vars)
+        insert!(clauses, clause_ix, Assign(return_var, :($(clause.var)[$var_ix]), [clause.var], true))
+      end
+      insert!(clauses, clause_ix, Assign(clause.var, code, clause.vars, false))
+    end
+  end
+  
   # collect clauses that assign a value to a var before intersect
   var_assigned_by = Dict()
   for clause in clauses
     if typeof(clause) in [Assign, In]
       @assert !haskey(var_assigned_by, clause.var) # only one assignment per var 
+      @assert !(clause.var in outside_vars) # can't reassign an existing var
       var_assigned_by[clause.var] = clause
     end
   end
@@ -296,7 +320,7 @@ function plan_query(query)
   end
   
   # declare vars
-  var_inits = [:(local $(esc(var))) for var in vars]
+  var_inits = [:(local $(esc(var))) for var in vars if !(var in outside_vars)]
   
   # figure out at which point in the variable order each When clause can be run
   whens = [[] for _ in vars]
@@ -345,7 +369,9 @@ function plan_query(query)
     next_los = [Symbol("lo_$(clause_ix)_$(range_ix)") for (clause_ix, range_ix) in range_ixes]
     his = [Symbol("hi_$(clause_ix)_$(range_ix-1)") for (clause_ix, range_ix) in range_ixes]
     next_his = [Symbol("hi_$(clause_ix)_$(range_ix)") for (clause_ix, range_ix) in range_ixes]
-    if typeof(clause) == Assign
+    if var in outside_vars
+      body = project(columns, los, his, next_los, next_his, esc(var), body)
+    elseif typeof(clause) == Assign
       expr = clause.escape ? esc(clause.expr) : clause.expr
       body = :(let $(esc(var)) = $expr
         $(project(columns, los, his, next_los, next_his, esc(var), body))
@@ -362,7 +388,7 @@ function plan_query(query)
   # put everything together
   results_symbols = [Symbol("results_$ix") for (ix, var) in enumerate(return_clause.vars)]
   result = :(Relation(tuple($(results_symbols...)), $(return_clause.num_keys))) 
-  code = quote 
+  quote 
     let
       $(index_inits...)
       $(results_inits...)
@@ -379,13 +405,10 @@ function plan_query(query)
       end) 
     end
   end
-  
-  (code, collect(input_names), return_clause)
 end
 
 macro query(query)
-  (code, _, _) = plan_query(query)
-  code
+  plan_query(parse_query(query)..., Set())
 end
 
 type View
@@ -396,13 +419,14 @@ type View
 end
 
 macro view(query)
-  (code, input_names, _) = plan_query(query)
+  (clauses, vars, created_vars, input_names, return_clause) = parse_query(query)
+  code = plan_query(clauses, vars, created_vars, input_names, return_clause, Set())
   escs = [:($(esc(input_name)) = $input_name) for input_name in input_names]
   code = quote
     $(escs...)
     $code
   end
-  @show :(View($input_names, $(Expr(:quote, query)), $(Expr(:quote, code)), $(Expr(:->, Expr(:tuple, input_names...), code))))
+  :(View($(collect(input_names)), $(Expr(:quote, query)), $(Expr(:quote, code)), $(Expr(:->, Expr(:tuple, input_names...), code))))
 end
 
 function (view::View){R <: Relation}(state::Dict{Symbol, R})

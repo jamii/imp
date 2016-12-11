@@ -240,12 +240,13 @@ function parse_query(query)
     error("Too many returns: $returns")
   end
   
-  # use types of return relation if available
-  if return_clause.name != ()
-    for (ix, var) in enumerate(return_clause.vars)
-      return_clause.typs[ix] = :(eltype($(return_clause.name)[$ix]))
-    end
-  end
+  # TODO this breaks in Flows
+  # # use types of return relation if available
+  # if return_clause.name != ()
+  #   for (ix, var) in enumerate(return_clause.vars)
+  #     return_clause.typs[ix] = :(eltype($(return_clause.name)[$ix]))
+  #   end
+  # end
   
   (clauses, vars, created_vars, input_names, return_clause)
 end
@@ -398,11 +399,7 @@ function plan_query(clauses, vars, created_vars, input_names, return_clause, out
           $body 
         end
       end
-      $(if return_clause.name != ()
-        :(merge!($(esc(return_clause.name)), $result))
-      else
-        result
-      end) 
+      result
     end
   end
 end
@@ -411,30 +408,6 @@ macro query(query)
   plan_query(parse_query(query)..., Set())
 end
 
-abstract AbstractView
-
-type View <: AbstractView
-  input_names::Vector{Symbol}
-  query
-  code
-  eval::Function
-end
-
-macro view(query)
-  (clauses, vars, created_vars, input_names, return_clause) = parse_query(query)
-  code = plan_query(clauses, vars, created_vars, input_names, return_clause, Set())
-  escs = [:($(esc(input_name)) = $input_name) for input_name in input_names]
-  code = quote
-    $(escs...)
-    $code
-  end
-  :(View($(collect(input_names)), $(Expr(:quote, query)), $(Expr(:quote, code)), $(Expr(:->, Expr(:tuple, input_names...), code))))
-end
-
-function (view::View)(inputs::Dict{Symbol, Relation})
-  view.eval(map((name) -> inputs[name], view.input_names))
-end
-
-export @query, @view, View
+export @query
 
 end

@@ -3,55 +3,132 @@ module Flows
 using Data
 using Query
 
-type Union <: AbstractView
-  views::Vector{AbstractView}
+abstract Flow
+
+type Create <: Flow
+  output_name::Symbol
+  input_names::Vector{Symbol}
+  meta::Any
+  eval::Function
 end
 
-function (union::Union)(inputs::Dict{Symbol, Relation})
-  reduce(merge, (view(inputs) for view in union.views))
+type Merge <: Flow
+  output_name::Symbol
+  input_names::Vector{Symbol}
+  meta::Any
+  eval::Function
 end
 
-type Flow
+type Sequence <: Flow
+  flows::Vector{Flow}
+end
+
+type Fixpoint <: Flow
+  flow::Flow
+end
+
+function output_names(create::Create)
+  Set(create.output_name)
+end
+
+function output_names(merge::Merge)
+  Set(merge.output_name)
+end
+
+function output_names(sequence::Sequence)
+  union(map(output_names, sequence.flows)...)
+end
+
+function output_names(fixpoint::Fixpoint)
+  output_names(fixpoint.flow)
+end
+
+function (create::Create)(inputs::Dict{Symbol, Relation})
+  output = create.eval(map((name) -> state[name], create.input_names))
+  inputs[create.output_name] = output
+end
+
+function (merge::Merge)(inputs::Dict{Symbol, Relation})
+  output = merge.eval(map((name) -> state[name], merge.input_names))
+  inputs[merge.output_name] = merge(inputs[merge.output_name], output)
+end
+
+function (sequence::Sequence)(inputs::Dict{Symbol, Relation})
+  for flow in sequence.flows
+    flow(inputs)
+  end
+end
+
+function (fixpoint::Fixpoint)(inputs::Dict{Symbol, Relation})
+  names = output_names(fixpoint.flow)
+  while true
+    old_values = map((name) -> inputs[name], names)
+    fixpoint.flow(inputs)
+    new_values = map((name) -> inputs[name], names)
+    if old_values == new_values
+      return
+    end
+  end
+end
+
+function query_to_flow(constructor, query)
+  (clauses, vars, created_vars, input_names, return_clause) = Query.parse_query(query)
+  code = Query.plan_query(clauses, vars, created_vars, input_names, return_clause, Set())
+  escs = [:($(esc(input_name)) = $input_name) for input_name in input_names]
+  code = quote
+    $(escs...)
+    $code
+  end
+  :($constructor(return_clause.name, $(collect(input_names)), $(Expr(:quote, query)), $(Expr(:->, Expr(:tuple, input_names...), code))))
+end
+
+macro create(query)
+  query_to_flow(Create, query)
+end
+
+macro merge(query)
+  query_to_flow(Merge, query)
+end
+
+type World
   inputs::Dict{Symbol, Relation}
-  views::Vector{Pair{Symbol, AbstractView}} # TODO make views a dict, do topo sort
+  flow::Flow
   outputs::Dict{Symbol, Relation}
   watchers::Set{Any}
 end
 
-function Flow()
-  Flow(Dict{Symbol, Relation}(), Vector{Pair{Symbol, AbstractView}}(), Dict{Symbol, Relation}(), Set{Any}())
+function World()
+  World(Dict{Symbol, Relation}(), Sequence([]), Dict{Symbol, Relation}(), Set{Any}())
 end
 
-function refresh(flow::Flow)
-  old_outputs = flow.outputs
-  new_outputs = copy(flow.inputs)
-  for (name, view) in flow.views
-    new_outputs[name] = view(new_outputs)
-  end
-  flow.new_outputs = new_outputs
-  for watcher in flow.watchers
+function refresh(world::World)
+  old_outputs = world.outputs
+  new_outputs = copy(world.inputs)
+  world.flow(new_outputs)
+  world.new_outputs = new_outputs
+  for watcher in world.watchers
     watcher(old_outputs, new_outputs)
   end
 end
 
-function Base.getindex(flow::Flow, name::Symbol)
-  flow.outputs[name]
+function Base.getindex(world::World, name::Symbol)
+  world.outputs[name]
 end
 
-function Base.setindex!(flow::Flow, input::Relation, name::Symbol)
-  flow.inputs[name] = input
-  refresh(flow)
+function Base.setindex!(world::World, input::Relation, name::Symbol)
+  world.inputs[name] = input
+  refresh(world)
 end
 
-function setviews(flow::Flow, views::Vector{Pair{Symbol, AbstractView}})
-  flow.views = views
-  refresh(flow)
+function setflow(world::World, flow::Flow)
+  world.flow = flow
+  refresh(world)
 end
 
-function watch(watcher, flow::Flow)
-  push!(flow.watchers, watcher)
+function watch(watcher, world::World)
+  push!(world.watchers, watcher)
 end
 
-export Flow, setviews
+export Create, Merge, Sequence, Fixpoint, @create, @merge, World, world
 
 end

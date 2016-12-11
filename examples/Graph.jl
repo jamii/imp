@@ -2,8 +2,8 @@ module Graph
 
 using Data
 using Query
-using Query.@view
 using Flows
+using Flows.@view
 using BenchmarkTools
 using Base.Test
 
@@ -28,7 +28,7 @@ tris = @view begin
   edge(b,c)
   @when b < c
   edge(c,a)
-  return (a::Int64, b::Int64, c::Int64)
+  return tris(a::Int64, b::Int64, c::Int64)
 end
 
 function test()
@@ -36,20 +36,20 @@ function test()
   @test f(edge1)[2] == [2, 3]
   @test f(edge1)[3] == [3, 4]
   
-  flow = Flow()
+  world = World()
   
-  flow[:edge] = edge1
-  @test flow[:edge] == edge1
+  world[:edge] = edge1
+  @test world[:edge] == edge1
   
   local old, new
-  push!(flow.watchers, (old_cached, new_cached) -> (old, new) = (old_cached, new_cached))
+  push!(world.watchers, (old_cached, new_cached) -> (old, new) = (old_cached, new_cached))
   
-  setviews(flow, [:tris => tris])
+  setflow(world, tris)
   @test !haskey(old, :tris)
   @test haskey(new, :tris)
-  @test flow[:tris][1] == [1, 2]
-  @test flow[:tris][2] == [2, 3]
-  @test flow[:tris][3] == [3, 4]
+  @test world[:tris][1] == [1, 2]
+  @test world[:tris][2] == [2, 3]
+  @test world[:tris][3] == [3, 4]
 end
 
 function bench()

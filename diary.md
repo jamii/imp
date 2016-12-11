@@ -7329,3 +7329,98 @@ end
 Writing fixpoint is less easy, because it doesn't know what output name it's going to be assigned. It's also impossible to write fixpoint over multiple views because the current interface only allow returning one result. Ooops.
 
 I've made and undone changes for an hour or two now. I think it's clear I need to sit down and think about exactly what I want out of this.
+
+### 2016 Dec 11
+
+So I've made some janky flow stuff that I don't really like but will live with for the sake of momentum.
+
+``` julia
+abstract Flow
+
+type Create <: Flow
+  output_name::Symbol
+  input_names::Vector{Symbol}
+  meta::Any
+  eval::Function
+end
+
+type Merge <: Flow
+  output_name::Symbol
+  input_names::Vector{Symbol}
+  meta::Any
+  eval::Function
+end
+
+type Sequence <: Flow
+  flows::Vector{Flow}
+end
+
+type Fixpoint <: Flow
+  flow::Flow
+end
+
+function output_names(create::Create)
+  Set(create.output_name)
+end
+
+function output_names(merge::Merge)
+  Set(merge.output_name)
+end
+
+function output_names(sequence::Sequence)
+  union(map(output_names, sequence.flows)...)
+end
+
+function output_names(fixpoint::Fixpoint)
+  output_names(fixpoint.flow)
+end
+
+function (create::Create)(inputs::Dict{Symbol, Relation})
+  output = create.eval(map((name) -> state[name], create.input_names))
+  inputs[create.output_name] = output
+end
+
+function (merge::Merge)(inputs::Dict{Symbol, Relation})
+  output = merge.eval(map((name) -> state[name], merge.input_names))
+  inputs[merge.output_name] = merge(inputs[merge.output_name], output)
+end
+
+function (sequence::Sequence)(inputs::Dict{Symbol, Relation})
+  for flow in sequence.flows
+    flow(inputs)
+  end
+end
+
+function (fixpoint::Fixpoint)(inputs::Dict{Symbol, Relation})
+  names = output_names(fixpoint.flow)
+  while true
+    old_values = map((name) -> inputs[name], names)
+    fixpoint.flow(inputs)
+    new_values = map((name) -> inputs[name], names)
+    if old_values == new_values
+      return
+    end
+  end
+end
+
+function query_to_flow(constructor, query)
+  (clauses, vars, created_vars, input_names, return_clause) = Query.parse_query(query)
+  code = Query.plan_query(clauses, vars, created_vars, input_names, return_clause, Set())
+  escs = [:($(esc(input_name)) = $input_name) for input_name in input_names]
+  code = quote
+    $(escs...)
+    $code
+  end
+  :($constructor(return_clause.name, $(collect(input_names)), $(Expr(:quote, query)), $(Expr(:->, Expr(:tuple, input_names...), code))))
+end
+
+macro create(query)
+  query_to_flow(Create, query)
+end
+
+macro merge(query)
+  query_to_flow(Merge, query)
+end
+```
+
+I realised that with the way I have things setup currently, I can't write code like I did before that reacts to events and mutates the world state. I think this is probably a good thing. Let's see how far I can get with all mutation confined to the immediate effects of user interaction. A little like the Monolog experiment I worked on earlier this year.

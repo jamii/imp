@@ -105,7 +105,7 @@ function refresh(world::World)
   old_outputs = world.outputs
   new_outputs = copy(world.inputs)
   world.flow(new_outputs)
-  world.new_outputs = new_outputs
+  world.outputs = new_outputs
   for watcher in world.watchers
     watcher(old_outputs, new_outputs)
   end
@@ -115,7 +115,7 @@ function Base.getindex(world::World, name::Symbol)
   world.outputs[name]
 end
 
-function Base.setindex!(world::World, input::Relation, name::Symbol)
+function Base.setindex!{R <: Relation}(world::World, input::R, name::Symbol)
   world.inputs[name] = input
   refresh(world)
 end
@@ -129,6 +129,6 @@ function watch(watcher, world::World)
   push!(world.watchers, watcher)
 end
 
-export Create, Merge, Sequence, Fixpoint, @create, @merge, World, world
+export Create, Merge, Sequence, Fixpoint, @create, @merge, World, watch
 
 end

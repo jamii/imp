@@ -5,6 +5,7 @@ module UI
 # Pkg.add("Hiccup")
 
 using Data
+using Flows
 using Blink
 using Hiccup
 
@@ -19,30 +20,21 @@ macro event(expr)
   :(event($(string(name)), [$(map(esc, keys)...), $(map(esc, vals)...)]))
 end
 
-function Blink.Window(flow, event_tables)
-  w = Window()
-  event_number = 1
-  handle(w, "event") do event
-    values = event["values"]
-    insert!(values, 1, event_number)
-    push!(event_tables[event["table"]], tuple(values...))
-    flow(w, event_number)
-    event_number += 1
-  end
-  handle(w, "tick") do event
-    flow(w, event_number)
-    event_number += 1
-  end
-  flow(w, 0)
-  w
+function render(outputs, window)
+  Blink.body!(window, outputs[:window][1][1], fade=false)
 end
 
-macro Window(flow, event_tables...)
-  :(Window($(esc(flow)), Dict($([:($(string(table)) => $(esc(table))) for table in event_tables]...))))
-end
-
-function tick_every(window, interval_ms)
-  @js window setInterval(() -> Blink.msg("tick", d()), $interval_ms)
+function window(world)
+  window = Window()
+  handle(window, "event") do event
+    push!(world.inputs[symbol(event["table"])], tuple(event["values"]...))
+    refresh(world)
+  end
+  watch(world) do old_outputs, new_outputs
+    render(new_outputs, window)
+  end
+  render(world.outputs, window)
+  window
 end
 
 function hbox(nodes)
@@ -75,6 +67,6 @@ function Base.isless(n1::Hiccup.Node, n2::Hiccup.Node)
   cmp(n1, n2) == -1
 end
 
-export event, @event, Window, @Window, tick_every, hbox, vbox
+export event, @event, render, window, hbox, vbox
 
 end

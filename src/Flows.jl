@@ -44,12 +44,12 @@ function output_names(fixpoint::Fixpoint)
 end
 
 function (create::Create)(inputs::Dict{Symbol, Relation})
-  output = create.eval(map((name) -> state[name], create.input_names))
+  output = create.eval(map((name) -> state[name], create.input_names)...)
   inputs[create.output_name] = output
 end
 
 function (merge::Merge)(inputs::Dict{Symbol, Relation})
-  output = merge.eval(map((name) -> state[name], merge.input_names))
+  output = merge.eval(map((name) -> state[name], merge.input_names)...)
   inputs[merge.output_name] = merge(inputs[merge.output_name], output)
 end
 
@@ -79,7 +79,7 @@ function query_to_flow(constructor, query)
     $(escs...)
     $code
   end
-  :($constructor(return_clause.name, $(collect(input_names)), $(Expr(:quote, query)), $(Expr(:->, Expr(:tuple, input_names...), code))))
+  :($constructor($(Expr(:quote, return_clause.name)), $(collect(input_names)), $(Expr(:quote, query)), $(Expr(:->, Expr(:tuple, input_names...), code))))
 end
 
 macro create(query)
@@ -129,6 +129,6 @@ function watch(watcher, world::World)
   push!(world.watchers, watcher)
 end
 
-export Create, Merge, Sequence, Fixpoint, @create, @merge, World, watch
+export Create, Merge, Sequence, Fixpoint, @create, @merge, World, watch, setflow
 
 end

@@ -7424,3 +7424,17 @@ end
 ```
 
 I realised that with the way I have things setup currently, I can't write code like I did before that reacts to events and mutates the world state. I think this is probably a good thing. Let's see how far I can get with all mutation confined to the immediate effects of user interaction. A little like the Monolog experiment I worked on earlier this year.
+
+I got it all hooked up to UI too, so I can write things like this:
+
+``` julia
+world = World()
+
+world[:window] = Relation(([span("hello")],), 1)
+
+window(world)
+
+world[:window] = Relation(([span("world")],), 1)
+```
+
+Next up is redoing the table interface in this new style.

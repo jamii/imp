@@ -399,7 +399,7 @@ function plan_query(clauses, vars, created_vars, input_names, return_clause, out
           $body 
         end
       end
-      result
+      $result
     end
   end
 end

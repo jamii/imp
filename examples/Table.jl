@@ -8,27 +8,27 @@ using Match
 using Hiccup
 @tags button, textarea
 
-# macro exists(clause)
-#   quote 
-#     exists = @query begin 
-#       exists = true
-#       $clause
-#       return (exists::Bool,)
-#     end
-#     length(exists[1]) == 1
-#   end
-# end
-# 
-# macro not(clause)
-#   quote 
-#     exists = @query begin 
-#       exists = true
-#       $clause
-#       return (exists::Bool,)
-#     end
-#     length(exists[1]) == 0
-#   end
-# end
+macro exists(clause)
+  quote 
+    exists = @query begin 
+      exists = true
+      $clause
+      return (exists::Bool,)
+    end
+    length(exists[1]) == 1
+  end
+end
+
+macro not(clause)
+  quote 
+    exists = @query begin 
+      exists = true
+      $clause
+      return (exists::Bool,)
+    end
+    length(exists[1]) == 0
+  end
+end
 
 function render_node(value)
   Hiccup.span(string(value))
@@ -40,11 +40,17 @@ end
 
 world = World()
 
-world[:window] = Relation(([span("hello")],), 1)
+world[:window] = @relation (Hiccup.Node,)
+
+begin 
+  setflow(world, Sequence([
+    @create begin
+      return window(span("hello"))
+    end 
+  ]))
+end
 
 window(world)
-
-world[:window] = Relation(([span("world")],), 1)
 
 # function debug(relation)
 #   @relation displaying() => (Int64, String)

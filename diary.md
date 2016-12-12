@@ -7438,3 +7438,73 @@ world[:window] = Relation(([span("world")],), 1)
 ```
 
 Next up is redoing the table interface in this new style.
+
+### 2016 Dec 12
+
+Here it is:
+
+``` julia
+world = World()
+
+world[:displaying] = @relation () => String
+
+world[:cell] = @relation (Int64, Int64) => Hiccup.Node
+world[:row] = @relation (Int64,) => Hiccup.Node
+world[:tab] = @relation (String,) => Hiccup.Node
+world[:window] = @relation () => Hiccup.Node
+
+begin 
+  setflow(world, Sequence([
+    @create begin 
+      name in map(string, keys(world.outputs))
+      node = button(Dict(:onclick=>@event displaying() => name), name)
+      return tab(name) => node
+    end
+  
+    @create begin
+      displaying() => name
+      columns = world[Symbol(name)].columns
+      c in 1:length(columns)
+      column = columns[c]
+      r in 1:length(column)
+      value = column[r]
+      style = "height: 2em; flex: $(100/length(columns))%"
+      cell = Hiccup.div(Dict(:style=>style), render_value(value))
+      return cell(c, r) => cell
+    end
+    
+    @merge begin
+      displaying() => name
+      columns = world[Symbol(name)].columns
+      c in 1:length(columns)
+      column = columns[c]
+      typ = eltype(column)
+      style = "border-bottom: 1px solid #aaa; height: 2em; flex: $(100/length(columns))%"
+      node = Hiccup.div(Dict(:style=>style), string(typ))
+      return cell(c, 0) => node
+    end
+    
+    @create begin
+      cell(_, r) => _
+      @query cell(c, r) => cell_node
+      row = hbox(cell_node)
+      return row(r) => row
+    end
+  
+    @create begin
+      @query tab(name) => tab_node
+      tabs = hbox(tab_node)
+      @query row(r) => row_node
+      rows = vbox(row_node)
+      window = vbox([tabs, rows])
+      return window() => window
+    end 
+  ]))
+end
+
+window(world)
+```
+
+Live updating works nicely. 
+
+It's missing row editing, but that didn't really work properly in the previous version anyway. Next thing I need to do is figure out how to handle how to deal with user input correctly.

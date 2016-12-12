@@ -408,6 +408,6 @@ macro query(query)
   plan_query(parse_query(query)..., Set())
 end
 
-export @query
+export @query, gallop
 
 end

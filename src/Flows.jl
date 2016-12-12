@@ -44,12 +44,12 @@ function output_names(fixpoint::Fixpoint)
 end
 
 function (create::Create)(inputs::Dict{Symbol, Relation})
-  output = create.eval(map((name) -> state[name], create.input_names)...)
+  output = create.eval(map((name) -> inputs[name], create.input_names)...)
   inputs[create.output_name] = output
 end
 
 function (merge::Merge)(inputs::Dict{Symbol, Relation})
-  output = merge.eval(map((name) -> state[name], merge.input_names)...)
+  output = merge.eval(map((name) -> inputs[name], merge.input_names)...)
   inputs[merge.output_name] = merge(inputs[merge.output_name], output)
 end
 
@@ -104,8 +104,8 @@ end
 function refresh(world::World)
   old_outputs = world.outputs
   new_outputs = copy(world.inputs)
-  world.flow(new_outputs)
   world.outputs = new_outputs
+  world.flow(new_outputs)
   for watcher in world.watchers
     watcher(old_outputs, new_outputs)
   end
@@ -129,6 +129,6 @@ function watch(watcher, world::World)
   push!(world.watchers, watcher)
 end
 
-export Create, Merge, Sequence, Fixpoint, @create, @merge, World, watch, setflow
+export Create, Merge, Sequence, Fixpoint, @create, @merge, World, watch, setflow, refresh
 
 end

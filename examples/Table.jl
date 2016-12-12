@@ -40,15 +40,55 @@ end
 
 world = World()
 
-world[:window] = @relation (Hiccup.Node,)
+world[:displaying] = @relation () => String
+
+world[:tab] = @relation (String,) => Hiccup.Node
+world[:window] = @relation () => Hiccup.Node
+
+# TODO
+# dump relations in somehow
+# redo raw display
+# figure out interaction
 
 begin 
   setflow(world, Sequence([
+    @create begin 
+      name in map(string, keys(world.outputs))
+      node = button(Dict(:onclick=>@event displaying() => name), name)
+      return tab(name) => node
+    end
+    
     @create begin
-      return window(span("hello"))
+      displaying() => name
+      columns = world[symbol(name)].columns
+      c in 1:length(columns)
+      column = columns[c]
+      r in 1:length(column)
+      value = column[r]
+      style = "height: 2em; flex: $(100/length(column))%"
+      cell = Hiccup.div(Dict(:style=>style), render_node(value))
+      return cell(c, r) => cell
+    end
+    
+    @create begin
+      cell(_, r) => _
+      @query cell(c, r) => cell_node
+      row = hbox(cell_node)
+      return row(r) => row
+    end
+  
+    @create begin
+      @query tab(name) => tab_node
+      tabs = hbox(tab_node)
+      @query row(r) => row_node
+      rows = vbox(row_node)
+      window = vbox([tabs, rows])
+      return window() => window
     end 
   ]))
 end
+
+world.outputs
 
 window(world)
 

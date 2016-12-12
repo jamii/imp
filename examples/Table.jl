@@ -30,11 +30,11 @@ macro not(clause)
   end
 end
 
-function render_node(value)
+function render_value(value)
   Hiccup.span(string(value))
 end
 
-function render_node(value::Node)
+function render_value(value::Node)
   value
 end
 
@@ -42,13 +42,10 @@ world = World()
 
 world[:displaying] = @relation () => String
 
+world[:cell] = @relation (Int64, Int64) => Hiccup.Node
+world[:row] = @relation (Int64,) => Hiccup.Node
 world[:tab] = @relation (String,) => Hiccup.Node
 world[:window] = @relation () => Hiccup.Node
-
-# TODO
-# dump relations in somehow
-# redo raw display
-# figure out interaction
 
 begin 
   setflow(world, Sequence([
@@ -57,17 +54,28 @@ begin
       node = button(Dict(:onclick=>@event displaying() => name), name)
       return tab(name) => node
     end
-    
+  
     @create begin
       displaying() => name
-      columns = world[symbol(name)].columns
+      columns = world[Symbol(name)].columns
       c in 1:length(columns)
       column = columns[c]
       r in 1:length(column)
       value = column[r]
-      style = "height: 2em; flex: $(100/length(column))%"
-      cell = Hiccup.div(Dict(:style=>style), render_node(value))
+      style = "height: 2em; flex: $(100/length(columns))%"
+      cell = Hiccup.div(Dict(:style=>style), render_value(value))
       return cell(c, r) => cell
+    end
+    
+    @merge begin
+      displaying() => name
+      columns = world[Symbol(name)].columns
+      c in 1:length(columns)
+      column = columns[c]
+      typ = eltype(column)
+      style = "border-bottom: 1px solid #aaa; height: 2em; flex: $(100/length(columns))%"
+      node = Hiccup.div(Dict(:style=>style), string(typ))
+      return cell(c, 0) => node
     end
     
     @create begin
@@ -161,7 +169,7 @@ window(world)
 #       r in 1:length(column)
 #       value = column[r]
 #       style = "height: 2em; flex: $(100/length(column))%"
-#       node = Hiccup.div(Dict(:style=>style, :onclick => @event(editing() => r)), render_node(value))
+#       node = Hiccup.div(Dict(:style=>style, :onclick => @event(editing() => r)), render_value(value))
 #       return (c::Int64, r::Int64) => node::Node
 #     end
 #     

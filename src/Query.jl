@@ -180,6 +180,10 @@ function parse_query(query)
       for name in clause.input_names
         push!(input_names, name)
       end
+    elseif typeof(clause) == Return
+      if clause.name != ()
+        push!(input_names, clause.name)
+      end
     end
   end
   
@@ -240,13 +244,12 @@ function parse_query(query)
     error("Too many returns: $returns")
   end
   
-  # TODO this breaks in Flows
-  # # use types of return relation if available
-  # if return_clause.name != ()
-  #   for (ix, var) in enumerate(return_clause.vars)
-  #     return_clause.typs[ix] = :(eltype($(return_clause.name)[$ix]))
-  #   end
-  # end
+  # use types of return relation if available
+  if return_clause.name != ()
+    for (ix, var) in enumerate(return_clause.vars)
+      return_clause.typs[ix] = :(eltype($(return_clause.name)[$ix]))
+    end
+  end
   
   (clauses, vars, created_vars, input_names, return_clause)
 end
@@ -259,7 +262,9 @@ function plan_query(clauses, vars, created_vars, input_names, return_clause, out
       deleteat!(clauses, clause_ix)
       code = plan_query(clause.clauses, clause.vars, clause.created_vars, clause.input_names, clause.return_clause, created_vars)
       for (var_ix, return_var) in enumerate(clause.return_clause.vars)
-        insert!(clauses, clause_ix, Assign(return_var, :($(clause.var)[$var_ix]), [clause.var], true))
+        if !(return_var in created_vars)
+          insert!(clauses, clause_ix, Assign(return_var, :($(clause.var)[$var_ix]), [clause.var], true))
+        end
       end
       insert!(clauses, clause_ix, Assign(clause.var, code, clause.vars, false))
     end

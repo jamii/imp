@@ -55,7 +55,6 @@ end
 
 function (sequence::Sequence)(inputs::Dict{Symbol, Relation})
   for flow in sequence.flows
-    @show flow
     flow(inputs)
   end
 end
@@ -74,7 +73,6 @@ end
 
 function query_to_flow(constructor, query)
   (clauses, vars, created_vars, input_names, return_clause) = Query.parse_query(query)
-  @show clauses vars created_vars input_names return_clause
   code = Query.plan_query(clauses, vars, created_vars, input_names, return_clause, Set())
   escs = [:($(esc(input_name)) = $input_name) for input_name in input_names]
   code = quote

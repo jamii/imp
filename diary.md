@@ -7508,3 +7508,22 @@ window(world)
 Live updating works nicely. 
 
 It's missing row editing, but that didn't really work properly in the previous version anyway. Next thing I need to do is figure out how to handle how to deal with user input correctly.
+
+### 2016 Dec 17
+
+I have incremental dom patching sort-of working. The actual dom patching works, but somehow messages back to Julia are getting lost, and anything that waits on a message gets stuck eg `@js w console.log("ok")` hangs in a lock:
+
+``` julia
+InterruptException:
+ in process_events(::Bool) at ./libuv.jl:82
+ in wait() at ./event.jl:147
+ in wait(::Condition) at ./event.jl:27
+ in lock(::ReentrantLock) at ./lock.jl:74
+ in (::Atom.##65#68)(::Dict{String,Any}) at /home/jamie/.julia/v0.5/Atom/src/eval.jl:107
+ in handlemsg(::Dict{String,Any}, ::Dict{String,Any}, ::Vararg{Dict{String,Any},N}) at /home/jamie/.julia/v0.5/Atom/src/comm.jl:163
+ in (::Atom.##14#17)() at ./event.jl:68
+```
+
+Annoyingly, the network tab in electron shell doesn't seem to be able to see the websocket. I can verify in wireshark that the message is sent to the server. The event handler doesn't get called. And... that's about it. What now?
+
+Somehow I managed to figure out that the culprit was that `@js(window, morphdom(document.getElementById("main"), $html))` never returns. I don't know why. If I change it to an async call `@js_(window, morphdom(document.getElementById("main"), $html))` everything works fine. That sounds like a bug in Blink. I don't really want to dive into the networking code though, so I'm just gonna leave it and hope it doesn't happen again. That'll probably work...

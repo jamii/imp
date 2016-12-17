@@ -6,6 +6,7 @@ using Flows
 using UI
 using Match
 using Hiccup
+using Blink
 @tags button, textarea
 
 macro exists(clause)
@@ -98,7 +99,11 @@ end
 
 world.outputs
 
-window(world)
+w = window(world)
+opentools(w)
+
+# UI.render(w, world.outputs)
+# @js w console.log("ok")
 
 # function debug(relation)
 #   @relation displaying() => (Int64, String)

@@ -1,7 +1,7 @@
 module UI
 
 # Pkg.add("Blink")
-# Blink.AtomShell.install()
+# AtomShell.install()
 # Pkg.add("Hiccup")
 
 using Data
@@ -20,20 +20,24 @@ macro event(expr)
   :(event($(string(name)), [$(map(esc, keys)...), $(map(esc, vals)...)]))
 end
 
-function render(outputs, window)
-  Blink.body!(window, outputs[:window][1][1], fade=false)
+function render(window, outputs)
+  html = string(Hiccup.div("#main", outputs[:window][1][1]))
+  @js_(window, morphdom(document.getElementById("main"), $html))
 end
 
 function window(world)
   window = Window()
+  loadjs!(window, "https://unpkg.com/morphdom@2.2.1/dist/morphdom-umd.js")
+  sleep(3) # :(
   handle(window, "event") do event
     push!(world.inputs[symbol(event["table"])], tuple(event["values"]...))
     refresh(world)
   end
   watch(world) do old_outputs, new_outputs
-    render(new_outputs, window)
+    render(window, new_outputs)
   end
-  render(world.outputs, window)
+  @js window document.body.innerHTML = "<div id=\"main\"></div>"
+  render(window, world.outputs)
   window
 end
 

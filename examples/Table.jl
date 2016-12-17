@@ -42,6 +42,7 @@ end
 world = World()
 
 world[:displaying] = @relation () => String
+world[:editing] = @relation () => (String, Int64)
 
 world[:cell] = @relation (Int64, Int64) => Hiccup.Node
 world[:row] = @relation (Int64,) => Hiccup.Node
@@ -64,7 +65,18 @@ begin
       r in 1:length(column)
       value = column[r]
       style = "height: 2em; flex: $(100/length(columns))%"
-      cell = Hiccup.div(Dict(:style=>style), render_value(value))
+      cell = Hiccup.div(Dict(:style=>style, :onclick=>@event editing() => (name, r)), render_value(value))
+      return cell(c, r) => cell
+    end
+    
+    @merge begin
+      displaying() => name
+      editing() => (name, r)
+      columns = world[Symbol(name)].columns
+      c in 1:length(columns)
+      value = columns[c][r]
+      style = "height: 2em; flex: $(100/length(columns))%"
+      cell = textarea(Dict(:style=>style, :rows=>1), string(value))
       return cell(c, r) => cell
     end
     
@@ -97,11 +109,10 @@ begin
   ]))
 end
 
-world.outputs
-
 w = window(world)
-opentools(w)
 
+# world.outputs
+# opentools(w)
 # UI.render(w, world.outputs)
 # @js w console.log("ok")
 

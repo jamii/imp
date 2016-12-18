@@ -42,7 +42,7 @@ end
 world = World()
 
 world[:displaying] = @relation () => String
-world[:editing] = @relation () => (String, Int64)
+world[:editing] = @relation () => (String, Int64, Int64)
 
 world[:cell] = @relation (Int64, Int64) => Hiccup.Node
 world[:row] = @relation (Int64,) => Hiccup.Node
@@ -65,17 +65,18 @@ begin
       r in 1:length(column)
       value = column[r]
       style = "height: 2em; flex: $(100/length(columns))%"
-      cell = Hiccup.div(Dict(:style=>style, :onclick=>@event editing() => (name, r)), render_value(value))
+      cell = Hiccup.div(Dict(:style=>style, :onclick=>@event editing() => (name, c, r)), render_value(value))
       return cell(c, r) => cell
     end
     
     @merge begin
       displaying() => name
-      editing() => (name, r)
+      editing() => (name, c, r)
       columns = world[Symbol(name)].columns
-      c in 1:length(columns)
       value = columns[c][r]
       style = "height: 2em; flex: $(100/length(columns))%"
+      # row = [columns[c2][r] for c2 in 1:length(columns)]
+      # onkeyup = "values = $row; values[$c] = this.value; Blink.msg('event', {'table': 'edited', 'values': [$c, this.value]})"
       cell = textarea(Dict(:style=>style, :rows=>1), string(value))
       return cell(c, r) => cell
     end

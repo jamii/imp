@@ -9,15 +9,19 @@ using Flows
 using Blink
 using Hiccup
 
+# TODO these should definitely not be allocated globally and kept forever
+next_event_id = 0
+events = Dict{Int64, Tuple{Symbol, Tuple}}()
+
 function event(table_name, values)
-  Blink.jsexpr(quote 
-    Blink.msg("event", d(("table", $table_name), ("values", $values)))
-  end).s
+  events[next_event_id] = values
+  handler = """Blink.msg("event", {"id": $next_event_id})"""
+  next_event_id += 1
 end
 
 macro event(expr)
   (name, keys, vals) = Data.parse_relation(expr)
-  :(event($(string(name)), [$(map(esc, keys)...), $(map(esc, vals)...)]))
+  :(event($(Expr(:quote, name)), tuple($(map(esc, keys)...), $(map(esc, vals)...))))
 end
 
 function render(window, outputs)
@@ -30,7 +34,8 @@ function window(world)
   loadjs!(window, "https://unpkg.com/morphdom@2.2.1/dist/morphdom-umd.js")
   sleep(3) # :(
   handle(window, "event") do event
-    push!(world.inputs[symbol(event["table"])], tuple(event["values"]...))
+    (name, values) = events[event["id"]]
+    push!(world.inputs[name], values)
     refresh(world)
   end
   watch(world) do old_outputs, new_outputs

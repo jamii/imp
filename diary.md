@@ -7527,3 +7527,15 @@ InterruptException:
 Annoyingly, the network tab in electron shell doesn't seem to be able to see the websocket. I can verify in wireshark that the message is sent to the server. The event handler doesn't get called. And... that's about it. What now?
 
 Somehow I managed to figure out that the culprit was that `@js(window, morphdom(document.getElementById("main"), $html))` never returns. I don't know why. If I change it to an async call `@js_(window, morphdom(document.getElementById("main"), $html))` everything works fine. That sounds like a bug in Blink. I don't really want to dive into the networking code though, so I'm just gonna leave it and hope it doesn't happen again. That'll probably work...
+
+### 2016 Dec 18
+
+I found a problem with my approach to handling state. I wanted to have mutations occur only in event handlers, but the event handlers produce json and I need arbitrary Julia values. I could probably fix that by putting julia code strings in the event handler and evalling it on the server. Or I could just generate some unique id and store the events client-side. That seems more sensible. But then how do I get values out of eg textboxes?
+
+The core problem here is the asynchrony between server and the client. The client knows what the current value of the textbox is. The server knows how to interpret the value. If other mutations have happened in the meantime, the server may have forgotten what the client is currently seeing, and might wrongly interpret the event (this is the problem with naive applications of CQRS where the events are things like "user 7 clicked on button 42"). 
+
+I think it's clear that any model that allows mutation at all is still going to be subject to subtle asynchrony bugs, but I want to continue to allow it for now so that I don't have to figure out how to deal with time yet.
+
+Maybe a better option would be to remove the asynchrony by using a native gui framework. It would be far easier to write this query if I could just access the value of the textbox in the query.
+
+Maybe I should try to write a blog post on the problem to clear up my thinking.

@@ -42,7 +42,7 @@ end
 world = World()
 
 world[:displaying] = @relation () => String
-world[:editing] = @relation () => (String, Int64, Int64)
+world[:editing] = @relation () => (String, Int64, Int64, String)
 world[:edited] = @relation () => (String, Int64, Int64, String)
 world[:edit_finished] = @relation () => Bool
 
@@ -57,7 +57,7 @@ fail = []
 
 begin 
   setflow(world, Sequence([
-    @create begin 
+    @merge begin 
       edited(name, c, r, value_string)
       columns = world[Symbol(name)].columns
       row = Any[columns[c2][r] for c2 in 1:length(columns)]
@@ -66,13 +66,10 @@ begin
       @when typeof(value) <: eltype(columns[c])
       ignore1 = @show (row[c] = value)
       ignore2 = (world.outputs[Symbol(name)] = push!(world[Symbol(name)], tuple(row...)))
-      return edit_finished() => true
+      return editing() => ("", 0, 0, "")
     end
     
-    @merge begin 
-      edit_finished() => true
-      return editing() => ("", 0, 0)
-    end
+    @erase edited() => (String, Int64, Int64, String)
   
     @create begin 
       name in map(string, keys(world.outputs))
@@ -88,26 +85,24 @@ begin
       r in 1:length(column)
       value = column[r]
       style = "height: 2em; flex: $(100/length(columns))%"
-      onclick = (c > world[Symbol(name)].num_keys) ? @event(editing() => (name, c, r)) : ""
+      onclick = (c > world[Symbol(name)].num_keys) ? @event(editing() => (name, c, r, string(value))) : ""
       cell = Hiccup.div(Dict(:style=>style, :onclick=>onclick), render_value(value))
       return cell(c, r) => cell
     end
     
     @merge begin
       displaying() => name
-      editing() => (name, c, r)
+      editing() => (name, c, r, value)
       columns = world[Symbol(name)].columns
-      @when length(columns[1]) >= r
-      @query edited(name, c, r, old_edit)
-      value = length(old_edit) > 0 ? old_edit[1] : string(columns[c][r])
       style = "height: 2em; flex: $(100/length(columns))%"
       onkeydown = """
         if (event.which == 13) {
+          Blink.msg('event', {'table': 'editing', 'values': ['$name', $c, $r, this.value]}); 
           Blink.msg('event', {'table': 'edited', 'values': ['$name', $c, $r, this.value]}); 
           return false;
         }
         if (event.which == 27) {
-          Blink.msg('event', {'table': 'editing', 'values': ['', 0, 0]});
+          Blink.msg('event', {'table': 'editing', 'values': ['', 0, 0, '']});
           return false;
         } 
       """
@@ -115,8 +110,6 @@ begin
       cell = textarea(Dict(:style=>style, :rows=>1, :onkeydown=>onkeydown), value)
       return cell(c, r) => cell
     end
-    
-    @erase edited() => (String, Int64, Int64, String)
     
     @merge begin
       displaying() => name

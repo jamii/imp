@@ -88,7 +88,8 @@ begin
       r in 1:length(column)
       value = column[r]
       style = "height: 2em; flex: $(100/length(columns))%"
-      cell = Hiccup.div(Dict(:style=>style, :onclick=>@event editing() => (name, c, r)), render_value(value))
+      onclick = (c > world[Symbol(name)].num_keys) ? @event(editing() => (name, c, r)) : ""
+      cell = Hiccup.div(Dict(:style=>style, :onclick=>onclick), render_value(value))
       return cell(c, r) => cell
     end
     
@@ -123,7 +124,8 @@ begin
       c in 1:length(columns)
       column = columns[c]
       typ = eltype(column)
-      style = "border-bottom: 1px solid #aaa; height: 2em; flex: $(100/length(columns))%"
+      weight = (c > world[Symbol(name)].num_keys) ? "normal" : "bold"
+      style = "border-bottom: 1px solid #aaa; height: 2em; font-weight: $weight; flex: $(100/length(columns))%"
       node = Hiccup.div(Dict(:style=>style), string(typ))
       return cell(c, 0) => node
     end

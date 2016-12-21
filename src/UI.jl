@@ -30,6 +30,7 @@ function window(world)
   loadjs!(window, "https://unpkg.com/morphdom@2.2.1/dist/morphdom-umd.js")
   sleep(3) # :(
   handle(window, "event") do event
+    @show event
     push!(world.inputs[symbol(event["table"])], tuple(event["values"]...))
     refresh(world)
   end

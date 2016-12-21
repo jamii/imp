@@ -61,10 +61,10 @@ begin
     
     @create begin 
       edited(name, c, r, value_string)
-      value = eval(parse(value_string))
       columns = world[Symbol(name)].columns
-      @when typeof(value) <: eltype(columns[c])
       row = Any[columns[c2][r] for c2 in 1:length(columns)]
+      value = try eval(parse(value_string)) catch Exception row[c] end
+      @when typeof(value) <: eltype(columns[c])
       ignore1 = (row[c] = value)
       ignore2 = (world.outputs[Symbol(name)] = push!(world[Symbol(name)], tuple(row...)))
       impossible in []
@@ -96,8 +96,9 @@ begin
       @when length(columns[1]) >= r
       value = columns[c][r]
       style = "height: 2em; flex: $(100/length(columns))%"
+      onkeydown = "if (event.keyCode == 13) {Blink.msg('event', {'table': 'edited', 'values': ['$name', $c, $r, this.value]}); return false}"
       onblur = "Blink.msg('event', {'table': 'edited', 'values': ['$name', $c, $r, this.value]})"
-      cell = textarea(Dict(:style=>style, :rows=>1, :onblur=>onblur), string(value))
+      cell = textarea(Dict(:style=>style, :rows=>1, :onblur=>onblur, :onkeydown=>onkeydown), string(value))
       return cell(c, r) => cell
     end
     

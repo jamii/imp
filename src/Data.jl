@@ -235,7 +235,7 @@ function Base.merge!{T}(old::Relation{T}, new::Relation{T})
 end
 
 function Base.push!{T}(relation::Relation{T}, values)
-  merge!(relation, Relation(map((v) -> [v], values), relation.num_keys))
+  merge!(relation, Relation(map((i) -> eltype(relation.columns[i])[values[i]], tuple(1:length(values)...)), relation.num_keys))
 end
 
 @inline function Base.length(relation::Relation)

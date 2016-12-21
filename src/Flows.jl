@@ -90,6 +90,11 @@ macro merge(query)
   query_to_flow(Merge, query)
 end
 
+macro erase(relation)
+  (name, keys, vals) = parse_relation(relation)
+  :(Create($(Expr(:quote, name)), [], (), $(Expr(:->, (), Relation(tuple($([:(Vector{$typ}()) for typ in [keys..., vals...]]...)))))))
+end
+
 type World
   inputs::Dict{Symbol, Relation}
   flow::Flow

@@ -43,14 +43,34 @@ world = World()
 
 world[:displaying] = @relation () => String
 world[:editing] = @relation () => (String, Int64, Int64)
+world[:edited] = @relation () => (String, Int64, Int64, String)
 
 world[:cell] = @relation (Int64, Int64) => Hiccup.Node
 world[:row] = @relation (Int64,) => Hiccup.Node
 world[:tab] = @relation (String,) => Hiccup.Node
 world[:window] = @relation () => Hiccup.Node
 
+world[:test] = Relation((Int64[1,2,3], Any[4,5,6]), 1)
+
 begin 
   setflow(world, Sequence([
+    @merge begin 
+      edited(name, c, r, value_string)
+      return editing() => ("", 0, 0)
+    end
+    
+    @create begin 
+      edited(name, c, r, value_string)
+      value = eval(parse(value_string))
+      columns = world[Symbol(name)].columns
+      @when typeof(value) <: eltype(columns[c])
+      row = Any[columns[c2][r] for c2 in 1:length(columns)]
+      ignore1 = (row[c] = value)
+      ignore2 = (world.outputs[Symbol(name)] = push!(world[Symbol(name)], tuple(row...)))
+      impossible in []
+      return edited() => (name, c, r, value_string)
+    end
+  
     @create begin 
       name in map(string, keys(world.outputs))
       node = button(Dict(:onclick=>@event displaying() => name), name)
@@ -73,11 +93,11 @@ begin
       displaying() => name
       editing() => (name, c, r)
       columns = world[Symbol(name)].columns
+      @when length(columns[1]) >= r
       value = columns[c][r]
       style = "height: 2em; flex: $(100/length(columns))%"
-      # row = [columns[c2][r] for c2 in 1:length(columns)]
-      # onkeyup = "values = $row; values[$c] = this.value; Blink.msg('event', {'table': 'edited', 'values': [$c, this.value]})"
-      cell = textarea(Dict(:style=>style, :rows=>1), string(value))
+      onblur = "Blink.msg('event', {'table': 'edited', 'values': ['$name', $c, $r, this.value]})"
+      cell = textarea(Dict(:style=>style, :rows=>1, :onblur=>onblur), string(value))
       return cell(c, r) => cell
     end
     
@@ -112,8 +132,8 @@ end
 
 w = window(world)
 
-# world.outputs
-# opentools(w)
+world.outputs
+opentools(w)
 # UI.render(w, world.outputs)
 # @js w console.log("ok")
 

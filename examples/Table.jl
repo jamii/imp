@@ -44,6 +44,7 @@ world = World()
 world[:displaying] = @relation () => String
 world[:editing] = @relation () => (String, Int64, Int64)
 world[:edited] = @relation () => (String, Int64, Int64, String)
+world[:edit_finished] = @relation () => Bool
 
 world[:cell] = @relation (Int64, Int64) => Hiccup.Node
 world[:row] = @relation (Int64,) => Hiccup.Node
@@ -52,23 +53,25 @@ world[:window] = @relation () => Hiccup.Node
 
 world[:test] = Relation((Int64[1,2,3], Any[4,5,6]), 1)
 
+fail = []
+
 begin 
   setflow(world, Sequence([
-    @merge begin 
-      edited(name, c, r, value_string)
-      return editing() => ("", 0, 0)
-    end
-    
     @create begin 
       edited(name, c, r, value_string)
       columns = world[Symbol(name)].columns
       row = Any[columns[c2][r] for c2 in 1:length(columns)]
-      value = try eval(parse(value_string)) catch Exception row[c] end
+      value = try eval(parse(value_string)) catch Exception fail end
+      @when !is(value, fail)
       @when typeof(value) <: eltype(columns[c])
-      ignore1 = (row[c] = value)
+      ignore1 = @show (row[c] = value)
       ignore2 = (world.outputs[Symbol(name)] = push!(world[Symbol(name)], tuple(row...)))
-      impossible in []
-      return edited() => (name, c, r, value_string)
+      return edit_finished() => true
+    end
+    
+    @merge begin 
+      edit_finished() => true
+      return editing() => ("", 0, 0)
     end
   
     @create begin 
@@ -94,7 +97,8 @@ begin
       editing() => (name, c, r)
       columns = world[Symbol(name)].columns
       @when length(columns[1]) >= r
-      value = columns[c][r]
+      @query edited(name, c, r, old_edit)
+      value = length(old_edit) > 0 ? old_edit[1] : string(columns[c][r])
       style = "height: 2em; flex: $(100/length(columns))%"
       onkeydown = """
         if (event.which == 13) {
@@ -107,9 +111,11 @@ begin
         } 
       """
       onblur = ""
-      cell = textarea(Dict(:style=>style, :rows=>1, :onkeydown=>onkeydown), string(value))
+      cell = textarea(Dict(:style=>style, :rows=>1, :onkeydown=>onkeydown), value)
       return cell(c, r) => cell
     end
+    
+    @erase edited() => (String, Int64, Int64, String)
     
     @merge begin
       displaying() => name

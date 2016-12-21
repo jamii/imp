@@ -92,7 +92,7 @@ end
 
 macro erase(relation)
   (name, keys, vals) = parse_relation(relation)
-  :(Create($(Expr(:quote, name)), [], (), $(Expr(:->, (), Relation(tuple($([:(Vector{$typ}()) for typ in [keys..., vals...]]...)))))))
+  :(Create($(Expr(:quote, name)), [], (), $(Expr(:->, Expr(:tuple), :(Relation(tuple($([:(Vector{$typ}()) for typ in [keys..., vals...]]...)), $(length(keys))))))))
 end
 
 type World
@@ -135,6 +135,6 @@ function watch(watcher, world::World)
   push!(world.watchers, watcher)
 end
 
-export Create, Merge, Sequence, Fixpoint, @create, @merge, World, watch, setflow, refresh
+export Create, Merge, Sequence, Fixpoint, @create, @merge, @erase, World, watch, setflow, refresh
 
 end

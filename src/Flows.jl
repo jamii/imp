@@ -9,6 +9,7 @@ type Create <: Flow
   output_name::Symbol
   keys::Vector{Type}
   vals::Vector{Type}
+  replace::Bool
 end
 
 type Merge <: Flow
@@ -43,8 +44,10 @@ function output_names(fixpoint::Fixpoint)
 end
 
 function (create::Create)(inputs::Dict{Symbol, Relation})
-  output = Relation(tuple((Vector{typ}() for typ in [create.keys..., create.vals...])...), length(create.keys))
-  inputs[create.output_name] = output
+  if !haskey(inputs, create.output_name) || create.replace
+    output = Relation(tuple((Vector{typ}() for typ in [create.keys..., create.vals...])...), length(create.keys))
+    inputs[create.output_name] = output
+  end
 end
 
 function (merge::Merge)(inputs::Dict{Symbol, Relation})
@@ -70,9 +73,14 @@ function (fixpoint::Fixpoint)(inputs::Dict{Symbol, Relation})
   end
 end
 
-macro create(relation)
+macro state(relation)
   (name, keys, vals) = parse_relation(relation)
-  :(Create($(Expr(:quote, name)), [$(map(esc, keys)...)], [$(map(esc, vals)...)]))
+  :(Create($(Expr(:quote, name)), [$(map(esc, keys)...)], [$(map(esc, vals)...)], false))
+end
+
+macro fresh(relation)
+  (name, keys, vals) = parse_relation(relation)
+  :(Create($(Expr(:quote, name)), [$(map(esc, keys)...)], [$(map(esc, vals)...)], true))
 end
 
 macro merge(query)
@@ -126,6 +134,6 @@ function watch(watcher, world::World)
   push!(world.watchers, watcher)
 end
 
-export Create, Merge, Sequence, Fixpoint, @create, @merge, World, watch, setflow, refresh
+export Create, Merge, Sequence, Fixpoint, @state, @fresh, @merge, World, watch, setflow, refresh
 
 end

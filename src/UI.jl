@@ -12,6 +12,7 @@ using Hiccup
 function event(table_name, values)
   Blink.jsexpr(quote 
     Blink.msg("event", d(("table", $table_name), ("values", $values)))
+    event.stopPropagation()
   end).s
 end
 
@@ -31,7 +32,7 @@ function window(world)
   sleep(3) # :(
   handle(window, "event") do event
     @show event
-    push!(world.inputs[symbol(event["table"])], tuple(event["values"]...))
+    push!(world.inputs[Symbol(event["table"])], tuple(event["values"]...))
     refresh(world)
   end
   watch(world) do old_outputs, new_outputs

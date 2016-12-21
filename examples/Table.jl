@@ -96,9 +96,18 @@ begin
       @when length(columns[1]) >= r
       value = columns[c][r]
       style = "height: 2em; flex: $(100/length(columns))%"
-      onkeydown = "if (event.keyCode == 13) {Blink.msg('event', {'table': 'edited', 'values': ['$name', $c, $r, this.value]}); return false}"
-      onblur = "Blink.msg('event', {'table': 'edited', 'values': ['$name', $c, $r, this.value]})"
-      cell = textarea(Dict(:style=>style, :rows=>1, :onblur=>onblur, :onkeydown=>onkeydown), string(value))
+      onkeydown = """
+        if (event.which == 13) {
+          Blink.msg('event', {'table': 'edited', 'values': ['$name', $c, $r, this.value]}); 
+          return false;
+        }
+        if (event.which == 27) {
+          Blink.msg('event', {'table': 'editing', 'values': ['', 0, 0]});
+          return false;
+        } 
+      """
+      onblur = ""
+      cell = textarea(Dict(:style=>style, :rows=>1, :onkeydown=>onkeydown), string(value))
       return cell(c, r) => cell
     end
     

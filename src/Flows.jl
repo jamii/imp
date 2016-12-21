@@ -105,6 +105,7 @@ function refresh(world::World)
   old_outputs = world.outputs
   new_outputs = copy(world.inputs)
   world.outputs = new_outputs
+  world.inputs = new_outputs # TODO this is a temporary kludge, till I figure out how to handle asnyc events
   world.flow(new_outputs)
   for watcher in world.watchers
     watcher(old_outputs, new_outputs)

@@ -41,24 +41,23 @@ end
 
 world = World()
 
-world[:displaying] = @relation () => String
-world[:editing] = @relation () => (String, Int64, Int64, String)
-world[:edited] = @relation () => (String, Int64, Int64, String)
-world[:edit_finished] = @relation () => Bool
-
-world[:cell] = @relation (Int64, Int64) => Hiccup.Node
-world[:row] = @relation (Int64,) => Hiccup.Node
-world[:tab] = @relation (String,) => Hiccup.Node
-world[:window] = @relation () => Hiccup.Node
-
 world[:test] = Relation((Int64[1,2,3], Any[4,5,6]), 1)
+
+init = Sequence([
+  @create displaying() => String
+  @create editing() => (String, Int64, Int64, String)
+  @create committed() => Bool
+])
+
+init(world.inputs)
 
 fail = []
 
 begin 
   setflow(world, Sequence([
     @merge begin 
-      edited(name, c, r, value_string)
+      committed() => true
+      editing() => (name, c, r, value_string)
       columns = world[Symbol(name)].columns
       row = Any[columns[c2][r] for c2 in 1:length(columns)]
       value = try eval(parse(value_string)) catch Exception fail end
@@ -69,15 +68,19 @@ begin
       return editing() => ("", 0, 0, "")
     end
     
-    @erase edited() => (String, Int64, Int64, String)
+    @create committed() => Bool
+    
+    @create tab(String,) => Hiccup.Node
   
-    @create begin 
+    @merge begin 
       name in map(string, keys(world.outputs))
       node = button(Dict(:onclick=>@event displaying() => name), name)
       return tab(name) => node
     end
+    
+    @create cell(Int64, Int64) => Hiccup.Node
   
-    @create begin
+    @merge begin
       displaying() => name
       columns = world[Symbol(name)].columns
       c in 1:length(columns)
@@ -98,7 +101,7 @@ begin
       onkeydown = """
         if (event.which == 13) {
           Blink.msg('event', {'table': 'editing', 'values': ['$name', $c, $r, this.value]}); 
-          Blink.msg('event', {'table': 'edited', 'values': ['$name', $c, $r, this.value]}); 
+          Blink.msg('event', {'table': 'committed', 'values': [true]}); 
           return false;
         }
         if (event.which == 27) {
@@ -106,7 +109,6 @@ begin
           return false;
         } 
       """
-      onblur = ""
       cell = textarea(Dict(:style=>style, :rows=>1, :onkeydown=>onkeydown), value)
       return cell(c, r) => cell
     end
@@ -123,14 +125,18 @@ begin
       return cell(c, 0) => node
     end
     
-    @create begin
+    @create row(Int64) => Hiccup.Node
+    
+    @merge begin
       cell(_, r) => _
       @query cell(c, r) => cell_node
       row = hbox(cell_node)
       return row(r) => row
     end
+    
+    @create window() => Hiccup.Node
   
-    @create begin
+    @merge begin
       @query tab(name) => tab_node
       tabs = hbox(tab_node)
       @query row(r) => row_node

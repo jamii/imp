@@ -7,9 +7,8 @@ abstract Flow
 
 type Create <: Flow
   output_name::Symbol
-  input_names::Vector{Symbol}
-  meta::Any
-  eval::Function
+  keys::Vector{Type}
+  vals::Vector{Type}
 end
 
 type Merge <: Flow
@@ -44,7 +43,7 @@ function output_names(fixpoint::Fixpoint)
 end
 
 function (create::Create)(inputs::Dict{Symbol, Relation})
-  output = create.eval(map((name) -> inputs[name], create.input_names)...)
+  output = Relation(tuple((Vector{typ}() for typ in [create.keys..., create.vals...])...), length(create.keys))
   inputs[create.output_name] = output
 end
 
@@ -71,7 +70,12 @@ function (fixpoint::Fixpoint)(inputs::Dict{Symbol, Relation})
   end
 end
 
-function query_to_flow(constructor, query)
+macro create(relation)
+  (name, keys, vals) = parse_relation(relation)
+  :(Create($(Expr(:quote, name)), [$(map(esc, keys)...)], [$(map(esc, vals)...)]))
+end
+
+macro merge(query)
   (clauses, vars, created_vars, input_names, return_clause) = Query.parse_query(query)
   code = Query.plan_query(clauses, vars, created_vars, input_names, return_clause, Set())
   escs = [:($(esc(input_name)) = $input_name) for input_name in input_names]
@@ -79,20 +83,7 @@ function query_to_flow(constructor, query)
     $(escs...)
     $code
   end
-  :($constructor($(Expr(:quote, return_clause.name)), $(collect(input_names)), $(Expr(:quote, query)), $(Expr(:->, Expr(:tuple, input_names...), code))))
-end
-
-macro create(query)
-  query_to_flow(Create, query)
-end
-
-macro merge(query)
-  query_to_flow(Merge, query)
-end
-
-macro erase(relation)
-  (name, keys, vals) = parse_relation(relation)
-  :(Create($(Expr(:quote, name)), [], (), $(Expr(:->, Expr(:tuple), :(Relation(tuple($([:(Vector{$typ}()) for typ in [keys..., vals...]]...)), $(length(keys))))))))
+  :(Merge($(Expr(:quote, return_clause.name)), $(collect(input_names)), $(Expr(:quote, query)), $(Expr(:->, Expr(:tuple, input_names...), code))))
 end
 
 type World
@@ -135,6 +126,6 @@ function watch(watcher, world::World)
   push!(world.watchers, watcher)
 end
 
-export Create, Merge, Sequence, Fixpoint, @create, @merge, @erase, World, watch, setflow, refresh
+export Create, Merge, Sequence, Fixpoint, @create, @merge, World, watch, setflow, refresh
 
 end

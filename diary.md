@@ -7539,3 +7539,37 @@ I think it's clear that any model that allows mutation at all is still going to 
 Maybe a better option would be to remove the asynchrony by using a native gui framework. It would be far easier to write this query if I could just access the value of the textbox in the query.
 
 Maybe I should try to write a blog post on the problem to clear up my thinking.
+
+### 2016 Dec 21
+
+So I just gave up and introduced arbitrary state. I don't like it, but I don't see a way around it right now. Maybe I'll end up with something like Elm where the view and update functions are separated. 
+
+I moved all the query code into the `@merge` macro, which works like before, and created `@state` and `@fresh` macros for creating stateful and stateless tables. (`@fresh` is a shitty name but `@view` is already taken in Julia. Maybe `@stateful` and `@transient`?)
+
+With those I now have pretty decent editing working, but I'm having to splice in javascript to get the most recent state out of the textbox. 
+
+``` julia 
+@merge begin
+  displaying() => name
+  editing() => (name, c, r, value)
+  columns = world[Symbol(name)].columns
+  style = "height: 2em; flex: $(100/length(columns))%"
+  onkeydown = """
+    if (event.which == 13) {
+      Blink.msg('event', {'table': 'editing', 'values': ['$name', $c, $r, this.value]}); 
+      Blink.msg('event', {'table': 'committed', 'values': [true]}); 
+      return false;
+    }
+    if (event.which == 27) {
+      Blink.msg('event', {'table': 'editing', 'values': ['', 0, 0, '']});
+      return false;
+    } 
+  """
+  cell = textarea(Dict(:style=>style, :rows=>1, :onkeydown=>onkeydown), value)
+  return cell(c, r) => cell
+end
+```
+
+There's a similar problem in the other direction where if anything causes the flow to refresh, the textbox gets reset. 
+
+Both problems are caused by the fact that I don't have synchronous access to the dom, so the model and the view can get out of sync. I could get synchronous access either by porting Imp to js or by using a native toolkit. Or I could figure out a way to deal with asynchronous access.

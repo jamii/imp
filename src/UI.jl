@@ -21,8 +21,8 @@ macro event(expr)
   :(event($(string(name)), [$(map(esc, keys)...), $(map(esc, vals)...)]))
 end
 
-function render(window, outputs)
-  html = string(Hiccup.div("#main", outputs[:window][1][1]))
+function render(window, state)
+  html = string(Hiccup.div("#main", state[:window][1][1]))
   @js_(window, morphdom(document.getElementById("main"), $html))
 end
 
@@ -32,14 +32,13 @@ function window(world)
   sleep(3) # :(
   handle(window, "event") do event
     @show event
-    push!(world.inputs[Symbol(event["table"])], tuple(event["values"]...))
-    refresh(world)
+    refresh(world, Symbol(event["table"]), tuple(event["values"]...))
   end
-  watch(world) do old_outputs, new_outputs
-    render(window, new_outputs)
+  watch(world) do old_state, new_state
+    render(window, new_state)
   end
   @js window document.body.innerHTML = "<div id=\"main\"></div>"
-  render(window, world.outputs)
+  render(window, world.state)
   window
 end
 

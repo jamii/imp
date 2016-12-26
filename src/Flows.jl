@@ -9,7 +9,7 @@ type Create <: Flow
   output_name::Symbol
   keys::Vector{Type}
   vals::Vector{Type}
-  replace::Bool
+  transient::Bool
 end
 
 type Merge <: Flow
@@ -25,6 +25,13 @@ end
 
 type Fixpoint <: Flow
   flow::Flow
+end
+
+type World
+  state::Dict{Symbol, Relation}
+  transients::Set{Symbol}
+  flow::Flow
+  watchers::Set{Any}
 end
 
 function output_names(create::Create)
@@ -43,42 +50,45 @@ function output_names(fixpoint::Fixpoint)
   output_names(fixpoint.flow)
 end
 
-function (create::Create)(inputs::Dict{Symbol, Relation})
-  if !haskey(inputs, create.output_name) || create.replace
+function (create::Create)(world::World)
+  if !haskey(world.state, create.output_name) 
     output = Relation(tuple((Vector{typ}() for typ in [create.keys..., create.vals...])...), length(create.keys))
-    inputs[create.output_name] = output
+    world.state[create.output_name] = output
+    if create.transient 
+      push!(world.transients, create.output_name)
+    end
   end
 end
 
-function (merge::Merge)(inputs::Dict{Symbol, Relation})
-  output = merge.eval(map((name) -> inputs[name], merge.input_names)...)
-  inputs[merge.output_name] = Base.merge(inputs[merge.output_name], output)
+function (merge::Merge)(world::World)
+  output = merge.eval(map((name) -> world.state[name], merge.input_names)...)
+  world.state[merge.output_name] = Base.merge(world.state[merge.output_name], output)
 end
 
-function (sequence::Sequence)(inputs::Dict{Symbol, Relation})
+function (sequence::Sequence)(world::World)
   for flow in sequence.flows
-    flow(inputs)
+    flow(world)
   end
 end
 
-function (fixpoint::Fixpoint)(inputs::Dict{Symbol, Relation})
+function (fixpoint::Fixpoint)(world::World)
   names = output_names(fixpoint.flow)
   while true
-    old_values = map((name) -> inputs[name], names)
-    fixpoint.flow(inputs)
-    new_values = map((name) -> inputs[name], names)
+    old_values = map((name) -> world.state[name], names)
+    fixpoint.flow(world)
+    new_values = map((name) -> world.state[name], names)
     if old_values == new_values
       return
     end
   end
 end
 
-macro state(relation)
+macro stateful(relation)
   (name, keys, vals) = parse_relation(relation)
   :(Create($(Expr(:quote, name)), [$(map(esc, keys)...)], [$(map(esc, vals)...)], false))
 end
 
-macro fresh(relation)
+macro transient(relation)
   (name, keys, vals) = parse_relation(relation)
   :(Create($(Expr(:quote, name)), [$(map(esc, keys)...)], [$(map(esc, vals)...)], true))
 end
@@ -94,34 +104,39 @@ macro merge(query)
   :(Merge($(Expr(:quote, return_clause.name)), $(collect(input_names)), $(Expr(:quote, query)), $(Expr(:->, Expr(:tuple, input_names...), code))))
 end
 
-type World
-  inputs::Dict{Symbol, Relation}
-  flow::Flow
-  outputs::Dict{Symbol, Relation}
-  watchers::Set{Any}
-end
-
 function World()
-  World(Dict{Symbol, Relation}(), Sequence([]), Dict{Symbol, Relation}(), Set{Any}())
+  World(Dict{Symbol, Relation}(), Set{Symbol}(), Sequence([]), Set{Any}())
 end
 
 function refresh(world::World)
-  old_outputs = world.outputs
-  new_outputs = copy(world.inputs)
-  world.outputs = new_outputs
-  world.inputs = new_outputs # TODO this is a temporary kludge, till I figure out how to handle asnyc events
-  world.flow(new_outputs)
+  old_state = copy(world.state)
+  for transient in world.transients
+    world.state[transient] = empty(world.state[transient])
+  end
+  world.flow(world)
   for watcher in world.watchers
-    watcher(old_outputs, new_outputs)
+    watcher(old_state, world.state)
+  end
+end
+
+function refresh(world::World, event_table::Symbol, event_row::Tuple)
+  old_state = copy(world.state)
+  for transient in world.transients
+    world.state[transient] = empty(world.state[transient])
+  end
+  push!(world.state[event_table], event_row)
+  world.flow(world)
+  for watcher in world.watchers
+    watcher(old_state, world.state)
   end
 end
 
 function Base.getindex(world::World, name::Symbol)
-  world.outputs[name]
+  world.state[name]
 end
 
-function Base.setindex!{R <: Relation}(world::World, input::R, name::Symbol)
-  world.inputs[name] = input
+function Base.setindex!{R <: Relation}(world::World, relation::R, name::Symbol)
+  world.state[name] = relation
   refresh(world)
 end
 
@@ -134,6 +149,6 @@ function watch(watcher, world::World)
   push!(world.watchers, watcher)
 end
 
-export Create, Merge, Sequence, Fixpoint, @state, @fresh, @merge, World, watch, setflow, refresh
+export Create, Merge, Sequence, Fixpoint, @stateful, @transient, @merge, World, watch, setflow, refresh
 
 end

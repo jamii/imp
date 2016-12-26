@@ -246,7 +246,11 @@ end
   relation.columns[ix]
 end
 
-export Relation, @relation, index, project, parse_relation
+function empty(relation::Relation) 
+  Relation(map((c) -> Vector{eltype(c)}(), relation.columns), relation.num_keys)
+end
+
+export Relation, @relation, index, project, parse_relation, empty
 
 function test()
   for i in 1:10000

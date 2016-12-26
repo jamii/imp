@@ -47,9 +47,9 @@ fail = []
 
 begin 
   setflow(world, Sequence([
-    @state displaying() => String
-    @state editing() => (String, Int64, Int64, String)
-    @state committed() => Bool
+    @stateful displaying() => String
+    @stateful editing() => (String, Int64, Int64, String)
+    @transient committed() => Bool
   
     @merge begin 
       committed() => true
@@ -60,21 +60,19 @@ begin
       @when !is(value, fail)
       @when typeof(value) <: eltype(columns[c])
       ignore1 = @show (row[c] = value)
-      ignore2 = (world.outputs[Symbol(name)] = push!(world[Symbol(name)], tuple(row...)))
+      ignore2 = (world.state[Symbol(name)] = push!(world[Symbol(name)], tuple(row...)))
       return editing() => ("", 0, 0, "")
     end
     
-    @fresh committed() => Bool
-    
-    @fresh tab(String,) => Hiccup.Node
+    @transient tab(String,) => Hiccup.Node
   
     @merge begin 
-      name in map(string, keys(world.outputs))
+      name in map(string, keys(world.state))
       node = button(Dict(:onclick=>@event displaying() => name), name)
       return tab(name) => node
     end
     
-    @fresh cell(Int64, Int64) => Hiccup.Node
+    @transient cell(Int64, Int64) => Hiccup.Node
   
     @merge begin
       displaying() => name
@@ -121,7 +119,7 @@ begin
       return cell(c, 0) => node
     end
     
-    @fresh row(Int64) => Hiccup.Node
+    @transient row(Int64) => Hiccup.Node
     
     @merge begin
       cell(_, r) => _
@@ -130,7 +128,7 @@ begin
       return row(r) => row
     end
     
-    @fresh window() => Hiccup.Node
+    @transient window() => Hiccup.Node
   
     @merge begin
       @query tab(name) => tab_node
@@ -145,9 +143,9 @@ end
 
 w = window(world)
 
-world.outputs
+world.state
 opentools(w)
-# UI.render(w, world.outputs)
+# UI.render(w, world.state)
 # @js w console.log("ok")
 
 

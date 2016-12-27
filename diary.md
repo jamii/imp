@@ -7573,3 +7573,160 @@ end
 There's a similar problem in the other direction where if anything causes the flow to refresh, the textbox gets reset. 
 
 Both problems are caused by the fact that I don't have synchronous access to the dom, so the model and the view can get out of sync. I could get synchronous access either by porting Imp to js or by using a native toolkit. Or I could figure out a way to deal with asynchronous access.
+
+### 2016 Dec 26
+
+The UI-as-a-value-embedded-in-the-debugger thing I was pushing for was interesting but a) it caused major problems with not having a vdom <-> dom bijection and b) when pressed I couldn't come up with any actual usecases that weren't just buttons. So let's scrap it and go with the flat relational representation that we used in Eve since way back in early 2014. 
+
+Every DOM node gets a unique id:
+
+``` julia
+# typealias Id UInt
+
+# macro id(args...)
+#   h = :(zero(UInt))
+#   for arg in args
+#     h = :(hash($(esc(arg)), $h))
+#   end
+#   h
+# end
+
+# root = UInt(0)
+
+typealias Id String
+
+macro id(args...)
+  :(join([$(map(esc,args)...)], "-"))
+end
+
+root = "root"
+```
+
+I haven't implemented multiple returns yet so I'll just mush everything important into one table:
+
+``` julia
+# (id) => (parent, ix, kind, class, text)
+pre = @transient node(Id) => (Id, Int64, String, String, String)
+```
+
+The main program fills lots of stuff into that table, and then the UI lib sorts it by depth and sends it to the frontend:
+
+``` julia
+post = Sequence([
+  # (level, parent, ix, id, kind, class, text)
+  @transient sorted_node(Int64, Id, Int64, Id, String, String, String)
+
+  @merge begin
+    root = UI.root
+    node(id) => (root, ix, kind, class, text)
+    return sorted_node(1, root, ix, id, kind, class, text)
+  end
+  
+  Fixpoint(
+    @merge begin
+      sorted_node(level, _, _, parent, _, _, _)
+      node(id) => (parent, ix, kind, class, text)
+      return sorted_node(level+1, parent, ix, id, kind, class, text)
+    end
+  )
+])
+
+function render(window, state)
+  (_, id, parent, ix, kind, class, text) = state[:sorted_node].columns
+  @js(window, render($id, $parent, $ix, $kind, $class, $text))
+end
+```
+
+Then the frontend erases the old DOM and builds a new one from scratch:
+
+``` js
+function render(parent, ix, id, kind, className, textContent) {
+    document.getElementById("root").innerHTML = "";
+    for (var i = 0; i < parent.length; i++) {
+        node = document.createElement(kind[i]);
+        node.id = id[i];
+        node.className = className[i];
+        node.textContent = textContent[i];
+        document.getElementById(parent[i]).appendChild(node);
+    }
+}
+```
+
+The next thing I have to do is make this incremental. It's not too hard - just diff the new sorted_nodes table against the old and then do deletions before insertions. 
+
+I've ported the readonly parts of the table interface to this model:
+
+``` julia
+@merge begin
+  root = UI.root
+  return node(@id(:top)) => (root, 1, "div", "vbox", "")
+end
+
+@merge begin
+  return node(@id(:tabs)) => (@id(:top), 1, "div", "hbox", "")
+end
+
+@merge begin 
+  ix_name in enumerate(keys(world.state))
+  ix = ix_name[1]
+  name = ix_name[2]
+  return node(@id(:tabs, ix)) => (@id(:tabs), ix, "button", "", string(name))
+end
+
+@merge begin
+  return node(@id(:cells)) => (@id(:top), 2, "div", "vbox", "")
+end
+
+@merge begin
+  displaying() => name
+  columns = world[Symbol(name)].columns
+  r in 0:length(columns[1])
+  return node(@id(:cells, r)) => (@id(:cells), r, "div", "hbox", "")
+end
+
+@merge begin
+  displaying() => name
+  columns = world[Symbol(name)].columns
+  c in 1:length(columns)
+  column = columns[c]
+  r in 1:length(column)
+  value = column[r]
+  # style = "height: 2em; flex: $(100/length(columns))%"
+  # onclick = (c > world[Symbol(name)].num_keys) ? @event(editing() => (name, c, r, string(value))) : ""
+  return node(@id(:cells, r, c)) => (@id(:cells, r), c, "div", "flex1", string(value))
+end
+
+@merge begin
+  displaying() => name
+  editing() => (name, c, r, value)
+  columns = world[Symbol(name)].columns
+  # style = "height: 2em; flex: $(100/length(columns))%"
+  # onkeydown = """
+  #   if (event.which == 13) {
+  #     Blink.msg('event', {'table': 'editing', 'values': ['$name', $c, $r, this.value]}); 
+  #     Blink.msg('event', {'table': 'committed', 'values': [true]}); 
+  #     return false;
+  #   }
+  #   if (event.which == 27) {
+  #     Blink.msg('event', {'table': 'editing', 'values': ['', 0, 0, '']});
+  #     return false;
+  #   } 
+  # """
+  # cell = textarea(Dict(:style=>style, :rows=>1, :onkeydown=>onkeydown), value)
+  return node(@id(:cells, r, c)) => (@id(:cells, r), c, "textarea", "flex1", string(value))
+end
+
+@merge begin
+  displaying() => name
+  columns = world[Symbol(name)].columns
+  c in 1:length(columns)
+  column = columns[c]
+  typ = eltype(column)
+  # weight = (c > world[Symbol(name)].num_keys) ? "normal" : "bold"
+  # style = "border-bottom: 1px solid #aaa; height: 2em; font-weight: $weight; flex: $(100/length(columns))%"
+  # node = Hiccup.div(Dict(:style=>style), string(typ))
+  return node(@id(:cells, 0, c)) => (@id(:cells, 0), c, "div", "flex1", string(typ))
+end
+```
+
+I haven't hooked up events yet so that's all commented out for now. I'll need to create some way of unpacking ids to get the useful data back out.

@@ -77,7 +77,6 @@ function (fixpoint::Fixpoint)(world::World)
     old_values = map((name) -> world.state[name].columns, names)
     fixpoint.flow(world)
     new_values = map((name) -> world.state[name].columns, names)
-    @show new_values
     if old_values == new_values
       return
     end

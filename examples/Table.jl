@@ -7,28 +7,6 @@ using UI
 using Match
 using Blink
 
-macro exists(clause)
-  quote 
-    exists = @query begin 
-      exists = true
-      $clause
-      return (exists::Bool,)
-    end
-    length(exists[1]) == 1
-  end
-end
-
-macro not(clause)
-  quote 
-    exists = @query begin 
-      exists = true
-      $clause
-      return (exists::Bool,)
-    end
-    length(exists[1]) == 0
-  end
-end
-
 world = World()
 
 world[:test] = Relation((Int64[1,2,3], Any[4,5,6]), 1)
@@ -68,7 +46,7 @@ begin
     end
     
     @merge begin 
-      ix_name in enumerate(keys(world.state))
+      ix_name in enumerate(sort(collect(keys(world.state))))
       ix = ix_name[1]
       name = ix_name[2]
       return node(@id(:tabs, ix)) => (@id(:tabs), ix, "button", "", string(name))
@@ -137,7 +115,7 @@ w = window(world)
 
 world.state
 # opentools(w)
-UI.render(w, world.state)
+# UI.render(w, world.state)
 load!(w, "src/Imp.js")
 load!(w, "src/Imp.css")
 # @js w console.log("ok")

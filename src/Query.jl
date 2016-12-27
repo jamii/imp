@@ -413,6 +413,28 @@ macro query(query)
   plan_query(parse_query(query)..., Set())
 end
 
-export @query, gallop
+macro exists(clause)
+  quote 
+    exists = @query begin 
+      exists = true
+      $clause
+      return (exists::Bool,)
+    end
+    length(exists[1]) == 1
+  end
+end
+
+macro not(clause)
+  quote 
+    exists = @query begin 
+      exists = true
+      $clause
+      return (exists::Bool,)
+    end
+    length(exists[1]) == 0
+  end
+end
+
+export gallop, @query, @exists, @not
 
 end

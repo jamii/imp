@@ -5,6 +5,7 @@ module UI
 # Pkg.add("Hiccup")
 
 using Data
+using Query
 using Flows
 using Blink
 
@@ -50,9 +51,16 @@ post = Sequence([
   )
 ])
 
+function render(window, old_state, new_state)
+  (removed, inserted) = Data.diff(old_state[:sorted_node], new_state[:sorted_node])
+  (_, _, _, removed_id, _, _, _) = removed
+  (_, parent, ix, id, kind, class, text) = inserted
+  @js(window, render($removed_id, $parent, $ix, $id, $kind, $class, $text))
+end
+
 function render(window, state)
   (_, id, parent, ix, kind, class, text) = state[:sorted_node].columns
-  @js(window, render($id, $parent, $ix, $kind, $class, $text))
+  @js(window, render($([]), $id, $parent, $ix, $kind, $class, $text))
 end
 
 function window(world)
@@ -66,7 +74,7 @@ function window(world)
     refresh(world, Symbol(event["table"]), tuple(event["values"]...))
   end
   watch(world) do old_state, new_state
-    render(window, new_state)
+    render(window, old_state, new_state)
   end
   innerHTML = "<div id=\"$root\"></div>"
   @js(window, document.body.innerHTML = $innerHTML)

@@ -7730,3 +7730,104 @@ end
 ```
 
 I haven't hooked up events yet so that's all commented out for now. I'll need to create some way of unpacking ids to get the useful data back out.
+
+### 2016 Dec 27
+
+DOM patching seems to be working. The implementation is pretty simple. The server does a little more work than before to compute diffs between old and new node tables:
+
+``` julia
+post = Sequence([
+  # (level, parent, ix, id, kind, class, text)
+  @transient sorted_node(Int64, Id, Int64, Id, String)
+
+  @merge begin
+    root = UI.root
+    node(id) => (root, ix, kind, _, _)
+    return sorted_node(1, root, ix, id, kind)
+  end
+  
+  Fixpoint(
+    @merge begin
+      sorted_node(level, _, _, parent, _,)
+      node(id) => (parent, ix, kind, _, _)
+      return sorted_node(level+1, parent, ix, id, kind)
+    end
+  )
+  
+  @transient class(Id, String)
+  
+  @merge begin
+    node(id) => (_, _, _, class, _)
+    return class(id, class)
+  end
+  
+  @transient text(Id, String)
+  
+  @merge begin
+    node(id) => (_, _, _, _, text)
+    return text(id, text)
+  end
+])
+
+function render(window, old_state, new_state)
+  (removed, inserted) = Data.diff(old_state[:sorted_node], new_state[:sorted_node])
+  (_, _, _, removed_id, _) = removed
+  (_, parent, ix, id, kind) = inserted
+  (_, (class_id, class)) = Data.diff(old_state[:class], new_state[:class])
+  (_, (text_id, text)) = Data.diff(old_state[:text], new_state[:text])
+  @js(window, render($removed_id, $parent, $ix, $id, $kind, $class_id, $class, $text_id, $text))
+end
+
+function render(window, state)
+  (_, parent, ix, id, kind) = state[:sorted_node].columns
+  (class_id, class) = state[:class].columns
+  (text_id, text) = state[:text].columns
+  @js(window, render($([]), $parent, $ix, $id, $kind, $class_id, $class, $text_id, $text))
+end
+```
+
+Then the client just rolls through and applies the diffs:
+
+``` js
+function render(removed, parent, ix, id, kind, classNameId, className, textContentId, textContent) {
+    trash = document.createElement(kind[i]);
+    document.getElementById("root").appendChild(trash);
+    
+    for (var i = removed.length - 1; i >= 0; i--) {
+        node = document.getElementById(removed[i]);
+        trash.appendChild(node);
+    }
+    
+    for (var i = 0; i < parent.length; i++) {
+        node = document.getElementById(id[i]);
+        if (node == null) {
+            node = document.createElement(kind[i]);
+        } else if (node.tagName != kind[i].toUpperCase()) {
+            oldNode = node
+            node = document.createElement(kind[i]);
+            while (oldNode.hasChildNodes()) {
+                node.appendChild(oldNode.firstChild);
+            }
+        }
+        node.id = id[i];
+        parentNode = document.getElementById(parent[i])
+        parentNode.insertBefore(node, parentNode.children[ix[i]]);
+    }
+    
+    for (var i = 0; i < classNameId.length; i++) {
+        node = document.getElementById(classNameId[i]);
+        node.className = className[i];
+    }
+    
+    for (var i = 0; i < textContentId.length; i++) {
+        node = document.getElementById(textContentId[i]);
+        if (node.children.length == 0) {
+            node.textContent = textContent[i];
+        }
+    }
+    
+    trash.remove();
+}
+```
+
+I make a trash node so that I don't have to distinguish between nodes being removed and nodes being moved - anything that changes at all gets put in the trash where it can be found by the insert loop later.

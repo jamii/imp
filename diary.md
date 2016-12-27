@@ -7880,3 +7880,28 @@ function window(world)
   ...
 end
 ```
+
+Had to fix a bug in the relation diff.
+
+Also fixed a couple of missed cases in the client render function:
+
+``` js
+    for (var i = 0; i < parent.length; i++) {
+        node = document.getElementById(id[i]);
+        if (node == null) {
+            node = document.createElement(tagName[i]);
+        } else if (node.tagName != tagName[i].toUpperCase()) {
+            oldNode = node
+            node = document.createElement(tagName[i]);
+            node.className = oldNode.className;
+            while (oldNode.hasChildNodes()) {
+                node.appendChild(oldNode.firstChild);
+            }
+            node.onclick = oldNode.onclick;
+            node.onkeydown = oldNode.onkeydown;
+        }
+        node.id = id[i];
+        parentNode = document.getElementById(parent[i])
+        parentNode.insertBefore(node, parentNode.children[ix[i]-1]);
+    }
+```

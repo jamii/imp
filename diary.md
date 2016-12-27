@@ -7849,3 +7849,34 @@ I can't figure out how to do event handlers nicely without multiple returns, so 
   return text(@id(:cells, r, c)) => string(value)
 end
 ```
+
+I'm again running into problems with Blink getting blocked on a non-empty queue. Plagued me for half an hour and then went away again. Going to be tricky to fix if I can't reliably repro.
+
+Got some basic event handlers up, but I'm running into the same old async problem. Eg if I get a click event for "tabs-1", how do I know if it means the current "tabs-1" or one from a previous frame. If I'm not going to switch to a synchronous UI framework then I have to make the events carry semantically meaningful data, which means passing more data back and forth over the wire.
+
+For the moment I'm just ignoring that problem, and I've got the whole table interface otherwise working again.
+
+Blink is blocking again! Why? Damned Heisenbug!
+
+I've also added some watchers for the non-Julia files so that I can iterate quickly. It's the first time I've directly interacted with Julias concurrency primitives. It was pleasantly straightforward.
+
+``` julia
+function watch_and_load(window, file)
+  load!(window, file)
+  @schedule begin
+    (waits, _) = open(`inotifywait -m $file`)
+    while true
+      readline(waits)
+      load!(window, file)
+    end
+  end
+end
+
+function window(world)
+  window = Window()
+  opentools(window)
+  watch_and_load(window, "src/Imp.js")
+  watch_and_load(window, "src/Imp.css")
+  ...
+end
+```

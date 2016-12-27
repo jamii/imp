@@ -9,7 +9,7 @@ using Blink
 
 world = World()
 
-world[:test] = Relation((Int64[1,2,3], Any[4,5,6]), 1)
+world[:test] = Relation((Int64[1,2,3], Any[4,5,6], String["a","b","c"]), 1)
 
 fail = []
 
@@ -66,6 +66,7 @@ begin
       ix = ix_name[1]
       name = ix_name[2]
       return node(@id(:tabs, ix)) => (@id(:tabs), ix, "button")
+      return class(@id(:tabs, ix)) => "tab"
       return text(@id(:tabs, ix)) => string(name)
       return tab(@id(:tabs, ix)) => string(name)
       return onclick(@id(:tabs, ix))
@@ -108,7 +109,7 @@ begin
       displaying() => name
       editing() => (name, r, c, value)
       columns = world[Symbol(name)].columns
-      return node(@id(:cells, r, c)) => (@id(:cells, r), c, "textarea")
+      return node(@id(:cells, r, c)) => (@id(:cells, r), c, "input")
       return class(@id(:cells, r, c)) => "flex1 row"
       return text(@id(:cells, r, c)) => string(value)
       return cell(@id(:cells, r, c)) => (r, c, string(value))
@@ -121,7 +122,7 @@ begin
       c in 1:length(columns)
       column = columns[c]
       typ = eltype(column)
-      class = (c > world[Symbol(name)].num_keys) ? "flex1 row key" : "flex1 row val"
+      class = (c <= world[Symbol(name)].num_keys) ? "flex1 row key" : "flex1 row val"
       return node(@id(:cells, 0, c)) => (@id(:cells, 0), c, "div")
       return class(@id(:cells, 0, c)) => class
       return text(@id(:cells, 0, c)) => string(typ)

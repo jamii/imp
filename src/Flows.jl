@@ -13,7 +13,7 @@ type Create <: Flow
 end
 
 type Merge <: Flow
-  output_name::Symbol
+  output_names::Vector{Symbol}
   input_names::Vector{Symbol}
   meta::Any
   eval::Function
@@ -39,7 +39,7 @@ function output_names(create::Create)
 end
 
 function output_names(merge::Merge)
-  Set([merge.output_name])
+  Set(merge.output_names)
 end
 
 function output_names(sequence::Sequence)
@@ -61,12 +61,15 @@ function (create::Create)(world::World)
 end
 
 function (merge::Merge)(world::World)
-  output = merge.eval(map((name) -> world.state[name], merge.input_names)...)
-  world.state[merge.output_name] = Base.merge(world.state[merge.output_name], output)
+  outputs = merge.eval(map((name) -> world.state[name], merge.input_names)...)
+  for (output_name, output) in zip(merge.output_names, outputs)
+    world.state[output_name] = Base.merge(world.state[output_name], output)
+  end
 end
 
 function (sequence::Sequence)(world::World)
   for flow in sequence.flows
+    @show flow
     flow(world)
   end
 end
@@ -94,14 +97,14 @@ macro transient(relation)
 end
 
 macro merge(query)
-  (clauses, vars, created_vars, input_names, return_clause) = Query.parse_query(query)
-  code = Query.plan_query(clauses, vars, created_vars, input_names, return_clause, Set())
+  (clauses, vars, created_vars, input_names, return_clauses) = Query.parse_query(query)
+  code = Query.plan_query(clauses, vars, created_vars, input_names, return_clauses, Set())
   escs = [:($(esc(input_name)) = $input_name) for input_name in input_names]
   code = quote
     $(escs...)
     $code
   end
-  :(Merge($(Expr(:quote, return_clause.name)), $(collect(input_names)), $(Expr(:quote, query)), $(Expr(:->, Expr(:tuple, input_names...), code))))
+  :(Merge($([return_clause.name for return_clause in return_clauses]), $(collect(input_names)), $(Expr(:quote, query)), $(Expr(:->, Expr(:tuple, input_names...), code))))
 end
 
 function World()

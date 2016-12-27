@@ -38,29 +38,34 @@ begin
     
     @merge begin
       root = UI.root
-      return node(@id(:top)) => (root, 1, "div", "vbox", "")
+      return node(@id(:top)) => (root, 1, "div")
+      return class(@id(:top)) => "vbox"
     end
     
     @merge begin
-      return node(@id(:tabs)) => (@id(:top), 1, "div", "hbox", "")
+      return node(@id(:tabs)) => (@id(:top), 1, "div")
+      return class(@id(:tabs)) => "hbox"
     end
     
     @merge begin 
       ix_name in enumerate(sort(collect(keys(world.state))))
       ix = ix_name[1]
       name = ix_name[2]
-      return node(@id(:tabs, ix)) => (@id(:tabs), ix, "button", "", string(name))
+      return node(@id(:tabs, ix)) => (@id(:tabs), ix, "button")
+      return text(@id(:tabs, ix)) => string(name)
     end
     
     @merge begin
-      return node(@id(:cells)) => (@id(:top), 2, "div", "vbox", "")
+      return node(@id(:cells)) => (@id(:top), 2, "div")
+      return class(@id(:cells)) => "vbox"
     end
     
     @merge begin
       displaying() => name
       columns = world[Symbol(name)].columns
       r in 0:length(columns[1])
-      return node(@id(:cells, r)) => (@id(:cells), r, "div", "hbox", "")
+      return node(@id(:cells, r)) => (@id(:cells), r, "div")
+      return class(@id(:cells, r)) => "hbox"
     end
     
     @merge begin
@@ -72,7 +77,9 @@ begin
       value = column[r]
       # style = "height: 2em; flex: $(100/length(columns))%"
       # onclick = (c > world[Symbol(name)].num_keys) ? @event(editing() => (name, c, r, string(value))) : ""
-      return node(@id(:cells, r, c)) => (@id(:cells, r), c, "div", "flex1", string(value))
+      return node(@id(:cells, r, c)) => (@id(:cells, r), c, "div")
+      return class(@id(:cells, r, c)) => "flex1"
+      return text(@id(:cells, r, c)) => string(value)
     end
     
     @merge begin
@@ -92,7 +99,9 @@ begin
       #   } 
       # """
       # cell = textarea(Dict(:style=>style, :rows=>1, :onkeydown=>onkeydown), value)
-      return node(@id(:cells, r, c)) => (@id(:cells, r), c, "textarea", "flex1", string(value))
+      return node(@id(:cells, r, c)) => (@id(:cells, r), c, "textarea")
+      return class(@id(:cells, r, c)) => "flex1"
+      return text(@id(:cells, r, c)) => string(value)
     end
     
     @merge begin
@@ -104,7 +113,9 @@ begin
       # weight = (c > world[Symbol(name)].num_keys) ? "normal" : "bold"
       # style = "border-bottom: 1px solid #aaa; height: 2em; font-weight: $weight; flex: $(100/length(columns))%"
       # node = Hiccup.div(Dict(:style=>style), string(typ))
-      return node(@id(:cells, 0, c)) => (@id(:cells, 0), c, "div", "flex1", string(typ))
+      return node(@id(:cells, 0, c)) => (@id(:cells, 0), c, "div")
+      return class(@id(:cells, 0, c)) => "flex1"
+      return text(@id(:cells, 0, c)) => string(typ)
     end
     
     UI.post

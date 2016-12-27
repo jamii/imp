@@ -107,7 +107,7 @@ type Assign; var; expr; vars; escape end
 type In; var; expr; vars; end
 type Hint; vars; end
 type Return; name; vars; typs; num_keys; end  
-type SubQuery; query; var; clauses; vars; created_vars; input_names; return_clause; end
+type SubQuery; query; var; clauses; vars; created_vars; input_names; return_clauses; end
 
 function parse_query(query)
   # unwrap block
@@ -151,7 +151,7 @@ function parse_query(query)
     end
   end
   
-  # rewrite expressions nested in Row
+  # rewrite expressions nested in Row or Return
   old_clauses = clauses
   clauses = []
   for clause in old_clauses
@@ -235,35 +235,34 @@ function parse_query(query)
   vars = unique((var for var in mentioned_vars if (var in created_vars) || (var in subcreated_vars)))
   
   # add a return if needed
-  returns = [clause for clause in clauses if typeof(clause) == Return]
-  if length(returns) == 0
-    return_clause = Return((), vars, [:Any for _ in vars], length(vars))
-  elseif length(returns) == 1
-    return_clause = returns[1]
-  else
-    error("Too many returns: $returns")
+  return_clauses = [clause for clause in clauses if typeof(clause) == Return]
+  if length(return_clauses) == 0
+    push!(return_clauses, Return((), vars, [:Any for _ in vars], length(vars)))
   end
   
   # use types of return relation if available
-  if return_clause.name != ()
-    for (ix, var) in enumerate(return_clause.vars)
-      return_clause.typs[ix] = :(eltype($(return_clause.name)[$ix]))
+  for return_clause in return_clauses
+    if return_clause.name != ()
+      for (ix, var) in enumerate(return_clause.vars)
+        return_clause.typs[ix] = :(eltype($(return_clause.name)[$ix]))
+      end
     end
   end
   
-  (clauses, vars, created_vars, input_names, return_clause)
+  (clauses, vars, created_vars, input_names, return_clauses)
 end
 
-function plan_query(clauses, vars, created_vars, input_names, return_clause, outside_vars)
+function plan_query(clauses, vars, created_vars, input_names, return_clauses, outside_vars)
   # rewrite SubQuery in terms of Assign
   for clause_ix in length(clauses):-1:1
     clause = clauses[clause_ix]
     if typeof(clause) == SubQuery
       deleteat!(clauses, clause_ix)
-      code = plan_query(clause.clauses, clause.vars, clause.created_vars, clause.input_names, clause.return_clause, created_vars)
-      for (var_ix, return_var) in enumerate(clause.return_clause.vars)
+      code = plan_query(clause.clauses, clause.vars, clause.created_vars, clause.input_names, clause.return_clauses, created_vars)
+      @assert length(clause.return_clauses) == 1
+      for (var_ix, return_var) in enumerate(clause.return_clauses[1].vars)
         if !(return_var in created_vars)
-          insert!(clauses, clause_ix, Assign(return_var, :($(clause.var)[$var_ix]), [clause.var], true))
+          insert!(clauses, clause_ix, Assign(return_var, :($(clause.var)[1][$var_ix]), [clause.var], true))
         end
       end
       insert!(clauses, clause_ix, Assign(clause.var, code, clause.vars, false))
@@ -320,9 +319,11 @@ function plan_query(clauses, vars, created_vars, input_names, return_clause, out
   
   # initialize arrays for storing results
   results_inits = []
-  for (ix, typ) in enumerate(return_clause.typs)
-    results_init = :(local $(Symbol("results_$ix")) = Vector{$(esc(typ))}())
-    push!(results_inits, results_init)
+  for (clause_ix, return_clause) in enumerate(return_clauses)
+    for (var_ix, typ) in enumerate(return_clause.typs)
+      results_init = :(local $(Symbol("results_$(clause_ix)_$(var_ix)")) = Vector{$(esc(typ))}())
+      push!(results_inits, results_init)
+    end
   end
   
   # declare vars
@@ -337,16 +338,21 @@ function plan_query(clauses, vars, created_vars, input_names, return_clause, out
     end
   end
   
+  indexin([1,2,:c], [:c])
+  
   # figure out at which point in the variable order we have all the variables we need to return
-  return_after = maximum(push!(indexin(return_clause.vars, vars), 0))
+  return_after = 0
+  for return_clause in return_clauses
+    return_after = max(return_after, maximum(indexin(return_clause.vars, vars)))
+  end
   
   # label for early return
   next_result = gensym("next_result")
   
   # store results 
   body = quote
-    $([:(push!($(Symbol("results_$ix")), $(esc(var))))
-    for (ix, var) in enumerate(return_clause.vars)]...)
+    $([:(push!($(Symbol("results_$(clause_ix)_$(var_ix)")), $(esc(var))))
+    for (clause_ix, return_clause) in enumerate(return_clauses) for (var_ix, var) in enumerate(return_clause.vars)]...)
     @goto $next_result
   end
   
@@ -392,8 +398,13 @@ function plan_query(clauses, vars, created_vars, input_names, return_clause, out
   end
   
   # put everything together
-  results_symbols = [Symbol("results_$ix") for (ix, var) in enumerate(return_clause.vars)]
-  result = :(Relation(tuple($(results_symbols...)), $(return_clause.num_keys))) 
+  results = []
+  for (clause_ix, return_clause) in enumerate(return_clauses)
+    results_symbols = [Symbol("results_$(clause_ix)_$(var_ix)") for (var_ix, var) in enumerate(return_clause.vars)]
+    result = :(Relation(tuple($(results_symbols...)), $(return_clause.num_keys)))
+    push!(results, result)
+  end
+  
   quote 
     let
       $(index_inits...)
@@ -404,7 +415,7 @@ function plan_query(clauses, vars, created_vars, input_names, return_clause, out
           $body 
         end
       end
-      $result
+      tuple($(results...))
     end
   end
 end

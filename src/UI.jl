@@ -29,56 +29,45 @@ end
 
 root = "root"
 
-# (id) => (parent, ix, kind, class, text)
-pre = @transient node(Id) => (Id, Int64, String, String, String)
+pre = Sequence([
+  @transient node(Id) => (Id, Int64, String) # (id) => (parent, ix, tag)
+  @transient class(Id) => String
+  @transient text(Id) => String
+])
 
 post = Sequence([
-  # (level, parent, ix, id, kind, class, text)
+  # (level, parent, ix, id, tag)
   @transient sorted_node(Int64, Id, Int64, Id, String)
 
   @merge begin
     root = UI.root
-    node(id) => (root, ix, kind, _, _)
-    return sorted_node(1, root, ix, id, kind)
+    node(id) => (root, ix, tag)
+    return sorted_node(1, root, ix, id, tag)
   end
   
   Fixpoint(
     @merge begin
       sorted_node(level, _, _, parent, _,)
-      node(id) => (parent, ix, kind, _, _)
-      return sorted_node(level+1, parent, ix, id, kind)
+      node(id) => (parent, ix, tag)
+      return sorted_node(level+1, parent, ix, id, tag)
     end
   )
-  
-  @transient class(Id, String)
-  
-  @merge begin
-    node(id) => (_, _, _, class, _)
-    return class(id, class)
-  end
-  
-  @transient text(Id, String)
-  
-  @merge begin
-    node(id) => (_, _, _, _, text)
-    return text(id, text)
-  end
 ])
 
 function render(window, old_state, new_state)
   (removed, inserted) = Data.diff(old_state[:sorted_node], new_state[:sorted_node])
   (_, _, _, removed_id, _) = removed
-  (_, parent, ix, id, kind) = inserted
+  (_, parent, ix, id, tag) = inserted
   (_, (class_id, class)) = Data.diff(old_state[:class], new_state[:class])
   (_, (text_id, text)) = Data.diff(old_state[:text], new_state[:text])
-  @js(window, render($removed_id, $parent, $ix, $id, $kind, $class_id, $class, $text_id, $text))
+  @js(window, render($removed_id, $parent, $ix, $id, $tag, $class_id, $class, $text_id, $text))
 end
 
 function render(window, state)
-  (_, parent, ix, id, kind) = state[:sorted_node].columns
+  (_, parent, ix, id, tag) = state[:sorted_node].columns
   (class_id, class) = state[:class].columns
   (text_id, text) = state[:text].columns
-  @js(window, render($([]), $parent, $ix, $id, $kind, $class_id, $class, $text_id, $text))
+  @js(window, render($([]), $parent, $ix, $id, $tag, $class_id, $class, $text_id, $text))
 end
 
 function window(world)

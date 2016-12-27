@@ -7831,3 +7831,21 @@ function render(removed, parent, ix, id, kind, classNameId, className, textConte
 ```
 
 I make a trash node so that I don't have to distinguish between nodes being removed and nodes being moved - anything that changes at all gets put in the trash where it can be found by the insert loop later.
+
+I can't figure out how to do event handlers nicely without multiple returns, so I implemented that first. A bunch of mindless edits to the compiler later, I can write things like:
+
+``` julia
+@merge begin
+  displaying() => name
+  columns = world[Symbol(name)].columns
+  c in 1:length(columns)
+  column = columns[c]
+  r in 1:length(column)
+  value = column[r]
+  # style = "height: 2em; flex: $(100/length(columns))%"
+  # onclick = (c > world[Symbol(name)].num_keys) ? @event(editing() => (name, c, r, string(value))) : ""
+  return node(@id(:cells, r, c)) => (@id(:cells, r), c, "div")
+  return class(@id(:cells, r, c)) => "flex1"
+  return text(@id(:cells, r, c)) => string(value)
+end
+```

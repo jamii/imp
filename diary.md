@@ -7905,3 +7905,26 @@ Also fixed a couple of missed cases in the client render function:
         parentNode.insertBefore(node, parentNode.children[ix[i]-1]);
     }
 ```
+
+I got fed up of editing css so I added support for in-place styles like:
+
+``` julia
+@merge begin
+  displaying() => name
+  columns = world[Symbol(name)].columns
+  c in 1:length(columns)
+  column = columns[c]
+  r in 1:length(column)
+  value = column[r]
+  return node(@id(:cells, r, c)) => (@id(:cells, r), c, "div")
+  return style(@id(:cells, r, c), "flex") => "1"
+  return style(@id(:cells, r, c), "height") => "1.5em"
+  return style(@id(:cells, r, c), "margin-left") => "0.5em"
+  return style(@id(:cells, r, c), "margin-right") => "0.5em"
+  return text(@id(:cells, r, c)) => string(value)
+  return cell(@id(:cells, r, c)) => (r, c, string(value))
+  return onclick(@id(:cells, r, c))
+end
+```
+
+The rendering breaks in hard to reproduce ways, and it took me a while to figure out why. `node.style = oldNode.style` silently doesn't work. It just erases the style of node. The correct incantation is `node.style = oldNode.style.cssText`.

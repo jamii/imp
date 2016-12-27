@@ -30,7 +30,7 @@ root = "root"
 
 pre = Sequence([
   @transient node(Id) => (Id, Int64, String) # (id) => (parent, ix, tag)
-  @transient class(Id) => String
+  @transient style(Id, String) => String
   @transient text(Id) => String
   @transient onclick(Id)
   @transient click(Id)
@@ -55,19 +55,28 @@ post = Sequence([
       return sorted_node(level+1, parent, ix, id, tag)
     end
   )
+  
+  @transient style_string(Id) => String
+  
+  @merge begin
+    style(id, _) => _
+    @query style(id, key) => val
+    string = join(["$k: $v" for (k, v) in zip(key,val)], "; ")
+    return style_string(id) => string
+  end
 ])
 
 @noinline function render(window, old_state, new_state)
   (removed, inserted) = Data.diff(old_state[:sorted_node], new_state[:sorted_node])
   (_, _, _, removed_id, _) = removed
   (_, parent, ix, id, tag) = inserted
-  (_, (class_id, class)) = Data.diff(old_state[:class], new_state[:class])
+  (_, (style_id, style)) = Data.diff(old_state[:style_string], new_state[:style_string])
   (_, (text_id, text)) = Data.diff(old_state[:text], new_state[:text])
   (_, (onclick,)) = Data.diff(old_state[:onclick], new_state[:onclick])
   (_, (onkeydown,)) = Data.diff(old_state[:onkeydown], new_state[:onkeydown])
-  @show removed_id parent ix id tag class_id class text_id text onclick onkeydown
+  @show removed_id parent ix id tag style_id style text_id text onclick onkeydown
   # TODO remove old event handlers
-  @js_(window, render($removed_id, $parent, $ix, $id, $tag, $class_id, $class, $text_id, $text, $onclick, $onkeydown))
+  @js_(window, render($removed_id, $parent, $ix, $id, $tag, $style_id, $style, $text_id, $text, $onclick, $onkeydown))
 end
 
 function render(window, state)
@@ -78,7 +87,7 @@ end
 function watch_and_load(window, file)
   load!(window, file)
   @schedule begin
-    (waits, _) = open(`inotifywait -m $file`)
+    (waits, _) = open(`inotifywait -me CLOSE_WRITE $file`)
     while true
       readline(waits)
       load!(window, file)
@@ -90,7 +99,6 @@ function window(world)
   window = Window()
   opentools(window)
   watch_and_load(window, "src/Imp.js")
-  watch_and_load(window, "src/Imp.css")
   sleep(3) # :(
   handle(window, "event") do event
     @show event

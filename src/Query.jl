@@ -206,7 +206,7 @@ function parse_query(query)
   for clause in clauses
     if typeof(clause) == SubQuery
       push!(created_vars, clause.var)
-      for var in clause.return_clause.vars
+      for var in clause.return_clauses[1].vars
         push!(subcreated_vars, var)
       end
     end

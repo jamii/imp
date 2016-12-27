@@ -51,12 +51,14 @@ begin
     @merge begin
       root = UI.root
       return node(@id(:top)) => (root, 1, "div")
-      return class(@id(:top)) => "vbox"
+      return style(@id(:top), "display") => "flex"
+      return style(@id(:top), "flex-direction") => "column"
     end
     
     @merge begin
       return node(@id(:tabs)) => (@id(:top), 1, "div")
-      return class(@id(:tabs)) => "hbox"
+      return style(@id(:tabs), "display") => "flex"
+      return style(@id(:tabs), "flex-direction") => "row"
     end
     
     @transient tab(Id) => String
@@ -66,7 +68,8 @@ begin
       ix = ix_name[1]
       name = ix_name[2]
       return node(@id(:tabs, ix)) => (@id(:tabs), ix, "button")
-      return class(@id(:tabs, ix)) => "tab"
+      return style(@id(:tabs, ix), "height") => "2em"
+      return style(@id(:tabs, ix), "margin") => "0.5em"
       return text(@id(:tabs, ix)) => string(name)
       return tab(@id(:tabs, ix)) => string(name)
       return onclick(@id(:tabs, ix))
@@ -80,7 +83,8 @@ begin
     
     @merge begin
       return node(@id(:cells)) => (@id(:top), 2, "div")
-      return class(@id(:cells)) => "vbox"
+      return style(@id(:cells), "display") => "flex"
+      return style(@id(:cells), "flex-direction") => "column"
     end
     
     @merge begin
@@ -88,7 +92,8 @@ begin
       columns = world[Symbol(name)].columns
       r in 0:length(columns[1])
       return node(@id(:cells, r)) => (@id(:cells), r+1, "div")
-      return class(@id(:cells, r)) => "hbox"
+      return style(@id(:cells, r), "display") => "flex"
+      return style(@id(:cells, r), "flex-direction") => "row"
     end
     
     @merge begin
@@ -99,8 +104,11 @@ begin
       r in 1:length(column)
       value = column[r]
       return node(@id(:cells, r, c)) => (@id(:cells, r), c, "div")
-      return class(@id(:cells, r, c)) => "flex1 row"
-      return text(@id(:cells, r, c)) => string(value)
+      return style(@id(:cells, r, c), "flex") => "1"
+      return style(@id(:cells, r, c), "height") => "1.5em"
+      return style(@id(:cells, r, c), "margin-left") => "0.5em"
+      return style(@id(:cells, r, c), "margin-right") => "0.5em"
+      return text(@id(:cells, r, c)) => repr(value)
       return cell(@id(:cells, r, c)) => (r, c, string(value))
       return onclick(@id(:cells, r, c))
     end
@@ -110,8 +118,11 @@ begin
       editing() => (name, r, c, value)
       columns = world[Symbol(name)].columns
       return node(@id(:cells, r, c)) => (@id(:cells, r), c, "input")
-      return class(@id(:cells, r, c)) => "flex1 row"
-      return text(@id(:cells, r, c)) => string(value)
+      return style(@id(:cells, r, c), "flex") => "1"
+      return style(@id(:cells, r, c), "height") => "1.5em"
+      return style(@id(:cells, r, c), "margin-left") => "0.5em"
+      return style(@id(:cells, r, c), "margin-right") => "0.5em"
+      return text(@id(:cells, r, c)) => repr(value)
       return cell(@id(:cells, r, c)) => (r, c, string(value))
       return onkeydown(@id(:cells, r, c))
     end
@@ -122,9 +133,14 @@ begin
       c in 1:length(columns)
       column = columns[c]
       typ = eltype(column)
-      class = (c <= world[Symbol(name)].num_keys) ? "flex1 row key" : "flex1 row val"
       return node(@id(:cells, 0, c)) => (@id(:cells, 0), c, "div")
-      return class(@id(:cells, 0, c)) => class
+      return style(@id(:cells, 0, c), "flex") => "1"
+      return style(@id(:cells, 0, c), "height") => "1.5em"
+      return style(@id(:cells, 0, c), "margin-left") => "0.5em"
+      return style(@id(:cells, 0, c), "margin-right") => "0.5em"
+      return style(@id(:cells, 0, c), "border-bottom") => "1px solid #aaa"
+      weight = (c <= world[Symbol(name)].num_keys) ? "bold" : "normal"
+      return style(@id(:cells, 0, c), "font-weight") => weight
       return text(@id(:cells, 0, c)) => string(typ)
     end
     

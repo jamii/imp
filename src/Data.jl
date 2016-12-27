@@ -203,7 +203,7 @@ function diff{T}(old::Relation{T}, new::Relation{T})
   new_index = index(new, order)
   old_only_columns = tuple([Vector{eltype(column)}() for column in old.columns]...)
   new_only_columns = tuple([Vector{eltype(column)}() for column in new.columns]...)
-  foreach_diff(old_index, new_index, old_index[1:old.num_keys], new_index[1:new.num_keys], 
+  foreach_diff(old_index, new_index, old_index[1:length(old.columns)], new_index[1:length(new.columns)], 
     (o, i) -> push_in!(old_only_columns, o, i),
     (n, i) -> push_in!(new_only_columns, n, i),
     (o, n, oi, ni) -> ())

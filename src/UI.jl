@@ -2,7 +2,6 @@ module UI
 
 # Pkg.add("Blink")
 # AtomShell.install()
-# Pkg.add("Hiccup")
 
 using Data
 using Query
@@ -33,6 +32,10 @@ pre = Sequence([
   @transient node(Id) => (Id, Int64, String) # (id) => (parent, ix, tag)
   @transient class(Id) => String
   @transient text(Id) => String
+  @transient onclick(Id)
+  @transient click(Id)
+  @transient onkeydown(Id)
+  @transient keydown(Id) => (Int64, String)
 ])
 
 post = Sequence([
@@ -54,27 +57,40 @@ post = Sequence([
   )
 ])
 
-function render(window, old_state, new_state)
+@noinline function render(window, old_state, new_state)
   (removed, inserted) = Data.diff(old_state[:sorted_node], new_state[:sorted_node])
   (_, _, _, removed_id, _) = removed
   (_, parent, ix, id, tag) = inserted
   (_, (class_id, class)) = Data.diff(old_state[:class], new_state[:class])
   (_, (text_id, text)) = Data.diff(old_state[:text], new_state[:text])
-  @js(window, render($removed_id, $parent, $ix, $id, $tag, $class_id, $class, $text_id, $text))
+  (_, (onclick,)) = Data.diff(old_state[:onclick], new_state[:onclick])
+  (_, (onkeydown,)) = Data.diff(old_state[:onkeydown], new_state[:onkeydown])
+  @show removed_id parent ix id tag class_id class text_id text onclick onkeydown
+  # TODO remove old event handlers
+  @js_(window, render($removed_id, $parent, $ix, $id, $tag, $class_id, $class, $text_id, $text, $onclick, $onkeydown))
 end
 
 function render(window, state)
-  (_, parent, ix, id, tag) = state[:sorted_node].columns
-  (class_id, class) = state[:class].columns
-  (text_id, text) = state[:text].columns
-  @js(window, render($([]), $parent, $ix, $id, $tag, $class_id, $class, $text_id, $text))
+  empty_state = Dict(name => empty(relation) for (name, relation) in state)
+  render(window, empty_state, state)
+end
+
+function watch_and_load(window, file)
+  load!(window, file)
+  @schedule begin
+    (waits, _) = open(`inotifywait -m $file`)
+    while true
+      readline(waits)
+      load!(window, file)
+    end
+  end
 end
 
 function window(world)
   window = Window()
   opentools(window)
-  load!(window, "src/Imp.js")
-  load!(window, "src/Imp.css")
+  watch_and_load(window, "src/Imp.js")
+  watch_and_load(window, "src/Imp.css")
   sleep(3) # :(
   handle(window, "event") do event
     @show event
@@ -89,6 +105,6 @@ function window(world)
   window
 end
 
-export render, window, @id, root
+export render, window, Id, @id, root
 
 end

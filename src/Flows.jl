@@ -69,7 +69,7 @@ end
 
 function (sequence::Sequence)(world::World)
   for flow in sequence.flows
-    @show flow
+    # @show flow
     flow(world)
   end
 end

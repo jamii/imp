@@ -19,13 +19,12 @@ begin
   
     @stateful displaying() => String
     @stateful editing() => (String, Int64, Int64, String)
-    @transient committed() => Bool
+    @stateful cell(Id) => (Int64, Int64, String)
     
-    @merge return displaying() => "test"
-    
-    @merge begin 
-      committed() => true
-      editing() => (name, c, r, value_string)
+    @merge begin
+      keydown(id) => (13, value_string)
+      cell(id) => (r, c, _)
+      displaying() => name
       columns = world[Symbol(name)].columns
       row = Any[columns[c2][r] for c2 in 1:length(columns)]
       value = try eval(parse(value_string)) catch Exception fail end
@@ -37,6 +36,19 @@ begin
     end
     
     @merge begin
+      keydown(id) => (27, value_string)
+      return editing() => ("", 0, 0, "")
+    end
+    
+    @merge begin
+      click(id)
+      cell(id) => (r, c, value)
+      displaying() => name
+      @when c > world[Symbol(name)].num_keys
+      return editing() => (name, r, c, value)
+    end
+      
+    @merge begin
       root = UI.root
       return node(@id(:top)) => (root, 1, "div")
       return class(@id(:top)) => "vbox"
@@ -47,12 +59,22 @@ begin
       return class(@id(:tabs)) => "hbox"
     end
     
+    @transient tab(Id) => String
+    
     @merge begin 
       ix_name in enumerate(sort(collect(keys(world.state))))
       ix = ix_name[1]
       name = ix_name[2]
       return node(@id(:tabs, ix)) => (@id(:tabs), ix, "button")
       return text(@id(:tabs, ix)) => string(name)
+      return tab(@id(:tabs, ix)) => string(name)
+      return onclick(@id(:tabs, ix))
+    end
+    
+    @merge begin 
+      click(id)
+      tab(id, name)
+      return displaying() => name
     end
     
     @merge begin
@@ -64,7 +86,7 @@ begin
       displaying() => name
       columns = world[Symbol(name)].columns
       r in 0:length(columns[1])
-      return node(@id(:cells, r)) => (@id(:cells), r, "div")
+      return node(@id(:cells, r)) => (@id(:cells), r+1, "div")
       return class(@id(:cells, r)) => "hbox"
     end
     
@@ -75,33 +97,22 @@ begin
       column = columns[c]
       r in 1:length(column)
       value = column[r]
-      # style = "height: 2em; flex: $(100/length(columns))%"
-      # onclick = (c > world[Symbol(name)].num_keys) ? @event(editing() => (name, c, r, string(value))) : ""
       return node(@id(:cells, r, c)) => (@id(:cells, r), c, "div")
-      return class(@id(:cells, r, c)) => "flex1"
+      return class(@id(:cells, r, c)) => "flex1 row"
       return text(@id(:cells, r, c)) => string(value)
+      return cell(@id(:cells, r, c)) => (r, c, string(value))
+      return onclick(@id(:cells, r, c))
     end
     
     @merge begin
       displaying() => name
-      editing() => (name, c, r, value)
+      editing() => (name, r, c, value)
       columns = world[Symbol(name)].columns
-      # style = "height: 2em; flex: $(100/length(columns))%"
-      # onkeydown = """
-      #   if (event.which == 13) {
-      #     Blink.msg('event', {'table': 'editing', 'values': ['$name', $c, $r, this.value]}); 
-      #     Blink.msg('event', {'table': 'committed', 'values': [true]}); 
-      #     return false;
-      #   }
-      #   if (event.which == 27) {
-      #     Blink.msg('event', {'table': 'editing', 'values': ['', 0, 0, '']});
-      #     return false;
-      #   } 
-      # """
-      # cell = textarea(Dict(:style=>style, :rows=>1, :onkeydown=>onkeydown), value)
       return node(@id(:cells, r, c)) => (@id(:cells, r), c, "textarea")
-      return class(@id(:cells, r, c)) => "flex1"
+      return class(@id(:cells, r, c)) => "flex1 row"
       return text(@id(:cells, r, c)) => string(value)
+      return cell(@id(:cells, r, c)) => (r, c, string(value))
+      return onkeydown(@id(:cells, r, c))
     end
     
     @merge begin
@@ -110,11 +121,9 @@ begin
       c in 1:length(columns)
       column = columns[c]
       typ = eltype(column)
-      # weight = (c > world[Symbol(name)].num_keys) ? "normal" : "bold"
-      # style = "border-bottom: 1px solid #aaa; height: 2em; font-weight: $weight; flex: $(100/length(columns))%"
-      # node = Hiccup.div(Dict(:style=>style), string(typ))
+      class = (c > world[Symbol(name)].num_keys) ? "flex1 row key" : "flex1 row val"
       return node(@id(:cells, 0, c)) => (@id(:cells, 0), c, "div")
-      return class(@id(:cells, 0, c)) => "flex1"
+      return class(@id(:cells, 0, c)) => class
       return text(@id(:cells, 0, c)) => string(typ)
     end
     
@@ -125,10 +134,8 @@ end
 w = window(world)
 
 world.state
-# opentools(w)
-# UI.render(w, world.state)
-load!(w, "src/Imp.js")
-load!(w, "src/Imp.css")
+# load!(w, "src/Imp.js")
+# load!(w, "src/Imp.css")
 # @js w console.log("ok")
 
 

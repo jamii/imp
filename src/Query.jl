@@ -164,7 +164,7 @@ function parse_query(query)
             Expr(:$, [value], _) => value
             value => value 
           end
-          insert!(clauses, 1, Assign(var, value, collect_vars(value), true))
+          push!(clauses, Assign(var, value, collect_vars(value), true))
         end
       end
     end

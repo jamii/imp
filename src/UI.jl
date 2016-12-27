@@ -7,28 +7,59 @@ module UI
 using Data
 using Flows
 using Blink
-using Hiccup
 
-function event(table_name, values)
-  Blink.jsexpr(quote 
-    Blink.msg("event", d(("table", $table_name), ("values", $values)))
-    event.stopPropagation()
-  end).s
+# typealias Id UInt
+
+# macro id(args...)
+#   h = :(zero(UInt))
+#   for arg in args
+#     h = :(hash($(esc(arg)), $h))
+#   end
+#   h
+# end
+
+# root = UInt(0)
+
+typealias Id String
+
+macro id(args...)
+  :(join([$(map(esc,args)...)], "-"))
 end
 
-macro event(expr)
-  (name, keys, vals) = Data.parse_relation(expr)
-  :(event($(string(name)), [$(map(esc, keys)...), $(map(esc, vals)...)]))
-end
+root = "root"
+
+# (id) => (parent, ix, kind, class, text)
+pre = @transient node(Id) => (Id, Int64, String, String, String)
+
+post = Sequence([
+  # (level, parent, ix, id, kind, class, text)
+  @transient sorted_node(Int64, Id, Int64, Id, String, String, String)
+
+  @merge begin
+    root = UI.root
+    node(id) => (root, ix, kind, class, text)
+    return sorted_node(1, root, ix, id, kind, class, text)
+  end
+  
+  Fixpoint(
+    @merge begin
+      sorted_node(level, _, _, parent, _, _, _)
+      node(id) => (parent, ix, kind, class, text)
+      return sorted_node(level+1, parent, ix, id, kind, class, text)
+    end
+  )
+])
 
 function render(window, state)
-  html = string(Hiccup.div("#main", state[:window][1][1]))
-  @js_(window, morphdom(document.getElementById("main"), $html))
+  (_, id, parent, ix, kind, class, text) = state[:sorted_node].columns
+  @js(window, render($id, $parent, $ix, $kind, $class, $text))
 end
 
 function window(world)
   window = Window()
-  loadjs!(window, "https://unpkg.com/morphdom@2.2.1/dist/morphdom-umd.js")
+  opentools(window)
+  load!(window, "src/Imp.js")
+  load!(window, "src/Imp.css")
   sleep(3) # :(
   handle(window, "event") do event
     @show event
@@ -37,41 +68,12 @@ function window(world)
   watch(world) do old_state, new_state
     render(window, new_state)
   end
-  @js window document.body.innerHTML = "<div id=\"main\"></div>"
+  innerHTML = "<div id=\"$root\"></div>"
+  @js(window, document.body.innerHTML = $innerHTML)
   render(window, world.state)
   window
 end
 
-function hbox(nodes)
-  Hiccup.div(Dict(:style => "display: flex; flex-direction: row"), nodes)
-end
-
-function vbox(nodes)
-  Hiccup.div(Dict(:style => "display: flex; flex-direction: column"), nodes)
-end
-
-function Base.cmp{T1, T2}(n1::Hiccup.Node{T1}, n2::Hiccup.Node{T2})
-  c = cmp(T1, T2)
-  if c != 0; return c; end
-  c = cmp(length(n1.attrs), length(n2.attrs))
-  if c != 0; return c; end
-  for (a1, a2) in zip(n1.attrs, n2.attrs)
-    c = cmp(a1, a2)
-    if c != 0; return c; end
-  end
-  c = cmp(length(n1.children), length(n2.children))
-  if c != 0; return c; end
-  for (c1, c2) in zip(n1.children, n2.children)
-    c = cmp(c1, c2)
-    if c != 0; return c; end
-  end
-  return 0
-end
-
-function Base.isless(n1::Hiccup.Node, n2::Hiccup.Node)
-  cmp(n1, n2) == -1
-end
-
-export event, @event, render, window, hbox, vbox
+export render, window, @id, root
 
 end

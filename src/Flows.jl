@@ -35,11 +35,11 @@ type World
 end
 
 function output_names(create::Create)
-  Set(create.output_name)
+  Set([create.output_name])
 end
 
 function output_names(merge::Merge)
-  Set(merge.output_name)
+  Set([merge.output_name])
 end
 
 function output_names(sequence::Sequence)
@@ -72,11 +72,12 @@ function (sequence::Sequence)(world::World)
 end
 
 function (fixpoint::Fixpoint)(world::World)
-  names = output_names(fixpoint.flow)
+  names = collect(output_names(fixpoint.flow))
   while true
-    old_values = map((name) -> world.state[name], names)
+    old_values = map((name) -> world.state[name].columns, names)
     fixpoint.flow(world)
-    new_values = map((name) -> world.state[name], names)
+    new_values = map((name) -> world.state[name].columns, names)
+    @show new_values
     if old_values == new_values
       return
     end

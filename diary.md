@@ -7932,3 +7932,5 @@ The rendering breaks in hard to reproduce ways, and it took me a while to figure
 ### 2016 Dec 28 
 
 I ported the minesweeper example to the new flow/UI system. It's noticably faster - building the hiccup.jl vdom was the majority of the runtime in the previous version, which is daft.
+
+I also hooked in the table browser so I can poke about inside the minesweeper state.

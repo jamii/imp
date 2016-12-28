@@ -14,9 +14,8 @@ world[:test] = Relation((Int64[1,2,3], Any[4,5,6], String["a","b","c"]), 1)
 fail = []
 
 begin 
-  setflow(world, Sequence([
-    UI.pre
-  
+  function post(world)
+    Sequence([
     @stateful displaying() => String
     @stateful editing() => (String, Int64, Int64, String)
     @stateful cell(Id) => (Int64, Int64, String)
@@ -47,10 +46,10 @@ begin
       @when c > world[Symbol(name)].num_keys
       return editing() => (name, r, c, value)
     end
-      
+    
     @merge begin
       root = UI.root
-      return node(@id(:top)) => (root, 1, "div")
+      return node(@id(:top)) => (root, 999, "div")
       return style(@id(:top), "display") => "flex"
       return style(@id(:top), "flex-direction") => "column"
     end
@@ -133,17 +132,22 @@ begin
       c in 1:length(columns)
       column = columns[c]
       typ = eltype(column)
-      return node(@id(:cells, 0, c)) => (@id(:cells, 0), c, "div")
-      return style(@id(:cells, 0, c), "flex") => "1"
-      return style(@id(:cells, 0, c), "height") => "1.5em"
-      return style(@id(:cells, 0, c), "margin-left") => "0.5em"
-      return style(@id(:cells, 0, c), "margin-right") => "0.5em"
-      return style(@id(:cells, 0, c), "border-bottom") => "1px solid #aaa"
-      weight = (c <= world[Symbol(name)].num_keys) ? "bold" : "normal"
-      return style(@id(:cells, 0, c), "font-weight") => weight
-      return text(@id(:cells, 0, c)) => string(typ)
+        return node(@id(:cells, 0, c)) => (@id(:cells, 0), c, "div")
+        return style(@id(:cells, 0, c), "flex") => "1"
+        return style(@id(:cells, 0, c), "height") => "1.5em"
+        return style(@id(:cells, 0, c), "margin-left") => "0.5em"
+        return style(@id(:cells, 0, c), "margin-right") => "0.5em"
+        return style(@id(:cells, 0, c), "border-bottom") => "1px solid #aaa"
+        weight = (c <= world[Symbol(name)].num_keys) ? "bold" : "normal"
+        return style(@id(:cells, 0, c), "font-weight") => weight
+        return text(@id(:cells, 0, c)) => string(typ)
+      end
+      ])
     end
-    
+  
+  setflow(world, Sequence([
+    UI.pre
+    post(world)
     UI.post
   ]))
 end

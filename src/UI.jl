@@ -74,7 +74,7 @@ post = Sequence([
   (_, (text_id, text)) = Data.diff(old_state[:text], new_state[:text])
   (_, (onclick,)) = Data.diff(old_state[:onclick], new_state[:onclick])
   (_, (onkeydown,)) = Data.diff(old_state[:onkeydown], new_state[:onkeydown])
-  @show removed_id parent ix id tag style_id style text_id text onclick onkeydown
+  # @show removed_id parent ix id tag style_id style text_id text onclick onkeydown
   # TODO remove old event handlers
   @js_(window, render($removed_id, $parent, $ix, $id, $tag, $style_id, $style, $text_id, $text, $onclick, $onkeydown))
 end

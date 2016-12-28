@@ -6,6 +6,7 @@ using Flows
 using UI
 using Match
 using Blink
+using Table
 
 world = World()
 
@@ -13,9 +14,11 @@ world[:state] = Relation(([:game_in_progress],), 0)
 world[:mine] = Relation((Int64[], Int64[]), 2)
 world[:cleared] = Relation((Int64[], Int64[]), 2)
 
+world[:test] = Relation((Int64[1,2,3], Any[4,5,6], String["a","b","c"]), 1)
+
 num_x = 30
 num_y = 30
-num_mines = 300
+num_mines = 90
 
 begin 
   setflow(world, Sequence([
@@ -28,13 +31,17 @@ begin
     
     @stateful grid(Id) => (Int64, Int64)
     
+    @transient mine_attempts() => Int64
+    @merge return mine_attempts() => 0
     Fixpoint(
       @merge begin
         @query mine(x, y)
         @when length(x) < num_mines
         nx = rand(1:num_x)
         ny = rand(1:num_y)
+        mine_attempts() => a
         return mine(nx, ny)
+        return mine_attempts() => a+1
       end
     )
     
@@ -60,6 +67,8 @@ begin
     Fixpoint(
       @merge begin
         cleared(x,y)
+        # @query begin mine(x,y); is_mine = true end
+        # @when isempty(is_mine)
         mine_count(x,y) => 0
         nx in (x-1):(x+1)
         ny in (y-1):(y+1)
@@ -120,6 +129,8 @@ begin
       return style(@id(:grid, x, y), "width") => "2em"
       return style(@id(:grid, x, y), "height") => "2em"
     end
+    
+    Table.post(world)
   
     UI.post
   ]))

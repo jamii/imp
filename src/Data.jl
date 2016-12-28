@@ -211,7 +211,9 @@ function diff{T}(old::Relation{T}, new::Relation{T})
 end
 
 function Base.merge{T}(old::Relation{T}, new::Relation{T})
-  @assert old.num_keys == new.num_keys 
+  if old.num_keys != new.num_keys 
+    error("Mismatch in num_keys - $(old.num_keys) vs $(new.num_keys) in merge($old, $new)")
+  end
   order = collect(1:length(old.columns))
   old_index = old.indexes[order]
   new_index = new.indexes[order]

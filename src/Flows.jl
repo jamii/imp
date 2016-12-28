@@ -100,6 +100,9 @@ macro merge(query)
   (clauses, vars, created_vars, input_names, return_clauses) = Query.parse_query(query)
   code = Query.plan_query(clauses, vars, created_vars, input_names, return_clauses, Set())
   escs = [:($(esc(input_name)) = $input_name) for input_name in input_names]
+  for return_clause in return_clauses
+    @assert isa(return_clause.name, Symbol)
+  end
   code = quote
     $(escs...)
     $code

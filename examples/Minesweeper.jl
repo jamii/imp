@@ -2,84 +2,63 @@ module Minesweeper
 
 using Data
 using Query
+using Flows
 using UI
 using Match
 using Blink
-using Hiccup
-@tags button
 
-function count(relation)
-  length(relation[1])
-end
+world = World()
 
-macro exists(clause)
-  quote 
-    exists = @query begin 
-      exists = true
-      $clause
-      return (exists::Bool,)
+world[:state] = Relation(([:game_in_progress],), 0)
+world[:mine] = Relation((Int64[], Int64[]), 2)
+world[:cleared] = Relation((Int64[], Int64[]), 2)
+
+num_x = 30
+num_y = 30
+num_mines = 300
+
+begin 
+  setflow(world, Sequence([
+    UI.pre
+  
+    @stateful state() => Symbol
+    @stateful mine(Int64, Int64)
+    @stateful mine_count(Int64, Int64) => Int64
+    @stateful cleared(Int64, Int64)
+    
+    @stateful grid(Id) => (Int64, Int64)
+    
+    Fixpoint(
+      @merge begin
+        @query mine(x, y)
+        @when length(x) < num_mines
+        nx = rand(1:num_x)
+        ny = rand(1:num_y)
+        return mine(nx, ny)
+      end
+    )
+    
+    @merge begin
+      x in 1:num_x
+      y in 1:num_y
+      @query begin
+        nx in (x-1):(x+1)
+        ny in (y-1):(y+1)
+        @when (nx != x) || (ny != y)
+        mine(nx, ny) 
+        return (nx, ny)
+      end
+      return mine_count(x, y) => length(nx)
     end
-    length(exists[1]) == 1
-  end
-end
-
-function fix(flow, relation)
-  order = collect(1:length(relation))
-  while true
-    old_state = relation.columns
-    flow()
-    new_state = relation.columns
-    if new_state == old_state
-      return
-    end
-  end
-end
-
-function run(num_x, num_y, num_mines)
-  
-  @relation state() => Symbol
-  @relation mine(Int64, Int64)
-  @relation mine_count(Int64, Int64) => Int64
-  @relation cleared(Int64, Int64)
-  @relation clicked(Int64) => (Int64, Int64)
-  
-  @relation cell(Int64, Int64) => Hiccup.Node
-  @relation row(Int64) => Hiccup.Node
-  @relation grid() => Hiccup.Node
-  
-  @query begin 
-    return state() => :game_in_progress
-  end
-  
-  while length(mine[1]) < num_mines
-    @query begin 
-      nx = rand(1:num_x)
-      ny = rand(1:num_y)
-      return mine(nx, ny)
-    end 
-  end
-  
-  @query begin 
-    x in 1:num_x
-    y in 1:num_y
-    c = count(@query begin
-      nx in (x-1):(x+1)
-      ny in (y-1):(y+1)
-      @when (nx != x) || (ny != y)
-      mine(nx, ny) 
-    end)
-    return mine_count(x, y) => c
-  end
-  
-  @Window(clicked) do window, event_number
-
-    @query begin
-      clicked($event_number) => (x, y)
+    
+    @merge begin
+      click(id)
+      grid(id) => (x, y)
       return cleared(x, y)
     end
     
-    fix(cleared) do
-      @query begin
+    Fixpoint(
+      @merge begin
         cleared(x,y)
         mine_count(x,y) => 0
         nx in (x-1):(x+1)
@@ -89,61 +68,63 @@ function run(num_x, num_y, num_mines)
         @when (nx != x) || (ny != y)
         return cleared(nx, ny)
       end
-    end
+    )
     
-    @query begin 
-      num_cleared = count(@query begin 
-        cleared(x,y)
-        return (x::Int64, y::Int64)
-      end)
+    @merge begin 
+      @query cleared(x,y)
+      num_cleared = length(x)
       @when num_cleared + num_mines >= num_x * num_y
       return state() => :game_won
-    end
+    end 
     
-    @query begin
-      clicked($event_number) => (x, y)
+    @merge begin
+      click(id)
+      grid(id) => (x,y)
       mine(x,y)
       return state() => :game_lost
     end
     
-    @query begin
+    @merge begin 
+      return node(@id(:grid)) => (@id(:root), 1, "div")
+      return style(@id(:grid), "display") => "flex"
+      return style(@id(:grid), "flex-direction") => "column"
+    end
+    
+    @merge begin 
+      x in 1:num_x
+      return node(@id(:grid, x)) => (@id(:grid), x, "div")
+      return style(@id(:grid, x), "display") => "flex"
+      return style(@id(:grid, x), "flex-direction") => "row"
+    end
+    
+    @merge begin
       state() => current_state
       x in 1:num_x
       y in 1:num_y
-      is_cleared = @exists cleared($x,$y)
-      is_mine = @exists mine($x,$y)
+      @query begin cleared(x,y); is_cleared = true; end
+      @query begin mine(x,y); is_mine = true; end
       mine_count(x, y) => count
-      cell_node = @match (current_state, is_mine, is_cleared, count) begin
-        (:game_in_progress, _, true, 0) => button("_")
-        (:game_in_progress, _, true, _) => button(string(count))
-        (:game_in_progress, _, false, _) => button(Dict(:onclick => @event clicked(x,y)), "X")
-        (:game_won, true, _, _) => button("💣")
-        (:game_lost, true, _, _) => button("☀")
-        (_, false, _, _) => button(string(count))
+      text = @match (current_state, !isempty(is_mine), !isempty(is_cleared), count) begin
+        (:game_in_progress, _, true, 0) => "_"
+        (:game_in_progress, _, true, _) => string(count)
+        (:game_in_progress, _, false, _) => ""
+        (:game_won, true, _, _) => "💣"
+        (:game_lost, true, _, _) => "☀"
+        (_, false, _, _) => string(count)
         other => error("The hell is this: $other")
       end
-      return cell(x,y) => cell_node
+      return grid(@id(:grid, x, y)) => (x, y)
+      return node(@id(:grid, x, y)) => (@id(:grid, x), y, "button")
+      return text(@id(:grid, x, y)) => text
+      return onclick(@id(:grid, x, y))
+      return style(@id(:grid, x, y), "width") => "2em"
+      return style(@id(:grid, x, y), "height") => "2em"
     end
-    
-    @query begin
-      y in 1:num_y
-      row_node = hbox((@query cell(x,$y) => cell_node)[3])
-      return row(y) => row_node
-    end
-    
-    @query begin
-      grid_node = vbox((@query row(y) => row_node)[2])
-      return grid() => grid_node
-    end
-    
-    Blink.body!(window, grid[1][1], fade=false)
-    
-  end
   
-  (state, mine, mine_count, cleared, clicked, cell, row, grid)
+    UI.post
+  ]))
 end
 
-# (state, mine, mine_count, cleared, clicked, cell, row, grid) = run(30, 30, 100)
-
+w = window(world)
 
 end

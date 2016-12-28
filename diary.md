@@ -7928,3 +7928,7 @@ end
 ```
 
 The rendering breaks in hard to reproduce ways, and it took me a while to figure out why. `node.style = oldNode.style` silently doesn't work. It just erases the style of node. The correct incantation is `node.style = oldNode.style.cssText`.
+
+### 2016 Dec 28 
+
+I ported the minesweeper example to the new flow/UI system. It's noticably faster - building the hiccup.jl vdom was the majority of the runtime in the previous version, which is daft.

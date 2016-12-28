@@ -30,7 +30,7 @@ begin
       value = try eval(parse(value_string)) catch Exception fail end
       @when !is(value, fail)
       @when typeof(value) <: eltype(columns[c])
-      ignore1 = @show (row[c] = value)
+      ignore1 = (row[c] = value)
       ignore2 = (world.state[Symbol(name)] = push!(world[Symbol(name)], tuple(row...)))
       return editing() => ("", 0, 0, "")
     end

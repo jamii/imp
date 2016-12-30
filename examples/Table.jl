@@ -152,7 +152,7 @@ begin
   ]))
 end
 
-w = window(world)
+# w = window(world)
 
 world.state
 # load!(w, "src/Imp.js")

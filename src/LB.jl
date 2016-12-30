@@ -1,13 +1,16 @@
 module LB
 
 using Blink
+using DataFrames
 
 function lb(command)
   write("/tmp/script.lb", command)
   output = readstring(`/home/jamie/logicblox-x86_64-linux-4.3.17-a3f4888aecd21c326197b02deae87d1d74569cc5/bin/lb /tmp/script.lb`)
   raw_results = matchall(r"/--------------- _ ---------------\\([^$\\]*)\\--------------- _ ---------------/"s, output)
-  @show raw_results
-  results = [readdlm(IOBuffer(raw_result[37:(length(raw_result)-36)])) for raw_result in raw_results]
+  stripped_results = [raw_result[37:(length(raw_result)-36)] for raw_result in raw_results]
+  @show stripped_results
+  results = Any[readtable(IOBuffer(String(stripped_result)), separator=' ', header=false) for stripped_result in stripped_results]
+  @show results
 end
 
 begin
@@ -27,16 +30,16 @@ begin
     onclick(id) ->
       string(id).
       
+    lang:pulse(`click).
     click(id) ->
       string(id).
-    lang:pulse(`click).
       
     onkeydown(id) ->
       string(id).
       
+    lang:pulse(`keydown).
     keydown(id; key, text) ->
       string(id), int(key), string(text).
-    lang:pulse(`keydown).
       
     level(id; val) ->
       string(id), int(val).
@@ -72,6 +75,10 @@ begin
       +node("a"; "root", 1, "div").
       +node("b"; "root", 2, "div").
       +node("c"; "a", 1, "button").
+      
+      +text("c"; "click me!").
+      
+      +onclick("c").
     '
     
     query '_(l, id) <-
@@ -82,7 +89,15 @@ begin
   lb(command)
 end
 
-function render(window, event_string) 
+function col(dataframe, i)
+  (size(dataframe) == (0,0)) ? Any[] : dataframe[i].data
+end
+  
+
+function render(window, event_name, event_values) 
+  event_values_string = join(map(repr, event_values), ",")
+  event_string = "+$event_name($event_values_string)."
+  @show event_string
   command = """
     open imp
     
@@ -98,14 +113,25 @@ function render(window, event_string)
       node(id; parent, ix, tag),
       level(id; l).
     '    
+    
+    query '_(id, k, v) <-
+      style(id, k; v).
+    ' 
+    
+    query '_(id, t) <-
+      text(id; t).
+    '
+    
+    query '_(id) <-
+      onclick(id).
+    '
+    
+    query '_(id) <-
+      onkeydown(id).
+    '
   """
-  (removed, inserted) = lb(command)
-  removed_id = removed[:,1]
-  parent = inserted[:,2]
-  ix = inserted[:,3]
-  id = inserted[:,4]
-  tag = inserted[:,5]
-  @js(window, render($removed_id, $parent, $ix, $id, $tag, $[], $[], $[], $[], $[], $[]))
+  (removed, inserted, style, text, onclick, onkeydown) = lb(command)
+  @js(window, render($(col(removed, 1)), $(col(inserted,2)), $(col(inserted,3)), $(col(inserted,4)), $(col(inserted,5)), $(col(style,1)), $(col(style,2)), $(col(style,3)), $(col(text,1)), $(col(text,2)), $(col(onclick,1)), $(col(onkeydown,1))))
 end
 
 function render(window) 
@@ -115,14 +141,26 @@ function render(window)
     query '_(l, parent, ix, id, tag) <-
       node(id; parent, ix, tag),
       level(id; l).
-    '    
+    '   
+    
+    query '_(id, k, v) <-
+      style(id, k; v).
+    ' 
+    
+    query '_(id, t) <-
+      text(id; t).
+    ' 
+    
+    query '_(id) <-
+      onclick(id).
+    '
+    
+    query '_(id) <-
+      onkeydown(id).
+    '
   """
-  (inserted,) = lb(command)
-  parent = inserted[:,2]
-  ix = inserted[:,3]
-  id = inserted[:,4]
-  tag = inserted[:,5]
-  @js(window, render($[], $parent, $ix, $id, $tag, $[], $[], $[], $[], $[], $[]))
+  (inserted, style, text, onclick, onkeydown) = @show lb(command)
+  @js(window, render($[], $(col(inserted,2)), $(col(inserted,3)), $(col(inserted,4)), $(col(inserted,5)), $(col(style,1)), $(col(style,2)), $(col(style,3)), $(col(text,1)), $(col(text,2)), $(col(onclick,1)), $(col(onkeydown,1))))
 end
 
 function window()
@@ -132,7 +170,7 @@ function window()
   sleep(3) # :(
   handle(window, "event") do event
     @show event
-    render(window, "")
+    render(window, Symbol(event["table"]), event["values"])
   end
   innerHTML = "<div id=\"root\"></div>"
   @js(window, document.body.innerHTML = $innerHTML)
@@ -140,6 +178,6 @@ function window()
   window
 end
 
-window()
+w = window()
 
 end

@@ -7,7 +7,7 @@ function onkeydownHandler(event) {
     Blink.msg("event", {"table": "keydown", "values": [this.id, event.which, this.value]});
 }
 
-function render(removed, parent, ix, id, tagName, styleId, style, textContentId, textContent, onclick, onkeydown) {
+function render(removed, parent, ix, id, tagName, styleId, styleKey, styleVal, textContentId, textContent, onclick, onkeydown) {
     console.log(arguments)
     
     trash = document.createElement(tagName[i]);
@@ -39,7 +39,7 @@ function render(removed, parent, ix, id, tagName, styleId, style, textContentId,
     
     for (var i = 0; i < styleId.length; i++) {
         node = document.getElementById(styleId[i]);
-        node.style = style[i];
+        node.style[styleKey[i]] = styleVal[i];
     }
     
     for (var i = 0; i < textContentId.length; i++) {

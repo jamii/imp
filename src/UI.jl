@@ -55,28 +55,19 @@ post = Sequence([
       return sorted_node(level+1, parent, ix, id, tag)
     end
   )
-  
-  @transient style_string(Id) => String
-  
-  @merge begin
-    style(id, _) => _
-    @query style(id, key) => val
-    string = join(["$k: $v" for (k, v) in zip(key,val)], "; ")
-    return style_string(id) => string
-  end
 ])
 
 @noinline function render(window, old_state, new_state)
   (removed, inserted) = Data.diff(old_state[:sorted_node], new_state[:sorted_node])
   (_, _, _, removed_id, _) = removed
   (_, parent, ix, id, tag) = inserted
-  (_, (style_id, style)) = Data.diff(old_state[:style_string], new_state[:style_string])
+  (_, (style_id, style_key, style_val)) = Data.diff(old_state[:style], new_state[:style])
   (_, (text_id, text)) = Data.diff(old_state[:text], new_state[:text])
   (_, (onclick,)) = Data.diff(old_state[:onclick], new_state[:onclick])
   (_, (onkeydown,)) = Data.diff(old_state[:onkeydown], new_state[:onkeydown])
   # @show removed_id parent ix id tag style_id style text_id text onclick onkeydown
   # TODO remove old event handlers
-  @js_(window, render($removed_id, $parent, $ix, $id, $tag, $style_id, $style, $text_id, $text, $onclick, $onkeydown))
+  @js_(window, render($removed_id, $parent, $ix, $id, $tag, $style_id, $style_key, $style_val, $text_id, $text, $onclick, $onkeydown))
 end
 
 function render(window, state)

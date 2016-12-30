@@ -2,3 +2,4 @@ imp, projectname
 lb_web, library
 src/ui.proto, proto, descName=ui
 ui, module
+minesweeper, module

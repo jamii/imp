@@ -1,7 +1,6 @@
 module LB
 
 using Blink
-using DataFrames
 
 function lb(command)
   write("/tmp/script.lb", command)

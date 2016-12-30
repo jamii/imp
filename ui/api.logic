@@ -1,0 +1,12 @@
+block(`api) {
+  alias_all(`ui),
+  clauses(`{
+    lang:constructor(`cons).
+    lang:pulse(`cons).
+    cons[req] = resp -> ui:Request(req), ui:Response(resp).
+
+    +cons[req] = resp,
+    +ui:Response(resp) <- 
+      +ui:Request(req).
+  })
+} <-- .

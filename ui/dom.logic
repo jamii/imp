@@ -1,0 +1,37 @@
+block(`dom) {
+ export(`{ 
+   node(id; parent, ix, tag) ->
+     string(id), string(parent), int(ix), string(tag).
+ 
+   style(id, key; val) ->
+     string(id), string(key), string(val).
+ 
+   text(id; val) ->
+     string(id), string(val).
+ 
+   onclick(id) ->
+     string(id).
+ 
+   click(id) ->
+     string(id).
+ 
+   onkeydown(id) ->
+     string(id).
+ 
+   keydown(id; key, text) ->
+     string(id), int(key), string(text).
+ 
+   level(id; val) ->
+     string(id), int(val).
+  }),
+  clauses(`{
+    lang:pulse(`click).
+    lang:pulse(`keydown).
+    
+    level("root"; 1).
+
+    level(id; val+1) <-
+      level(parent; val),
+      node(id; parent, _, _).  
+  })
+} <-- .

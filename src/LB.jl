@@ -4,7 +4,7 @@ using Blink
 
 function lb(command)
   write("/tmp/script.lb", command)
-  output = readstring(`/home/jamie/logicblox-x86_64-linux-4.3.17-a3f4888aecd21c326197b02deae87d1d74569cc5/bin/lb /tmp/script.lb`)
+  output = readstring(`/home/jamie/logicblox/bin/lb /tmp/script.lb`)
   raw_results = matchall(r"/--------------- _ ---------------\\([^$\\]*)\\--------------- _ ---------------/"s, output)
   stripped_results = [string("[", raw_result[37:(length(raw_result)-36)], "]") for raw_result in raw_results]
   @show stripped_results
@@ -12,46 +12,12 @@ function lb(command)
   @show results
 end
 
-begin
-  init = """
-  open imp
-  
-  addblock --name ui '
-    node(id; parent, ix, tag) ->
-      string(id), string(parent), int(ix), string(tag).
-      
-    style(id, key; val) ->
-      string(id), string(key), string(val).
-      
-    text(id; val) ->
-      string(id), string(val).
-      
-    onclick(id) ->
-      string(id).
-      
-    lang:pulse(`click).
-    click(id) ->
-      string(id).
-      
-    onkeydown(id) ->
-      string(id).
-      
-    lang:pulse(`keydown).
-    keydown(id; key, text) ->
-      string(id), int(key), string(text).
-      
-    level(id; val) ->
-      string(id), int(val).
-      
-    level("root"; 1).
-    
-    level(id; val+1) <-
-      level(parent; val),
-      node(id; parent, _, _).
-  '
-
-  """
-  lb(init)
+begin 
+  # run(`/home/jamie/logicblox/bin/lb compile project ./imp.project`)
+  lb("""
+    open imp
+    addproject /home/jamie/imp
+  """)
 end
 
 function col(matrix, i)
@@ -319,11 +285,6 @@ begin
   lb(command)
 end
 
-begin 
-  run(`/home/jamie/logicblox/bin/lb compile project ./imp.project`)
-  lb("addproject imp ./")
-end
-
-w = window()
+# w = window()
 
 end

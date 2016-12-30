@@ -1,0 +1,33 @@
+package ui;
+
+message Request
+{
+  optional Click click = 1;
+  optional Keydown keydown = 2;
+}
+
+message Click {
+  required string id = 1;
+}
+
+message Keydown {
+  required string id = 1;
+  required int64 key = 2;
+  required string text = 3;
+}
+
+message Response
+{
+  repeated string removed = 1;
+  repeated string parent = 2;
+  repeated int64 ix = 3;
+  repeated string id = 4;
+  repeated string tagName = 5;
+  repeated string styleId = 6;
+  repeated string styleKey = 7;
+  repeated string styleVal = 8;
+  repeated string textContentId = 9;
+  repeated string textContent = 10;
+  repeated string onclick = 11;
+  repeated string onkeydown = 12;
+}

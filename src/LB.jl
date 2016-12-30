@@ -319,6 +319,11 @@ begin
   lb(command)
 end
 
+begin 
+  run(`/home/jamie/logicblox/bin/lb compile project ./imp.project`)
+  lb("addproject imp ./")
+end
+
 w = window()
 
 end

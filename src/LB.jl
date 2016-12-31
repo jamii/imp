@@ -127,4 +127,6 @@ end
 
 # w = window()
 
+# bin/lb compile project ../imp/imp.project &&elete imp && bin/lb create imp && bin/lb addproject imp ../imp && bin/lb web-server load-services
+
 end

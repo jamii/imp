@@ -1,12 +1,18 @@
 block(`api) {
-  alias_all(`ui),
   clauses(`{
-    lang:constructor(`cons).
-    lang:pulse(`cons).
-    cons[req] = resp -> ui:Request(req), ui:Response(resp).
 
-    +cons[req] = resp,
-    +ui:Response(resp) <- 
+    answer[req] = resp -> ui:Request(req), ui:Response(resp).
+    lang:constructor(`answer).
+    lang:pulse(`answer).
+
+    +ui:Response(resp),
+    +answer[req] = resp <-
       +ui:Request(req).
+
+   +ui:Response_removed[resp, 1] = id <-
+     +answer[req] = resp,
+     +ui:Request_click(req, click), 
+     +ui:Click_id(click, id).
+
   })
 } <-- .

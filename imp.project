@@ -1,5 +1,5 @@
 imp, projectname
 lb_web, library
-src/ui.proto, proto, descName=ui
+src/ui.proto, proto, descName=ui lifetime=transaction
 ui, module
 minesweeper, module

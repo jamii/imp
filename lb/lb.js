@@ -9,8 +9,8 @@ function sendEvent(event) {
 
 function requestHandler() {
     data = JSON.parse(this.responseText);
-    console.log(data);
-    render(data.removed, data.parent, data.ix, data.id, data.tagName, data.styleId, data.styleKey, data.styleVal, data.textContentId, data.textContent, data.onclick, data.onkeydown);
+    // console.log(data);
+    render(data.removed || [], data.parent || [], data.ix || [], data.id || [], data.tagName || [], data.styleId || [], data.styleKey || [], data.styleVal || [], data.textContentId || [], data.textContent || [], data.onclick || [], data.onkeydown || []);
 }
 
 function errorHandler(event) {
@@ -18,9 +18,9 @@ function errorHandler(event) {
 }
 
 function render(removed, parent, ix, id, tagName, styleId, styleKey, styleVal, textContentId, textContent, onclick, onkeydown) {
-    console.log(arguments)
+    // console.log(arguments)
     
-    trash = document.createElement(tagName[i]);
+    trash = document.createElement("div");
     document.getElementById("root").appendChild(trash);
     
     for (var i = removed.length - 1; i >= 0; i--) {
@@ -79,4 +79,4 @@ function onkeydownHandler(event) {
     sendEvent({"keydown": {"id": this.id, "key": event.which, "text": this.value}});
 }
 
-sendEvent({});
+sendEvent({"firstRender": true});

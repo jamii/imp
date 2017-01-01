@@ -4,3 +4,4 @@ job/
 lb/proto-gen
 lb/LB_SUMMARY.lbp
 *.lbb
+lb/*.log

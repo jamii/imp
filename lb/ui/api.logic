@@ -21,7 +21,8 @@ block(`api) {
       int(l), string(id).
     lang:pulse(`removed).
         
-    +removed(l, id) ->
+    +removed(l, id) <-
+      +ui:Request(_),
       -ui:dom:node(id; _, _, _),
       ui:dom:level@prev(id; l).
       
@@ -37,8 +38,14 @@ block(`api) {
       int(l), string(parent), int(ix), string(id), string(tagName).
     lang:pulse(`inserted).
       
-    +inserted(l, parent, ix, id, tagName) ->
+    +inserted(l, parent, ix, id, tagName) <-
+      +ui:Request(_),
       ^ui:dom:node(id; parent, ix, tagName),
+      ui:dom:level(id; l). 
+      
+    +inserted(l, parent, ix, id, tagName) <-
+      +ui:Request_firstRender(_, true),
+      ui:dom:node(id; parent, ix, tagName),
       ui:dom:level(id; l). 
       
     sorted_inserted(i; l, parent, ix, id, tagName) ->
@@ -49,20 +56,75 @@ block(`api) {
       seq<< i = (l, parent, ix, id, tagName) >>
       +inserted(l, parent, ix, id, tagName).
       
+    style(id, key; val) ->
+      string(id), string(key), string(val).
+    lang:pulse(`style).
+    
+    +style(id, key; val) <-
+      +ui:Request(_),
+      ^ui:dom:style(id, key; val).
+      
+    +style(id, key; val) <-
+      +ui:Request_firstRender(_, true),
+      ui:dom:style(id, key; val).
+      
+    sorted_style(i; id, key, val) ->
+      int(i), string(id), string(key), string(val).
+      
+    +sorted_style(i; id, key, val) <-
+      seq<< i = (id, key, val) >>
+      +style(id, key; val).
+      
+    text(id; text) ->
+      string(id), string(text).
+    lang:pulse(`text).
+      
+    +text(id, text) <-
+      +ui:Request(_),
+      ^ui:dom:text(id; text).
+      
+    +text(id, text) <-
+      +ui:Request_firstRender(_, true),
+      ui:dom:text(id; text).
+      
     sorted_text(i; id, text) ->
       int(i), string(id), string(text).
     lang:pulse(`sorted_text).
     
     +sorted_text(i; id, text) <-
       seq<< i = (id, text) >>
-      ^ui:dom:text(id, text).
+      +text(id, text).
+      
+    onclick(id) ->
+      string(id).
+    lang:pulse(`onclick).
+      
+    +onclick(id) <-
+      +ui:Request(_),
+      +ui:dom:onclick(id).
+      
+    +onclick(id) <-
+      +ui:Request_firstRender(_, true),
+      ui:dom:onclick(id).
       
     sorted_onclick(i; id) ->
       int(i), string(id).
       
     +sorted_onclick(i; id) <-
       seq<< i = (id) >>
-      +ui:dom:onclick(id).
+      +onclick(id).
+      
+    onkeydown(id) ->
+      string(id).
+    lang:pulse(`onkeydown).
+    
+    +onkeydown(id) <-
+      +ui:Request(_),
+      +ui:dom:onkeydown(id).
+      
+    +onkeydown(id) <-
+      +ui:Request_firstRender(_, true),
+      ui:dom:onkeydown(id).
       
     sorted_onkeydown(i; id) ->
       int(i), string(id).
@@ -102,6 +164,18 @@ block(`api) {
    +ui:Response_textContent[resp, i] = text <-
      +answer[_] = resp,
      +sorted_text(i; _, text).
+     
+   +ui:Response_styleId[resp, i] = id <-
+     +answer[_] = resp,
+     +sorted_style(i; id, _, _).
+     
+   +ui:Response_styleKey[resp, i] = key <-
+     +answer[_] = resp,
+     +sorted_style(i; _, key, _).
+  
+   +ui:Response_styleVal[resp, i] = val <-
+     +answer[_] = resp,
+     +sorted_style(i; _, _, val).
      
    +ui:Response_onclick[resp, i] = id <-
      +answer[_] = resp,

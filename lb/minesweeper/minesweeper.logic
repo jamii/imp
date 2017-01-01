@@ -47,8 +47,8 @@ block(`minesweeper) {
     int:range(1, num_mines[], 1, i),
     mine_x(i;xx),
     mine_y(i;yy),
-    x = int:mod[xx, num_x[]],
-    y = int:mod[yy, num_y[]].
+    x = 1 + int:mod[xx, num_x[]],
+    y = 1 + int:mod[yy, num_y[]].
   
   cell(id;x,y) <-
     int:range(1,num_x[],1,x),

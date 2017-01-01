@@ -2,8 +2,9 @@ package ui;
 
 message Request
 {
-  optional Click click = 1;
-  optional Keydown keydown = 2;
+  optional bool firstRender = 1;
+  optional Click click = 2;
+  optional Keydown keydown = 3;
 }
 
 message Click {
@@ -29,5 +30,5 @@ message Response
   repeated string textContentId = 9;
   repeated string textContent = 10;
   repeated string onclick = 11;
-  repeated string onkeydown = 12 ;
+  repeated string onkeydown = 12;
 }

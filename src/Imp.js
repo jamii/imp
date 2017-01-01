@@ -10,7 +10,7 @@ function onkeydownHandler(event) {
 function render(removed, parent, ix, id, tagName, styleId, styleKey, styleVal, textContentId, textContent, onclick, onkeydown) {
     console.log(arguments)
     
-    trash = document.createElement(tagName[i]);
+    trash = document.createElement("div");
     document.getElementById("root").appendChild(trash);
     
     for (var i = removed.length - 1; i >= 0; i--) {

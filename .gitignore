@@ -1,6 +1,6 @@
 /target
 /target-install
 job/
-proto-gen
-LB_SUMMARY.lbp
+lb/proto-gen
+lb/LB_SUMMARY.lbp
 *.lbb

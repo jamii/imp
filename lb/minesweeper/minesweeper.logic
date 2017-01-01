@@ -1,5 +1,6 @@
 block(`minesweeper) {
   alias_all(`ui:dom),
+  
   clauses(`{
   state[] = s ->
     string(s).

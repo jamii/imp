@@ -29,5 +29,5 @@ message Response
   repeated string textContentId = 9;
   repeated string textContent = 10;
   repeated string onclick = 11;
-  repeated string onkeydown = 12;
+  repeated string onkeydown = 12 ;
 }

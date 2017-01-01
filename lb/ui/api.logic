@@ -1,0 +1,114 @@
+block(`api) {
+  clauses(`{
+
+    answer[req] = resp -> ui:Request(req), ui:Response(resp).
+    lang:constructor(`answer).
+    lang:pulse(`answer).
+    
+    +ui:dom:click(id) <-
+      +ui:Request(req),
+      +ui:Request_click(req, click),
+      +ui:Click_id(click, id).
+      
+    +ui:dom:keydown(id; key, text) <-
+      +ui:Request(req),
+      +ui:Request_keydown(req, keydown),
+      +ui:Keydown_id(keydown, id),
+      +ui:Keydown_key(keydown, key),
+      +ui:Keydown_text(keydown, text).
+        
+    removed(l, id) ->
+      int(l), string(id).
+    lang:pulse(`removed).
+        
+    +removed(l, id) ->
+      -ui:dom:node(id; _, _, _),
+      ui:dom:level@prev(id; l).
+      
+    sorted_removed(i; l, id) ->
+      int(i), int(l), string(id).
+    lang:pulse(`sorted_removed).
+    
+    +sorted_removed(i; l, id) <-
+      seq<< i = (l, id) >>
+      +removed(l, id).
+      
+    inserted(l, parent, ix, id, tagName) ->
+      int(l), string(parent), int(ix), string(id), string(tagName).
+    lang:pulse(`inserted).
+      
+    +inserted(l, parent, ix, id, tagName) ->
+      ^ui:dom:node(id; parent, ix, tagName),
+      ui:dom:level(id; l). 
+      
+    sorted_inserted(i; l, parent, ix, id, tagName) ->
+      int(i), int(l), string(parent), int(ix), string(id), string(tagName).
+    lang:pulse(`sorted_inserted).
+    
+    +sorted_inserted(i; l, parent, ix, id, tagName) <-
+      seq<< i = (l, parent, ix, id, tagName) >>
+      +inserted(l, parent, ix, id, tagName).
+      
+    sorted_text(i; id, text) ->
+      int(i), string(id), string(text).
+    lang:pulse(`sorted_text).
+    
+    +sorted_text(i; id, text) <-
+      seq<< i = (id, text) >>
+      ^ui:dom:text(id, text).
+      
+    sorted_onclick(i; id) ->
+      int(i), string(id).
+      
+    +sorted_onclick(i; id) <-
+      seq<< i = (id) >>
+      +ui:dom:onclick(id).
+      
+    sorted_onkeydown(i; id) ->
+      int(i), string(id).
+      
+    +sorted_onkeydown(i; id) <-
+      seq<< i = (id) >>
+      +ui:dom:onkeydown(id).
+
+    +ui:Response(resp),
+    +answer[req] = resp <-
+      +ui:Request(req).
+
+   +ui:Response_removed[resp, i] = id <-
+     +answer[_] = resp,
+     +sorted_removed(i; _, id).
+     
+   +ui:Response_parent[resp, i] = parent <-
+     +answer[_] = resp,
+     +sorted_inserted(i; _, parent, _, _, _).
+     
+   +ui:Response_ix[resp, i] = ix <-
+     +answer[_] = resp,
+     +sorted_inserted(i; _, _, ix, _, _).
+       
+   +ui:Response_id[resp, i] = id <-
+     +answer[_] = resp,
+     +sorted_inserted(i; _, _, _, id, _).
+     
+   +ui:Response_tagName[resp, i] = tagName <-
+     +answer[_] = resp,
+     +sorted_inserted(i; _, _, _, _, tagName).
+     
+   +ui:Response_textContentId[resp, i] = id <-
+     +answer[_] = resp,
+     +sorted_text(i; id, _).
+     
+   +ui:Response_textContent[resp, i] = text <-
+     +answer[_] = resp,
+     +sorted_text(i; _, text).
+     
+   +ui:Response_onclick[resp, i] = id <-
+     +answer[_] = resp,
+     +sorted_onclick(i; id).
+     
+   +ui:Response_onkeydown[resp, i] = id <-
+     +answer[_] = resp,
+     +sorted_onkeydown(i; id).
+  })
+} <-- .

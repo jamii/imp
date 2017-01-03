@@ -70,6 +70,7 @@ block(`api) {
       
     sorted_style(i; id, key, val) ->
       int(i), string(id), string(key), string(val).
+    lang:pulse(`sorted_style).
       
     +sorted_style(i; id, key, val) <-
       seq<< i = (id, key, val) >>
@@ -109,6 +110,7 @@ block(`api) {
       
     sorted_on_click(i; id) ->
       int(i), string(id).
+    lang:pulse(`sorted_on_click).
       
     +sorted_on_click(i; id) <-
       seq<< i = (id) >>
@@ -128,6 +130,7 @@ block(`api) {
       
     sorted_on_key_down(i; id) ->
       int(i), string(id).
+    lang:pulse(`sorted_on_key_down).
       
     +sorted_on_key_down(i; id) <-
       seq<< i = (id) >>

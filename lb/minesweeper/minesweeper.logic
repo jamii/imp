@@ -2,14 +2,27 @@ block(`minesweeper) {
   alias_all(`ui:dom),
   
   clauses(`{
-  state[] = s ->
-    string(s).
-    
+  
+  // set externally 
+  
   num_x[] = c ->
     int(c).
     
   num_y[] = c ->
     int(c).
+    
+  num_mines[] = c ->
+    int(c).
+    
+  seed[] = s ->
+    int(s).
+    
+  // internal state
+  
+  cleared(x,y) ->
+    int(x), int(y).
+    
+  // game logic
   
   cell(id; x,y) ->
     string(id), int(x), int(y).
@@ -19,21 +32,16 @@ block(`minesweeper) {
   
   mine_count[x,y] = c ->
     int(x), int(y), int(c).
-  
-  cleared(x,y) ->
-    int(x), int(y).
     
   num_cleared[] = c ->
-    int(c).
-    
-  num_mines[] = c ->
     int(c).
     
   mine_x(i; x) -> 
     int(i), int(x).
     
   mine_x(i; x) <- 
-    series<< x = rnd_uniform_int<1, 1000000000, 321>[i] >>
+    series<< x = rnd_uniform_int<1, 1000000000, s>[i] >>
+    seed[] = s,
     int:range(1, num_mines[], 1, i).
     
   mine_y(i; y) -> 
@@ -62,18 +70,19 @@ block(`minesweeper) {
     boolean:or(int:ne_3[nx,x],int:ne_3[ny,y], true),
     mine(nx,ny).
   
-  mine_count[x,y] = c <-
+  mine_count[x, y] = c <-
     agg<< c=count() >>
     cell(_;x,y),
-    neighbouring_mine(x,y,nx,ny).
+    neighbouring_mine(x,y,_,_).
     
-  mine_count[x,y] = 0 <-
+  mine_count[x, y] = 0 <-
     cell(_;x,y),
     !neighbouring_mine(x,y,_,_).
     
-  +cleared(x,y) <-
+  +cleared(x, y) <-
     +click(id),
-    cell(id;x,y).
+    cell(id; x, y),
+    game_in_progress@prev().
     
   +cleared(nx,ny) <-
     +cleared(x,y),
@@ -83,25 +92,41 @@ block(`minesweeper) {
     boolean:or(int:ne_3[nx,x],int:ne_3[ny,y], true),
     cell(_;nx,ny).
     
+  -cleared(x, y) <-
+    +click(id),
+    cell(id; _, _),
+    !game_in_progress@prev(),
+    cleared@prev(x, y).
+    
+  ^seed[] = s2 <-
+    series<< s2 = rnd_uniform_int<1, 1000000, s>[1] >>
+    +click(id),
+    cell(id; _, _),
+    !game_in_progress@prev(),
+    seed@prev[] = s.
+    
   num_cleared[] = c <-
     agg<< c=count() >>
-    cleared(x,y).
+    cleared(_,_).
     
-  ^state[] = "game lost" <-
-    +click(id),
-    cell(id;x,y),
-    mine(x,y).
+  game_lost() <-
+    cleared(x, y),
+    mine(x, y).
     
-  ^state[] = "game won" <-
-    +click(id),
-    cell(id;x,y),
-    !mine(x,y),
-    !state@prev[] = "game lost",
+  game_won() <-
+    !game_lost(),
     num_cleared[] + num_mines[] = num_x[] * num_y[].
     
+  game_in_progress() <-
+    !game_lost(),
+    !game_won().
+    
+  // ui
+    
   node("grid"; "root", 1, "div"),
-  style("grid", "display"; "flex"),
-  style("grid", "flex-direction"; "column") <- .
+  style("grid", "display"; "inline-block"),
+  style("grid", "flex-direction"; "column"),
+  inset("grid") <- .
   
   node(id; "grid", x, "div"),
   style(id, "display"; "flex"),
@@ -110,39 +135,70 @@ block(`minesweeper) {
     id = "row-" + int:string:convert[x].
     
   node(id; parent, y, "button"),
-  style(id, "width"; "2em"),
-  style(id, "height"; "2em"),
+  style(id, "width"; "1.5em"),
+  style(id, "height"; "1.5em"),
   on_click(id) <-
     cell(id;x,y),
     parent = "row-" +  int:string:convert[x].
-  
-  text[id] = "_" <-
-    cell(id;x,y),
-    state[] = "game in progress",
-    cleared(x,y),
-    mine_count[x,y] = 0.
+    
+  visible(x, y) ->
+    int(x), int(y).
+    
+  visible(x, y) <- 
+    cleared(x, y).
+    
+  visible(x, y) <-
+    mine(x, y),
+    !game_in_progress().
+    
+  outset(id),
+  text[id] = "" <-
+    cell(id; x, y),
+    !visible(x, y).
+    
+  flat(id) <-
+    cell(id; x, y),
+    visible(x, y).
+    
+  text[id] = "X" <-
+    cell(id; x, y),
+    visible(x, y),
+    mine(x, y).
     
   text[id] = int:string:convert[c] <-
-    cell(id;x,y),
-    state[] = "game in progress",
-    cleared(x,y),
+    cell(id; x, y),
+    visible(x, y),
+    !mine(x,y),
     mine_count[x,y] = c,
     c != 0.
     
-  text[id] = "M" <-
-    cell(id;x,y),
-    state[] = "game won",
-    mine(x,y).
+  style(id, "color", "red") <-
+    cell(id; x, y),
+    cleared(x, y),
+    mine(x, y).
     
-  text[id] = "*" <-
-    cell(id;x,y),
-    state[] = "game lost",
-    mine(x,y).
+  outset(id) ->
+    string(id).
     
-  text[id] = int:string:convert[c] <-
-    cell(id;x,y),
-    state[] != "game in progress",
-    !mine(x,y),
-    mine_count[x,y] = c.
+  style(id, "border"; "2px solid"),
+  style(id, "border-color"; "white gray gray white"),
+  style(id, "background-color"; "silver") <-
+    outset(id).
+    
+  inset(id) ->
+    string(id).
+      
+  style(id, "border"; "2px solid"),
+  style(id, "border-color"; "gray white white gray"),
+  style(id, "background-color"; "silver") <-
+    inset(id).
+    
+  flat(id) ->
+    string(id).
+        
+  style(id, "border"; "1px solid gray"),
+  style(id, "border-width"; "1px 0 0 1px"),
+  style(id, "background-color"; "silver") <-
+    flat(id).
   })
 } <-- .

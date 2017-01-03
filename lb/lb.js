@@ -10,14 +10,14 @@ function sendEvent(event) {
 function requestHandler() {
     data = JSON.parse(this.responseText);
     // console.log(data);
-    render(data.removed || [], data.parent || [], data.ix || [], data.id || [], data.tagName || [], data.styleId || [], data.styleKey || [], data.styleVal || [], data.textContentId || [], data.textContent || [], data.onclick || [], data.onkeydown || []);
+    render(data.removed || [], data.parent || [], data.ix || [], data.id || [], data.tag || [], data.style_id || [], data.style_key || [], data.style_val || [], data.text_id || [], data.text || [], data.on_click || [], data.on_key_down || []);
 }
 
 function errorHandler(event) {
     console.log(this, event);
 }
 
-function render(removed, parent, ix, id, tagName, styleId, styleKey, styleVal, textContentId, textContent, onclick, onkeydown) {
+function render(removed, parent, ix, id, tag, styleId, styleKey, styleVal, textId, text, onclick, onkeydown) {
     // console.log(arguments)
     
     trash = document.createElement("div");
@@ -31,10 +31,10 @@ function render(removed, parent, ix, id, tagName, styleId, styleKey, styleVal, t
     for (var i = 0; i < parent.length; i++) {
         node = document.getElementById(id[i]);
         if (node == null) {
-            node = document.createElement(tagName[i]);
-        } else if (node.tagName != tagName[i].toUpperCase()) {
+            node = document.createElement(tag[i]);
+        } else if (node.tagName != tag[i].toUpperCase()) {
             oldNode = node
-            node = document.createElement(tagName[i]);
+            node = document.createElement(tag[i]);
             node.style = oldNode.style.cssText;
             while (oldNode.hasChildNodes()) {
                 node.appendChild(oldNode.firstChild);
@@ -52,9 +52,9 @@ function render(removed, parent, ix, id, tagName, styleId, styleKey, styleVal, t
         node.style[styleKey[i]] = styleVal[i];
     }
     
-    for (var i = 0; i < textContentId.length; i++) {
-        node = document.getElementById(textContentId[i]);
-        node.textContent = textContent[i];
+    for (var i = 0; i < textId.length; i++) {
+        node = document.getElementById(textId[i]);
+        node.textContent = text[i];
     }
     
     for (var i = 0; i < onclick.length; i++) {
@@ -76,7 +76,7 @@ function onclickHandler(event) {
 }
 
 function onkeydownHandler(event) {
-    sendEvent({"keydown": {"id": this.id, "key": event.which, "text": this.value}});
+    sendEvent({"key_down": {"id": this.id, "key": event.which, "text": this.value}});
 }
 
-sendEvent({"firstRender": true});
+sendEvent({"first_render": true});

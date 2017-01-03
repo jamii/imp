@@ -9,16 +9,16 @@ block(`dom) {
    text(id; val) ->
      string(id), string(val).
  
-   onclick(id) ->
+   on_click(id) ->
      string(id).
  
    click(id) ->
      string(id).
  
-   onkeydown(id) ->
+   on_key_down(id) ->
      string(id).
  
-   keydown(id; key, text) ->
+   key_down(id; key, text) ->
      string(id), int(key), string(text).
  
    level(id; val) ->
@@ -26,7 +26,7 @@ block(`dom) {
   }),
   clauses(`{
     lang:pulse(`click).
-    lang:pulse(`keydown).
+    lang:pulse(`key_down).
     
     level("root"; 1).
 

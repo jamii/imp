@@ -112,7 +112,7 @@ block(`minesweeper) {
   node(id; parent, y, "button"),
   style(id, "width"; "2em"),
   style(id, "height"; "2em"),
-  onclick(id) <-
+  on_click(id) <-
     cell(id;x,y),
     parent = "row-" +  int:string:convert[x].
   

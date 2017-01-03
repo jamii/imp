@@ -10,12 +10,12 @@ block(`api) {
       +ui:Request_click(req, click),
       +ui:Click_id(click, id).
       
-    +ui:dom:keydown(id; key, text) <-
+    +ui:dom:key_down(id; key, text) <-
       +ui:Request(req),
-      +ui:Request_keydown(req, keydown),
-      +ui:Keydown_id(keydown, id),
-      +ui:Keydown_key(keydown, key),
-      +ui:Keydown_text(keydown, text).
+      +ui:Request_key_down(req, key_down),
+      +ui:KeyDown_id(key_down, id),
+      +ui:KeyDown_key(key_down, key),
+      +ui:KeyDown_text(key_down, text).
         
     removed(l, id) ->
       int(l), string(id).
@@ -34,27 +34,27 @@ block(`api) {
       seq<< i = (l, id) >>
       +removed(l, id).
       
-    inserted(l, parent, ix, id, tagName) ->
-      int(l), string(parent), int(ix), string(id), string(tagName).
+    inserted(l, parent, ix, id, tag) ->
+      int(l), string(parent), int(ix), string(id), string(tag).
     lang:pulse(`inserted).
       
-    +inserted(l, parent, ix, id, tagName) <-
+    +inserted(l, parent, ix, id, tag) <-
       +ui:Request(_),
-      ^ui:dom:node(id; parent, ix, tagName),
+      ^ui:dom:node(id; parent, ix, tag),
       ui:dom:level(id; l). 
       
-    +inserted(l, parent, ix, id, tagName) <-
-      +ui:Request_firstRender(_, true),
-      ui:dom:node(id; parent, ix, tagName),
+    +inserted(l, parent, ix, id, tag) <-
+      +ui:Request_first_render(_, true),
+      ui:dom:node(id; parent, ix, tag),
       ui:dom:level(id; l). 
       
-    sorted_inserted(i; l, parent, ix, id, tagName) ->
-      int(i), int(l), string(parent), int(ix), string(id), string(tagName).
+    sorted_inserted(i; l, parent, ix, id, tag) ->
+      int(i), int(l), string(parent), int(ix), string(id), string(tag).
     lang:pulse(`sorted_inserted).
     
-    +sorted_inserted(i; l, parent, ix, id, tagName) <-
-      seq<< i = (l, parent, ix, id, tagName) >>
-      +inserted(l, parent, ix, id, tagName).
+    +sorted_inserted(i; l, parent, ix, id, tag) <-
+      seq<< i = (l, parent, ix, id, tag) >>
+      +inserted(l, parent, ix, id, tag).
       
     style(id, key; val) ->
       string(id), string(key), string(val).
@@ -65,7 +65,7 @@ block(`api) {
       ^ui:dom:style(id, key; val).
       
     +style(id, key; val) <-
-      +ui:Request_firstRender(_, true),
+      +ui:Request_first_render(_, true),
       ui:dom:style(id, key; val).
       
     sorted_style(i; id, key, val) ->
@@ -84,7 +84,7 @@ block(`api) {
       ^ui:dom:text(id; text).
       
     +text(id, text) <-
-      +ui:Request_firstRender(_, true),
+      +ui:Request_first_render(_, true),
       ui:dom:text(id; text).
       
     sorted_text(i; id, text) ->
@@ -95,43 +95,43 @@ block(`api) {
       seq<< i = (id, text) >>
       +text(id, text).
       
-    onclick(id) ->
+    on_click(id) ->
       string(id).
-    lang:pulse(`onclick).
+    lang:pulse(`on_click).
       
-    +onclick(id) <-
+    +on_click(id) <-
       +ui:Request(_),
-      +ui:dom:onclick(id).
+      +ui:dom:on_click(id).
       
-    +onclick(id) <-
-      +ui:Request_firstRender(_, true),
-      ui:dom:onclick(id).
+    +on_click(id) <-
+      +ui:Request_first_render(_, true),
+      ui:dom:on_click(id).
       
-    sorted_onclick(i; id) ->
+    sorted_on_click(i; id) ->
       int(i), string(id).
       
-    +sorted_onclick(i; id) <-
+    +sorted_on_click(i; id) <-
       seq<< i = (id) >>
-      +onclick(id).
+      +on_click(id).
       
-    onkeydown(id) ->
+    on_key_down(id) ->
       string(id).
-    lang:pulse(`onkeydown).
+    lang:pulse(`on_key_down).
     
-    +onkeydown(id) <-
+    +on_key_down(id) <-
       +ui:Request(_),
-      +ui:dom:onkeydown(id).
+      +ui:dom:on_key_down(id).
       
-    +onkeydown(id) <-
-      +ui:Request_firstRender(_, true),
-      ui:dom:onkeydown(id).
+    +on_key_down(id) <-
+      +ui:Request_first_render(_, true),
+      ui:dom:on_key_down(id).
       
-    sorted_onkeydown(i; id) ->
+    sorted_on_key_down(i; id) ->
       int(i), string(id).
       
-    +sorted_onkeydown(i; id) <-
+    +sorted_on_key_down(i; id) <-
       seq<< i = (id) >>
-      +ui:dom:onkeydown(id).
+      +ui:dom:on_key_down(id).
 
     +ui:Response(resp),
     +answer[req] = resp <-
@@ -153,36 +153,36 @@ block(`api) {
      +answer[_] = resp,
      +sorted_inserted(i; _, _, _, id, _).
      
-   +ui:Response_tagName[resp, i] = tagName <-
+   +ui:Response_tag[resp, i] = tag <-
      +answer[_] = resp,
-     +sorted_inserted(i; _, _, _, _, tagName).
+     +sorted_inserted(i; _, _, _, _, tag).
      
-   +ui:Response_textContentId[resp, i] = id <-
+   +ui:Response_text_id[resp, i] = id <-
      +answer[_] = resp,
      +sorted_text(i; id, _).
      
-   +ui:Response_textContent[resp, i] = text <-
+   +ui:Response_text[resp, i] = text <-
      +answer[_] = resp,
      +sorted_text(i; _, text).
      
-   +ui:Response_styleId[resp, i] = id <-
+   +ui:Response_style_id[resp, i] = id <-
      +answer[_] = resp,
      +sorted_style(i; id, _, _).
      
-   +ui:Response_styleKey[resp, i] = key <-
+   +ui:Response_style_key[resp, i] = key <-
      +answer[_] = resp,
      +sorted_style(i; _, key, _).
   
-   +ui:Response_styleVal[resp, i] = val <-
+   +ui:Response_style_val[resp, i] = val <-
      +answer[_] = resp,
      +sorted_style(i; _, _, val).
      
-   +ui:Response_onclick[resp, i] = id <-
+   +ui:Response_on_click[resp, i] = id <-
      +answer[_] = resp,
-     +sorted_onclick(i; id).
+     +sorted_on_click(i; id).
      
-   +ui:Response_onkeydown[resp, i] = id <-
+   +ui:Response_on_key_down[resp, i] = id <-
      +answer[_] = resp,
-     +sorted_onkeydown(i; id).
+     +sorted_on_key_down(i; id).
   })
 } <-- .

@@ -5,30 +5,43 @@ message Request
   optional bool first_render = 1;
   optional Click click = 2;
   optional KeyDown key_down = 3;
+  optional Change change = 4;
 }
 
-message Click {
-  required string id = 1;
+message Click 
+{
+  required string node = 1;
 }
 
-message KeyDown {
-  required string id = 1;
+message KeyDown 
+{
+  required string node = 1;
   required int64 key = 2;
-  required string text = 3;
+}
+
+message Change
+{
+  required string node = 1;
+  required string text = 2;
 }
 
 message Response
 {
-  repeated string removed = 1;
-  repeated string parent = 2;
-  repeated int64 ix = 3;
-  repeated string id = 4;
-  repeated string tag = 5;
-  repeated string style_id = 6;
-  repeated string style_key = 7;
-  repeated string style_val = 8;
-  repeated string text_id = 9;
-  repeated string text = 10;
-  repeated string on_click = 11;
-  repeated string on_key_down = 12;
+  repeated string delete_node_node = 1;
+  repeated string change_tag_node = 2;
+  repeated string change_tag_tag = 3;
+  repeated string change_text_node = 4;
+  repeated string change_text_text = 5;
+  repeated string create_node_node = 6;
+  repeated string create_node_tag = 7;
+  repeated string move_node_parent = 8;
+  repeated int64 move_node_position = 9;
+  repeated string move_node_child = 10;
+  repeated string change_style_node = 11;
+  repeated string change_style_key = 12;
+  repeated string change_style_val = 13;
+  repeated string start_listening_to_node = 14;
+  repeated string start_listening_to_event = 15;
+  repeated string stop_listening_to_node = 16;
+  repeated string stop_listening_to_event = 17;
 }

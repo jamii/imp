@@ -8,3 +8,9 @@ lb compile project ~/imp/lb/imp.project && lb delete imp && lb create imp && lb 
   -minesweeper:minesweeper:cleared(x,y) <-
     minesweeper:minesweeper:cleared@prev(x,y).
 '
+
+diff is a mess + currently no way to handle non-client initiated changes
+definitely want ordered choice, especially for style cascades
+random gen of mines is ugly
+stratification was problematic with state[] = _
+want live coding

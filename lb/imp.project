@@ -3,3 +3,4 @@ lb_web, library
 ui.proto, proto, descName=ui lifetime=transaction
 ui, module
 minesweeper, module
+crm, module

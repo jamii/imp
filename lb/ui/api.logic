@@ -1,191 +1,290 @@
 block(`api) {
+  alias_all(`ui),
+  alias_all(`ui:dom),
+  
   clauses(`{
+  
+    // fill in defaults (can't use lang:default because node is not an entity)
+  
+    tag_or_default[node] = tag ->
+      string(node), string(tag), node(node).
+      
+    tag_or_default[node] = tag[node].
+    tag_or_default[node] = "div" <-
+      node(node),
+      !(tag[node] = _).
+      
+    position_or_default[node] = position ->
+      string(node), int(position), node(node).
+      
+    position_or_default[node] = position[node].
+    position_or_default[node] = -1 <-
+      node(node),
+      !(position[node] = _).
+    
+    // fill in server-side events
+    
+    +click(node) <-
+      +Request(request),
+      +Request_click(request, click),
+      +Click_node(click, node).
+      
+    +key_down(node; key) <-
+      +Request(request),
+      +Request_key_down(request, key_down),
+      +KeyDown_node(key_down, node),
+      +KeyDown_key(key_down, key).
+      
+    +change(node; text) <-
+      +Request(request),
+      +Request_change(request, change),
+      +Change_node(change, node),
+      +Change_text(change, text).
+      
+    // possible changes (to be applied in this order)
+        
+    delete_node(node) ->
+      string(node), node@prev(node).
+    lang:pulse(`delete_node).
+    
+    change_tag(node, tag) ->
+      string(node), node(node), string(tag).
+    lang:pulse(`change_text).
+      
+    change_text(node, text) ->
+      string(node), node(node), string(text).
+    lang:pulse(`change_text).
+    
+    create_node(node, tag) ->
+      string(node), node(node), string(tag).
+    lang:pulse(`create_node).
+    
+    move_node(parent, position, child) ->
+      string(parent), string(child), node(parent), int(position), node(child).
+    lang:pulse(`move_node).
+      
+    change_style(node, key, val) ->
+      string(node), node(node), string(key), string(val).
+    lang:pulse(`change_style).
+    
+    start_listening_to(node, event) ->
+      string(node), string(event), node(node), event(event).
+    lang:pulse(`start_listening_to).
+    
+    stop_listening_to(node, event) ->
+      string(node), string(event), node(node), event(event).
+    lang:pulse(`stop_listening_to).
+      
+    // on first render, send everything
+    
+    +create_node(node, tag_or_default[node]),
+    +move_node(parent[node], position_or_default[node], node) <-
+      +Request_first_render(_, true),
+      node(node),
+      !(node_by_id["root"] = node).
+      
+    +change_text(node, text) <-
+      +Request_first_render(_, true),
+      text[node] = text,
+      text != "".
+      
+    +change_style(node, key, val) <-
+      +Request_first_render(_, true),
+      style[node, key] = val.
+      
+    +start_listening_to(node, event) <-
+      +Request_first_render(_, true),
+      listen_to(node, event).
+    
+    // on subsequent renders, send changes
+    
+    +delete_node(node) <-
+      -node(node),
+      node(parent[node]). // if a whole subtree is gone, we only need to delete the top node
+      
+    +change_tag(node, tag) <-
+      node@prev(node), // if node is new, we give it a tag on creation
+      ^tag_or_default[node] = tag.
+      
+    +change_text(node, text) <-
+      ^text[node] = text,
+      (text != ""; text@prev[node] = _).
+      
+    +change_text(node, "") <-
+      node(node),
+      -text[node] = _.
+      
+    +create_node(node, tag_or_default[node]) <- 
+      +node(node),
+      !(node_by_id["root"] = node).
+      
+    +move_node(parent, position, child) <-
+      ^parent[child] = parent,
+      position_or_default[child] = position.
+      
+    +move_node(parent, position, child) <-
+      parent[child] = parent,
+      ^position_or_default[child] = position.
+      
+    +change_style(node, key, val) <-
+      ^style[node, key] = val.
+      
+    +change_style(node, key, "") <- // setting style val to "" resets to default (TODO is this portable?)
+      node(node),
+      -style[node, key] = _.
+      
+    +start_listening_to(node, event) <-
+      +listen_to(node, event).
+      
+    +stop_listening_to(node, event) <-
+      node(node),
+      -listen_to(node, event).
+      
+    // sort into arrays
+    // (order only matters for move_node, but [(blox.options.set) = true] from docs doesn't compile so we have to sort them all)
+        
+    sorted_delete_node(i; node) ->
+      string(node), int(i), node@prev(node).
+    lang:pulse(`sorted_delete_node).
+    
+    sorted_change_tag(i; node, tag) ->
+      string(node), int(i), node(node), string(tag).
+    lang:pulse(`sorted_change_text).
+      
+    sorted_change_text(i; node, text) ->
+      string(node), int(i), node(node), string(text).
+    lang:pulse(`sorted_change_text).
+    
+    sorted_create_node(i; node, tag) ->
+      string(node), int(i), node(node), string(tag).
+    lang:pulse(`sorted_create_node).
+    
+    sorted_move_node(i; parent, position, child) ->
+      string(parent), string(child), int(i), node(parent), int(position), node(child).
+    lang:pulse(`sorted_move_node).
+      
+    sorted_change_style(i; node, key, val) ->
+      string(node), int(i), node(node), string(key), string(val).
+    lang:pulse(`sorted_change_style).
+    
+    sorted_start_listening_to(i; node, event) ->
+      string(node), string(event), int(i), node(node), event(event).
+    lang:pulse(`sorted_start_listening_to).
+    
+    sorted_stop_listening_to(i; node, event) ->
+      string(node), string(event), int(i), node(node), event(event).
+    lang:pulse(`sorted_stop_listening_to).    
+        
+    +sorted_delete_node(i; node) <-
+      seq<<>>
+      +delete_node(node).
+    
+    +sorted_change_tag(i; node, tag) <-
+      seq<<>>
+      +change_tag(node, tag).
+      
+    +sorted_change_text(i; node, text) <-
+      seq<<>>
+      +change_text(node, text).
+    
+    +sorted_create_node(i; node, tag) <-
+      seq<<>>
+      +create_node(node, tag).
+    
+    // sorting by parent/position means that we can just loop through in order and call parent.insertBefore(node, parent.children[position]);
+    +sorted_move_node(i; parent, position, child) <-
+      seq<<>>
+      +move_node(parent, position, child).
+    
+    +sorted_change_style(i; node, key, val) <-
+      seq<<>>
+      +change_style(node, key, val).
+      
+    +sorted_start_listening_to(i; node, event) <-
+      seq<<>>
+      +start_listening_to(node, event).
+      
+    +sorted_stop_listening_to(i; node, event) <-
+      seq<<>>
+      +stop_listening_to(node, event).
+    
+    // create response
 
-    answer[req] = resp -> ui:Request(req), ui:Response(resp).
+    answer[request] = response -> 
+      Request(request), Response(response).
     lang:constructor(`answer).
     lang:pulse(`answer).
-    
-    +ui:dom:click(id) <-
-      +ui:Request(req),
-      +ui:Request_click(req, click),
-      +ui:Click_id(click, id).
-      
-    +ui:dom:key_down(id; key, text) <-
-      +ui:Request(req),
-      +ui:Request_key_down(req, key_down),
-      +ui:KeyDown_id(key_down, id),
-      +ui:KeyDown_key(key_down, key),
-      +ui:KeyDown_text(key_down, text).
-        
-    removed(l, id) ->
-      int(l), string(id).
-    lang:pulse(`removed).
-        
-    +removed(l, id) <-
-      +ui:Request(_),
-      -ui:dom:node(id; _, _, _),
-      ui:dom:level@prev(id; l).
-      
-    sorted_removed(i; l, id) ->
-      int(i), int(l), string(id).
-    lang:pulse(`sorted_removed).
-    
-    +sorted_removed(i; l, id) <-
-      seq<< i = (l, id) >>
-      +removed(l, id).
-      
-    inserted(l, parent, ix, id, tag) ->
-      int(l), string(parent), int(ix), string(id), string(tag).
-    lang:pulse(`inserted).
-      
-    +inserted(l, parent, ix, id, tag) <-
-      +ui:Request(_),
-      ^ui:dom:node(id; parent, ix, tag),
-      ui:dom:level(id; l). 
-      
-    +inserted(l, parent, ix, id, tag) <-
-      +ui:Request_first_render(_, true),
-      ui:dom:node(id; parent, ix, tag),
-      ui:dom:level(id; l). 
-      
-    sorted_inserted(i; l, parent, ix, id, tag) ->
-      int(i), int(l), string(parent), int(ix), string(id), string(tag).
-    lang:pulse(`sorted_inserted).
-    
-    +sorted_inserted(i; l, parent, ix, id, tag) <-
-      seq<< i = (l, parent, ix, id, tag) >>
-      +inserted(l, parent, ix, id, tag).
-      
-    style(id, key; val) ->
-      string(id), string(key), string(val).
-    lang:pulse(`style).
-    
-    +style(id, key; val) <-
-      +ui:Request(_),
-      ^ui:dom:style(id, key; val).
-      
-    +style(id, key; val) <-
-      +ui:Request_first_render(_, true),
-      ui:dom:style(id, key; val).
-      
-    sorted_style(i; id, key, val) ->
-      int(i), string(id), string(key), string(val).
-    lang:pulse(`sorted_style).
-      
-    +sorted_style(i; id, key, val) <-
-      seq<< i = (id, key, val) >>
-      +style(id, key; val).
-      
-    text(id; text) ->
-      string(id), string(text).
-    lang:pulse(`text).
-      
-    +text(id, text) <-
-      +ui:Request(_),
-      ^ui:dom:text(id; text).
-      
-    +text(id, text) <-
-      +ui:Request_first_render(_, true),
-      ui:dom:text(id; text).
-      
-    sorted_text(i; id, text) ->
-      int(i), string(id), string(text).
-    lang:pulse(`sorted_text).
-    
-    +sorted_text(i; id, text) <-
-      seq<< i = (id, text) >>
-      +text(id, text).
-      
-    on_click(id) ->
-      string(id).
-    lang:pulse(`on_click).
-      
-    +on_click(id) <-
-      +ui:Request(_),
-      +ui:dom:on_click(id).
-      
-    +on_click(id) <-
-      +ui:Request_first_render(_, true),
-      ui:dom:on_click(id).
-      
-    sorted_on_click(i; id) ->
-      int(i), string(id).
-    lang:pulse(`sorted_on_click).
-      
-    +sorted_on_click(i; id) <-
-      seq<< i = (id) >>
-      +on_click(id).
-      
-    on_key_down(id) ->
-      string(id).
-    lang:pulse(`on_key_down).
-    
-    +on_key_down(id) <-
-      +ui:Request(_),
-      +ui:dom:on_key_down(id).
-      
-    +on_key_down(id) <-
-      +ui:Request_first_render(_, true),
-      ui:dom:on_key_down(id).
-      
-    sorted_on_key_down(i; id) ->
-      int(i), string(id).
-    lang:pulse(`sorted_on_key_down).
-      
-    +sorted_on_key_down(i; id) <-
-      seq<< i = (id) >>
-      +ui:dom:on_key_down(id).
 
-    +ui:Response(resp),
-    +answer[req] = resp <-
-      +ui:Request(req).
+    +Response(response),
+    +answer[request] = response <-
+      +Request(request).
 
-   +ui:Response_removed[resp, i] = id <-
-     +answer[_] = resp,
-     +sorted_removed(i; _, id).
-     
-   +ui:Response_parent[resp, i] = parent <-
-     +answer[_] = resp,
-     +sorted_inserted(i; _, parent, _, _, _).
-     
-   +ui:Response_ix[resp, i] = ix <-
-     +answer[_] = resp,
-     +sorted_inserted(i; _, _, ix, _, _).
-       
-   +ui:Response_id[resp, i] = id <-
-     +answer[_] = resp,
-     +sorted_inserted(i; _, _, _, id, _).
-     
-   +ui:Response_tag[resp, i] = tag <-
-     +answer[_] = resp,
-     +sorted_inserted(i; _, _, _, _, tag).
-     
-   +ui:Response_text_id[resp, i] = id <-
-     +answer[_] = resp,
-     +sorted_text(i; id, _).
-     
-   +ui:Response_text[resp, i] = text <-
-     +answer[_] = resp,
-     +sorted_text(i; _, text).
-     
-   +ui:Response_style_id[resp, i] = id <-
-     +answer[_] = resp,
-     +sorted_style(i; id, _, _).
-     
-   +ui:Response_style_key[resp, i] = key <-
-     +answer[_] = resp,
-     +sorted_style(i; _, key, _).
-  
-   +ui:Response_style_val[resp, i] = val <-
-     +answer[_] = resp,
-     +sorted_style(i; _, _, val).
-     
-   +ui:Response_on_click[resp, i] = id <-
-     +answer[_] = resp,
-     +sorted_on_click(i; id).
-     
-   +ui:Response_on_key_down[resp, i] = id <-
-     +answer[_] = resp,
-     +sorted_on_key_down(i; id).
+    +Response_delete_node_node[response, i] = node <-
+      +answer[_] = response,
+      +sorted_delete_node(i; node).
+      
+    +Response_change_tag_node[response, i] = node <-
+      +answer[_] = response,
+      +sorted_change_tag(i; node, _).
+      
+    +Response_change_tag_tag[response, i] = tag <-
+      +answer[_] = response,
+      +sorted_change_tag(i; _, tag).
+      
+    +Response_change_text_node[response, i] = node <-
+      +answer[_] = response,
+      +sorted_change_text(i; node, _).
+
+    +Response_change_text_text[response, i] = text <-
+      +answer[_] = response,
+      +sorted_change_text(i; _, text).
+            
+    +Response_create_node_node[response, i] = node <-
+      +answer[_] = response,
+      +sorted_create_node(i; node, _).
+      
+    +Response_create_node_tag[response, i] = tag <-
+      +answer[_] = response,
+      +sorted_create_node(i; _, tag).
+      
+    +Response_move_node_parent[response, i] = parent <-
+      +answer[_] = response,
+      +sorted_move_node(i; parent, _, _).
+      
+    +Response_move_node_position[response, i] = position <-
+      +answer[_] = response,
+      +sorted_move_node(i; _, position, _).
+      
+    +Response_move_node_child[response, i] = child <-
+      +answer[_] = response,
+      +sorted_move_node(i; _, _, child).
+      
+    +Response_change_style_node[response, i] = node <-
+      +answer[_] = response,
+      +sorted_change_style(i; node, _, _).
+      
+    +Response_change_style_key[response, i] = key <-
+      +answer[_] = response,
+      +sorted_change_style(i; _, key, _).
+
+    +Response_change_style_val[response, i] = val <-
+      +answer[_] = response,
+      +sorted_change_style(i; _, _, val).  
+      
+    +Response_start_listening_to_node[response, i] = node <-
+      +answer[_] = response,
+      +sorted_start_listening_to(i; node, _).
+      
+    +Response_start_listening_to_event[response, i] = event <-
+      +answer[_] = response,
+      +sorted_start_listening_to(i; _, event).
+      
+    +Response_stop_listening_to_node[response, i] = node <-
+      +answer[_] = response,
+      +sorted_stop_listening_to(i; node, _).
+      
+    +Response_stop_listening_to_event[response, i] = event <-
+      +answer[_] = response,
+      +sorted_stop_listening_to(i; _, event).
   })
 } <-- .

@@ -86,6 +86,7 @@ block(`minesweeper) {
     
   +cleared(nx,ny) <-
     +cleared(x,y),
+    !mine(x, y),
     mine_count(x,y;0),
     int:range(x-1,x+1,1,nx),
     int:range(y-1,y+1,1,ny),
@@ -122,22 +123,30 @@ block(`minesweeper) {
     !game_won().
     
   // ui
-    
-  node("grid"; "root", 1, "div"),
-  style("grid", "display"; "inline-block"),
-  style("grid", "flex-direction"; "column"),
-  inset("grid") <- .
   
-  node(id; "grid", x, "div"),
-  style(id, "display"; "flex"),
-  style(id, "flex-direction"; "row") <-
+  node(id),
+  parent[id] = "root",
+  position[id] = 1,
+  style[id, "display"] = "inline-block",
+  style[id, "flex-direction"] = "column",
+  inset(id) <- 
+    id = "grid".
+  
+  node(id),
+  parent[id] = "grid",
+  position[id] = x - 1,
+  style[id, "display"] = "flex",
+  style[id, "flex-direction"] = "row" <-
     cell(_;x,_),
     id = "row-" + int:string:convert[x].
-    
-  node(id; parent, y, "button"),
-  style(id, "width"; "1.5em"),
-  style(id, "height"; "1.5em"),
-  on_click(id) <-
+  
+  node(id),
+  parent[id] = parent,
+  position[id] = y - 1,
+  tag[id] = "button",
+  style[id, "width"] = "1.5em",
+  style[id, "height"] = "1.5em",
+  listen_to(id, "click") <-
     cell(id;x,y),
     parent = "row-" +  int:string:convert[x].
     
@@ -151,8 +160,7 @@ block(`minesweeper) {
     mine(x, y),
     !game_in_progress().
     
-  outset(id),
-  text[id] = "" <-
+  outset(id) <-
     cell(id; x, y),
     !visible(x, y).
     
@@ -172,7 +180,7 @@ block(`minesweeper) {
     mine_count[x,y] = c,
     c != 0.
     
-  style(id, "color", "red") <-
+  style[id, "color"] = "red" <-
     cell(id; x, y),
     cleared(x, y),
     mine(x, y).
@@ -180,25 +188,25 @@ block(`minesweeper) {
   outset(id) ->
     string(id).
     
-  style(id, "border"; "2px solid"),
-  style(id, "border-color"; "white gray gray white"),
-  style(id, "background-color"; "silver") <-
+  style[id, "border"] = "2px solid",
+  style[id, "border-color"] = "white gray gray white",
+  style[id, "background-color"] = "silver" <-
     outset(id).
     
   inset(id) ->
     string(id).
       
-  style(id, "border"; "2px solid"),
-  style(id, "border-color"; "gray white white gray"),
-  style(id, "background-color"; "silver") <-
+  style[id, "border"] = "2px solid",
+  style[id, "border-color"] = "gray white white gray",
+  style[id, "background-color"] = "silver" <-
     inset(id).
     
   flat(id) ->
     string(id).
         
-  style(id, "border"; "1px solid gray"),
-  style(id, "border-width"; "1px 0 0 1px"),
-  style(id, "background-color"; "silver") <-
+  style[id, "border"] = "1px solid gray",
+  style[id, "border-width"] = "1px 0 0 1px",
+  style[id, "background-color"] = "silver" <-
     flat(id).
   })
 } <-- .

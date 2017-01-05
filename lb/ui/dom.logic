@@ -1,37 +1,73 @@
 block(`dom) {
  export(`{ 
-   node(id; parent, ix, tag) ->
-     string(id), string(parent), int(ix), string(tag).
+   node(node) -> 
+     string(node).
+   
+   node_by_id[id] = node ->
+     string(id), string(node), node(node).
  
-   style(id, key; val) ->
-     string(id), string(key), string(val).
+   parent[node] = parent ->
+     string(node), string(parent), node(node), node(parent).
+      
+   position[node] = position -> 
+     string(node), node(node), int(position). 
+     
+   tag[node] = tag -> // defaults to "div"
+     string(node), node(node), string(tag).
  
-   text(id; val) ->
-     string(id), string(val).
+   style[node, key] = val ->
+     string(node), node(node), string(key), string(val).
  
-   on_click(id) ->
-     string(id).
+   text[node] = text ->
+     string(node), node(node), string(text).
+     
+   event(event) -> 
+     string(event).
+   
+   event_by_name[name] = event ->
+     string(name), string(event), event(event).
  
-   click(id) ->
-     string(id).
+   listen_to(node, event) ->
+     string(node), string(event), node(node), event(event).
+     
+   // events only constrain string(node) because node might already be deleted
  
-   on_key_down(id) ->
-     string(id).
+   click(node) ->
+     string(node). 
  
-   key_down(id; key, text) ->
-     string(id), int(key), string(text).
- 
-   level(id; val) ->
-     string(id), int(val).
+   key_down[node] = key ->
+     string(node), int(key).
+     
+   change[node] = text ->
+     string(node), string(text).
   }),
   clauses(`{
     lang:pulse(`click).
     lang:pulse(`key_down).
+    lang:pulse(`change).
     
-    level("root"; 1).
-
-    level(id; val+1) <-
-      level(parent; val),
-      node(id; parent, _, _).  
+    node("root").
+    
+    event("click").
+    event("key_down").
+    event("change").
+    
+    // every node except the root must have a parent
+    node(node) -> 
+      node = "root"; parent[node] = _.
+      
+    // no two nodes at same position
+    parent[child1] = parent[child2], child1 != child2 ->
+      position[child1] != position[child2].
+    
+    // TODO this doesn't compile
+    // no gaps in position
+    // position[child1] = p, p > 0 ->
+    //  parent[child2] = parent[child1],
+    //  position[child2] = p-1.
+      
+    // can EITHER set text OR have children (because setting node.textContent deletes any existing children)
+    text[node] = _ ->
+      !parent[_] = node. 
   })
 } <-- .

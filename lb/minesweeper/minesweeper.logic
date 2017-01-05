@@ -24,7 +24,7 @@ block(`minesweeper) {
     
   // game logic
   
-  cell(id; x,y) ->
+  cell[x,y] = id ->
     string(id), int(x), int(y).
   
   mine(x,y) ->
@@ -58,13 +58,13 @@ block(`minesweeper) {
     x = 1 + int:mod[xx, num_x[]],
     y = 1 + int:mod[yy, num_y[]].
   
-  cell(id;x,y) <-
+  cell[x,y]=id <-
     int:range(1,num_x[],1,x),
     int:range(1,num_y[],1,y),
     id = "cell-" + int:string:convert[x] + "-" + int:string:convert[y].
     
   neighbouring_mine(x,y,nx,ny) <-
-    cell(_;x,y),
+    cell[x,y] = _,
     int:range(x-1,x+1,1,nx),
     int:range(y-1,y+1,1,ny),
     boolean:or(int:ne_3[nx,x],int:ne_3[ny,y], true),
@@ -72,16 +72,16 @@ block(`minesweeper) {
   
   mine_count[x, y] = c <-
     agg<< c=count() >>
-    cell(_;x,y),
+    cell[x,y] = _,
     neighbouring_mine(x,y,_,_).
     
   mine_count[x, y] = 0 <-
-    cell(_;x,y),
+    cell[x,y] = _,
     !neighbouring_mine(x,y,_,_).
     
   +cleared(x, y) <-
     +click(id),
-    cell(id; x, y),
+    cell[x,y] = id,
     game_in_progress@prev().
     
   +cleared(nx,ny) <-
@@ -91,18 +91,18 @@ block(`minesweeper) {
     int:range(x-1,x+1,1,nx),
     int:range(y-1,y+1,1,ny),
     boolean:or(int:ne_3[nx,x],int:ne_3[ny,y], true),
-    cell(_;nx,ny).
+    cell[nx,ny] = _.
     
   -cleared(x, y) <-
     +click(id),
-    cell(id; _, _),
+    cell[_,_] = id,
     !game_in_progress@prev(),
     cleared@prev(x, y).
     
   ^seed[] = s2 <-
     series<< s2 = rnd_uniform_int<1, 1000000, s>[1] >>
     +click(id),
-    cell(id; _, _),
+    cell[_,_] = id,
     !game_in_progress@prev(),
     seed@prev[] = s.
     
@@ -137,7 +137,7 @@ block(`minesweeper) {
   position[id] = x - 1,
   style[id, "display"] = "flex",
   style[id, "flex-direction"] = "row" <-
-    cell(_;x,_),
+    cell[x,_] = _,
     id = "row-" + int:string:convert[x].
   
   node(id),
@@ -147,7 +147,7 @@ block(`minesweeper) {
   style[id, "width"] = "1.5em",
   style[id, "height"] = "1.5em",
   listen_to(id, "click") <-
-    cell(id;x,y),
+    cell[x,y]=id,
     parent = "row-" +  int:string:convert[x].
     
   visible(x, y) ->
@@ -161,27 +161,27 @@ block(`minesweeper) {
     !game_in_progress().
     
   outset(id) <-
-    cell(id; x, y),
+    cell[x,y] = id,
     !visible(x, y).
     
   flat(id) <-
-    cell(id; x, y),
+    cell[x,y] = id,
     visible(x, y).
     
   text[id] = "X" <-
-    cell(id; x, y),
+    cell[x,y] = id,
     visible(x, y),
     mine(x, y).
     
   text[id] = int:string:convert[c] <-
-    cell(id; x, y),
+    cell[x,y] = id,
     visible(x, y),
     !mine(x,y),
     mine_count[x,y] = c,
     c != 0.
     
   style[id, "color"] = "red" <-
-    cell(id; x, y),
+    cell[x,y] = id,
     cleared(x, y),
     mine(x, y).
     

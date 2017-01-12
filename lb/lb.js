@@ -24,6 +24,9 @@ function requestHandler() {
         data.move_node_parent || [],
         data.move_node_position || [],
         data.move_node_child || [],
+        data.change_attribute_node || [],
+        data.change_attribute_key || [],
+        data.change_attribute_val || [],
         data.change_style_node || [],
         data.change_style_key || [],
         data.change_style_val || [],
@@ -49,6 +52,9 @@ function render(
     move_node_parent,
     move_node_position,
     move_node_child,
+    change_attribute_node,
+    change_attribute_key,
+    change_attribute_val,
     change_style_node,
     change_style_key,
     change_style_val,
@@ -99,6 +105,11 @@ function render(
     }
     
     nursery.remove();
+    
+    for (var i = 0; i < change_attribute_node.length; i++) {
+        node = document.getElementById(change_attribute_node[i]);
+        node[change_attribute_key[i]] = change_attribute_val[i];
+    }
     
     for (var i = 0; i < change_style_node.length; i++) {
         node = document.getElementById(change_style_node[i]);

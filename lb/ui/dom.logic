@@ -14,6 +14,9 @@ block(`dom) {
      
    tag[node] = tag -> // defaults to "div"
      string(node), node(node), string(tag).
+     
+   attribute[node, key] = val ->
+     string(node), node(node), string(key), string(val).
  
    style[node, key] = val ->
      string(node), node(node), string(key), string(val).

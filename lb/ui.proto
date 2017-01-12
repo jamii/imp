@@ -37,11 +37,14 @@ message Response
   repeated string move_node_parent = 8;
   repeated int64 move_node_position = 9;
   repeated string move_node_child = 10;
-  repeated string change_style_node = 11;
-  repeated string change_style_key = 12;
-  repeated string change_style_val = 13;
-  repeated string start_listening_to_node = 14;
-  repeated string start_listening_to_event = 15;
-  repeated string stop_listening_to_node = 16;
-  repeated string stop_listening_to_event = 17;
+  repeated string change_attribute_node = 11;
+  repeated string change_attribute_key = 12;
+  repeated string change_attribute_val = 13;
+  repeated string change_style_node = 14;
+  repeated string change_style_key = 15;
+  repeated string change_style_val = 16;
+  repeated string start_listening_to_node = 17;
+  repeated string start_listening_to_event = 18;
+  repeated string stop_listening_to_node = 19;
+  repeated string stop_listening_to_event = 20;
 }

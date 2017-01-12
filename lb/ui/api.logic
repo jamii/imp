@@ -29,13 +29,13 @@ block(`api) {
       +Request_click(request, click),
       +Click_node(click, node).
       
-    +key_down(node; key) <-
+    +key_down[node] = key <-
       +Request(request),
       +Request_key_down(request, key_down),
       +KeyDown_node(key_down, node),
       +KeyDown_key(key_down, key).
       
-    +change(node; text) <-
+    +change[node] = text <-
       +Request(request),
       +Request_change(request, change),
       +Change_node(change, node),
@@ -62,6 +62,10 @@ block(`api) {
     move_node(parent, position, child) ->
       string(parent), string(child), node(parent), int(position), node(child).
     lang:pulse(`move_node).
+    
+    change_attribute(node, key, val) ->
+      string(node), node(node), string(key), string(val).
+    lang:pulse(`change_attribute).
       
     change_style(node, key, val) ->
       string(node), node(node), string(key), string(val).
@@ -87,6 +91,10 @@ block(`api) {
       +Request_first_render(_, true),
       text[node] = text,
       text != "".
+      
+    +change_attribute(node, key, val) <-
+      +Request_first_render(_, true),
+      attribute[node, key] = val.  
       
     +change_style(node, key, val) <-
       +Request_first_render(_, true),
@@ -126,6 +134,13 @@ block(`api) {
       parent[child] = parent,
       ^position_or_default[child] = position.
       
+    +change_attribute(node, key, val) <-
+      ^attribute[node, key] = val.
+      
+    +change_attribute(node, key, "") <- // TODO copied from style, not sure if this is correct
+      node(node),
+      -attribute[node, key] = _.
+      
     +change_style(node, key, val) <-
       ^style[node, key] = val.
       
@@ -162,6 +177,10 @@ block(`api) {
     sorted_move_node(i; parent, position, child) ->
       string(parent), string(child), int(i), node(parent), int(position), node(child).
     lang:pulse(`sorted_move_node).
+    
+    sorted_change_attribute(i; node, key, val) ->
+      string(node), int(i), node(node), string(key), string(val).
+    lang:pulse(`sorted_change_attribute).
       
     sorted_change_style(i; node, key, val) ->
       string(node), int(i), node(node), string(key), string(val).
@@ -195,6 +214,10 @@ block(`api) {
     +sorted_move_node(i; parent, position, child) <-
       seq<<>>
       +move_node(parent, position, child).
+      
+    +sorted_change_attribute(i; node, key, val) <-
+      seq<<>>
+      +change_attribute(node, key, val).
     
     +sorted_change_style(i; node, key, val) <-
       seq<<>>
@@ -258,6 +281,18 @@ block(`api) {
     +Response_move_node_child[response, i] = child <-
       +answer[_] = response,
       +sorted_move_node(i; _, _, child).
+      
+    +Response_change_attribute_node[response, i] = node <-
+      +answer[_] = response,
+      +sorted_change_attribute(i; node, _, _).
+      
+    +Response_change_attribute_key[response, i] = key <-
+      +answer[_] = response,
+      +sorted_change_attribute(i; _, key, _).
+
+    +Response_change_attribute_val[response, i] = val <-
+      +answer[_] = response,
+      +sorted_change_attribute(i; _, _, val). 
       
     +Response_change_style_node[response, i] = node <-
       +answer[_] = response,

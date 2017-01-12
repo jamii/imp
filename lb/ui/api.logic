@@ -108,7 +108,7 @@ block(`api) {
     
     +delete_node(node) <-
       -node(node),
-      node(parent[node]). // if a whole subtree is gone, we only need to delete the top node
+      node(parent@prev[node]). // if a whole subtree is gone, we only need to delete the top node
       
     +change_tag(node, tag) <-
       node@prev(node), // if node is new, we give it a tag on creation

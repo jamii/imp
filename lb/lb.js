@@ -153,11 +153,13 @@ function render(
 
 function onclickHandler(event) {
     sendEvent({"click": {"node": this.id}});
-    return false;
 }
 
 function onkeydownHandler(event) {
-    sendEvent({"key_down": {"node": this.id, "key": event.which}});
+    sendEvent({
+        "key_down": {"node": this.id, "key": event.which},
+        "change": {"node": this.id, "text": this.value}
+    });
 }
 
 function onchangeHandler(event) {

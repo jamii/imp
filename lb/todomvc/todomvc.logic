@@ -98,6 +98,7 @@ block(`todomvc) {
     +dom:clear(node) <-
       +dom:key_down[node] = 13, // ENTER
       new_todo@prev[] = node,
+      input_text[] != "",
       todo = max_todo@prev[] + 1.
       
     ^completed[todo] = boolean:not[completed@prev[todo]] <-

@@ -130,6 +130,14 @@ function render(
             case "change":
               node.onchange = onchangeHandler;
               break;
+              
+            case "double_click":
+              node.ondblclick = ondblclickHandler;
+              break;
+              
+            case "blur":
+              node.onblur = onblurHandler;
+              break;
         }
     }
     
@@ -146,6 +154,14 @@ function render(
               
             case "change":
               node.onchange = null;
+              break;
+              
+            case "double_click":
+              node.ondblclick = null;
+              break;
+              
+            case "blur":
+              node.onblur = null;
               break;
         }
     }
@@ -164,6 +180,17 @@ function onkeydownHandler(event) {
 
 function onchangeHandler(event) {
     sendEvent({"change": {"node": this.id, "text": this.value}});
+}
+
+function ondblclickHandler(event) {
+    sendEvent({"double_click": {"node": this.id}});
+}
+
+function onblurHandler(event) {
+    sendEvent({
+        "blur": {"node": this.id},
+        "change": {"node": this.id, "text": this.value}
+    });
 }
 
 sendEvent({"first_render": true});

@@ -6,6 +6,8 @@ message Request
   optional Click click = 2;
   optional KeyDown key_down = 3;
   optional Change change = 4;
+  optional DoubleClick double_click = 5;
+  optional Blur blur = 6;
 }
 
 message Click 
@@ -23,6 +25,16 @@ message Change
 {
   required string node = 1;
   required string text = 2;
+}
+
+message DoubleClick
+{
+  required string node = 1;
+}
+
+message Blur
+{
+  required string node = 1;
 }
 
 message Response

@@ -33,7 +33,7 @@ block(`dom) {
    listen_to(node, event) ->
      string(node), string(event), node(node), event(event).
      
-   // events only constrain string(node) because node might already be deleted
+   // events only constrain string(node) and not node(node) because node might already be deleted
  
    click(node) ->
      string(node). 
@@ -43,17 +43,27 @@ block(`dom) {
      
    change[node] = text ->
      string(node), string(text).
+     
+    double_click(node) ->
+      string(node).
+      
+    blur(node) ->
+      string(node).
   }),
   clauses(`{
     lang:pulse(`click).
     lang:pulse(`key_down).
     lang:pulse(`change).
+    lang:pulse(`double_click).
+    lang:pulse(`blur).
     
     node("root").
     
     event("click").
     event("key_down").
     event("change").
+    event("double_click").
+    event("blur").
     
     // every node except the root must have a parent
     node(node) -> 

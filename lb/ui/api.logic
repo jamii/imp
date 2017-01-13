@@ -41,6 +41,16 @@ block(`api) {
       +Change_node(change, node),
       +Change_text(change, text).
       
+    +double_click(node) <-
+      +Request(request),
+      +Request_double_click(request, double_click),
+      +DoubleClick_node(double_click, node).
+      
+    +blur(node) <-
+      +Request(request),
+      +Request_blur(request, blur),
+      +Blur_node(blur, node).
+      
     // possible changes (to be applied in this order)
         
     delete_node(node) ->

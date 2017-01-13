@@ -206,7 +206,7 @@ block(`api) {
     
     sorted_clear(i; node) ->
       string(node), node(node), int(i).
-    lang:pulse(`sorted_clear).   
+    lang:pulse(`sorted_clear).  
         
     +sorted_delete_node(i; node) <-
       seq<<>>
@@ -343,5 +343,9 @@ block(`api) {
     +Response_clear_node[response, i] = node <-
       +answer[_] = response,
       +sorted_clear(i; node).
+      
+    +Response_focus_node[response] = node <-
+      +answer[_] = response,
+      ^focus[] = node.
   })
 } <-- .

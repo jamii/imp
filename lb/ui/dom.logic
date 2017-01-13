@@ -36,6 +36,9 @@ block(`dom) {
    clear(node) ->
      string(node), node(node).
      
+   focus[] = node ->
+     string(node), node(node).
+     
    // events only constrain string(node) and not node(node) because node might already be deleted
  
    click(node) ->

@@ -33,6 +33,9 @@ block(`dom) {
    listen_to(node, event) ->
      string(node), string(event), node(node), event(event).
      
+   clear(node) ->
+     string(node), node(node).
+     
    // events only constrain string(node) and not node(node) because node might already be deleted
  
    click(node) ->
@@ -51,6 +54,8 @@ block(`dom) {
       string(node).
   }),
   clauses(`{
+    lang:pulse(`clear).
+  
     lang:pulse(`click).
     lang:pulse(`key_down).
     lang:pulse(`change).

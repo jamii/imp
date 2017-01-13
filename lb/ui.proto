@@ -59,4 +59,5 @@ message Response
   repeated string start_listening_to_event = 18;
   repeated string stop_listening_to_node = 19;
   repeated string stop_listening_to_event = 20;
+  repeated string clear_node = 21;
 }

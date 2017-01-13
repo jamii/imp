@@ -202,7 +202,11 @@ block(`api) {
     
     sorted_stop_listening_to(i; node, event) ->
       string(node), string(event), int(i), node(node), event(event).
-    lang:pulse(`sorted_stop_listening_to).    
+    lang:pulse(`sorted_stop_listening_to). 
+    
+    sorted_clear(i; node) ->
+      string(node), node(node), int(i).
+    lang:pulse(`sorted_clear).   
         
     +sorted_delete_node(i; node) <-
       seq<<>>
@@ -240,6 +244,10 @@ block(`api) {
     +sorted_stop_listening_to(i; node, event) <-
       seq<<>>
       +stop_listening_to(node, event).
+      
+    +sorted_clear(i; node) <-
+      seq<<>>
+      +clear(node).
     
     // create response
 
@@ -331,5 +339,9 @@ block(`api) {
     +Response_stop_listening_to_event[response, i] = event <-
       +answer[_] = response,
       +sorted_stop_listening_to(i; _, event).
+      
+    +Response_clear_node[response, i] = node <-
+      +answer[_] = response,
+      +sorted_clear(i; node).
   })
 } <-- .

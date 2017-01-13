@@ -20,3 +20,4 @@ stratification was problematic with state[] = _
 want live coding
 need some way to serialize events
 setting initial values is a pain
+need to handle edge events like focus, clear

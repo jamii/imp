@@ -1,0 +1,359 @@
+block(`todomvc) {
+  alias(`ui:dom, `dom),
+  
+  clauses(`{
+    // state
+  
+    todo(todo) ->
+      int(todo).
+      
+    text[todo] = text ->
+      int(todo), string(text).
+      
+    completed[todo] = completed ->
+      int(todo), boolean(completed).
+      
+    input_text[] = text ->
+      string(text).
+      
+    current_filter[] = filter ->
+      string(filter).
+      
+    editing[] = todo ->
+      int(todo).
+      
+    edit_text[] = text ->
+      string(text).
+      
+    // computed
+    
+    todo_count[] = count <-
+      agg<<count = count()>>
+      completed[_] = false.
+      
+    all_completed() <-
+      !(completed[_] = false).
+      
+    visible(todo) <-
+      current_filter[] = "All",
+      completed[todo] = _.
+      
+    visible(todo) <-
+      current_filter[] = "Active",
+      completed[todo] = false.
+    
+    visible(todo) <-
+      current_filter[] = "Completed",
+      completed[todo] = true.
+      
+    todo_at[i] = todo ->
+      int(i), int(todo).
+    
+    todo_at[i] = todo <-
+      seq<<>>
+      visible(todo).
+      
+    max_todo[] = max_todo <-
+      agg<<max_todo = max(todo)>>
+      todo(todo).
+    
+    max_todo[] = 0 <-
+      !todo(_).
+      
+    // ui nodes
+    
+    new_todo[] = node ->
+      string(node).
+      
+    toggle[todo] = node ->
+      string(node), int(todo).
+      
+    button[todo] = node ->
+      string(node), int(todo).
+      
+    toggle_all[] = node ->
+      string(node).
+      
+    filter[filter] = node ->
+      string(filter), string(node).
+      
+    clear_completed[] = node ->
+      string(node).
+      
+    container[todo] = node ->
+      string(node), int(todo).
+      
+    edit[todo] = node ->
+      string(node), int(todo).
+      
+    // event handlers
+      
+    ^input_text[] = text <-
+      +dom:change[node] = text,
+      new_todo@prev[] = node.
+      
+    +todo(todo),
+    +text[todo] = input_text[],
+    +completed[todo] = false,
+    +dom:clear(node) <-
+      +dom:key_down[node] = 13, // ENTER
+      new_todo@prev[] = node,
+      todo = max_todo@prev[] + 1.
+      
+    ^completed[todo] = boolean:not[completed@prev[todo]] <-
+      +dom:click(node),
+      toggle@prev[todo] = node.
+      
+    -todo(todo),
+    -text[todo] = _,
+    -completed[todo] = _ <-
+      +dom:click(node),
+      button@prev[todo] = node.
+      
+    ^completed[todo] = true <-
+      +dom:click(node),
+      toggle_all@prev[] = node,
+      todo(todo),
+      !all_completed@prev().
+      
+    ^completed[todo] = false <-
+      +dom:click(node),
+      toggle_all@prev[] = node,
+      todo(todo),
+      all_completed@prev().
+      
+    ^current_filter[] = filter <-
+      +dom:click(node),
+      filter[filter] = node.
+      
+    -todo(todo),
+    -text[todo] = _,
+    -completed[todo] = _ <-
+      +dom:click(node),
+      clear_completed@prev[] = node,
+      completed@prev[todo] = true.
+      
+    ^editing[] = todo <-
+      +dom:double_click(node),
+      container@prev[todo] = node.
+      
+    ^edit_text[] = text <-
+      +dom:change[node] = text,
+      edit@prev[_] = node.
+      
+    ^text[todo] = text,
+    -editing[] = _ <-
+      +dom:key_down[node] = 13, // ENTER
+      edit@prev[todo] = node,
+      edit_text[] = text.
+      
+    -editing[] = _ <-
+      +dom:key_down[node] = 27, // ESCAPE
+      edit@prev[_] = node.
+      
+    ^text[todo] = text,
+    -editing[] = _ <-
+      +dom:blur(node),
+      edit@prev[todo] = node,
+      edit_text[] = text.
+      
+    // ui
+      
+    dom:node(id),
+    dom:parent[id] = "root",
+    dom:position[id] = 0,
+    dom:tag[id] = "section",
+    dom:attribute[id, "className"] = "todoapp" <-
+      id = "todoapp".
+      
+    dom:node(id),
+    dom:parent[id] = "todoapp",
+    dom:position[id] = 0,
+    dom:tag[id] = "header",
+    dom:attribute[id, "className"] = "header" <-
+      id = "header".
+      
+    dom:node(id),
+    dom:parent[id] = "todoapp",
+    dom:position[id] = 1,
+    dom:tag[id] = "section",
+    dom:attribute[id, "className"] = "main" <-
+      id = "main".
+      
+    dom:node(id),
+    dom:parent[id] = "todoapp",
+    dom:position[id] = 2,
+    dom:tag[id] = "footer",
+    dom:attribute[id, "className"] = "footer" <-
+      id = "footer".
+      
+    dom:style[id, "display"] = "none" <-
+      id = "footer",
+      !todo(_).
+      
+    dom:node(id),
+    dom:parent[id] = "header",
+    dom:position[id] = 0,
+    dom:tag[id] = "h1",
+    dom:text[id] = "todos" <-
+      id = "title".
+  
+    dom:node(id),
+    dom:parent[id] = "header",
+    dom:position[id] = 1,
+    dom:tag[id] = "input",
+    dom:attribute[id, "type"] = "text",
+    dom:attribute[id, "className"] = "new-todo",
+    dom:attribute[id, "placeholder"] = "What needs to be done?",
+    dom:listen_to(id, "key_down"),
+    new_todo[] = id <-
+      id = "new-todo".
+      // id = "new-todo-" + int:string:convert[max_todo[]]. // adding max_todo to id is a hack to reset text to blank
+      
+    dom:node(id),
+    dom:parent[id] = "main",
+    dom:position[id] = 0,
+    dom:tag[id] = "input",
+    dom:attribute[id, "type"] = "checkbox",
+    dom:attribute[id, "className"] = "toggle-all",
+    dom:listen_to(id, "click"),
+    toggle_all[] = id <-
+      id = "toggle-all".
+      
+    dom:style[id, "visibility"] = "hidden" <-
+      id = "toggle-all",
+      !todo(_).
+      
+    dom:attribute[id, "checked"] = "true" <-
+      id = "toggle-all",
+      all_completed().
+      
+    dom:node(id),
+    dom:parent[id] = "main",
+    dom:position[id] = 1,
+    dom:tag[id] = "ul",
+    dom:attribute[id, "className"] = "todo-list" <-
+      id = "todo-list".
+      
+    dom:node(li_id),
+    dom:parent[li_id] = "todo-list",
+    dom:position[li_id] = position,
+    dom:tag[li_id] = "li",
+    dom:node(div_id),
+    dom:parent[div_id] = li_id,
+    dom:position[div_id] = 0,
+    dom:attribute[div_id, "className"] = "view",
+    dom:listen_to(div_id, "double_click"),
+    container[todo] = div_id,
+    dom:node(checkbox_id),
+    dom:parent[checkbox_id] = div_id,
+    dom:position[checkbox_id] = 0,
+    dom:tag[checkbox_id] = "input",
+    dom:attribute[checkbox_id, "type"] = "checkbox",
+    dom:attribute[checkbox_id, "className"] = "toggle",
+    dom:listen_to(checkbox_id, "click"),
+    toggle[todo] = checkbox_id,
+    dom:node(label_id),
+    dom:parent[label_id] = div_id,
+    dom:position[label_id] = 1,
+    dom:tag[label_id] = "label",
+    dom:text[label_id] = text[todo],
+    dom:node(button_id),
+    dom:parent[button_id] = div_id,
+    dom:position[button_id] = 2,
+    dom:tag[button_id] = "button",
+    dom:attribute[button_id, "className"] = "destroy",
+    dom:listen_to(button_id, "click"),
+    button[todo] = button_id <-
+      li_id = "todo-li-" + int:string:convert[todo],
+      div_id = "todo-div-" + int:string:convert[todo],
+      label_id = "todo-label-" + int:string:convert[todo],
+      checkbox_id = "todo-checkbox-" + int:string:convert[todo],
+      button_id = "todo-button-" + int:string:convert[todo],
+      todo_at[position] = todo.
+  
+    dom:attribute[checkbox_id, "checked"] = "true",
+    dom:attribute[li_id, "className"] = "completed" <-
+      checkbox_id = "todo-checkbox-" + int:string:convert[todo],
+      li_id = "todo-li-" + int:string:convert[todo],
+      todo_at[_] = todo,
+      completed[todo] = true.
+      
+    dom:attribute[li_id, "className"] = "editing",  
+    dom:node(id),
+    dom:parent[id] = li_id,
+    dom:position[id] = 1,
+    dom:tag[id] = "input",
+    dom:attribute[id, "className"] = "edit",
+    dom:attribute[id, "value"] = text[todo],
+    dom:listen_to(id, "key_down"),
+    dom:listen_to(id, "blur"),
+    edit[todo] = id,
+    dom:focus[] = id <-
+      li_id = "todo-li-" + int:string:convert[todo],
+      id = "edit-todo",
+      todo_at[_] = todo,
+      editing[] = todo.
+      
+    dom:node(id),
+    dom:parent[id] = "footer",
+    dom:position[id] = 0,
+    dom:tag[id] = "span",
+    dom:attribute[id, "className"] = "todo-count" <-
+      id = "todo-count".
+      
+    dom:text[id] = "1 item left" <-
+      id = "todo-count",
+      todo_count[] = 1.
+      
+    dom:text[id] = int:string:convert[todo_count[]] + " items left" <-
+      id = "todo-count",
+      todo_count[] != 1.
+      
+    dom:node(id),
+    dom:parent[id] = "footer",
+    dom:position[id] = 1,
+    dom:tag[id] = "ul",
+    dom:attribute[id, "className"] = "filters" <-
+      id = "filters".
+      
+    filter_position["All"] = 0.
+    filter_position["Active"] = 1.
+    filter_position["Completed"] = 2.
+    
+    dom:node(li_id),
+    dom:parent[li_id] = "filters",
+    dom:position[li_id] = position,
+    dom:tag[li_id] = "li",
+    
+    dom:node(a_id),
+    dom:parent[a_id] = li_id,
+    dom:position[a_id] = 0,
+    dom:tag[a_id] = "a",
+    dom:text[a_id] = filter,
+    dom:listen_to(a_id, "click"),
+    filter[filter] = a_id <-
+      filter_position[filter] = position,
+      li_id = "filter-li-" + filter,
+      a_id = "filter-span-" + filter.
+      
+    dom:attribute[a_id, "className"] = "selected" <-
+      current_filter[] = filter,
+      a_id = "filter-span-" + filter.
+      
+    dom:node(id),
+    dom:parent[id] = "footer",
+    dom:position[id] = 2,
+    dom:tag[id] = "button",
+    dom:attribute[id, "className"] = "clear-completed",
+    dom:text[id] = "Clear completed",
+    dom:listen_to(id, "click"),
+    clear_completed[] = id <-
+      id = "clear-completed".
+      
+    dom:style[id, "display"] = "none" <-
+      id = "clear-completed",
+      !(completed[_] = true).
+    
+  })
+} <-- .

@@ -112,7 +112,7 @@ function render(
     
     for (var i = 0; i < change_attribute_node.length; i++) {
         node = document.getElementById(change_attribute_node[i]);
-        node[change_attribute_key[i]] = change_attribute_val[i];
+        node.setAttribute(change_attribute_key[i], change_attribute_val[i]);
     }
     
     for (var i = 0; i < change_style_node.length; i++) {

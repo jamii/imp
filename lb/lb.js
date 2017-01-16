@@ -43,6 +43,16 @@ function errorHandler(event) {
     console.log(this, event);
 }
 
+function ns_and_key(key) {
+    if (key.startsWith("svg:")) {
+        return ["http://www.w3.org/2000/svg", key.substring(4,key.length)];
+    } else if (key.startsWith("xlink:")) {
+        return ["http://www.w3.org/1999/xlink", key.substring(6, key.length)];
+    } else {
+        return [null, key];
+    }
+}
+
 function render(
     delete_node_node,
     change_tag_node,
@@ -73,7 +83,8 @@ function render(
     
     for (var i = 0; i < change_tag_node.length; i++) {
         oldNode = document.getElementById(change_tag_node[i]);
-        node = document.createElement(change_tag_tag[i]);
+        [ns, tag] = ns_and_key(change_tag_tag[i])
+        node = document.createElementNS(ns, tag);
         node.style = oldNode.style.cssText;
         while (oldNode.hasChildNodes()) {
             node.appendChild(oldNode.firstChild);
@@ -88,7 +99,8 @@ function render(
     document.getElementById("root").appendChild(nursery);
     
     for (var i = 0; i < create_node_node.length; i++) {
-        node = document.createElement(create_node_tag[i]);
+        [ns, tag] = ns_and_key(create_node_tag[i])
+        node = document.createElementNS(ns, tag);
         node.id = create_node_node[i];
         nursery.appendChild(node);
     }
@@ -112,7 +124,8 @@ function render(
     
     for (var i = 0; i < change_attribute_node.length; i++) {
         node = document.getElementById(change_attribute_node[i]);
-        node.setAttribute(change_attribute_key[i], change_attribute_val[i]);
+        [ns, key] = ns_and_key(change_attribute_key[i]);
+        node.setAttributeNS(ns, key, change_attribute_val[i])
     }
     
     for (var i = 0; i < change_style_node.length; i++) {

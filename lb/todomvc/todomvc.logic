@@ -164,28 +164,28 @@ block(`todomvc) {
     dom:parent[id] = "root",
     dom:position[id] = 0,
     dom:tag[id] = "section",
-    dom:attribute[id, "className"] = "todoapp" <-
+    dom:attribute[id, "class"] = "todoapp" <-
       id = "todoapp".
       
     dom:node(id),
     dom:parent[id] = "todoapp",
     dom:position[id] = 0,
     dom:tag[id] = "header",
-    dom:attribute[id, "className"] = "header" <-
+    dom:attribute[id, "class"] = "header" <-
       id = "header".
       
     dom:node(id),
     dom:parent[id] = "todoapp",
     dom:position[id] = 1,
     dom:tag[id] = "section",
-    dom:attribute[id, "className"] = "main" <-
+    dom:attribute[id, "class"] = "main" <-
       id = "main".
       
     dom:node(id),
     dom:parent[id] = "todoapp",
     dom:position[id] = 2,
     dom:tag[id] = "footer",
-    dom:attribute[id, "className"] = "footer" <-
+    dom:attribute[id, "class"] = "footer" <-
       id = "footer".
       
     dom:style[id, "display"] = "none" <-
@@ -204,7 +204,7 @@ block(`todomvc) {
     dom:position[id] = 1,
     dom:tag[id] = "input",
     dom:attribute[id, "type"] = "text",
-    dom:attribute[id, "className"] = "new-todo",
+    dom:attribute[id, "class"] = "new-todo",
     dom:attribute[id, "placeholder"] = "What needs to be done?",
     dom:listen_to(id, "key_down"),
     new_todo[] = id <-
@@ -216,7 +216,7 @@ block(`todomvc) {
     dom:position[id] = 0,
     dom:tag[id] = "input",
     dom:attribute[id, "type"] = "checkbox",
-    dom:attribute[id, "className"] = "toggle-all",
+    dom:attribute[id, "class"] = "toggle-all",
     dom:listen_to(id, "click"),
     toggle_all[] = id <-
       id = "toggle-all".
@@ -233,7 +233,7 @@ block(`todomvc) {
     dom:parent[id] = "main",
     dom:position[id] = 1,
     dom:tag[id] = "ul",
-    dom:attribute[id, "className"] = "todo-list" <-
+    dom:attribute[id, "class"] = "todo-list" <-
       id = "todo-list".
       
     dom:node(li_id),
@@ -243,7 +243,7 @@ block(`todomvc) {
     dom:node(div_id),
     dom:parent[div_id] = li_id,
     dom:position[div_id] = 0,
-    dom:attribute[div_id, "className"] = "view",
+    dom:attribute[div_id, "class"] = "view",
     dom:listen_to(div_id, "double_click"),
     container[todo] = div_id,
     dom:node(checkbox_id),
@@ -251,7 +251,7 @@ block(`todomvc) {
     dom:position[checkbox_id] = 0,
     dom:tag[checkbox_id] = "input",
     dom:attribute[checkbox_id, "type"] = "checkbox",
-    dom:attribute[checkbox_id, "className"] = "toggle",
+    dom:attribute[checkbox_id, "class"] = "toggle",
     dom:listen_to(checkbox_id, "click"),
     toggle[todo] = checkbox_id,
     dom:node(label_id),
@@ -263,7 +263,7 @@ block(`todomvc) {
     dom:parent[button_id] = div_id,
     dom:position[button_id] = 2,
     dom:tag[button_id] = "button",
-    dom:attribute[button_id, "className"] = "destroy",
+    dom:attribute[button_id, "class"] = "destroy",
     dom:listen_to(button_id, "click"),
     button[todo] = button_id <-
       li_id = "todo-li-" + int:string:convert[todo],
@@ -274,18 +274,18 @@ block(`todomvc) {
       todo_at[position] = todo.
   
     dom:attribute[checkbox_id, "checked"] = "true",
-    dom:attribute[li_id, "className"] = "completed" <-
+    dom:attribute[li_id, "class"] = "completed" <-
       checkbox_id = "todo-checkbox-" + int:string:convert[todo],
       li_id = "todo-li-" + int:string:convert[todo],
       todo_at[_] = todo,
       completed[todo] = true.
       
-    dom:attribute[li_id, "className"] = "editing",  
+    dom:attribute[li_id, "class"] = "editing",  
     dom:node(id),
     dom:parent[id] = li_id,
     dom:position[id] = 1,
     dom:tag[id] = "input",
-    dom:attribute[id, "className"] = "edit",
+    dom:attribute[id, "class"] = "edit",
     dom:attribute[id, "value"] = text[todo],
     dom:listen_to(id, "key_down"),
     dom:listen_to(id, "blur"),
@@ -300,7 +300,7 @@ block(`todomvc) {
     dom:parent[id] = "footer",
     dom:position[id] = 0,
     dom:tag[id] = "span",
-    dom:attribute[id, "className"] = "todo-count" <-
+    dom:attribute[id, "class"] = "todo-count" <-
       id = "todo-count".
       
     dom:text[id] = "1 item left" <-
@@ -315,7 +315,7 @@ block(`todomvc) {
     dom:parent[id] = "footer",
     dom:position[id] = 1,
     dom:tag[id] = "ul",
-    dom:attribute[id, "className"] = "filters" <-
+    dom:attribute[id, "class"] = "filters" <-
       id = "filters".
       
     filter_position["All"] = 0.
@@ -338,7 +338,7 @@ block(`todomvc) {
       li_id = "filter-li-" + filter,
       a_id = "filter-span-" + filter.
       
-    dom:attribute[a_id, "className"] = "selected" <-
+    dom:attribute[a_id, "class"] = "selected" <-
       current_filter[] = filter,
       a_id = "filter-span-" + filter.
       
@@ -346,7 +346,7 @@ block(`todomvc) {
     dom:parent[id] = "footer",
     dom:position[id] = 2,
     dom:tag[id] = "button",
-    dom:attribute[id, "className"] = "clear-completed",
+    dom:attribute[id, "class"] = "clear-completed",
     dom:text[id] = "Clear completed",
     dom:listen_to(id, "click"),
     clear_completed[] = id <-

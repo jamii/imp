@@ -49,7 +49,7 @@ function ns_and_key(key) {
     } else if (key.startsWith("xlink:")) {
         return ["http://www.w3.org/1999/xlink", key.substring(6, key.length)];
     } else {
-        return ["http://www.w3.org/1999/xhtml", key];
+        return [null, key];
     }
 }
 
@@ -84,7 +84,11 @@ function render(
     for (var i = 0; i < change_tag_node.length; i++) {
         oldNode = document.getElementById(change_tag_node[i]);
         [ns, tag] = ns_and_key(change_tag_tag[i])
-        node = document.createElementNS(ns, tag);
+        if (ns == null) {
+            node = document.createElement(tag);
+        } else {
+            node = document.createElementNS(ns, tag);
+        }
         node.style = oldNode.style.cssText;
         while (oldNode.hasChildNodes()) {
             node.appendChild(oldNode.firstChild);
@@ -100,7 +104,11 @@ function render(
     
     for (var i = 0; i < create_node_node.length; i++) {
         [ns, tag] = ns_and_key(create_node_tag[i])
-        node = document.createElementNS(ns, tag);
+        if (ns == null) {
+            node = document.createElement(tag);
+        } else {
+            node = document.createElementNS(ns, tag);
+        }
         node.id = create_node_node[i];
         nursery.appendChild(node);
     }
@@ -125,7 +133,11 @@ function render(
     for (var i = 0; i < change_attribute_node.length; i++) {
         node = document.getElementById(change_attribute_node[i]);
         [ns, key] = ns_and_key(change_attribute_key[i]);
-        node.setAttributeNS(ns, key, change_attribute_val[i])
+        if (ns == null) {
+            node.setAttribute(key, change_attribute_val[i]);
+        } else {
+            node.setAttributeNS(ns, key, change_attribute_val[i]);
+        }
     }
     
     for (var i = 0; i < change_style_node.length; i++) {

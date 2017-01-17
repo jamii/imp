@@ -49,7 +49,7 @@ function ns_and_key(key) {
     } else if (key.startsWith("xlink:")) {
         return ["http://www.w3.org/1999/xlink", key.substring(6, key.length)];
     } else {
-        return [null, key];
+        return ["http://www.w3.org/1999/xhtml", key];
     }
 }
 

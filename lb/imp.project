@@ -4,3 +4,4 @@ ui.proto, proto, descName=ui lifetime=transaction
 ui, module
 // minesweeper, module
 todomvc, module
+// flappy, module

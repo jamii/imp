@@ -1,0 +1,102 @@
+block(`flappy) {
+  alias(`ui:dom, `dom),
+  
+  clauses(`{
+  
+    // state
+  
+    game_over() ->.
+    
+    player_x[] = x ->
+      float(x).
+
+    player_y[] = y -> 
+      float(y).
+      
+    player_dy[] = dy ->
+      float(dy).
+      
+    seed[] = seed ->
+      int(seed).
+      
+    frame() ->.
+    lang:pulse(`frame).
+      
+    // event handlers
+    
+    -game_over(),
+    ^player_x[] = 0f,
+    ^player_y[] = viewport_height[] / 2f,
+    ^player_dy[] = 0f <-
+      game_over@prev(),
+      +dom:click(_).
+    
+    +game_over() <-
+      +frame(),
+      !game_over@prev(),
+      collision().
+      
+    ^player_x[] = player_x@prev[] + 1f,
+    ^player_y[] = player_y@prev[] + player_dy@prev[] <-
+      +frame(),
+      !game_over@prev().
+    
+    ^player_dy[] = player_dy@prev[] - 0.1f <-
+      +frame(),
+      !game_over@prev(),
+      !+dom:click(_).
+     
+    ^player_dy[] = player_dy@prev[] + 1f <-
+      +frame(),
+      !game_over@prev(),
+      +dom:click(_).
+      
+    // computed
+    
+    viewport_width[] = 480f.
+    viewport_height[] = 600f.
+    floor_height[] = 85f.
+    
+    obstacle_width[] = 20f.
+    obstacle_height[] = 20f.
+    
+    obstacle_spacing[] = 200f.
+      
+    obstacle(x, y) ->
+      float(x), float(y).
+      
+    obstacle(x, y) <-
+      series<< y = rnd_uniform_real<5f, 35f, seed>[x] >>
+      seed[] = seed,
+      float:range(player_x[] - obstacle_width[], player_x[] + viewport_width[] + obstacle_width[], obstacle_spacing[], x).
+      
+    collision() <-
+      !(floor_height[] <= player_y[] <= viewport_height[]) .
+      
+    collision() <- 
+      obstacle(x,y),
+      x - obstacle_width[] <= player_x[] <= x + obstacle_width[],
+      !(y - obstacle_height[] <= player_y[] <= y + obstacle_height[]).
+      
+    // ui
+    
+    dom:node(id),
+    dom:parent[id] = "root",
+    dom:position[id] = 0,
+    dom:tag[id] = "svg:svg",
+    dom:attribute[id, "width"] = float:string:convert[viewport_width[]] + "px",
+    dom:attribute[id, "height"] = float:string:convert[viewport_height[]] + "px",
+    dom:listen_to(id, "click") <-
+      id = "viewport".
+      
+    dom:node(id),
+    dom:parent[id] = "viewport",
+    dom:position[id] = 0,
+    dom:tag[id] = "svg:image",
+    dom:attribute[id, "width"] = "100px",
+    dom:attribute[id, "height"] = "100px",
+    dom:attribute[id, "xlink:xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/background.png" <-
+      id = "background".
+    
+  })
+} <-- .

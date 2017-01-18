@@ -1,0 +1,11 @@
+{
+  "handler" : "lb:web:connectblox:create_branch",
+  "prefix"  : "/imp/create-branch",
+  "group" : "lb:web:internal",
+  "http_method": "POST",
+  "request_protocol"  : "ConnectBlox",
+  "request_message"   : "CreateNamedBranch",
+  "response_protocol" : "ConnectBlox",
+  "response_message"  : "CreateNamedBranchResponse"
+}
+

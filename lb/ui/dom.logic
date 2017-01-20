@@ -55,6 +55,8 @@ block(`dom) {
       
     blur(node) ->
       string(node).
+      
+    frame() ->. // dummy event for animations, physics etc
   }),
   clauses(`{
     lang:pulse(`clear).
@@ -64,6 +66,7 @@ block(`dom) {
     lang:pulse(`change).
     lang:pulse(`double_click).
     lang:pulse(`blur).
+    lang:pulse(`frame).
     
     node("root").
     

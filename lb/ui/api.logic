@@ -51,6 +51,10 @@ block(`api) {
       +Request_blur(request, blur),
       +Blur_node(blur, node).
       
+    +frame() <-
+      +Request(request),
+      +Request_frame(request, true).
+      
     // possible changes (to be applied in this order)
         
     delete_node(node) ->
@@ -118,6 +122,7 @@ block(`api) {
     
     +delete_node(node) <-
       -node(node),
+      !node(node),
       node(parent@prev[node]). // if a whole subtree is gone, we only need to delete the top node
       
     +change_tag(node, tag) <-
@@ -130,7 +135,8 @@ block(`api) {
       
     +change_text(node, "") <-
       node(node),
-      -text[node] = _.
+      -text[node] = _,
+      !text[node] = _.
       
     +create_node(node, tag_or_default[node]) <- 
       +node(node),
@@ -149,14 +155,16 @@ block(`api) {
       
     +change_attribute(node, key, "") <- // TODO copied from style, not sure if this is correct
       node(node),
-      -attribute[node, key] = _.
+      -attribute[node, key] = _,
+      !attribute[node, key] = _.
       
     +change_style(node, key, val) <-
       ^style[node, key] = val.
       
     +change_style(node, key, "") <- // setting style val to "" resets to default (TODO is this portable?)
       node(node),
-      -style[node, key] = _.
+      -style[node, key] = _,
+      !style[node, key] = _.
       
     +start_listening_to(node, event) <-
       +listen_to(node, event).

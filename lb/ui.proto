@@ -8,6 +8,7 @@ message Request
   optional Change change = 4;
   optional DoubleClick double_click = 5;
   optional Blur blur = 6;
+  optional bool frame = 7;
 }
 
 message Click 

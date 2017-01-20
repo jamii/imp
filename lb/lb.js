@@ -1,4 +1,41 @@
+function uuid() {
+    var d = new Date().getTime();
+    if(window.performance && typeof window.performance.now === "function"){
+        d += performance.now(); //use high-precision timer if available
+    }
+    var uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = (d + Math.random()*16)%16 | 0;
+        d = Math.floor(d/16);
+        return (c=='x' ? r : (r&0x3|0x8)).toString(16);
+    });
+    return uuid;
+}
+
+function createBranch(oldBranch) {
+    branch = "imp-" + uuid();
+    var request = new XMLHttpRequest();
+    // request.onload = requestHandler;
+    request.onerror = errorHandler;
+    request.open("POST", "/create-branch");
+    request.setRequestHeader('Content-Type', 'application/json');
+    request.send(JSON.stringify({
+        "request": {
+            "workspace": "imp",
+            "branch": branch,
+            "from_branch": oldBranch,
+            "overwrite": false,
+        }
+    }));
+}
+
+events = [];
+
 function sendEvent(event) {
+    events.push(event);
+}
+
+function frame() {
+    event = events.shift() || {}; // TODO need to be able to handle multiple events per frame
     var request = new XMLHttpRequest();
     request.onload = requestHandler;
     request.onerror = errorHandler;
@@ -37,6 +74,7 @@ function requestHandler() {
         data.clear_node || [],
         data.focus_node
     );
+    frame();
 }
 
 function errorHandler(event) {
@@ -211,7 +249,7 @@ function onclickHandler(event) {
 function onkeydownHandler(event) {
     sendEvent({
         "key_down": {"node": this.id, "key": event.which},
-        "change": {"node": this.id, "text": this.value}
+        "change": {"node": this.id, "text": this.value} // hack - events may not be processed in order so pair these
     });
 }
 
@@ -226,8 +264,9 @@ function ondblclickHandler(event) {
 function onblurHandler(event) {
     sendEvent({
         "blur": {"node": this.id},
-        "change": {"node": this.id, "text": this.value}
+        "change": {"node": this.id, "text": this.value} // hack - events may not be processed in order so pair these
     });
 }
 
 sendEvent({"first_render": true});
+frame();

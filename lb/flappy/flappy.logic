@@ -19,10 +19,12 @@ block(`flappy) {
     seed[] = seed ->
       int(seed).
       
+    seed[] = 3.
+      
     // event handlers
     
     +game_running(),
-    ^player_x[] = 20f,
+    ^player_x[] = 0f,
     ^player_y[] = 45f,
     ^player_dy[] = 0f <-
       !game_running@prev(),
@@ -52,31 +54,49 @@ block(`flappy) {
     
     viewport_width[] = 100f.
     viewport_height[] = 100f.
-    floor_height[] = 85f.
+    floor_height[] = 90f.
     
+    player_fixed_x[] = 20f.
     player_width[] = 10f.
-    player_height[] = 10f.
+    player_height[] = 10f * (41f / 57f).
     
-    obstacle_width[] = 20f.
-    obstacle_height[] = 20f.
+    obstacle_width[] = 10f.
+    obstacle_spacing[] = 50f.
+    gap_size[] = 35f.
     
-    obstacle_spacing[] = 200f.
+    obstacle_at(x) ->
+      float(x).
       
-    obstacle(x, y) ->
-      float(x), float(y).
+    obstacle_visible(i) <-
+      left_x = player_x[] - obstacle_width[],
+      right_x = player_x[] + viewport_width[] + obstacle_width[],
+      left_i = float:int:convert[float:floor[left_x / obstacle_spacing[]]],
+      right_i = float:int:convert[float:ceil[right_x / obstacle_spacing[]]],
+      int:range(left_i, right_i, 1, i).
       
-    obstacle(x, y) <-
-      series<< y = rnd_uniform_real<5f, 35f, seed>[x] >>
+    obstacle_x[i] = x ->
+      int(i), float(x).
+      
+    obstacle_x[i] = x <-
+      obstacle_visible(i),
+      world_x = int:float:convert[i] * obstacle_spacing[],
+      x = world_x - player_x[].
+      
+    obstacle_y[i] = y ->
+      int(i), float(y).
+      
+    obstacle_y[ii] = y <-
+      series<< y = rnd_uniform_real<5f, 35f, seed>[ii] >>
       seed[] = seed,
-      float:range(player_x[] - obstacle_width[], player_x[] + viewport_width[] + obstacle_width[], obstacle_spacing[], x).
+      obstacle_visible(i),
+      int:range(1, i, 1, ii). // hack to get deterministic random gen (i -> y)
       
     collision() <-
-      !(floor_height[] <= player_y[] <= viewport_height[]) .
+      !(0f <= player_y[] <= floor_height[] - player_height[]) .
       
     collision() <- 
-      obstacle(x,y),
-      x - obstacle_width[] <= player_x[] <= x + obstacle_width[],
-      !(y - obstacle_height[] <= player_y[] <= y + obstacle_height[]).
+      obstacle_x[i] - player_width[] <= player_fixed_x[] <= obstacle_x[i] + obstacle_width[],
+      !(obstacle_y[i] <= player_y[] <= obstacle_y[i] + gap_size[] - player_height[]).
       
     // ui
     
@@ -119,9 +139,16 @@ block(`flappy) {
     dom:attribute[id, "x"] = "0",
     dom:attribute[id, "y"] = "95",
     dom:attribute[id, "width"] = "100",
-    dom:attribute[id, "height"] = "5",
-    dom:attribute[id, "fill"] = "rgb(222, 216, 149)" <- 
+    dom:attribute[id, "height"] = "5" <- 
       id = "ground".
+      
+    dom:attribute[id, "fill"] = "rgb(222, 216, 149)" <-
+      id = "ground",
+      !collision().
+      
+    dom:attribute[id, "fill"] = "rgb(255, 0, 0)" <-
+      id = "ground",
+      collision().
     
     dom:node(id),
     dom:parent[id] = "viewport",
@@ -139,13 +166,63 @@ block(`flappy) {
     dom:parent[id] = "viewport",
     dom:position[id] = 3,
     dom:tag[id] = "svg:image",
-    dom:attribute[id, "x"] = float:string:convert[20f],
+    dom:attribute[id, "x"] = float:string:convert[player_fixed_x[]],
     dom:attribute[id, "y"] = float:string:convert[player_y[]],
     dom:attribute[id, "width"] = float:string:convert[player_width[]],
     dom:attribute[id, "height"] = float:string:convert[player_height[]],
-    dom:attribute[id, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/flappy-base.png",
-    dom:text[id] = "Click the screen to begin!" <-
-      id = "flappy",
+    dom:attribute[id, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/flappy-base.png" <-
+      id = "player",
       game_running().
-  })
+      
+    dom:node(id_top_body),
+    dom:parent[id_top_body] = "viewport",
+    dom:position[id_top_body] = 4 + (4*i) + 0, 
+    dom:tag[id_top_body] = "svg:image",
+    dom:attribute[id_top_body, "x"] = float:string:convert[x],
+    dom:attribute[id_top_body, "y"] = "0",
+    dom:attribute[id_top_body, "width"] = float:string:convert[obstacle_width[]],
+    dom:attribute[id_top_body, "height"] = float:string:convert[y],
+    dom:attribute[id_top_body, "preserveAspectRatio"] = "none",
+    dom:attribute[id_top_body, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/pillar-bkg.png",
+    
+    dom:node(id_bottom_body),
+    dom:parent[id_bottom_body] = "viewport",
+    dom:position[id_bottom_body] = 4 + (4*i) + 1, 
+    dom:tag[id_bottom_body] = "svg:image",
+    dom:attribute[id_bottom_body, "x"] = float:string:convert[x],
+    dom:attribute[id_bottom_body, "y"] = float:string:convert[y+gap_size[]],
+    dom:attribute[id_bottom_body, "width"] = float:string:convert[obstacle_width[]],
+    dom:attribute[id_bottom_body, "height"] = float:string:convert[floor_height[]-y-gap_size[]],
+    dom:attribute[id_bottom_body, "preserveAspectRatio"] = "none",
+    dom:attribute[id_bottom_body, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/pillar-bkg.png",
+    
+    dom:node(id_top_head),
+    dom:parent[id_top_head] = "viewport",
+    dom:position[id_top_head] = 4 + (4*i) + 2, 
+    dom:tag[id_top_head] = "svg:image",
+    dom:attribute[id_top_head, "x"] = float:string:convert[x-1f],
+    dom:attribute[id_top_head, "y"] = float:string:convert[y-5f],
+    dom:attribute[id_top_head, "width"] = float:string:convert[obstacle_width[]+2f],
+    dom:attribute[id_top_head, "height"] = "5",
+    dom:attribute[id_top_head, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/lower-pillar-head.png",
+    
+    dom:node(id_bottom_head),
+    dom:parent[id_bottom_head] = "viewport",
+    dom:position[id_bottom_head] = 4 + (4*i) + 3, 
+    dom:tag[id_bottom_head] = "svg:image",
+    dom:attribute[id_bottom_head, "x"] = float:string:convert[x-1f],
+    dom:attribute[id_bottom_head, "y"] = float:string:convert[y+gap_size[]],
+    dom:attribute[id_bottom_head, "width"] = float:string:convert[obstacle_width[]+2f],
+    dom:attribute[id_bottom_head, "height"] = "5",
+    dom:attribute[id_bottom_head, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/lower-pillar-head.png" <-
+  
+      obstacle_x[i] = x,
+      obstacle_y[i] = y,
+      id_top_body = "obstacle-top-body-" + int:string:convert[i],
+      id_bottom_body = "obstacle-bottom-body-" + int:string:convert[i],
+      id_top_head = "obstacle-top-head-" + int:string:convert[i],
+      id_bottom_head = "obstacle-bottom-head-" + int:string:convert[i].
+      
+  })    
+
 } <-- .

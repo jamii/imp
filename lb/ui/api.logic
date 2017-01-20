@@ -52,8 +52,7 @@ block(`api) {
       +Blur_node(blur, node).
       
     +frame() <-
-      +Request(request),
-      +Request_frame(request, true).
+      +Request(_).
       
     // possible changes (to be applied in this order)
         

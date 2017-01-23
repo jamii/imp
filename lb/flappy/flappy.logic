@@ -44,6 +44,8 @@ block(`flappy) {
       game_running@prev(),
       collision().
       
+    // TODO cant correct for frame length because datetime resolution is 1s
+      
     ^player_x[] = player_x@prev[] + 1f,
     ^player_y[] = player_y@prev[] + player_dy@prev[] <-
       +dom:frame(),

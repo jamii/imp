@@ -20,6 +20,9 @@ block(`flappy) {
       int(seed).
       
     seed[] = 3.
+    
+    best_score[] = best_score ->
+      int(best_score).
       
     // event handlers
     
@@ -30,10 +33,17 @@ block(`flappy) {
       !game_running@prev(),
       +dom:click(_).
     
-    //-game_running() <-
-    //  +dom:frame(),
-    //  game_running@prev(),
-    //  collision().
+    -game_running() <-
+      +dom:frame(),
+      game_running@prev(),
+      collision().
+      
+    ^best_score[] = int:max[best_score@prev[], score[]] <-
+      -game_running().
+      
+    ^best_score[] = score[] <-
+      -game_running(),
+      !(best_score@prev[] = _).
       
     ^player_x[] = player_x@prev[] + 1f,
     ^player_y[] = player_y@prev[] + player_dy@prev[] <-
@@ -98,6 +108,13 @@ block(`flappy) {
       obstacle_x[i] - player_width[] <= player_fixed_x[] <= obstacle_x[i] + obstacle_width[],
       !(obstacle_y[i] <= player_y[] <= obstacle_y[i] + gap_size[] - player_height[]).
       
+    score[] = score ->
+      int(score).  
+    
+    score[] = float:int:convert[float:floor[x / obstacle_spacing[]]] <-
+      player_x[] = x,
+      x > 0f.
+      
     // ui
     
     dom:node(id),
@@ -150,6 +167,7 @@ block(`flappy) {
       id = "ground",
       collision().
     
+    // TODO place in foreground
     dom:node(id),
     dom:parent[id] = "viewport",
     dom:position[id] = 3,
@@ -160,7 +178,62 @@ block(`flappy) {
     dom:attribute[id, "font-size"] = "6",
     dom:text[id] = "Click the screen to begin!" <-
       id = "start",
-      !game_running().
+      !game_running(),
+      !(score[] = _).
+      
+    // TODO place in foreground
+    dom:node(id),
+    dom:parent[id] = "viewport",
+    dom:position[id] = 3,
+    dom:tag[id] = "svg:svg",
+    
+    dom:node(id1),
+    dom:parent[id1] = id,
+    dom:position[id1] = 0,
+    dom:tag[id1] = "svg:text",
+    dom:attribute[id1, "x"] = "50",
+    dom:attribute[id1, "y"] = "30",
+    dom:attribute[id1, "text-anchor"] = "middle",
+    dom:attribute[id1, "font-size"] = "6",
+    dom:text[id1] = "Game Over :(",
+    
+    dom:node(id2),
+    dom:parent[id2] = id,
+    dom:position[id2] = 1,
+    dom:tag[id2] = "svg:text",
+    dom:attribute[id2, "x"] = "50",
+    dom:attribute[id2, "y"] = "55",
+    dom:attribute[id2, "text-anchor"] = "middle",
+    dom:attribute[id2, "font-size"] = "6",
+    dom:text[id2] = "Score " + int:string:convert[score[]],
+    
+    dom:node(id3),
+    dom:parent[id3] = id,
+    dom:position[id3] = 2,
+    dom:tag[id3] = "svg:text",
+    dom:attribute[id3, "x"] = "50",
+    dom:attribute[id3, "y"] = "65",
+    dom:attribute[id3, "text-anchor"] = "middle",
+    dom:attribute[id3, "font-size"] = "6",
+    dom:text[id3] = "Best " + int:string:convert[best_score[]],
+    
+    dom:node(id4),
+    dom:parent[id4] = id,
+    dom:position[id4] = 3,
+    dom:tag[id4] = "svg:text",
+    dom:attribute[id4, "x"] = "50",
+    dom:attribute[id4, "y"] = "85",
+    dom:attribute[id4, "text-anchor"] = "middle",
+    dom:attribute[id4, "font-size"] = "4",
+    dom:text[id4] = "Click to play again!" <-
+
+      id = "game-over",
+      id1 = "game-over-1",
+      id2 = "game-over-2",
+      id3 = "game-over-3",
+      id4 = "game-over-4",
+      !game_running(),
+      score[] = _.
       
     dom:node(id),
     dom:parent[id] = "viewport",

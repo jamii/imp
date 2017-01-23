@@ -46,17 +46,17 @@ block(`flappy) {
       
     // TODO cant correct for frame length because datetime resolution is 1s
       
-    ^player_x[] = player_x@prev[] + 1f,
+    ^player_x[] = player_x@prev[] + 3f,
     ^player_y[] = player_y@prev[] + player_dy@prev[] <-
       +dom:frame(),
       game_running@prev().
     
-    ^player_dy[] = player_dy@prev[] + 0.1f <-
+    ^player_dy[] = player_dy@prev[] + 0.3f <-
       +dom:frame(),
       game_running@prev(),
       !+dom:click(_).
      
-    ^player_dy[] = player_dy@prev[] - 1f <-
+    ^player_dy[] = player_dy@prev[] - 2f <-
       +dom:frame(),
       game_running@prev(),
       +dom:click(_).

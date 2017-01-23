@@ -6,6 +6,10 @@ block(`flappy) {
     // state
   
     game_running() ->.
+    game_over() ->.
+    game_not_started() <-
+      !game_running(),
+      !game_over().
     
     player_x[] = x ->
       float(x).
@@ -27,23 +31,18 @@ block(`flappy) {
     // event handlers
     
     +game_running(),
+    -game_over(),
     ^player_x[] = 0f,
     ^player_y[] = 45f,
     ^player_dy[] = 0f <-
       !game_running@prev(),
       +dom:click(_).
     
-    -game_running() <-
+    -game_running(),
+    +game_over() <-
       +dom:frame(),
       game_running@prev(),
       collision().
-      
-    ^best_score[] = int:max[best_score@prev[], score[]] <-
-      -game_running().
-      
-    ^best_score[] = score[] <-
-      -game_running(),
-      !(best_score@prev[] = _).
       
     ^player_x[] = player_x@prev[] + 1f,
     ^player_y[] = player_y@prev[] + player_dy@prev[] <-
@@ -60,6 +59,13 @@ block(`flappy) {
       game_running@prev(),
       +dom:click(_).
       
+    +best_score[] = 0 <-
+      +game_running(), // TODO make an init event?
+      !(best_score@prev[] = _).
+  
+    ^best_score[] = int:max[best_score@prev[], score@prev[]] <-
+      +game_running(). 
+      
     // computed
     
     viewport_width[] = 100f.
@@ -73,9 +79,6 @@ block(`flappy) {
     obstacle_width[] = 10f.
     obstacle_spacing[] = 50f.
     gap_size[] = 35f.
-    
-    obstacle_at(x) ->
-      float(x).
       
     obstacle_visible(i) <-
       left_x = player_x[] - obstacle_width[],
@@ -111,9 +114,7 @@ block(`flappy) {
     score[] = score ->
       int(score).  
     
-    score[] = float:int:convert[float:floor[x / obstacle_spacing[]]] <-
-      player_x[] = x,
-      x > 0f.
+    score[] = float:int:convert[float:floor[player_x[] / obstacle_spacing[]]] <-.
       
     // ui
     
@@ -178,8 +179,7 @@ block(`flappy) {
     dom:attribute[id, "font-size"] = "6",
     dom:text[id] = "Click the screen to begin!" <-
       id = "start",
-      !game_running(),
-      !(score[] = _).
+      game_not_started().
       
     // TODO place in foreground
     dom:node(id),
@@ -232,8 +232,7 @@ block(`flappy) {
       id2 = "game-over-2",
       id3 = "game-over-3",
       id4 = "game-over-4",
-      !game_running(),
-      score[] = _.
+      game_over().
       
     dom:node(id),
     dom:parent[id] = "viewport",

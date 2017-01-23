@@ -24,5 +24,6 @@ need some way to serialize events
 setting initial values is a pain
 need to handle edge events like focus, clear
 sorting is a mess, especially with optional nodes
+state machines are awkward - enums? init?
 
 echo '{ "request": { "workspace": "imp", "branch": "q1", "from_branch": "master", "overwrite": false } }' | lb web-client call http://localhost:55183/imp/create-branch

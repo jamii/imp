@@ -3,19 +3,18 @@ block(`minesweeper) {
   
   clauses(`{
   
-  // set externally 
+  // config
   
-  num_x[] = c ->
-    int(c).
-    
-  num_y[] = c ->
-    int(c).
-    
-  num_mines[] = c ->
-    int(c).
-    
-  seed[] = s ->
-    int(s).
+  num_x[] = 30.
+  num_y[] = 30.
+  num_mines[] = 90.
+  
+  seed[] = seed ->
+    int(seed).
+  
+  +seed[] = 123 <-
+    +frame(),
+    !(seed@prev[] = _).
     
   // internal state
   
@@ -124,12 +123,16 @@ block(`minesweeper) {
     
   // ui
   
+  minesweeper() <-
+    url_fragment("#minesweeper").
+  
   node(id),
   parent[id] = "root",
   position[id] = 1,
   style[id, "display"] = "inline-block",
   style[id, "flex-direction"] = "column",
   inset(id) <- 
+    minesweeper(),
     id = "grid".
   
   node(id),
@@ -137,6 +140,7 @@ block(`minesweeper) {
   position[id] = x - 1,
   style[id, "display"] = "flex",
   style[id, "flex-direction"] = "row" <-
+    minesweeper(),
     cell[x,_] = _,
     id = "row-" + int:string:convert[x].
   
@@ -147,6 +151,7 @@ block(`minesweeper) {
   style[id, "width"] = "1.5em",
   style[id, "height"] = "1.5em",
   listen_to(id, "click") <-
+    minesweeper(),
     cell[x,y]=id,
     parent = "row-" +  int:string:convert[x].
     
@@ -154,26 +159,32 @@ block(`minesweeper) {
     int(x), int(y).
     
   visible(x, y) <- 
+    minesweeper(),
     cleared(x, y).
     
   visible(x, y) <-
+    minesweeper(),
     mine(x, y),
     !game_in_progress().
     
   outset(id) <-
+    minesweeper(),
     cell[x,y] = id,
     !visible(x, y).
     
   flat(id) <-
+    minesweeper(),
     cell[x,y] = id,
     visible(x, y).
     
   text[id] = "X" <-
+    minesweeper(),
     cell[x,y] = id,
     visible(x, y),
     mine(x, y).
     
   text[id] = int:string:convert[c] <-
+    minesweeper(),
     cell[x,y] = id,
     visible(x, y),
     !mine(x,y),
@@ -181,6 +192,7 @@ block(`minesweeper) {
     c != 0.
     
   style[id, "color"] = "red" <-
+    minesweeper(),
     cell[x,y] = id,
     cleared(x, y),
     mine(x, y).
@@ -188,25 +200,31 @@ block(`minesweeper) {
   outset(id) ->
     string(id).
     
-  style[id, "border"] = "2px solid",
+  style[id, "border-style"] = "solid",
+  style[id, "border-width"] = "2px",
   style[id, "border-color"] = "white gray gray white",
   style[id, "background-color"] = "silver" <-
+    minesweeper(),
     outset(id).
     
   inset(id) ->
     string(id).
       
-  style[id, "border"] = "2px solid",
+  style[id, "border-style"] = "solid",
+  style[id, "border-width"] = "2px",
   style[id, "border-color"] = "gray white white gray",
   style[id, "background-color"] = "silver" <-
+    minesweeper(),
     inset(id).
     
   flat(id) ->
     string(id).
         
-  style[id, "border"] = "1px solid gray",
+  style[id, "border-style"] = "solid",
   style[id, "border-width"] = "1px 0 0 1px",
+  style[id, "border-color"] = "gray",
   style[id, "background-color"] = "silver" <-
+    minesweeper(),
     flat(id).
   })
 } <-- .

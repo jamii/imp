@@ -36,6 +36,9 @@ function sendEvent(event) {
 
 function frame() {
     event = events.shift() || {}; // TODO need to be able to handle multiple events per frame
+    if (Object.keys(event).length > 0) {
+        console.log("sending", event);
+    }
     var request = new XMLHttpRequest();
     request.onload = requestHandler;
     request.onerror = errorHandler;
@@ -46,7 +49,9 @@ function frame() {
 
 function requestHandler() {
     data = JSON.parse(this.responseText);
-    console.log(data);
+    if (Object.keys(event).length > 0) {
+        console.log("received", data);
+    }
     for (var key in data) {
         data[key] = data[key] || [];
     }
@@ -72,7 +77,8 @@ function requestHandler() {
         data.stop_listening_to_node || [],
         data.stop_listening_to_event || [],
         data.clear_node || [],
-        data.focus_node
+        data.focus_node,
+        data.url_fragment
     );
     frame();
 }
@@ -113,7 +119,8 @@ function render(
     stop_listening_to_node,
     stop_listening_to_event,
     clear_node,
-    focus_node
+    focus_node,
+    url_fragment
 ) {
     for (var i = 0; i < delete_node_node.length; i++) {
         document.getElementById(delete_node_node[i]).remove();
@@ -175,7 +182,7 @@ function render(
             if (key == "checked") {
                 // "checked" is not a real attribute :(
                 node.checked = change_attribute_val[i];
-            } {
+            } else {
                 node.setAttribute(key, change_attribute_val[i]);
             }
         } else {
@@ -184,7 +191,7 @@ function render(
     }
     
     for (var i = 0; i < change_style_node.length; i++) {
-        node = document.getElementById(change_style_node[i]);
+        node = document.getElementById(change_style_node[i]);  
         node.style[change_style_key[i]] = change_style_val[i];
     }
     
@@ -245,6 +252,10 @@ function render(
     if (focus_node != undefined) {
         document.getElementById(focus_node).focus();
     }
+    
+    if (url_fragment != undefined) {
+        history.pushState(null, null, url_fragment);
+    }
 }
 
 function onclickHandler(event) {
@@ -273,5 +284,9 @@ function onblurHandler(event) {
     });
 }
 
-sendEvent({"first_render": true});
+window.onhashchange = function(event) {
+    sendEvent({"url_fragment": window.location.hash});
+}
+
+sendEvent({"first_render": true, "url_fragment": window.location.hash});
 frame();

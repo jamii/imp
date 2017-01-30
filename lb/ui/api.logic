@@ -54,6 +54,10 @@ block(`api) {
     +frame() <-
       +Request(_).
       
+    ^url_fragment[] = url_fragment <-
+      +Request(request),
+      +Request_url_fragment(request, url_fragment).
+      
     // possible changes (to be applied in this order)
         
     delete_node(node) ->
@@ -120,55 +124,68 @@ block(`api) {
     // on subsequent renders, send changes
     
     +delete_node(node) <-
+      !(+Request_first_render(_, true)),
       -node(node),
       !node(node),
       node(parent@prev[node]). // if a whole subtree is gone, we only need to delete the top node
       
     +change_tag(node, tag) <-
+      !(+Request_first_render(_, true)),
       node@prev(node), // if node is new, we give it a tag on creation
       ^tag_or_default[node] = tag.
       
     +change_text(node, text) <-
+      !(+Request_first_render(_, true)),
       ^text[node] = text,
       (text != ""; text@prev[node] = _).
       
     +change_text(node, "") <-
+      !(+Request_first_render(_, true)),
       node(node),
       -text[node] = _,
       !text[node] = _.
       
     +create_node(node, tag_or_default[node]) <- 
+      !(+Request_first_render(_, true)),
       +node(node),
       !(node_by_id["root"] = node).
       
     +move_node(parent, position, child) <-
+      !(+Request_first_render(_, true)),
       ^parent[child] = parent,
       position_or_default[child] = position.
       
     +move_node(parent, position, child) <-
+      !(+Request_first_render(_, true)),
       parent[child] = parent,
       ^position_or_default[child] = position.
       
     +change_attribute(node, key, val) <-
+      !(+Request_first_render(_, true)),
       ^attribute[node, key] = val.
       
     +change_attribute(node, key, "") <- // TODO copied from style, not sure if this is correct
+      !(+Request_first_render(_, true)),
       node(node),
       -attribute[node, key] = _,
       !attribute[node, key] = _.
       
     +change_style(node, key, val) <-
+      !(+Request_first_render(_, true)),
       ^style[node, key] = val.
       
     +change_style(node, key, "") <- // setting style val to "" resets to default (TODO is this portable?)
+      !(+Request_first_render(_, true)),
       node(node),
       -style[node, key] = _,
       !style[node, key] = _.
       
     +start_listening_to(node, event) <-
+      !(+Request_first_render(_, true)),
       +listen_to(node, event).
       
     +stop_listening_to(node, event) <-
+      !(+Request_first_render(_, true)),
       node(node),
       -listen_to(node, event).
       
@@ -354,5 +371,10 @@ block(`api) {
     +Response_focus_node[response] = node <-
       +answer[_] = response,
       ^focus[] = node.
+      
+    +Response_url_fragment[response] = url_fragment <-
+      +answer[_] = response,
+      ^url_fragment[] = url_fragment,
+      !(+Request_url_fragment(_, url_fragment)).
   })
 } <-- .

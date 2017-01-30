@@ -123,6 +123,10 @@ block(`todomvc) {
       todo(todo),
       all_completed@prev().
       
+    ^current_filter[] = "All" <-
+      +dom:frame(),
+      !(current_filter@prev[] = _).
+      
     ^current_filter[] = filter <-
       +dom:click(node),
       filter[filter] = node.
@@ -159,12 +163,16 @@ block(`todomvc) {
       edit_text[] = text.
       
     // ui
+    
+    todomvc() <-
+      dom:url_fragment[] = "#todomvc".
       
     dom:node(id),
     dom:parent[id] = "root",
     dom:position[id] = 0,
     dom:tag[id] = "section",
     dom:attribute[id, "class"] = "todoapp" <-
+      todomvc(),
       id = "todoapp".
       
     dom:node(id),
@@ -172,6 +180,7 @@ block(`todomvc) {
     dom:position[id] = 0,
     dom:tag[id] = "header",
     dom:attribute[id, "class"] = "header" <-
+      todomvc(),
       id = "header".
       
     dom:node(id),
@@ -179,6 +188,7 @@ block(`todomvc) {
     dom:position[id] = 1,
     dom:tag[id] = "section",
     dom:attribute[id, "class"] = "main" <-
+      todomvc(),
       id = "main".
       
     dom:node(id),
@@ -186,9 +196,11 @@ block(`todomvc) {
     dom:position[id] = 2,
     dom:tag[id] = "footer",
     dom:attribute[id, "class"] = "footer" <-
+      todomvc(),
       id = "footer".
       
     dom:style[id, "display"] = "none" <-
+      todomvc(),
       id = "footer",
       !todo(_).
       
@@ -197,6 +209,7 @@ block(`todomvc) {
     dom:position[id] = 0,
     dom:tag[id] = "h1",
     dom:text[id] = "todos" <-
+      todomvc(),
       id = "title".
   
     dom:node(id),
@@ -208,6 +221,7 @@ block(`todomvc) {
     dom:attribute[id, "placeholder"] = "What needs to be done?",
     dom:listen_to(id, "key_down"),
     new_todo[] = id <-
+      todomvc(),
       id = "new-todo".
       // id = "new-todo-" + int:string:convert[max_todo[]]. // adding max_todo to id is a hack to reset text to blank
       
@@ -219,13 +233,16 @@ block(`todomvc) {
     dom:attribute[id, "class"] = "toggle-all",
     dom:listen_to(id, "click"),
     toggle_all[] = id <-
+      todomvc(),
       id = "toggle-all".
       
     dom:style[id, "visibility"] = "hidden" <-
+      todomvc(),
       id = "toggle-all",
       !todo(_).
       
     dom:attribute[id, "checked"] = "true" <-
+      todomvc(),
       id = "toggle-all",
       all_completed().
       
@@ -234,6 +251,7 @@ block(`todomvc) {
     dom:position[id] = 1,
     dom:tag[id] = "ul",
     dom:attribute[id, "class"] = "todo-list" <-
+      todomvc(),
       id = "todo-list".
       
     dom:node(li_id),
@@ -266,6 +284,7 @@ block(`todomvc) {
     dom:attribute[button_id, "class"] = "destroy",
     dom:listen_to(button_id, "click"),
     button[todo] = button_id <-
+      todomvc(),
       li_id = "todo-li-" + int:string:convert[todo],
       div_id = "todo-div-" + int:string:convert[todo],
       label_id = "todo-label-" + int:string:convert[todo],
@@ -275,6 +294,7 @@ block(`todomvc) {
   
     dom:attribute[checkbox_id, "checked"] = "true",
     dom:attribute[li_id, "class"] = "completed" <-
+      todomvc(),
       checkbox_id = "todo-checkbox-" + int:string:convert[todo],
       li_id = "todo-li-" + int:string:convert[todo],
       todo_at[_] = todo,
@@ -291,6 +311,7 @@ block(`todomvc) {
     dom:listen_to(id, "blur"),
     edit[todo] = id,
     dom:focus[] = id <-
+      todomvc(),
       li_id = "todo-li-" + int:string:convert[todo],
       id = "edit-todo",
       todo_at[_] = todo,
@@ -301,13 +322,16 @@ block(`todomvc) {
     dom:position[id] = 0,
     dom:tag[id] = "span",
     dom:attribute[id, "class"] = "todo-count" <-
+      todomvc(),
       id = "todo-count".
       
     dom:text[id] = "1 item left" <-
+      todomvc(),
       id = "todo-count",
       todo_count[] = 1.
       
     dom:text[id] = int:string:convert[todo_count[]] + " items left" <-
+      todomvc(),
       id = "todo-count",
       todo_count[] != 1.
       
@@ -316,6 +340,7 @@ block(`todomvc) {
     dom:position[id] = 1,
     dom:tag[id] = "ul",
     dom:attribute[id, "class"] = "filters" <-
+      todomvc(),
       id = "filters".
       
     filter_position["All"] = 0.
@@ -334,11 +359,13 @@ block(`todomvc) {
     dom:text[a_id] = filter,
     dom:listen_to(a_id, "click"),
     filter[filter] = a_id <-
+      todomvc(),
       filter_position[filter] = position,
       li_id = "filter-li-" + filter,
       a_id = "filter-span-" + filter.
       
     dom:attribute[a_id, "class"] = "selected" <-
+      todomvc(),
       current_filter[] = filter,
       a_id = "filter-span-" + filter.
       
@@ -350,9 +377,11 @@ block(`todomvc) {
     dom:text[id] = "Clear completed",
     dom:listen_to(id, "click"),
     clear_completed[] = id <-
+      todomvc(),
       id = "clear-completed".
       
     dom:style[id, "display"] = "none" <-
+      todomvc(),
       id = "clear-completed",
       !(completed[_] = true).
     

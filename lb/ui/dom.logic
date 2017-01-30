@@ -39,6 +39,9 @@ block(`dom) {
    focus[] = node ->
      string(node), node(node).
      
+   url_fragment[] = url_fragment ->
+     string(url_fragment).
+     
    // events only constrain string(node) and not node(node) because node might already be deleted
  
    click(node) ->

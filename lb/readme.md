@@ -20,10 +20,18 @@ definitely want ordered choice, especially for style cascades
 random gen of mines is ugly
 stratification was problematic with state[] = _
 want live coding
-need some way to serialize events
 setting initial values is a pain
-need to handle edge events like focus, clear
 sorting is a mess, especially with optional nodes
 state machines are awkward - enums? init?
+mixing eg border-style/border-width and border is brittle, depends on ordering
 
 echo '{ "request": { "workspace": "imp", "branch": "q1", "from_branch": "master", "overwrite": false } }' | lb web-client call http://localhost:55183/imp/create-branch
+
+templates
+sorting / aggregates / random
+diff / branch / listener
+latency?
+
+email jeff + molham about benchmarking
+hierarchical syntax
+servers / routing

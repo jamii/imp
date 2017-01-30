@@ -172,7 +172,12 @@ function render(
         node = document.getElementById(change_attribute_node[i]);
         [ns, key] = ns_and_key(change_attribute_key[i]);
         if (ns == null) {
-            node.setAttribute(key, change_attribute_val[i]);
+            if (key == "checked") {
+                // "checked" is not a real attribute :(
+                node.checked = change_attribute_val[i];
+            } {
+                node.setAttribute(key, change_attribute_val[i]);
+            }
         } else {
             node.setAttributeNS(ns, key, change_attribute_val[i]);
         }

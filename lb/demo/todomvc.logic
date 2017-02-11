@@ -13,17 +13,17 @@ block(`todomvc) {
     completed[todo] = completed ->
       int(todo), boolean(completed).
       
-    input_text[] = text ->
-      string(text).
+    input_text[session] = text ->
+      string(session), string(text).
       
-    current_filter[] = filter ->
-      string(filter).
+    current_filter[session] = filter ->
+      string(session), string(filter).
       
-    editing[] = todo ->
-      int(todo).
+    editing[session] = todo ->
+      string(session), int(todo).
       
-    edit_text[] = text ->
-      string(text).
+    edit_text[session] = text ->
+      string(session), string(text).
       
     // computed
     
@@ -34,24 +34,24 @@ block(`todomvc) {
     all_completed() <-
       !(completed[_] = false).
       
-    visible(todo) <-
-      current_filter[] = "All",
+    visible(session, todo) <-
+      current_filter[session] = "All",
       completed[todo] = _.
       
-    visible(todo) <-
-      current_filter[] = "Active",
+    visible(session, todo) <-
+      current_filter[session] = "Active",
       completed[todo] = false.
     
-    visible(todo) <-
-      current_filter[] = "Completed",
+    visible(session, todo) <-
+      current_filter[session] = "Completed",
       completed[todo] = true.
       
-    todo_at[i] = todo ->
-      int(i), int(todo).
+    todo_at[session, i] = todo ->
+      string(session), int(i), int(todo).
     
-    todo_at[i] = todo <-
+    todo_at[session, i] = todo <-
       seq<<>>
-      visible(todo).
+      visible(session, todo).
       
     max_todo[] = max_todo <-
       agg<<max_todo = max(todo)>>
@@ -88,300 +88,300 @@ block(`todomvc) {
       
     // event handlers
       
-    ^input_text[] = text <-
-      +dom:change[node] = text,
+    ^input_text[session] = text <-
+      +dom:change[session, node] = text,
       new_todo@prev[] = node.
       
     +todo(todo),
-    +text[todo] = input_text[],
+    +text[todo] = input_text[session],
     +completed[todo] = false,
-    +dom:clear(node) <-
-      +dom:key_down[node] = 13, // ENTER
+    +dom:clear(session, node) <-
+      +dom:key_down[session, node] = 13, // ENTER
       new_todo@prev[] = node,
-      input_text[] != "",
+      input_text[session] != "",
       todo = max_todo@prev[] + 1.
       
     ^completed[todo] = boolean:not[completed@prev[todo]] <-
-      +dom:click(node),
+      +dom:click(_, node),
       toggle@prev[todo] = node.
       
     -todo(todo),
     -text[todo] = _,
     -completed[todo] = _ <-
-      +dom:click(node),
+      +dom:click(_, node),
       button@prev[todo] = node.
       
     ^completed[todo] = true <-
-      +dom:click(node),
+      +dom:click(_, node),
       toggle_all@prev[] = node,
       todo(todo),
       !all_completed@prev().
       
     ^completed[todo] = false <-
-      +dom:click(node),
+      +dom:click(_, node),
       toggle_all@prev[] = node,
       todo(todo),
       all_completed@prev().
       
-    ^current_filter[] = "All" <-
-      +dom:frame(),
-      !(current_filter@prev[] = _).
+    ^current_filter[session] = "All" <-
+      +dom:frame(session),
+      !(current_filter@prev[session] = _).
       
-    ^current_filter[] = filter <-
-      +dom:click(node),
+    ^current_filter[session] = filter <-
+      +dom:click(session, node),
       filter[filter] = node.
       
     -todo(todo),
     -text[todo] = _,
     -completed[todo] = _ <-
-      +dom:click(node),
+      +dom:click(_, node),
       clear_completed@prev[] = node,
       completed@prev[todo] = true.
       
-    ^editing[] = todo <-
-      +dom:double_click(node),
+    ^editing[session] = todo <-
+      +dom:double_click(session, node),
       container@prev[todo] = node.
       
-    ^edit_text[] = text <-
-      +dom:change[node] = text,
+    ^edit_text[session] = text <-
+      +dom:change[session, node] = text,
       edit@prev[_] = node.
       
     ^text[todo] = text,
-    -editing[] = _ <-
-      +dom:key_down[node] = 13, // ENTER
+    -editing[session] = _ <-
+      +dom:key_down[session, node] = 13, // ENTER
       edit@prev[todo] = node,
-      edit_text[] = text.
+      edit_text[session] = text.
       
-    -editing[] = _ <-
-      +dom:key_down[node] = 27, // ESCAPE
+    -editing[session] = _ <-
+      +dom:key_down[session, node] = 27, // ESCAPE
       edit@prev[_] = node.
       
     ^text[todo] = text,
-    -editing[] = _ <-
-      +dom:blur(node),
+    -editing[session] = _ <-
+      +dom:blur(session, node),
       edit@prev[todo] = node,
-      edit_text[] = text.
+      edit_text[session] = text.
       
     // ui
     
-    todomvc() <-
-      dom:url_fragment[] = "#todomvc".
+    todomvc(session) <-
+      dom:url_fragment[session] = "#todomvc".
       
-    dom:node(id),
-    dom:parent[id] = "root",
-    dom:position[id] = 0,
-    dom:tag[id] = "section",
-    dom:attribute[id, "class"] = "todoapp" <-
-      todomvc(),
+    dom:node(session, id),
+    dom:parent[session, id] = "root",
+    dom:position[session, id] = 0,
+    dom:tag[session, id] = "section",
+    dom:attribute[session, id, "class"] = "todoapp" <-
+      todomvc(session),
       id = "todoapp".
       
-    dom:node(id),
-    dom:parent[id] = "todoapp",
-    dom:position[id] = 0,
-    dom:tag[id] = "header",
-    dom:attribute[id, "class"] = "header" <-
-      todomvc(),
+    dom:node(session, id),
+    dom:parent[session, id] = "todoapp",
+    dom:position[session, id] = 0,
+    dom:tag[session, id] = "header",
+    dom:attribute[session, id, "class"] = "header" <-
+      todomvc(session),
       id = "header".
       
-    dom:node(id),
-    dom:parent[id] = "todoapp",
-    dom:position[id] = 1,
-    dom:tag[id] = "section",
-    dom:attribute[id, "class"] = "main" <-
-      todomvc(),
+    dom:node(session, id),
+    dom:parent[session, id] = "todoapp",
+    dom:position[session, id] = 1,
+    dom:tag[session, id] = "section",
+    dom:attribute[session, id, "class"] = "main" <-
+      todomvc(session),
       id = "main".
       
-    dom:node(id),
-    dom:parent[id] = "todoapp",
-    dom:position[id] = 2,
-    dom:tag[id] = "footer",
-    dom:attribute[id, "class"] = "footer" <-
-      todomvc(),
+    dom:node(session, id),
+    dom:parent[session, id] = "todoapp",
+    dom:position[session, id] = 2,
+    dom:tag[session, id] = "footer",
+    dom:attribute[session, id, "class"] = "footer" <-
+      todomvc(session),
       id = "footer".
       
-    dom:style[id, "display"] = "none" <-
-      todomvc(),
+    dom:style[session, id, "display"] = "none" <-
+      todomvc(session),
       id = "footer",
       !todo(_).
       
-    dom:node(id),
-    dom:parent[id] = "header",
-    dom:position[id] = 0,
-    dom:tag[id] = "h1",
-    dom:text[id] = "todos" <-
-      todomvc(),
+    dom:node(session, id),
+    dom:parent[session, id] = "header",
+    dom:position[session, id] = 0,
+    dom:tag[session, id] = "h1",
+    dom:text[session, id] = "todos" <-
+      todomvc(session),
       id = "title".
   
-    dom:node(id),
-    dom:parent[id] = "header",
-    dom:position[id] = 1,
-    dom:tag[id] = "input",
-    dom:attribute[id, "type"] = "text",
-    dom:attribute[id, "class"] = "new-todo",
-    dom:attribute[id, "placeholder"] = "What needs to be done?",
-    dom:listen_to(id, "key_down"),
+    dom:node(session, id),
+    dom:parent[session, id] = "header",
+    dom:position[session, id] = 1,
+    dom:tag[session, id] = "input",
+    dom:attribute[session, id, "type"] = "text",
+    dom:attribute[session, id, "class"] = "new-todo",
+    dom:attribute[session, id, "placeholder"] = "What needs to be done?",
+    dom:listen_to(session, id, "key_down"),
     new_todo[] = id <-
-      todomvc(),
+      todomvc(session),
       id = "new-todo".
       // id = "new-todo-" + int:string:convert[max_todo[]]. // adding max_todo to id is a hack to reset text to blank
       
-    dom:node(id),
-    dom:parent[id] = "main",
-    dom:position[id] = 0,
-    dom:tag[id] = "input",
-    dom:attribute[id, "type"] = "checkbox",
-    dom:attribute[id, "class"] = "toggle-all",
-    dom:listen_to(id, "click"),
+    dom:node(session, id),
+    dom:parent[session, id] = "main",
+    dom:position[session, id] = 0,
+    dom:tag[session, id] = "input",
+    dom:attribute[session, id, "type"] = "checkbox",
+    dom:attribute[session, id, "class"] = "toggle-all",
+    dom:listen_to(session, id, "click"),
     toggle_all[] = id <-
-      todomvc(),
+      todomvc(session),
       id = "toggle-all".
       
-    dom:style[id, "visibility"] = "hidden" <-
-      todomvc(),
+    dom:style[session, id, "visibility"] = "hidden" <-
+      todomvc(session),
       id = "toggle-all",
       !todo(_).
       
-    dom:attribute[id, "checked"] = "true" <-
-      todomvc(),
+    dom:attribute[session, id, "checked"] = "true" <-
+      todomvc(session),
       id = "toggle-all",
       all_completed().
       
-    dom:node(id),
-    dom:parent[id] = "main",
-    dom:position[id] = 1,
-    dom:tag[id] = "ul",
-    dom:attribute[id, "class"] = "todo-list" <-
-      todomvc(),
+    dom:node(session, id),
+    dom:parent[session, id] = "main",
+    dom:position[session, id] = 1,
+    dom:tag[session, id] = "ul",
+    dom:attribute[session, id, "class"] = "todo-list" <-
+      todomvc(session),
       id = "todo-list".
       
-    dom:node(li_id),
-    dom:parent[li_id] = "todo-list",
-    dom:position[li_id] = position,
-    dom:tag[li_id] = "li",
-    dom:node(div_id),
-    dom:parent[div_id] = li_id,
-    dom:position[div_id] = 0,
-    dom:attribute[div_id, "class"] = "view",
-    dom:listen_to(div_id, "double_click"),
+    dom:node(session, li_id),
+    dom:parent[session, li_id] = "todo-list",
+    dom:position[session, li_id] = position,
+    dom:tag[session, li_id] = "li",
+    dom:node(session, div_id),
+    dom:parent[session, div_id] = li_id,
+    dom:position[session, div_id] = 0,
+    dom:attribute[session, div_id, "class"] = "view",
+    dom:listen_to(session, div_id, "double_click"),
     container[todo] = div_id,
-    dom:node(checkbox_id),
-    dom:parent[checkbox_id] = div_id,
-    dom:position[checkbox_id] = 0,
-    dom:tag[checkbox_id] = "input",
-    dom:attribute[checkbox_id, "type"] = "checkbox",
-    dom:attribute[checkbox_id, "class"] = "toggle",
-    dom:listen_to(checkbox_id, "click"),
+    dom:node(session, checkbox_id),
+    dom:parent[session, checkbox_id] = div_id,
+    dom:position[session, checkbox_id] = 0,
+    dom:tag[session, checkbox_id] = "input",
+    dom:attribute[session, checkbox_id, "type"] = "checkbox",
+    dom:attribute[session, checkbox_id, "class"] = "toggle",
+    dom:listen_to(session, checkbox_id, "click"),
     toggle[todo] = checkbox_id,
-    dom:node(label_id),
-    dom:parent[label_id] = div_id,
-    dom:position[label_id] = 1,
-    dom:tag[label_id] = "label",
-    dom:text[label_id] = text[todo],
-    dom:node(button_id),
-    dom:parent[button_id] = div_id,
-    dom:position[button_id] = 2,
-    dom:tag[button_id] = "button",
-    dom:attribute[button_id, "class"] = "destroy",
-    dom:listen_to(button_id, "click"),
+    dom:node(session, label_id),
+    dom:parent[session, label_id] = div_id,
+    dom:position[session, label_id] = 1,
+    dom:tag[session, label_id] = "label",
+    dom:text[session, label_id] = text[todo],
+    dom:node(session, button_id),
+    dom:parent[session, button_id] = div_id,
+    dom:position[session, button_id] = 2,
+    dom:tag[session, button_id] = "button",
+    dom:attribute[session, button_id, "class"] = "destroy",
+    dom:listen_to(session, button_id, "click"),
     button[todo] = button_id <-
-      todomvc(),
+      todomvc(session),
       li_id = "todo-li-" + int:string:convert[todo],
       div_id = "todo-div-" + int:string:convert[todo],
       label_id = "todo-label-" + int:string:convert[todo],
       checkbox_id = "todo-checkbox-" + int:string:convert[todo],
       button_id = "todo-button-" + int:string:convert[todo],
-      todo_at[position] = todo.
+      todo_at[session, position] = todo.
   
-    dom:attribute[checkbox_id, "checked"] = "true",
-    dom:attribute[li_id, "class"] = "completed" <-
-      todomvc(),
+    dom:attribute[session, checkbox_id, "checked"] = "true",
+    dom:attribute[session, li_id, "class"] = "completed" <-
+      todomvc(session),
       checkbox_id = "todo-checkbox-" + int:string:convert[todo],
       li_id = "todo-li-" + int:string:convert[todo],
-      todo_at[_] = todo,
+      todo_at[session, _] = todo,
       completed[todo] = true.
       
-    dom:attribute[li_id, "class"] = "editing",  
-    dom:node(id),
-    dom:parent[id] = li_id,
-    dom:position[id] = 1,
-    dom:tag[id] = "input",
-    dom:attribute[id, "class"] = "edit",
-    dom:attribute[id, "value"] = text[todo],
-    dom:listen_to(id, "key_down"),
-    dom:listen_to(id, "blur"),
+    dom:attribute[session, li_id, "class"] = "editing",  
+    dom:node(session, id),
+    dom:parent[session, id] = li_id,
+    dom:position[session, id] = 1,
+    dom:tag[session, id] = "input",
+    dom:attribute[session, id, "class"] = "edit",
+    dom:attribute[session, id, "value"] = text[todo],
+    dom:listen_to(session, id, "key_down"),
+    dom:listen_to(session, id, "blur"),
     edit[todo] = id,
-    dom:focus[] = id <-
-      todomvc(),
+    dom:focus[session] = id <-
+      todomvc(session),
       li_id = "todo-li-" + int:string:convert[todo],
       id = "edit-todo",
-      todo_at[_] = todo,
-      editing[] = todo.
+      todo_at[session, _] = todo,
+      editing[session] = todo.
       
-    dom:node(id),
-    dom:parent[id] = "footer",
-    dom:position[id] = 0,
-    dom:tag[id] = "span",
-    dom:attribute[id, "class"] = "todo-count" <-
-      todomvc(),
+    dom:node(session, id),
+    dom:parent[session, id] = "footer",
+    dom:position[session, id] = 0,
+    dom:tag[session, id] = "span",
+    dom:attribute[session, id, "class"] = "todo-count" <-
+      todomvc(session),
       id = "todo-count".
       
-    dom:text[id] = "1 item left" <-
-      todomvc(),
+    dom:text[session, id] = "1 item left" <-
+      todomvc(session),
       id = "todo-count",
       todo_count[] = 1.
       
-    dom:text[id] = int:string:convert[todo_count[]] + " items left" <-
-      todomvc(),
+    dom:text[session, id] = int:string:convert[todo_count[]] + " items left" <-
+      todomvc(session),
       id = "todo-count",
       todo_count[] != 1.
       
-    dom:node(id),
-    dom:parent[id] = "footer",
-    dom:position[id] = 1,
-    dom:tag[id] = "ul",
-    dom:attribute[id, "class"] = "filters" <-
-      todomvc(),
+    dom:node(session, id),
+    dom:parent[session, id] = "footer",
+    dom:position[session, id] = 1,
+    dom:tag[session, id] = "ul",
+    dom:attribute[session, id, "class"] = "filters" <-
+      todomvc(session),
       id = "filters".
       
     filter_position["All"] = 0.
     filter_position["Active"] = 1.
     filter_position["Completed"] = 2.
     
-    dom:node(li_id),
-    dom:parent[li_id] = "filters",
-    dom:position[li_id] = position,
-    dom:tag[li_id] = "li",
+    dom:node(session, li_id),
+    dom:parent[session, li_id] = "filters",
+    dom:position[session, li_id] = position,
+    dom:tag[session, li_id] = "li",
     
-    dom:node(a_id),
-    dom:parent[a_id] = li_id,
-    dom:position[a_id] = 0,
-    dom:tag[a_id] = "a",
-    dom:text[a_id] = filter,
-    dom:listen_to(a_id, "click"),
+    dom:node(session, a_id),
+    dom:parent[session, a_id] = li_id,
+    dom:position[session, a_id] = 0,
+    dom:tag[session, a_id] = "a",
+    dom:text[session, a_id] = filter,
+    dom:listen_to(session, a_id, "click"),
     filter[filter] = a_id <-
-      todomvc(),
+      todomvc(session),
       filter_position[filter] = position,
       li_id = "filter-li-" + filter,
       a_id = "filter-span-" + filter.
       
-    dom:attribute[a_id, "class"] = "selected" <-
-      todomvc(),
-      current_filter[] = filter,
+    dom:attribute[session, a_id, "class"] = "selected" <-
+      todomvc(session),
+      current_filter[session] = filter,
       a_id = "filter-span-" + filter.
       
-    dom:node(id),
-    dom:parent[id] = "footer",
-    dom:position[id] = 2,
-    dom:tag[id] = "button",
-    dom:attribute[id, "class"] = "clear-completed",
-    dom:text[id] = "Clear completed",
-    dom:listen_to(id, "click"),
+    dom:node(session, id),
+    dom:parent[session, id] = "footer",
+    dom:position[session, id] = 2,
+    dom:tag[session, id] = "button",
+    dom:attribute[session, id, "class"] = "clear-completed",
+    dom:text[session, id] = "Clear completed",
+    dom:listen_to(session, id, "click"),
     clear_completed[] = id <-
-      todomvc(),
+      todomvc(session),
       id = "clear-completed".
       
-    dom:style[id, "display"] = "none" <-
-      todomvc(),
+    dom:style[session, id, "display"] = "none" <-
+      todomvc(session),
       id = "clear-completed",
       !(completed[_] = true).
     

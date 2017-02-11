@@ -6,57 +6,64 @@ block(`api) {
   
     // fill in defaults (can't use lang:default because node is not an entity)
   
-    tag_or_default[node] = tag ->
-      string(node), string(tag), node(node).
+    tag_or_default[session, node] = tag ->
+      string(session), string(node), string(tag).
       
-    tag_or_default[node] = tag[node].
-    tag_or_default[node] = "div" <-
-      node(node),
-      !(tag[node] = _).
+    tag_or_default[session, node] = tag[session, node].
+    tag_or_default[session, node] = "div" <-
+      node(session, node),
+      !(tag[session, node] = _).
       
-    position_or_default[node] = position ->
-      string(node), int(position), node(node).
+    position_or_default[session, node] = position ->
+      string(session), string(node), int(position).
       
-    position_or_default[node] = position[node].
-    position_or_default[node] = -1 <-
-      node(node),
-      !(position[node] = _).
+    position_or_default[session, node] = position[session, node].
+    position_or_default[session, node] = -1 <-
+      node(session, node),
+      !(position[session, node] = _).
     
     // fill in server-side events
     
-    +click(node) <-
+    +click(session, node) <-
       +Request(request),
       +Request_click(request, click),
-      +Click_node(click, node).
+      +Click_node(click, node),
+      +Request_session(request, session).
       
-    +key_down[node] = key <-
+    +key_down[session, node] = key <-
       +Request(request),
       +Request_key_down(request, key_down),
       +KeyDown_node(key_down, node),
-      +KeyDown_key(key_down, key).
+      +KeyDown_key(key_down, key),
+      +Request_session(request, session).
       
-    +change[node] = text <-
+    +change[session, node] = text <-
       +Request(request),
       +Request_change(request, change),
       +Change_node(change, node),
-      +Change_text(change, text).
+      +Change_text(change, text),
+      +Request_session(request, session).
       
-    +double_click(node) <-
+    +double_click(session, node) <-
       +Request(request),
       +Request_double_click(request, double_click),
-      +DoubleClick_node(double_click, node).
+      +DoubleClick_node(double_click, node),
+      +Request_session(request, session).
       
-    +blur(node) <-
+    +blur(session, node) <-
       +Request(request),
       +Request_blur(request, blur),
-      +Blur_node(blur, node).
+      +Blur_node(blur, node),
+      +Request_session(request, session).
       
-    +frame() <-
-      +Request(_).
-      
-    ^url_fragment[] = url_fragment <-
+    +frame(session) <-
       +Request(request),
-      +Request_url_fragment(request, url_fragment).
+      +Request_session(request, session).
+      
+    ^url_fragment[session] = url_fragment <-
+      +Request(request),
+      +Request_url_fragment(request, url_fragment),
+      +Request_session(request, session).
       
     +session(session) <-
       +Request(request),
@@ -65,176 +72,204 @@ block(`api) {
     // possible changes (to be applied in this order)
         
     delete_node(node) ->
-      string(node), node@prev(node).
+      string(node).
     lang:pulse(`delete_node).
     
     change_tag(node, tag) ->
-      string(node), node(node), string(tag).
+      string(node), string(tag).
     lang:pulse(`change_text).
       
     change_text(node, text) ->
-      string(node), node(node), string(text).
+      string(node), string(text).
     lang:pulse(`change_text).
     
     create_node(node, tag) ->
-      string(node), node(node), string(tag).
+      string(node), string(tag).
     lang:pulse(`create_node).
     
     move_node(parent, position, child) ->
-      string(parent), string(child), node(parent), int(position), node(child).
+      string(parent), string(child), int(position).
     lang:pulse(`move_node).
     
     change_attribute(node, key, val) ->
-      string(node), node(node), string(key), string(val).
+      string(node), string(key), string(val).
     lang:pulse(`change_attribute).
       
     change_style(node, key, val) ->
-      string(node), node(node), string(key), string(val).
+      string(node), string(key), string(val).
     lang:pulse(`change_style).
     
     start_listening_to(node, event) ->
-      string(node), string(event), node(node), event(event).
+      string(node), string(event), event(event).
     lang:pulse(`start_listening_to).
     
     stop_listening_to(node, event) ->
-      string(node), string(event), node(node), event(event).
+      string(node), string(event), event(event).
     lang:pulse(`stop_listening_to).
+    
+    clear_node(node) ->
+      string(node).
       
     // on first render, send everything
     
-    +create_node(node, tag_or_default[node]),
-    +move_node(parent[node], position_or_default[node], node) <-
-      +Request_first_render(_, true),
-      node(node),
+    +create_node(node, tag_or_default[session, node]),
+    +move_node(parent[session, node], position_or_default[session, node], node) <-
+      +Request_session(request, session),
+      +Request_first_render(request, true),
+      node(session, node),
       !(node = "root").
       
     +change_text(node, text) <-
-      +Request_first_render(_, true),
-      text[node] = text,
+      +Request_session(request, session),
+      +Request_first_render(request, true),
+      text[session, node] = text,
       text != "".
       
     +change_attribute(node, key, val) <-
-      +Request_first_render(_, true),
-      attribute[node, key] = val.  
+      +Request_session(request, session),
+      +Request_first_render(request, true),
+      attribute[session, node, key] = val.  
       
     +change_style(node, key, val) <-
-      +Request_first_render(_, true),
-      style[node, key] = val.
+      +Request_session(request, session),
+      +Request_first_render(request, true),
+      style[session, node, key] = val.
       
     +start_listening_to(node, event) <-
-      +Request_first_render(_, true),
-      listen_to(node, event).
+      +Request_session(request, session),
+      +Request_first_render(request, true),
+      listen_to(session, node, event).
     
     // on subsequent renders, send changes
     
     +delete_node(node) <-
-      !(+Request_first_render(_, true)),
-      -node(node),
-      !node(node),
-      node(parent@prev[node]). // if a whole subtree is gone, we only need to delete the top node
+      +Request_session(request, session),
+      !(+Request_first_render(request, true)),
+      -node(session, node),
+      !node(session, node),
+      node(session, parent@prev[session, node]). // if a whole subtree is gone, we only need to delete the top node
       
     +change_tag(node, tag) <-
-      !(+Request_first_render(_, true)),
-      node@prev(node), // if node is new, we give it a tag on creation
-      ^tag_or_default[node] = tag.
+      +Request_session(request, session),
+      !(+Request_first_render(request, true)),
+      node@prev(session, node), // if node is new, we give it a tag on creation
+      ^tag_or_default[session, node] = tag.
       
     +change_text(node, text) <-
-      !(+Request_first_render(_, true)),
-      ^text[node] = text,
-      (text != ""; text@prev[node] = _).
+      +Request_session(request, session),
+      !(+Request_first_render(request, true)),
+      ^text[session, node] = text,
+      (text != ""; text@prev[session, node] = _).
       
     +change_text(node, "") <-
-      !(+Request_first_render(_, true)),
-      node(node),
-      -text[node] = _,
-      !text[node] = _.
+      +Request_session(request, session),
+      !(+Request_first_render(request, true)),
+      node(session, node),
+      -text[session, node] = _,
+      !text[session, node] = _.
       
-    +create_node(node, tag_or_default[node]) <- 
-      !(+Request_first_render(_, true)),
-      +node(node),
+    +create_node(node, tag_or_default[session, node]) <- 
+      +Request_session(request, session),
+      !(+Request_first_render(request, true)),
+      +node(session, node),
       !(node = "root").
       
     +move_node(parent, position, child) <-
-      !(+Request_first_render(_, true)),
-      ^parent[child] = parent,
-      position_or_default[child] = position.
+      +Request_session(request, session),
+      !(+Request_first_render(request, true)),
+      ^parent[session, child] = parent,
+      position_or_default[session, child] = position.
       
     +move_node(parent, position, child) <-
-      !(+Request_first_render(_, true)),
-      parent[child] = parent,
-      ^position_or_default[child] = position.
+      +Request_session(request, session),
+      !(+Request_first_render(request, true)),
+      parent[session, child] = parent,
+      ^position_or_default[session, child] = position.
       
     +change_attribute(node, key, val) <-
-      !(+Request_first_render(_, true)),
-      ^attribute[node, key] = val.
+      +Request_session(request, session),
+      !(+Request_first_render(request, true)),
+      ^attribute[session, node, key] = val.
       
     +change_attribute(node, key, "") <- // TODO copied from style, not sure if this is correct
-      !(+Request_first_render(_, true)),
-      node(node),
-      -attribute[node, key] = _,
-      !attribute[node, key] = _.
+      +Request_session(request, session),
+      !(+Request_first_render(request, true)),
+      node(session, node),
+      -attribute[session, node, key] = _,
+      !attribute[session, node, key] = _.
       
     +change_style(node, key, val) <-
-      !(+Request_first_render(_, true)),
-      ^style[node, key] = val.
+      +Request_session(request, session),
+      !(+Request_first_render(request, true)),
+      ^style[session, node, key] = val.
       
     +change_style(node, key, "") <- // setting style val to "" resets to default (TODO is this portable?)
-      !(+Request_first_render(_, true)),
-      node(node),
-      -style[node, key] = _,
-      !style[node, key] = _.
+      +Request_session(request, session),
+      !(+Request_first_render(request, true)),
+      node(session, node),
+      -style[session, node, key] = _,
+      !style[session, node, key] = _.
       
     +start_listening_to(node, event) <-
-      !(+Request_first_render(_, true)),
-      +listen_to(node, event).
+      +Request_session(request, session),
+      !(+Request_first_render(request, true)),
+      +listen_to(session, node, event).
       
     +stop_listening_to(node, event) <-
-      !(+Request_first_render(_, true)),
-      node(node),
-      -listen_to(node, event).
+      +Request_session(request, session),
+      !(+Request_first_render(request, true)),
+      node(session, node),
+      -listen_to(session, node, event).
+      
+    // clear node if requested
+    // TODO how do we deal with missed clears?
+    
+    +clear_node(node) <-
+      +Request_session(_, session),
+      +clear(session, node).
       
     // sort into arrays
     // (order only matters for move_node, but [(blox.options.set) = true] from docs doesn't compile so we have to sort them all)
         
     sorted_delete_node(i; node) ->
-      string(node), int(i), node@prev(node).
+      string(node), int(i).
     lang:pulse(`sorted_delete_node).
     
     sorted_change_tag(i; node, tag) ->
-      string(node), int(i), node(node), string(tag).
+      string(node), int(i), string(tag).
     lang:pulse(`sorted_change_text).
       
     sorted_change_text(i; node, text) ->
-      string(node), int(i), node(node), string(text).
+      string(node), int(i), string(text).
     lang:pulse(`sorted_change_text).
     
     sorted_create_node(i; node, tag) ->
-      string(node), int(i), node(node), string(tag).
+      string(node), int(i), string(tag).
     lang:pulse(`sorted_create_node).
     
     sorted_move_node(i; parent, position, child) ->
-      string(parent), string(child), int(i), node(parent), int(position), node(child).
+      string(parent), string(child), int(i), int(position).
     lang:pulse(`sorted_move_node).
     
     sorted_change_attribute(i; node, key, val) ->
-      string(node), int(i), node(node), string(key), string(val).
+      string(node), int(i), string(key), string(val).
     lang:pulse(`sorted_change_attribute).
       
     sorted_change_style(i; node, key, val) ->
-      string(node), int(i), node(node), string(key), string(val).
+      string(node), int(i), string(key), string(val).
     lang:pulse(`sorted_change_style).
     
     sorted_start_listening_to(i; node, event) ->
-      string(node), string(event), int(i), node(node), event(event).
+      string(node), string(event), int(i), event(event).
     lang:pulse(`sorted_start_listening_to).
     
     sorted_stop_listening_to(i; node, event) ->
-      string(node), string(event), int(i), node(node), event(event).
+      string(node), string(event), int(i), event(event).
     lang:pulse(`sorted_stop_listening_to). 
     
-    sorted_clear(i; node) ->
-      string(node), node(node), int(i).
-    lang:pulse(`sorted_clear).  
+    sorted_clear_node(i; node) ->
+      string(node), int(i).
+    lang:pulse(`sorted_clear_node).  
         
     +sorted_delete_node(i; node) <-
       seq<<>>
@@ -273,9 +308,9 @@ block(`api) {
       seq<<>>
       +stop_listening_to(node, event).
       
-    +sorted_clear(i; node) <-
+    +sorted_clear_node(i; node) <-
       seq<<>>
-      +clear(node).
+      +clear_node(node).
     
     // create response
 
@@ -370,15 +405,16 @@ block(`api) {
       
     +Response_clear_node[response, i] = node <-
       +answer[_] = response,
-      +sorted_clear(i; node).
+      +sorted_clear_node(i; node).
       
     +Response_focus_node[response] = node <-
       +answer[_] = response,
-      ^focus[] = node.
+      ^focus[session] = node.
       
     +Response_url_fragment[response] = url_fragment <-
+      +Request_session(request, session),
       +answer[_] = response,
-      ^url_fragment[] = url_fragment,
-      !(+Request_url_fragment(_, url_fragment)).
+      ^url_fragment[session] = url_fragment,
+      !(+Request_url_fragment(request, url_fragment)).
   })
 } <-- .

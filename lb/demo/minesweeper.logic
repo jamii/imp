@@ -9,51 +9,52 @@ block(`minesweeper) {
   num_y[] = 30.
   num_mines[] = 90.
   
-  seed[] = seed ->
-    int(seed).
+  seed[session] = seed ->
+    string(session), int(seed).
   
-  +seed[] = 123 <-
-    +frame(),
-    !(seed@prev[] = _).
+  +seed[session] = 123 <-
+    +frame(session),
+    !(seed@prev[session] = _).
     
   // internal state
   
-  cleared(x,y) ->
-    int(x), int(y).
+  cleared(session,x,y) ->
+    string(session), int(x), int(y).
     
   // game logic
   
   cell[x,y] = id ->
     string(id), int(x), int(y).
   
-  mine(x,y) ->
-    int(x), int(y).
+  mine(session,x,y) ->
+    string(session), int(x), int(y).
   
-  mine_count[x,y] = c ->
-    int(x), int(y), int(c).
+  mine_count[session,x,y] = c ->
+    string(session), int(x), int(y), int(c).
     
-  num_cleared[] = c ->
-    int(c).
+  num_cleared[session] = c ->
+    string(session), int(c).
     
-  mine_x(i; x) -> 
-    int(i), int(x).
+  mine_x(session, i; x) -> 
+    string(session), int(i), int(x).
     
-  mine_x(i; x) <- 
+  mine_x(session, i; x) <- 
     series<< x = rnd_uniform_int<1, 1000000000, s>[i] >>
-    seed[] = s,
+    seed[session] = s,
     int:range(1, num_mines[], 1, i).
     
-  mine_y(i; y) -> 
-    int(i), int(y).
+  mine_y(session, i; y) -> 
+    string(session), int(i), int(y).
       
-  mine_y(i; y) <- 
-    series<< y = rnd_uniform_int<1, 1000000000, 123>[i] >>
+  mine_y(session, i; y) <- 
+    series<< y = rnd_uniform_int<1, 1000000000, s>[i] >>
+    seed[session]+1 = s,
     int:range(1, num_mines[], 1, i).
     
-  mine(x,y) <-
+  mine(session,x,y) <-
     int:range(1, num_mines[], 1, i),
-    mine_x(i;xx),
-    mine_y(i;yy),
+    mine_x(session,i;xx),
+    mine_y(session,i;yy),
     x = 1 + int:mod[xx, num_x[]],
     y = 1 + int:mod[yy, num_y[]].
   
@@ -62,169 +63,171 @@ block(`minesweeper) {
     int:range(1,num_y[],1,y),
     id = "cell-" + int:string:convert[x] + "-" + int:string:convert[y].
     
-  neighbouring_mine(x,y,nx,ny) <-
+  neighbouring_mine(session,x,y,nx,ny) <-
     cell[x,y] = _,
     int:range(x-1,x+1,1,nx),
     int:range(y-1,y+1,1,ny),
     boolean:or(int:ne_3[nx,x],int:ne_3[ny,y], true),
-    mine(nx,ny).
+    mine(session,nx,ny).
   
-  mine_count[x, y] = c <-
+  mine_count[session, x, y] = c <-
     agg<< c=count() >>
     cell[x,y] = _,
-    neighbouring_mine(x,y,_,_).
+    neighbouring_mine(session,x,y,_,_).
     
-  mine_count[x, y] = 0 <-
+  mine_count[session, x, y] = 0 <-
     cell[x,y] = _,
-    !neighbouring_mine(x,y,_,_).
+    session(session),
+    !neighbouring_mine(session,x,y,_,_).
     
-  +cleared(x, y) <-
-    +click(id),
+  +cleared(session, x, y) <-
+    +click(session, id),
     cell[x,y] = id,
-    game_in_progress@prev().
+    game_in_progress@prev(session).
     
-  +cleared(nx,ny) <-
-    +cleared(x,y),
-    !mine(x, y),
-    mine_count(x,y;0),
+  +cleared(session,nx,ny) <-
+    +cleared(session,x,y),
+    !mine(session, x, y),
+    mine_count[session,x,y] = 0,
     int:range(x-1,x+1,1,nx),
     int:range(y-1,y+1,1,ny),
     boolean:or(int:ne_3[nx,x],int:ne_3[ny,y], true),
     cell[nx,ny] = _.
     
-  -cleared(x, y) <-
-    +click(id),
+  -cleared(session, x, y) <-
+    +click(session, id),
     cell[_,_] = id,
-    !game_in_progress@prev(),
-    cleared@prev(x, y).
+    !game_in_progress@prev(session),
+    cleared@prev(session, x, y).
     
-  ^seed[] = s2 <-
+  ^seed[session] = s2 <-
     series<< s2 = rnd_uniform_int<1, 1000000, s>[1] >>
-    +click(id),
+    +click(session, id),
     cell[_,_] = id,
-    !game_in_progress@prev(),
-    seed@prev[] = s.
+    !game_in_progress@prev(session),
+    seed@prev[session] = s.
     
-  num_cleared[] = c <-
+  num_cleared[session] = c <-
     agg<< c=count() >>
-    cleared(_,_).
+    cleared(session,_,_).
     
-  game_lost() <-
-    cleared(x, y),
-    mine(x, y).
+  game_lost(session) <-
+    cleared(session, x, y),
+    mine(session, x, y).
     
-  game_won() <-
-    !game_lost(),
-    num_cleared[] + num_mines[] = num_x[] * num_y[].
+  game_won(session) <-
+    !game_lost(session),
+    num_cleared[session] + num_mines[] = num_x[] * num_y[].
     
-  game_in_progress() <-
-    !game_lost(),
-    !game_won().
+  game_in_progress(session) <-
+    session(session),
+    !game_lost(session),
+    !game_won(session).
     
   // ui
   
-  minesweeper() <-
-    url_fragment("#minesweeper").
+  minesweeper(session) <-
+    url_fragment(session, "#minesweeper").
   
-  node(id),
-  parent[id] = "root",
-  position[id] = 1,
-  style[id, "display"] = "inline-block",
-  style[id, "flex-direction"] = "column",
-  inset(id) <- 
-    minesweeper(),
+  node(session, id),
+  parent[session, id] = "root",
+  position[session, id] = 1,
+  style[session, id, "display"] = "inline-block",
+  style[session, id, "flex-direction"] = "column",
+  inset(session, id) <- 
+    minesweeper(session),
     id = "grid".
   
-  node(id),
-  parent[id] = "grid",
-  position[id] = x - 1,
-  style[id, "display"] = "flex",
-  style[id, "flex-direction"] = "row" <-
-    minesweeper(),
+  node(session, id),
+  parent[session, id] = "grid",
+  position[session, id] = x - 1,
+  style[session, id, "display"] = "flex",
+  style[session, id, "flex-direction"] = "row" <-
+    minesweeper(session),
     cell[x,_] = _,
     id = "row-" + int:string:convert[x].
   
-  node(id),
-  parent[id] = parent,
-  position[id] = y - 1,
-  tag[id] = "button",
-  style[id, "width"] = "1.5em",
-  style[id, "height"] = "1.5em",
-  listen_to(id, "click") <-
-    minesweeper(),
+  node(session, id),
+  parent[session, id] = parent,
+  position[session, id] = y - 1,
+  tag[session, id] = "button",
+  style[session, id, "width"] = "1.5em",
+  style[session, id, "height"] = "1.5em",
+  listen_to(session, id, "click") <-
+    minesweeper(session),
     cell[x,y]=id,
     parent = "row-" +  int:string:convert[x].
     
-  visible(x, y) ->
-    int(x), int(y).
+  visible(session, x, y) ->
+    string(session), int(x), int(y).
     
-  visible(x, y) <- 
-    minesweeper(),
-    cleared(x, y).
+  visible(session, x, y) <- 
+    minesweeper(session),
+    cleared(session, x, y).
     
-  visible(x, y) <-
-    minesweeper(),
-    mine(x, y),
-    !game_in_progress().
+  visible(session, x, y) <-
+    minesweeper(session),
+    mine(session, x, y),
+    !game_in_progress(session).
     
-  outset(id) <-
-    minesweeper(),
+  outset(session, id) <-
+    minesweeper(session),
     cell[x,y] = id,
-    !visible(x, y).
+    !visible(session, x, y).
     
-  flat(id) <-
-    minesweeper(),
+  flat(session, id) <-
+    minesweeper(session),
     cell[x,y] = id,
-    visible(x, y).
+    visible(session, x, y).
     
-  text[id] = "X" <-
-    minesweeper(),
+  text[session, id] = "X" <-
+    minesweeper(session),
     cell[x,y] = id,
-    visible(x, y),
-    mine(x, y).
+    visible(session, x, y),
+    mine(session, x, y).
     
-  text[id] = int:string:convert[c] <-
-    minesweeper(),
+  text[session, id] = int:string:convert[c] <-
+    minesweeper(session),
     cell[x,y] = id,
-    visible(x, y),
-    !mine(x,y),
-    mine_count[x,y] = c,
+    visible(session, x, y),
+    !mine(session,x,y),
+    mine_count[session,x,y] = c,
     c != 0.
     
-  style[id, "color"] = "red" <-
-    minesweeper(),
+  style[session, id, "color"] = "red" <-
+    minesweeper(session),
     cell[x,y] = id,
-    cleared(x, y),
-    mine(x, y).
+    cleared(session, x, y),
+    mine(session, x, y).
     
-  outset(id) ->
-    string(id).
+  outset(session, id) ->
+    string(session), string(id).
     
-  style[id, "border-style"] = "solid",
-  style[id, "border-width"] = "2px",
-  style[id, "border-color"] = "white gray gray white",
-  style[id, "background-color"] = "silver" <-
-    minesweeper(),
-    outset(id).
+  style[session, id, "border-style"] = "solid",
+  style[session, id, "border-width"] = "2px",
+  style[session, id, "border-color"] = "white gray gray white",
+  style[session, id, "background-color"] = "silver" <-
+    minesweeper(session),
+    outset(session, id).
     
-  inset(id) ->
-    string(id).
+  inset(session, id) ->
+    string(session), string(id).
       
-  style[id, "border-style"] = "solid",
-  style[id, "border-width"] = "2px",
-  style[id, "border-color"] = "gray white white gray",
-  style[id, "background-color"] = "silver" <-
-    minesweeper(),
-    inset(id).
+  style[session, id, "border-style"] = "solid",
+  style[session, id, "border-width"] = "2px",
+  style[session, id, "border-color"] = "gray white white gray",
+  style[session, id, "background-color"] = "silver" <-
+    minesweeper(session),
+    inset(session, id).
     
-  flat(id) ->
-    string(id).
+  flat(session, id) ->
+    string(session), string(id).
         
-  style[id, "border-style"] = "solid",
-  style[id, "border-width"] = "1px 0 0 1px",
-  style[id, "border-color"] = "gray",
-  style[id, "background-color"] = "silver" <-
-    minesweeper(),
-    flat(id).
+  style[session, id, "border-style"] = "solid",
+  style[session, id, "border-width"] = "1px 0 0 1px",
+  style[session, id, "border-color"] = "gray",
+  style[session, id, "background-color"] = "silver" <-
+    minesweeper(session),
+    flat(session, id).
   })
 } <-- .

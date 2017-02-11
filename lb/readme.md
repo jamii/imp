@@ -24,6 +24,7 @@ setting initial values is a pain
 sorting is a mess, especially with optional nodes
 state machines are awkward - enums? init?
 mixing eg border-style/border-width and border is brittle, depends on ordering
+type inference doesn't propagate eg session(session) -/> string(session) - 'must be given a type'
 
 echo '{ "request": { "workspace": "imp", "branch": "q1", "from_branch": "master", "overwrite": false } }' | lb web-client call http://localhost:55183/imp/create-branch
 
@@ -32,6 +33,6 @@ sorting / aggregates / random
 diff / branch / listener
 latency?
 
-email jeff + molham about benchmarking
+email about benchmarking
 hierarchical syntax
 servers / routing

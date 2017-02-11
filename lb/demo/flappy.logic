@@ -5,20 +5,25 @@ block(`flappy) {
   
     // state
   
-    game_running() ->.
-    game_over() ->.
-    game_not_started() <-
-      !game_running(),
-      !game_over().
+    game_running(session) -> 
+      string(session).
+    game_over(session) ->
+      string(session).
+    game_not_started(session) <-
+      dom:session(session),
+      !game_running(session),
+      !game_over(session).
     
-    player_x[] = x ->
-      float(x).
+    player_x[session] = x ->
+      string(session), float(x).
 
-    player_y[] = y -> 
-      float(y).
+    player_y[session] = y -> 
+      string(session), float(y).
       
-    player_dy[] = dy ->
-      float(dy).
+    player_dy[session] = dy ->
+      string(session), float(dy).
+      
+    // TODO randomize seed per session and per game  
       
     seed[] = seed ->
       int(seed).
@@ -30,43 +35,43 @@ block(`flappy) {
       
     // event handlers
     
-    +game_running(),
-    -game_over(),
-    ^player_x[] = 0f,
-    ^player_y[] = 45f,
-    ^player_dy[] = 0f <-
-      !game_running@prev(),
-      +dom:click(_).
+    +game_running(session),
+    -game_over(session),
+    ^player_x[session] = 0f,
+    ^player_y[session] = 45f,
+    ^player_dy[session] = 0f <-
+      !game_running@prev(session),
+      +dom:click(session, _).
     
-    -game_running(),
-    +game_over() <-
-      +dom:frame(),
-      game_running@prev(),
-      collision().
+    -game_running(session),
+    +game_over(session) <-
+      +dom:frame(session),
+      game_running@prev(session),
+      collision(session).
       
     // TODO cant correct for frame length because datetime resolution is 1s
       
-    ^player_x[] = player_x@prev[] + 3f,
-    ^player_y[] = player_y@prev[] + player_dy@prev[] <-
-      +dom:frame(),
-      game_running@prev().
+    ^player_x[session] = player_x@prev[session] + 3f,
+    ^player_y[session] = player_y@prev[session] + player_dy@prev[session] <-
+      +dom:frame(session),
+      game_running@prev(session).
     
-    ^player_dy[] = player_dy@prev[] + 0.3f <-
-      +dom:frame(),
-      game_running@prev(),
-      !+dom:click(_).
+    ^player_dy[session] = player_dy@prev[session] + 0.3f <-
+      +dom:frame(session),
+      game_running@prev(session),
+      !+dom:click(session, _).
      
-    ^player_dy[] = player_dy@prev[] - 2f <-
-      +dom:frame(),
-      game_running@prev(),
-      +dom:click(_).
+    ^player_dy[session] = player_dy@prev[session] - 2f <-
+      +dom:frame(session),
+      game_running@prev(session),
+      +dom:click(session, _).
       
     +best_score[] = 0 <-
-      +game_running(), // TODO make an init event?
+      +game_running(_), // TODO make an init event?
       !(best_score@prev[] = _).
   
-    ^best_score[] = int:max[best_score@prev[], score@prev[]] <-
-      +game_running(). 
+    ^best_score[] = int:max[best_score@prev[], score@prev[session]] <-
+      +game_running(session). 
       
     // computed
     
@@ -82,240 +87,244 @@ block(`flappy) {
     obstacle_spacing[] = 50f.
     gap_size[] = 35f.
       
-    obstacle_visible(i) <-
-      left_x = player_x[] - obstacle_width[],
-      right_x = player_x[] + viewport_width[] + obstacle_width[],
+    obstacle_visible(session, i) <-
+      left_x = player_x[session] - obstacle_width[],
+      right_x = player_x[session] + viewport_width[] + obstacle_width[],
       left_i = float:int:convert[float:ceil[left_x / obstacle_spacing[]]],
       right_i = float:int:convert[float:floor[right_x / obstacle_spacing[]]],
       int:range(left_i, right_i, 1, i).
       
-    obstacle_x[i] = x ->
-      int(i), float(x).
+    obstacle_x[session, i] = x ->
+      string(session), int(i), float(x).
       
-    obstacle_x[i] = x <-
-      obstacle_visible(i),
+    obstacle_x[session, i] = x <-
+      obstacle_visible(session, i),
       world_x = int:float:convert[i] * obstacle_spacing[],
-      x = world_x - player_x[].
+      x = world_x - player_x[session].
       
-    obstacle_y[i] = y ->
-      int(i), float(y).
+    obstacle_y[session, i] = y ->
+      string(session), int(i), float(y).
       
-    obstacle_y[ii] = y <-
+    obstacle_y[session, ii] = y <-
       series<< y = rnd_uniform_real<5f, 35f, seed>[ii] >>
       seed[] = seed,
-      obstacle_visible(i),
+      obstacle_visible(session, i),
       int:range(1, i, 1, ii). // hack to get deterministic random gen (i -> y)
       
-    collision() <-
-      !(0f <= player_y[] <= floor_height[] - player_height[]) .
+    collision(session) -> 
+      string(session).
       
-    collision() <- 
-      obstacle_x[i] - player_width[] <= player_fixed_x[] <= obstacle_x[i] + obstacle_width[],
-      !(obstacle_y[i] <= player_y[] <= obstacle_y[i] + gap_size[] - player_height[]).
+    collision(session) <-
+      dom:session(session),
+      !(0f <= player_y[session] <= floor_height[] - player_height[]) .
       
-    score[] = score ->
-      int(score).  
+    collision(session) <- 
+      obstacle_x[session, i] - player_width[] <= player_fixed_x[] <= obstacle_x[session, i] + obstacle_width[],
+      !(obstacle_y[session, i] <= player_y[session] <= obstacle_y[session, i] + gap_size[] - player_height[]).
+      
+    score[session] = score ->
+      string(session), int(score).  
     
-    score[] = float:int:convert[float:floor[player_x[] / obstacle_spacing[]]] <-.
+    score[session] = float:int:convert[float:floor[player_x[session] / obstacle_spacing[]]] <-.
       
     // ui
     
-    flappy() <-
-      dom:url_fragment("#flappy").
+    flappy(session) <-
+      dom:url_fragment(session, "#flappy").
     
-    dom:node(id),
-    dom:parent[id] = "root",
-    dom:position[id] = 0,
-    dom:tag[id] = "svg:svg",
-    dom:attribute[id, "width"] = "480",
-    dom:attribute[id, "viewBox"] = "10 0 80 100",
-    dom:listen_to(id, "click") <-
-      flappy(),
+    dom:node(session, id),
+    dom:parent[session, id] = "root",
+    dom:position[session, id] = 0,
+    dom:tag[session, id] = "svg:svg",
+    dom:attribute[session, id, "width"] = "480",
+    dom:attribute[session, id, "viewBox"] = "10 0 80 100",
+    dom:listen_to(session, id, "click") <-
+      flappy(session),
       id = "viewport".
       
-    dom:node(id),
-    dom:parent[id] = "viewport",
-    dom:position[id] = 0,
-    dom:tag[id] = "svg:rect",
-    dom:attribute[id, "x"] = "0",
-    dom:attribute[id, "y"] = "0",
-    dom:attribute[id, "width"] = "100",
-    dom:attribute[id, "height"] = "53",
-    dom:attribute[id, "fill"] = "rgb(112, 197, 206)" <-
-      flappy(),
+    dom:node(session, id),
+    dom:parent[session, id] = "viewport",
+    dom:position[session, id] = 0,
+    dom:tag[session, id] = "svg:rect",
+    dom:attribute[session, id, "x"] = "0",
+    dom:attribute[session, id, "y"] = "0",
+    dom:attribute[session, id, "width"] = "100",
+    dom:attribute[session, id, "height"] = "53",
+    dom:attribute[session, id, "fill"] = "rgb(112, 197, 206)" <-
+      flappy(session),
       id = "sky".
       
-    dom:node(id),
-    dom:parent[id] = "viewport",
-    dom:position[id] = 1,
-    dom:tag[id] = "svg:image",
-    dom:attribute[id, "x"] = "0",
-    dom:attribute[id, "y"] = "52",
-    dom:attribute[id, "width"] = "100",
-    dom:attribute[id, "height"] = "43",
-    dom:attribute[id, "preserveAspectRatio"] = "xMinYMin slice",
-    dom:attribute[id, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/background.png" <-
-      flappy(),
+    dom:node(session, id),
+    dom:parent[session, id] = "viewport",
+    dom:position[session, id] = 1,
+    dom:tag[session, id] = "svg:image",
+    dom:attribute[session, id, "x"] = "0",
+    dom:attribute[session, id, "y"] = "52",
+    dom:attribute[session, id, "width"] = "100",
+    dom:attribute[session, id, "height"] = "43",
+    dom:attribute[session, id, "preserveAspectRatio"] = "xMinYMin slice",
+    dom:attribute[session, id, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/background.png" <-
+      flappy(session),
       id = "background".
       
-    dom:node(id),
-    dom:parent[id] = "viewport",
-    dom:position[id] = 2,
-    dom:tag[id] = "svg:rect",
-    dom:attribute[id, "x"] = "0",
-    dom:attribute[id, "y"] = "95",
-    dom:attribute[id, "width"] = "100",
-    dom:attribute[id, "height"] = "5" <- 
-      flappy(),
+    dom:node(session, id),
+    dom:parent[session, id] = "viewport",
+    dom:position[session, id] = 2,
+    dom:tag[session, id] = "svg:rect",
+    dom:attribute[session, id, "x"] = "0",
+    dom:attribute[session, id, "y"] = "95",
+    dom:attribute[session, id, "width"] = "100",
+    dom:attribute[session, id, "height"] = "5" <- 
+      flappy(session),
       id = "ground".
       
-    dom:attribute[id, "fill"] = "rgb(222, 216, 149)" <-
-      flappy(),
+    dom:attribute[session, id, "fill"] = "rgb(222, 216, 149)" <-
+      flappy(session),
       id = "ground",
-      !collision().
+      !collision(session).
       
-    dom:attribute[id, "fill"] = "rgb(255, 0, 0)" <-
-      flappy(),
+    dom:attribute[session, id, "fill"] = "rgb(255, 0, 0)" <-
+      flappy(session),
       id = "ground",
-      collision().
+      collision(session).
       
-    dom:node(id),
-    dom:parent[id] = "viewport",
-    dom:position[id] = 3,
-    dom:tag[id] = "svg:svg",
-    dom:attribute[id, "x"] = "0",
-    dom:attribute[id, "y"] = "0",
-    dom:attribute[id, "width"] = "100",
-    dom:attribute[id, "height"] = "100" <-
-      flappy(),
+    dom:node(session, id),
+    dom:parent[session, id] = "viewport",
+    dom:position[session, id] = 3,
+    dom:tag[session, id] = "svg:svg",
+    dom:attribute[session, id, "x"] = "0",
+    dom:attribute[session, id, "y"] = "0",
+    dom:attribute[session, id, "width"] = "100",
+    dom:attribute[session, id, "height"] = "100" <-
+      flappy(session),
       id = "obstacles".
       
-    dom:node(id_top_body),
-    dom:parent[id_top_body] = "obstacles",
-    dom:position[id_top_body] = (4*i) + 0, 
-    dom:tag[id_top_body] = "svg:image",
-    dom:attribute[id_top_body, "x"] = float:string:convert[x],
-    dom:attribute[id_top_body, "y"] = "0",
-    dom:attribute[id_top_body, "width"] = float:string:convert[obstacle_width[]],
-    dom:attribute[id_top_body, "height"] = float:string:convert[y],
-    dom:attribute[id_top_body, "preserveAspectRatio"] = "none",
-    dom:attribute[id_top_body, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/pillar-bkg.png",
+    dom:node(session, id_top_body),
+    dom:parent[session, id_top_body] = "obstacles",
+    dom:position[session, id_top_body] = (4*i) + 0, 
+    dom:tag[session, id_top_body] = "svg:image",
+    dom:attribute[session, id_top_body, "x"] = float:string:convert[x],
+    dom:attribute[session, id_top_body, "y"] = "0",
+    dom:attribute[session, id_top_body, "width"] = float:string:convert[obstacle_width[]],
+    dom:attribute[session, id_top_body, "height"] = float:string:convert[y],
+    dom:attribute[session, id_top_body, "preserveAspectRatio"] = "none",
+    dom:attribute[session, id_top_body, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/pillar-bkg.png",
     
-    dom:node(id_bottom_body),
-    dom:parent[id_bottom_body] = "obstacles",
-    dom:position[id_bottom_body] = (4*i) + 1, 
-    dom:tag[id_bottom_body] = "svg:image",
-    dom:attribute[id_bottom_body, "x"] = float:string:convert[x],
-    dom:attribute[id_bottom_body, "y"] = float:string:convert[y+gap_size[]],
-    dom:attribute[id_bottom_body, "width"] = float:string:convert[obstacle_width[]],
-    dom:attribute[id_bottom_body, "height"] = float:string:convert[floor_height[]-y-gap_size[]],
-    dom:attribute[id_bottom_body, "preserveAspectRatio"] = "none",
-    dom:attribute[id_bottom_body, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/pillar-bkg.png",
+    dom:node(session, id_bottom_body),
+    dom:parent[session, id_bottom_body] = "obstacles",
+    dom:position[session, id_bottom_body] = (4*i) + 1, 
+    dom:tag[session, id_bottom_body] = "svg:image",
+    dom:attribute[session, id_bottom_body, "x"] = float:string:convert[x],
+    dom:attribute[session, id_bottom_body, "y"] = float:string:convert[y+gap_size[]],
+    dom:attribute[session, id_bottom_body, "width"] = float:string:convert[obstacle_width[]],
+    dom:attribute[session, id_bottom_body, "height"] = float:string:convert[floor_height[]-y-gap_size[]],
+    dom:attribute[session, id_bottom_body, "preserveAspectRatio"] = "none",
+    dom:attribute[session, id_bottom_body, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/pillar-bkg.png",
     
-    dom:node(id_top_head),
-    dom:parent[id_top_head] = "obstacles",
-    dom:position[id_top_head] = (4*i) + 2, 
-    dom:tag[id_top_head] = "svg:image",
-    dom:attribute[id_top_head, "x"] = float:string:convert[x-1f],
-    dom:attribute[id_top_head, "y"] = float:string:convert[y-5f],
-    dom:attribute[id_top_head, "width"] = float:string:convert[obstacle_width[]+2f],
-    dom:attribute[id_top_head, "height"] = "5",
-    dom:attribute[id_top_head, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/lower-pillar-head.png",
+    dom:node(session, id_top_head),
+    dom:parent[session, id_top_head] = "obstacles",
+    dom:position[session, id_top_head] = (4*i) + 2, 
+    dom:tag[session, id_top_head] = "svg:image",
+    dom:attribute[session, id_top_head, "x"] = float:string:convert[x-1f],
+    dom:attribute[session, id_top_head, "y"] = float:string:convert[y-5f],
+    dom:attribute[session, id_top_head, "width"] = float:string:convert[obstacle_width[]+2f],
+    dom:attribute[session, id_top_head, "height"] = "5",
+    dom:attribute[session, id_top_head, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/lower-pillar-head.png",
     
-    dom:node(id_bottom_head),
-    dom:parent[id_bottom_head] = "obstacles",
-    dom:position[id_bottom_head] = (4*i) + 3, 
-    dom:tag[id_bottom_head] = "svg:image",
-    dom:attribute[id_bottom_head, "x"] = float:string:convert[x-1f],
-    dom:attribute[id_bottom_head, "y"] = float:string:convert[y+gap_size[]],
-    dom:attribute[id_bottom_head, "width"] = float:string:convert[obstacle_width[]+2f],
-    dom:attribute[id_bottom_head, "height"] = "5",
-    dom:attribute[id_bottom_head, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/lower-pillar-head.png" <-
+    dom:node(session, id_bottom_head),
+    dom:parent[session, id_bottom_head] = "obstacles",
+    dom:position[session, id_bottom_head] = (4*i) + 3, 
+    dom:tag[session, id_bottom_head] = "svg:image",
+    dom:attribute[session, id_bottom_head, "x"] = float:string:convert[x-1f],
+    dom:attribute[session, id_bottom_head, "y"] = float:string:convert[y+gap_size[]],
+    dom:attribute[session, id_bottom_head, "width"] = float:string:convert[obstacle_width[]+2f],
+    dom:attribute[session, id_bottom_head, "height"] = "5",
+    dom:attribute[session, id_bottom_head, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/lower-pillar-head.png" <-
   
-      flappy(),
-      obstacle_x[i] = x,
-      obstacle_y[i] = y,
+      flappy(session),
+      obstacle_x[session, i] = x,
+      obstacle_y[session, i] = y,
       id_top_body = "obstacle-top-body-" + int:string:convert[i],
       id_bottom_body = "obstacle-bottom-body-" + int:string:convert[i],
       id_top_head = "obstacle-top-head-" + int:string:convert[i],
       id_bottom_head = "obstacle-bottom-head-" + int:string:convert[i].
       
-    dom:node(id),
-    dom:parent[id] = "viewport",
-    dom:position[id] = 4,
-    dom:tag[id] = "svg:text",
-    dom:attribute[id, "x"] = "50",
-    dom:attribute[id, "y"] = "45",
-    dom:attribute[id, "text-anchor"] = "middle",
-    dom:attribute[id, "font-size"] = "6",
-    dom:text[id] = "Click the screen to begin!" <-
-      flappy(),
+    dom:node(session, id),
+    dom:parent[session, id] = "viewport",
+    dom:position[session, id] = 4,
+    dom:tag[session, id] = "svg:text",
+    dom:attribute[session, id, "x"] = "50",
+    dom:attribute[session, id, "y"] = "45",
+    dom:attribute[session, id, "text-anchor"] = "middle",
+    dom:attribute[session, id, "font-size"] = "6",
+    dom:text[session, id] = "Click the screen to begin!" <-
+      flappy(session),
       id = "start",
-      game_not_started().
+      game_not_started(session).
       
-    dom:node(id),
-    dom:parent[id] = "viewport",
-    dom:position[id] = 4,
-    dom:tag[id] = "svg:svg",
+    dom:node(session, id),
+    dom:parent[session, id] = "viewport",
+    dom:position[session, id] = 4,
+    dom:tag[session, id] = "svg:svg",
     
-    dom:node(id1),
-    dom:parent[id1] = id,
-    dom:position[id1] = 0,
-    dom:tag[id1] = "svg:text",
-    dom:attribute[id1, "x"] = "50",
-    dom:attribute[id1, "y"] = "30",
-    dom:attribute[id1, "text-anchor"] = "middle",
-    dom:attribute[id1, "font-size"] = "6",
-    dom:text[id1] = "Game Over :(",
+    dom:node(session, id1),
+    dom:parent[session, id1] = id,
+    dom:position[session, id1] = 0,
+    dom:tag[session, id1] = "svg:text",
+    dom:attribute[session, id1, "x"] = "50",
+    dom:attribute[session, id1, "y"] = "30",
+    dom:attribute[session, id1, "text-anchor"] = "middle",
+    dom:attribute[session, id1, "font-size"] = "6",
+    dom:text[session, id1] = "Game Over :(",
     
-    dom:node(id2),
-    dom:parent[id2] = id,
-    dom:position[id2] = 1,
-    dom:tag[id2] = "svg:text",
-    dom:attribute[id2, "x"] = "50",
-    dom:attribute[id2, "y"] = "55",
-    dom:attribute[id2, "text-anchor"] = "middle",
-    dom:attribute[id2, "font-size"] = "6",
-    dom:text[id2] = "Score " + int:string:convert[score[]],
+    dom:node(session, id2),
+    dom:parent[session, id2] = id,
+    dom:position[session, id2] = 1,
+    dom:tag[session, id2] = "svg:text",
+    dom:attribute[session, id2, "x"] = "50",
+    dom:attribute[session, id2, "y"] = "55",
+    dom:attribute[session, id2, "text-anchor"] = "middle",
+    dom:attribute[session, id2, "font-size"] = "6",
+    dom:text[session, id2] = "Score " + int:string:convert[score[session]],
     
-    dom:node(id3),
-    dom:parent[id3] = id,
-    dom:position[id3] = 2,
-    dom:tag[id3] = "svg:text",
-    dom:attribute[id3, "x"] = "50",
-    dom:attribute[id3, "y"] = "65",
-    dom:attribute[id3, "text-anchor"] = "middle",
-    dom:attribute[id3, "font-size"] = "6",
-    dom:text[id3] = "Best " + int:string:convert[best_score[]],
+    dom:node(session, id3),
+    dom:parent[session, id3] = id,
+    dom:position[session, id3] = 2,
+    dom:tag[session, id3] = "svg:text",
+    dom:attribute[session, id3, "x"] = "50",
+    dom:attribute[session, id3, "y"] = "65",
+    dom:attribute[session, id3, "text-anchor"] = "middle",
+    dom:attribute[session, id3, "font-size"] = "6",
+    dom:text[session, id3] = "Best " + int:string:convert[best_score[]],
     
-    dom:node(id4),
-    dom:parent[id4] = id,
-    dom:position[id4] = 3,
-    dom:tag[id4] = "svg:text",
-    dom:attribute[id4, "x"] = "50",
-    dom:attribute[id4, "y"] = "85",
-    dom:attribute[id4, "text-anchor"] = "middle",
-    dom:attribute[id4, "font-size"] = "4",
-    dom:text[id4] = "Click to play again!" <-
+    dom:node(session, id4),
+    dom:parent[session, id4] = id,
+    dom:position[session, id4] = 3,
+    dom:tag[session, id4] = "svg:text",
+    dom:attribute[session, id4, "x"] = "50",
+    dom:attribute[session, id4, "y"] = "85",
+    dom:attribute[session, id4, "text-anchor"] = "middle",
+    dom:attribute[session, id4, "font-size"] = "4",
+    dom:text[session, id4] = "Click to play again!" <-
     
-      flappy(),
+      flappy(session),
       id = "game-over",
       id1 = "game-over-1",
       id2 = "game-over-2",
       id3 = "game-over-3",
       id4 = "game-over-4",
-      game_over().
+      game_over(session).
       
-    dom:node(id),
-    dom:parent[id] = "viewport",
-    dom:position[id] = 5,
-    dom:tag[id] = "svg:image",
-    dom:attribute[id, "x"] = float:string:convert[player_fixed_x[]],
-    dom:attribute[id, "y"] = float:string:convert[player_y[]],
-    dom:attribute[id, "width"] = float:string:convert[player_width[]],
-    dom:attribute[id, "height"] = float:string:convert[player_height[]],
-    dom:attribute[id, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/flappy-base.png" <-
-      flappy(),
+    dom:node(session, id),
+    dom:parent[session, id] = "viewport",
+    dom:position[session, id] = 5,
+    dom:tag[session, id] = "svg:image",
+    dom:attribute[session, id, "x"] = float:string:convert[player_fixed_x[]],
+    dom:attribute[session, id, "y"] = float:string:convert[player_y[session]],
+    dom:attribute[session, id, "width"] = float:string:convert[player_width[]],
+    dom:attribute[session, id, "height"] = float:string:convert[player_height[]],
+    dom:attribute[session, id, "xlink:href"] = "https://cdn.rawgit.com/bhauman/flappy-bird-demo/master/resources/public/imgs/flappy-base.png" <-
+      flappy(session),
       id = "player".
       
   })    

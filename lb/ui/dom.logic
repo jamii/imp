@@ -3,60 +3,62 @@ block(`dom) {
    session(session) ->
      string(session).
      
-   node(node) -> 
-     string(node).
+   node(session, node) -> 
+     string(session), string(node).
  
-   parent[node] = parent ->
-     string(node), string(parent), node(node), node(parent).
+   parent[session, node] = parent ->
+     string(session), string(node), string(parent). // session(session), node(session, node), node(session, parent).
       
-   position[node] = position -> 
-     string(node), node(node), int(position). 
+   position[session, node] = position -> 
+     string(session), string(node), int(position). // session(session), node(session, node). 
      
-   tag[node] = tag -> // defaults to "div"
-     string(node), node(node), string(tag).
+   tag[session, node] = tag -> // defaults to "div"
+     string(session), string(node), string(tag). // session(session), node(session, node).
      
-   attribute[node, key] = val ->
-     string(node), node(node), string(key), string(val).
+   attribute[session, node, key] = val ->
+     string(session), string(node), string(key), string(val). // session(session), node(session, node).
  
-   style[node, key] = val ->
-     string(node), node(node), string(key), string(val).
+   style[session, node, key] = val ->
+     string(session), string(node), string(key), string(val). // session(session), node(session, node).
  
-   text[node] = text ->
-     string(node), node(node), string(text).
+   text[session, node] = text ->
+     string(session), string(node), string(text). // session(session), node(session, node).
      
    event(event) -> 
      string(event).
  
-   listen_to(node, event) ->
-     string(node), string(event), node(node), event(event).
+   listen_to(session, node, event) ->
+     string(session), string(node), string(event), event(event). // session(session), node(session, node).
      
-   clear(node) ->
-     string(node), node(node).
+   clear(session, node) ->
+     string(session), string(node). // session(session), node(session, node).
      
-   focus[] = node ->
-     string(node), node(node).
+   focus[session] = node ->
+     string(session), string(node). // session(session), node(session, node).
      
-   url_fragment[] = url_fragment ->
-     string(url_fragment).
+   url_fragment[session] = url_fragment ->
+     string(session), string(url_fragment). // session(session)
      
-   // events only constrain string(node) and not node(node) because node might already be deleted
+   // events only constrain string(node) and not node(session, node) because node might already be deleted
  
-   click(node) ->
-     string(node). 
+   click(session, node) ->
+     string(session), string(node). 
  
-   key_down[node] = key ->
-     string(node), int(key).
+   key_down[session, node] = key ->
+     string(session), string(node), int(key).
      
-   change[node] = text ->
-     string(node), string(text).
+   change[session, node] = text ->
+     string(session), string(node), string(text).
      
-    double_click(node) ->
-      string(node).
+    double_click(session, node) ->
+      string(session), string(node).
       
-    blur(node) ->
-      string(node).
+    blur(session, node) ->
+      string(session), string(node).
       
-    frame() ->. // dummy event for animations, physics etc
+    // dummy event for animations, physics etc  
+    frame(session) ->
+      string(session). 
   }),
   clauses(`{
     lang:pulse(`clear).
@@ -68,7 +70,8 @@ block(`dom) {
     lang:pulse(`blur).
     lang:pulse(`frame).
     
-    node("root").
+    node(session, "root") <-
+      session(session).
     
     event("click").
     event("key_down").
@@ -77,12 +80,12 @@ block(`dom) {
     event("blur").
     
     // every node except the root must have a parent
-    node(node) -> 
-      node = "root"; parent[node] = _.
+    node(session, node) -> 
+      node = "root"; parent[session, node] = _.
       
     // no two nodes at same position
-    parent[child1] = parent[child2], child1 != child2 ->
-      position[child1] != position[child2].
+    parent[session, child1] = parent[session, child2], child1 != child2 ->
+      position[session, child1] != position[session, child2].
     
     // TODO this doesn't compile
     // no gaps in position
@@ -91,7 +94,7 @@ block(`dom) {
     //  position[child2] = p-1.
       
     // can EITHER set text OR have children (because setting node.textContent deletes any existing children)
-    text[node] = _ ->
-      !parent[_] = node. 
+    text[session, node] = _ ->
+      !parent[session, _] = node. 
   })
 } <-- .

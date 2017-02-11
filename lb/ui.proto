@@ -9,6 +9,7 @@ message Request
   optional DoubleClick double_click = 5;
   optional Blur blur = 6;
   optional string url_fragment = 7;
+  required string session = 8;
 }
 
 message Click 

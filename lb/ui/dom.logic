@@ -1,10 +1,10 @@
 block(`dom) {
  export(`{ 
+   session(session) ->
+     string(session).
+     
    node(node) -> 
      string(node).
-   
-   node_by_id[id] = node ->
-     string(id), string(node), node(node).
  
    parent[node] = parent ->
      string(node), string(parent), node(node), node(parent).
@@ -26,9 +26,6 @@ block(`dom) {
      
    event(event) -> 
      string(event).
-   
-   event_by_name[name] = event ->
-     string(name), string(event), event(event).
  
    listen_to(node, event) ->
      string(node), string(event), node(node), event(event).

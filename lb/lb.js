@@ -34,8 +34,11 @@ function sendEvent(event) {
     events.push(event);
 }
 
+session = uuid();
+
 function frame() {
     event = events.shift() || {}; // TODO need to be able to handle multiple events per frame
+    event.session = session;
     if (Object.keys(event).length > 0) {
         console.log("sending", event);
     }

@@ -58,6 +58,10 @@ block(`api) {
       +Request(request),
       +Request_url_fragment(request, url_fragment).
       
+    +session(session) <-
+      +Request(request),
+      +Request_session(request, session).
+      
     // possible changes (to be applied in this order)
         
     delete_node(node) ->
@@ -102,7 +106,7 @@ block(`api) {
     +move_node(parent[node], position_or_default[node], node) <-
       +Request_first_render(_, true),
       node(node),
-      !(node_by_id["root"] = node).
+      !(node = "root").
       
     +change_text(node, text) <-
       +Request_first_render(_, true),
@@ -148,7 +152,7 @@ block(`api) {
     +create_node(node, tag_or_default[node]) <- 
       !(+Request_first_render(_, true)),
       +node(node),
-      !(node_by_id["root"] = node).
+      !(node = "root").
       
     +move_node(parent, position, child) <-
       !(+Request_first_render(_, true)),

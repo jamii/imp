@@ -80,8 +80,8 @@ function requestHandler() {
         data.stop_listening_to_node || [],
         data.stop_listening_to_event || [],
         data.clear_node || [],
-        data.focus_node,
-        data.url_fragment
+        data.change_focus_node,
+        data.change_url_fragment
     );
     frame();
 }
@@ -122,8 +122,8 @@ function render(
     stop_listening_to_node,
     stop_listening_to_event,
     clear_node,
-    focus_node,
-    url_fragment
+    change_focus_node,
+    change_url_fragment
 ) {
     for (var i = 0; i < delete_node_node.length; i++) {
         document.getElementById(delete_node_node[i]).remove();
@@ -252,12 +252,12 @@ function render(
         document.getElementById(clear_node[i]).value = "";
     }
     
-    if (focus_node != undefined) {
-        document.getElementById(focus_node).focus();
+    if (change_focus_node != undefined) {
+        document.getElementById(change_focus_node).focus();
     }
     
-    if (url_fragment != undefined) {
-        history.pushState(null, null, url_fragment);
+    if (change_url_fragment != undefined) {
+        history.pushState(null, null, change_url_fragment);
     }
 }
 
@@ -291,5 +291,5 @@ window.onhashchange = function(event) {
     sendEvent({"url_fragment": window.location.hash});
 }
 
-sendEvent({"first_render": true, "url_fragment": window.location.hash});
+sendEvent({"url_fragment": window.location.hash});
 frame();

@@ -107,126 +107,109 @@ block(`api) {
       string(node), string(event), event(event).
     lang:pulse(`stop_listening_to).
     
-    clear_node(node) ->
+    change_focus(node) ->
       string(node).
-      
-    // on first render, send everything
+    lang:pulse(`change_focus).
     
-    +create_node(node, tag_or_default[session, node]),
-    +move_node(parent[session, node], position_or_default[session, node], node) <-
-      +Request_session(request, session),
-      +Request_first_render(request, true),
-      node(session, node),
-      !(node = "root").
-      
-    +change_text(node, text) <-
-      +Request_session(request, session),
-      +Request_first_render(request, true),
-      text[session, node] = text,
-      text != "".
-      
-    +change_attribute(node, key, val) <-
-      +Request_session(request, session),
-      +Request_first_render(request, true),
-      attribute[session, node, key] = val.  
-      
-    +change_style(node, key, val) <-
-      +Request_session(request, session),
-      +Request_first_render(request, true),
-      style[session, node, key] = val.
-      
-    +start_listening_to(node, event) <-
-      +Request_session(request, session),
-      +Request_first_render(request, true),
-      listen_to(session, node, event).
+    change_url_fragment(url_fragment) ->
+      string(url_fragment).
+    lang:pulse(`change_url_fragment).
     
     // on subsequent renders, send changes
     
     +delete_node(node) <-
-      +Request_session(request, session),
-      !(+Request_first_render(request, true)),
-      -node(session, node),
+      +Request_session(_, session),
+      old_node@prev(session, node),
       !node(session, node),
-      node(session, parent@prev[session, node]). // if a whole subtree is gone, we only need to delete the top node
+      node(session, old_parent@prev[session, node]). // if a whole subtree is gone, we only need to delete the top node
       
     +change_tag(node, tag) <-
-      +Request_session(request, session),
-      !(+Request_first_render(request, true)),
-      node@prev(session, node), // if node is new, we give it a tag on creation
-      ^tag_or_default[session, node] = tag.
+      +Request_session(_, session),
+      old_node@prev(session, node), // if node is new, we give it a tag on creation
+      tag_or_default[session, node] = tag,
+      !(old_tag_or_default@prev[session, node] = tag).
       
     +change_text(node, text) <-
-      +Request_session(request, session),
-      !(+Request_first_render(request, true)),
-      ^text[session, node] = text,
-      (text != ""; text@prev[session, node] = _).
+      +Request_session(_, session),
+      text[session, node] = text,
+      !(old_text@prev[session, node] = text),
+      text != "".
       
     +change_text(node, "") <-
-      +Request_session(request, session),
-      !(+Request_first_render(request, true)),
+      +Request_session(_, session),
+      text[session, node] = "",
+      old_text@prev[session, node] = old_text,
+      old_text != "".
+      
+    +change_text(node, "") <-
+      +Request_session(_, session),
       node(session, node),
-      -text[session, node] = _,
-      !text[session, node] = _.
+      !(text[session, node] = _),
+      old_text@prev[session, node] = _.
       
     +create_node(node, tag_or_default[session, node]) <- 
-      +Request_session(request, session),
-      !(+Request_first_render(request, true)),
-      +node(session, node),
+      +Request_session(_, session),
+      node(session, node),
+      !(old_node@prev(session, node)),
       !(node = "root").
       
     +move_node(parent, position, child) <-
-      +Request_session(request, session),
-      !(+Request_first_render(request, true)),
-      ^parent[session, child] = parent,
+      +Request_session(_, session),
+      parent[session, child] = parent,
+      !(old_parent@prev[session, child] = parent),
       position_or_default[session, child] = position.
       
     +move_node(parent, position, child) <-
-      +Request_session(request, session),
-      !(+Request_first_render(request, true)),
+      +Request_session(_, session),
       parent[session, child] = parent,
-      ^position_or_default[session, child] = position.
+      position_or_default[session, child] = position,
+      !(old_position_or_default@prev[session, child] = position).
       
     +change_attribute(node, key, val) <-
-      +Request_session(request, session),
-      !(+Request_first_render(request, true)),
-      ^attribute[session, node, key] = val.
+      +Request_session(_, session),
+      attribute[session, node, key] = val,
+      !(old_attribute@prev[session, node, key] = val).
       
-    +change_attribute(node, key, "") <- // TODO copied from style, not sure if this is correct
-      +Request_session(request, session),
-      !(+Request_first_render(request, true)),
+    +change_attribute(node, key, "") <-
+      +Request_session(_, session),
       node(session, node),
-      -attribute[session, node, key] = _,
-      !attribute[session, node, key] = _.
+      !(attribute[session, node, key] = _),
+      old_attribute@prev[session, node, key] = _.
       
     +change_style(node, key, val) <-
-      +Request_session(request, session),
-      !(+Request_first_render(request, true)),
-      ^style[session, node, key] = val.
+      +Request_session(_, session),
+      style[session, node, key] = val,
+      !(old_style@prev[session, node, key] = val).
       
-    +change_style(node, key, "") <- // setting style val to "" resets to default (TODO is this portable?)
-      +Request_session(request, session),
-      !(+Request_first_render(request, true)),
+    +change_style(node, key, "") <- // setting style val to "" resets to default 
+      +Request_session(_, session),
       node(session, node),
-      -style[session, node, key] = _,
-      !style[session, node, key] = _.
+      !(style[session, node, key] = _),
+      old_style@prev[session, node, key] = _.
       
     +start_listening_to(node, event) <-
-      +Request_session(request, session),
-      !(+Request_first_render(request, true)),
-      +listen_to(session, node, event).
+      +Request_session(_, session),
+      listen_to(session, node, event),
+      !(old_listen_to@prev(session, node, event)).
       
     +stop_listening_to(node, event) <-
-      +Request_session(request, session),
-      !(+Request_first_render(request, true)),
-      node(session, node),
-      -listen_to(session, node, event).
-      
-    // clear node if requested
-    // TODO how do we deal with missed clears?
-    
-    +clear_node(node) <-
       +Request_session(_, session),
-      +clear(session, node).
+      node(session, node),
+      !(listen_to(session, node, event)),
+      old_listen_to@prev(session, node, event).
+      
+    +change_focus(node) <-
+      +Request_session(_, session),
+      focus[session] = node,
+      !(old_focus@prev[session] = node).
+      
+    +change_url_fragment(url_fragment) <-
+      +Request_session(_, session),
+      !(+Request_url_fragment(_, url_fragment)),
+      url_fragment[session] = url_fragment,
+      !(old_url_fragment@prev[session] = url_fragment).
+      
+    // TODO accumulate clear
       
     // sort into arrays
     // (order only matters for move_node, but [(blox.options.set) = true] from docs doesn't compile so we have to sort them all)
@@ -267,9 +250,13 @@ block(`api) {
       string(node), string(event), int(i), event(event).
     lang:pulse(`sorted_stop_listening_to). 
     
-    sorted_clear_node(i; node) ->
-      string(node), int(i).
-    lang:pulse(`sorted_clear_node).  
+    sorted_change_focus(i; node) ->
+      int(i), string(node).
+    lang:pulse(`sorted_change_focus).
+    
+    sorted_change_url_fragment(i; url_fragment) ->
+      int(i), string(url_fragment).
+    lang:pulse(`sorted_change_url_fragment).
         
     +sorted_delete_node(i; node) <-
       seq<<>>
@@ -308,9 +295,13 @@ block(`api) {
       seq<<>>
       +stop_listening_to(node, event).
       
-    +sorted_clear_node(i; node) <-
+    +sorted_change_focus(i; node) <-
       seq<<>>
-      +clear_node(node).
+      +change_focus(node).
+      
+    +sorted_change_url_fragment(i; url_fragment) <-
+      seq<<>>
+      +change_url_fragment(url_fragment).
     
     // create response
 
@@ -403,18 +394,124 @@ block(`api) {
       +answer[_] = response,
       +sorted_stop_listening_to(i; _, event).
       
-    +Response_clear_node[response, i] = node <-
+    +Response_change_focus_node[response] = node <-
       +answer[_] = response,
-      +sorted_clear_node(i; node).
+      +change_focus(node).
       
-    +Response_focus_node[response] = node <-
+    +Response_change_url_fragment[response] = url_fragment <-
       +answer[_] = response,
-      ^focus[session] = node.
+      +change_url_fragment(url_fragment).
       
-    +Response_url_fragment[response] = url_fragment <-
-      +Request_session(request, session),
-      +answer[_] = response,
-      ^url_fragment[session] = url_fragment,
-      !(+Request_url_fragment(request, url_fragment)).
+    // save current dom
+    
+    old_node(session, node) -> 
+      string(session), string(node).
+  
+    old_parent[session, node] = parent ->
+      string(session), string(node), string(parent). // session(session), node(session, node), node(session, parent).
+       
+    old_position_or_default[session, node] = position -> 
+      string(session), string(node), int(position). // session(session), node(session, node). 
+      
+    old_tag_or_default[session, node] = tag -> 
+      string(session), string(node), string(tag). // session(session), node(session, node).
+      
+    old_attribute[session, node, key] = val ->
+      string(session), string(node), string(key), string(val). // session(session), node(session, node).
+  
+    old_style[session, node, key] = val ->
+      string(session), string(node), string(key), string(val). // session(session), node(session, node).
+  
+    old_text[session, node] = text ->
+      string(session), string(node), string(text). // session(session), node(session, node).
+  
+    old_listen_to(session, node, event) ->
+      string(session), string(node), string(event), event(event). // session(session), node(session, node).
+      
+    old_focus[session] = node ->
+      string(session), string(node). // session(session), node(session, node).
+      
+    old_url_fragment[session] = url_fragment ->
+      string(session), string(url_fragment). // session(session)
+      
+    -old_node(session, node) <-
+      +Request_session(_, session),
+      old_node@prev(session, node).
+      
+    -old_parent[session, node] = _ <-
+      +Request_session(_, session),
+      old_parent@prev[session, node] = _.
+       
+    -old_position_or_default[session, node] = _ <-
+      +Request_session(_, session), 
+      old_position_or_default@prev[session, node] = _. 
+      
+    -old_tag_or_default[session, node] = _ <-
+      +Request_session(_, session), 
+      old_tag_or_default@prev[session, node] = _.
+      
+    -old_attribute[session, node, key] = _ <-
+      +Request_session(_, session),
+      old_attribute@prev[session, node, key] = _.
+  
+    -old_style[session, node, key] = _ <-
+      +Request_session(_, session),
+      old_style@prev[session, node, key] = _.
+  
+    -old_text[session, node] = _ <-
+      +Request_session(_, session),
+      old_text@prev[session, node] = _.
+  
+    -old_listen_to(session, node, event) <-
+      +Request_session(_, session),
+      old_listen_to@prev(session, node, event).
+      
+    -old_focus[session] = _ <-
+      +Request_session(_, session),
+      old_focus@prev[session] = _.
+      
+    -old_url_fragment[session] = _ <-
+      +Request_session(_, session),
+      old_url_fragment@prev[session] = _.
+      
+    +old_node(session, node) <-
+      +Request_session(_, session),
+      node(session, node).
+      
+    +old_parent[session, node] = parent <-
+      +Request_session(_, session),
+      parent[session, node] = parent.
+       
+    +old_position_or_default[session, node] = position <-
+      +Request_session(_, session), 
+      position_or_default[session, node] = position. 
+      
+    +old_tag_or_default[session, node] = tag <-
+      +Request_session(_, session), 
+      tag_or_default[session, node] = tag.
+      
+    +old_attribute[session, node, key] = val <-
+      +Request_session(_, session),
+      attribute[session, node, key] = val.
+  
+    +old_style[session, node, key] = val <-
+      +Request_session(_, session),
+      style[session, node, key] = val.
+  
+    +old_text[session, node] = text <-
+      +Request_session(_, session),
+      text[session, node] = text.
+  
+    +old_listen_to(session, node, event) <-
+      +Request_session(_, session),
+      listen_to(session, node, event).
+      
+    +old_focus[session] = node <-
+      +Request_session(_, session),
+      focus[session] = node.
+      
+    +old_url_fragment[session] = url_fragment <-
+      +Request_session(_, session),
+      url_fragment[session] = url_fragment.
   })
 } <-- .

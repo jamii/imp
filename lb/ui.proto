@@ -2,14 +2,13 @@ package ui;
 
 message Request
 {
-  optional bool first_render = 1;
-  optional Click click = 2;
-  optional KeyDown key_down = 3;
-  optional Change change = 4;
-  optional DoubleClick double_click = 5;
-  optional Blur blur = 6;
-  optional string url_fragment = 7;
-  required string session = 8;
+  optional Click click = 1;
+  optional KeyDown key_down = 2;
+  optional Change change = 3;
+  optional DoubleClick double_click = 4;
+  optional Blur blur = 5;
+  optional string url_fragment = 6;
+  required string session = 7;
 }
 
 message Click 
@@ -62,6 +61,6 @@ message Response
   repeated string stop_listening_to_node = 19;
   repeated string stop_listening_to_event = 20;
   repeated string clear_node = 21;
-  optional string focus_node = 22;
-  optional string url_fragment = 23;
+  optional string change_focus_node = 22;
+  optional string change_url_fragment = 23;
 }

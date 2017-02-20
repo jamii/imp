@@ -115,6 +115,10 @@ block(`api) {
       string(url_fragment).
     lang:pulse(`change_url_fragment).
     
+    clear_node(node) ->
+      string(node).
+    lang:pulse(`clear_node).
+    
     // on subsequent renders, send changes
     
     +delete_node(node) <-
@@ -205,9 +209,13 @@ block(`api) {
       
     +change_url_fragment(url_fragment) <-
       +Request_session(_, session),
-      !(+Request_url_fragment(_, url_fragment)),
       url_fragment[session] = url_fragment,
-      !(old_url_fragment@prev[session] = url_fragment).
+      !(old_url_fragment@prev[session] = url_fragment),
+      !(+Request_url_fragment(_, url_fragment)).
+      
+    +clear_node(node) <- 
+      +Request_session(_, session),
+      clear@prev(session, node).
       
     // TODO accumulate clear
       
@@ -250,13 +258,9 @@ block(`api) {
       string(node), string(event), int(i), event(event).
     lang:pulse(`sorted_stop_listening_to). 
     
-    sorted_change_focus(i; node) ->
+    sorted_clear_node(i; node) ->
       int(i), string(node).
-    lang:pulse(`sorted_change_focus).
-    
-    sorted_change_url_fragment(i; url_fragment) ->
-      int(i), string(url_fragment).
-    lang:pulse(`sorted_change_url_fragment).
+    lang:pulse(`sorted_clear_node).
         
     +sorted_delete_node(i; node) <-
       seq<<>>
@@ -295,13 +299,9 @@ block(`api) {
       seq<<>>
       +stop_listening_to(node, event).
       
-    +sorted_change_focus(i; node) <-
+    +sorted_clear_node(i; node) <-
       seq<<>>
-      +change_focus(node).
-      
-    +sorted_change_url_fragment(i; url_fragment) <-
-      seq<<>>
-      +change_url_fragment(url_fragment).
+      +clear_node(node).
     
     // create response
 
@@ -401,6 +401,10 @@ block(`api) {
     +Response_change_url_fragment[response] = url_fragment <-
       +answer[_] = response,
       +change_url_fragment(url_fragment).
+      
+    +Response_clear_node[response, i] = node <-
+      +answer[_] = response,
+      +sorted_clear_node(i; node).
       
     // save current dom
     
@@ -513,5 +517,11 @@ block(`api) {
     +old_url_fragment[session] = url_fragment <-
       +Request_session(_, session),
       url_fragment[session] = url_fragment.
+      
+    // clear commands
+    
+    -clear(session, node) <-
+      +Request_session(_, session),
+      clear@prev(session, node).
   })
 } <-- .

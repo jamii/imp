@@ -60,7 +60,7 @@ message Response
   repeated string start_listening_to_event = 18;
   repeated string stop_listening_to_node = 19;
   repeated string stop_listening_to_event = 20;
-  repeated string clear_node = 21;
-  optional string change_focus_node = 22;
-  optional string change_url_fragment = 23;
+  optional string change_focus_node = 21;
+  optional string change_url_fragment = 22;
+  repeated string clear_node = 23;
 }

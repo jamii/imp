@@ -30,14 +30,14 @@ block(`dom) {
    listen_to(session, node, event) ->
      string(session), string(node), string(event), event(event). // session(session), node(session, node).
      
-   clear(session, node) ->
-     string(session), string(node). // session(session), node(session, node).
-     
    focus[session] = node ->
      string(session), string(node). // session(session), node(session, node).
      
    url_fragment[session] = url_fragment ->
      string(session), string(url_fragment). // session(session)
+     
+   clear(session, node) ->
+     string(session), string(node). // session(session), node(session, node).
      
    // events only constrain string(node) and not node(session, node) because node might already be deleted
  
@@ -61,8 +61,6 @@ block(`dom) {
       string(session). 
   }),
   clauses(`{
-    lang:pulse(`clear).
-  
     lang:pulse(`click).
     lang:pulse(`key_down).
     lang:pulse(`change).

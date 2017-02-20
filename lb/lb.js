@@ -79,9 +79,9 @@ function requestHandler() {
         data.start_listening_to_event || [],
         data.stop_listening_to_node || [],
         data.stop_listening_to_event || [],
-        data.clear_node || [],
         data.change_focus_node,
-        data.change_url_fragment
+        data.change_url_fragment,
+        data.clear_node || []
     );
     frame();
 }
@@ -121,9 +121,9 @@ function render(
     start_listening_to_event,
     stop_listening_to_node,
     stop_listening_to_event,
-    clear_node,
     change_focus_node,
-    change_url_fragment
+    change_url_fragment,
+    clear_node
 ) {
     for (var i = 0; i < delete_node_node.length; i++) {
         document.getElementById(delete_node_node[i]).remove();

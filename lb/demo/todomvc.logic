@@ -223,7 +223,6 @@ block(`todomvc) {
     new_todo[] = id <-
       todomvc(session),
       id = "new-todo".
-      // id = "new-todo-" + int:string:convert[max_todo[]]. // adding max_todo to id is a hack to reset text to blank
       
     dom:node(session, id),
     dom:parent[session, id] = "main",

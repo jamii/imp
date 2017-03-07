@@ -1,0 +1,71 @@
+block(`chat) {
+  alias(`ui:dom, `dom),
+  
+  clauses(`{
+    // state 
+    
+    text[message] = text ->
+      int(message), string(text).
+      
+    session[message] = session ->
+      int(message), string(text).
+      
+    input_text[session] = text ->
+      string(session), string(text).
+      
+    // computed
+    
+    max_message[] = max_message <-
+      agg<<max_message = max(message)>>
+      text[message] = _.
+    
+    max_message[] = 0 <-
+      !text[_] = _.
+      
+    // event handlers
+    
+    ^input_text[session] = text <-
+      +dom:change[session, "new-message-entry"] = text.
+    
+    +text[message] = input_text[session],
+    +session[message] = session,
+    +dom:clear(session, "new-message-entry") <-
+      +dom:key_down[session, "new-message-entry"] = 13, // ENTER
+      input_text[session] != "",
+      message = max_message@prev[] + 1.
+      
+    // ui
+  
+    chat(session) <-
+      dom:url_fragment[session] = "#chat".
+      
+    dom:node(session, id),
+    dom:parent[session, id] = "root",
+    dom:position[session, id] = 0 <-
+      chat(session),
+      id = "messages".
+      
+    dom:node(session, id),
+    dom:parent[session, id] = "messages",
+    dom:position[session, id] = message,
+    dom:text[session, id] = text <-
+      chat(session),
+      text[message] = text,
+      id = "message-" + int:string:convert[message].
+      
+    dom:node(session, id),
+    dom:parent[session, id] = "root",
+    dom:position[session, id] = 1 <-
+      chat(session),
+      id = "new-message".
+      
+    dom:node(session, id),
+    dom:parent[session, id] = "new-message",
+    dom:position[session, id] = 0,
+    dom:tag[session, id] = "input",
+    dom:attribute[session, id, "type"] = "text",
+    dom:listen_to(session, id, "key_down") <-
+      chat(session),
+      id = "new-message-entry".
+  })
+} <-- .

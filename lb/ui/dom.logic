@@ -39,6 +39,9 @@ block(`dom) {
    clear(session, node) ->
      string(session), string(node). // session(session), node(session, node).
      
+   scroll_into_view(session, node) ->
+     string(session), string(node).
+     
    // events only constrain string(node) and not node(session, node) because node might already be deleted
  
    click(session, node) ->

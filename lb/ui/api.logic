@@ -119,6 +119,10 @@ block(`api) {
       string(node).
     lang:pulse(`clear_node).
     
+    scroll_into_view_node(node) ->
+      string(node).
+    lang:pulse(`scroll_into_view_node).
+    
     // on subsequent renders, send changes
     
     +delete_node(node) <-
@@ -217,7 +221,9 @@ block(`api) {
       +Request_session(_, session),
       clear@prev(session, node).
       
-    // TODO accumulate clear
+    +scroll_into_view_node(node) <- 
+      +Request_session(_, session),
+      scroll_into_view@prev(session, node).
       
     // sort into arrays
     // (order only matters for move_node, but [(blox.options.set) = true] from docs doesn't compile so we have to sort them all)
@@ -261,6 +267,10 @@ block(`api) {
     sorted_clear_node(i; node) ->
       int(i), string(node).
     lang:pulse(`sorted_clear_node).
+    
+    sorted_scroll_into_view_node(i; node) ->
+      int(i), string(node).
+    lang:pulse(`sorted_scroll_into_view_node).
         
     +sorted_delete_node(i; node) <-
       seq<<>>
@@ -302,6 +312,10 @@ block(`api) {
     +sorted_clear_node(i; node) <-
       seq<<>>
       +clear_node(node).
+      
+    +sorted_scroll_into_view_node(i; node) <-
+      seq<<>>
+      +scroll_into_view_node(node).
     
     // create response
 
@@ -405,6 +419,10 @@ block(`api) {
     +Response_clear_node[response, i] = node <-
       +answer[_] = response,
       +sorted_clear_node(i; node).
+      
+    +Response_scroll_into_view_node[response, i] = node <-
+      +answer[_] = response,
+      +sorted_scroll_into_view_node(i; node).
       
     // save current dom
     
@@ -523,5 +541,9 @@ block(`api) {
     -clear(session, node) <-
       +Request_session(_, session),
       clear@prev(session, node).
+      
+    -scroll_into_view(session, node) <-
+      +Request_session(_, session),
+      scroll_into_view@prev(session, node).
   })
 } <-- .

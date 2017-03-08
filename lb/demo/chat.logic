@@ -8,10 +8,19 @@ block(`chat) {
       int(message), string(text).
       
     session[message] = session ->
-      int(message), string(text).
+      int(message), string(session).
+      
+    time[message] = time ->
+      int(message), datetime(time).
       
     input_text[session] = text ->
       string(session), string(text).
+      
+    user_name[session] = user_name ->
+      string(session), string(user_name).
+      
+    input_user_name[session] = user_name ->
+      string(session), string(user_name).
       
     // computed
     
@@ -24,37 +33,102 @@ block(`chat) {
       
     // event handlers
     
+    ^input_user_name[session] = text <-
+      +dom:change[session, "user-name"] = text.
+      
+    +user_name[session] = input_user_name[session] <-
+      +dom:key_down[session, "user-name"] = 13, // ENTER
+      input_user_name[session] != "".
+    
     ^input_text[session] = text <-
       +dom:change[session, "new-message-entry"] = text.
     
     +text[message] = input_text[session],
     +session[message] = session,
-    +dom:clear(session, "new-message-entry") <-
+    +time[message] = datetime:now[],
+    +dom:clear(session, "new-message-entry"),
+    +dom:scroll_into_view(session, "message-" + int:string:convert[message]) <-
       +dom:key_down[session, "new-message-entry"] = 13, // ENTER
       input_text[session] != "",
       message = max_message@prev[] + 1.
       
     // ui
+    
+    login(session) <-
+      dom:url_fragment[session] = "#chat",
+      !user_name[session] = _.
   
     chat(session) <-
-      dom:url_fragment[session] = "#chat".
+      dom:url_fragment[session] = "#chat",
+      user_name[session] = _.
       
     dom:node(session, id),
     dom:parent[session, id] = "root",
-    dom:position[session, id] = 0 <-
+    dom:position[session, id] = 0,
+    dom:tag[session, id] = "input",
+    dom:attribute[session, id, "type"] = "text",
+    dom:attribute[session, id, "placeholder"] = "What should we call you?",
+    dom:listen_to(session, id, "key_down"),
+    dom:style[session, id, "margin"] = "50vh auto",
+    dom:style[session, id, "width"] = "100%",
+    dom:focus[session] = id <-
+      login(session),
+      id = "user-name".
+      
+    dom:node(session, id),
+    dom:parent[session, id] = "root",
+    dom:position[session, id] = 0, 
+    dom:style[session, id, "display"] = "flex",
+    dom:style[session, id, "flex-direction"] = "column",
+    dom:style[session, id, "height"] = "60vh",
+    dom:style[session, id, "margin"] = "20vh auto" <-
+      chat(session),
+      id = "chat".
+      
+    dom:node(session, id),
+    dom:parent[session, id] = "chat",
+    dom:position[session, id] = 0,
+    dom:style[session, id, "flex"] = "1 1 100%",
+    dom:style[session, id, "overflow"] = "scroll" <-
       chat(session),
       id = "messages".
       
     dom:node(session, id),
     dom:parent[session, id] = "messages",
     dom:position[session, id] = message,
-    dom:text[session, id] = text <-
+    dom:attribute[session, id, "title"] = datetime:string:convert[time[message]] <-
       chat(session),
-      text[message] = text,
+      text[message] = _,
       id = "message-" + int:string:convert[message].
       
     dom:node(session, id),
-    dom:parent[session, id] = "root",
+    dom:parent[session, id] = parent,
+    dom:position[session, id] = 0,
+    dom:tag[session, id] = "span",
+    dom:text[session, id] = user_name[message_session],
+    dom:style[session, id, "margin-right"] = "1em",
+    dom:style[session, id, "font-weight"] = "bold" <-
+      chat(session),
+      session[message] = message_session,
+      parent = "message-" + int:string:convert[message],
+      id = parent + "-user-name".      
+      
+    dom:node(session, id),
+    dom:parent[session, id] = parent,
+    dom:position[session, id] = 1,
+    dom:tag[session, id] = "span",
+    dom:text[session, id] = text <-
+      chat(session),
+      text[message] = text,
+      parent = "message-" + int:string:convert[message],
+      id = parent + "-text".
+      
+    +dom:scroll_into_view(session, "message-" + int:string:convert[max_message[]]) <-
+      text[_] = _,
+      +chat(session).
+      
+    dom:node(session, id),
+    dom:parent[session, id] = "chat",
     dom:position[session, id] = 1 <-
       chat(session),
       id = "new-message".
@@ -64,7 +138,10 @@ block(`chat) {
     dom:position[session, id] = 0,
     dom:tag[session, id] = "input",
     dom:attribute[session, id, "type"] = "text",
-    dom:listen_to(session, id, "key_down") <-
+    dom:attribute[session, id, "placeholder"] = "What do you want to say?",
+    dom:style[session, id, "width"] = "100%",
+    dom:listen_to(session, id, "key_down"),
+    dom:focus[session] = id <-
       chat(session),
       id = "new-message-entry".
   })

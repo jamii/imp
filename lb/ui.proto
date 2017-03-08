@@ -63,4 +63,5 @@ message Response
   optional string change_focus_node = 21;
   optional string change_url_fragment = 22;
   repeated string clear_node = 23;
+  repeated string scroll_into_view_node = 24;
 }

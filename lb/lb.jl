@@ -9,6 +9,11 @@ end
 
 typealias Value Union{String, Symbol}
 
+type Attribute
+  key::Symbol
+  val::Value
+end
+
 abstract Node
 
 type TextNode <: Node
@@ -17,7 +22,7 @@ end
 
 type FixedNode <: Node
   tag::Symbol
-  attributes::Dict{Symbol, Any}
+  attributes::Vector{Attribute}
   children::Vector{Node}
 end
 
@@ -41,8 +46,25 @@ function parse_node(form)
   @match form begin
     text::String => TextNode(text)
     var::Symbol => TextNode(var)
-    [tag::Symbol, args...] => FixedNode(tag, Dict{Symbol, Any}(), parse_nodes(args))
+    [tag::Symbol, args...] => begin
+      (attributes, more_args) = parse_attributes(args)
+      nodes = parse_nodes(more_args)
+      FixedNode(tag, attributes, nodes)
+    end
     _ => error("What are this? $form")
+  end
+end
+
+function parse_attributes(forms)
+  attributes = Attribute[]
+  while true
+    @match forms begin
+      [Expr(:(=), [key::Symbol, val::Value], _), rest...] => begin
+        push!(attributes, Attribute(key, val))
+        forms = rest
+      end
+      _ => return (attributes, forms)
+    end
   end
 end
 
@@ -73,10 +95,8 @@ d = quote
   [div
     message(message:int, text:string, time:string)
     [div
-      # [span class="message-time" time]
-      # [span class="message-text" text]
-      [span time]
-      [span text]
+      [span class="message-time" time]
+      [span class="message-text" text]
     ]
   ]
 ]

@@ -2,91 +2,178 @@ module LB
 
 using Match
   
-type Var 
+immutable Var 
   name::Symbol
   typ::Symbol
 end
 
 typealias Value Union{String, Symbol}
 
-type Attribute
+immutable Attribute
   key::Symbol
   val::Value
 end
 
 abstract Node
 
-type TextNode <: Node
+immutable TextNode <: Node
   text::Value
 end
 
-type FixedNode <: Node
+immutable FixedNode <: Node
   tag::Symbol
   attributes::Vector{Attribute}
   children::Vector{Node}
 end
 
-type QueryNode <: Node
+immutable QueryNode <: Node
   node::FixedNode
   table::Symbol
   vars::Vector{Var}
 end
 
-function preprocess(form)
-  @match form begin
+function preprocess(expr)
+  @match expr begin
     Expr(:vect || :vcat || :hcat, args, _) => map(preprocess, args)
     Expr(head, args, _) => Expr(head, map(preprocess, args)...)
     args::Vector => args
     value::Union{Symbol, String, Number} => value
-    _ => error("What are this? $form")
+    _ => error("What are this? $expr")
   end
 end
 
-function parse_node(form) 
-  @match form begin
-    text::String => TextNode(text)
-    var::Symbol => TextNode(var)
+function parse_node(expr) 
+  @match expr begin
     [tag::Symbol, args...] => begin
       (attributes, more_args) = parse_attributes(args)
       nodes = parse_nodes(more_args)
       FixedNode(tag, attributes, nodes)
     end
-    _ => error("What are this? $form")
+    _ => error("What are this? $expr")
   end
 end
 
-function parse_attributes(forms)
+function parse_attributes(exprs)
   attributes = Attribute[]
   while true
-    @match forms begin
+    @match exprs begin
       [Expr(:(=), [key::Symbol, val::Value], _), rest...] => begin
         push!(attributes, Attribute(key, val))
-        forms = rest
+        exprs = rest
       end
-      _ => return (attributes, forms)
+      _ => return (attributes, exprs)
     end
   end
 end
 
-function parse_nodes(forms)
-  @match forms begin
+function parse_nodes(exprs)
+  @match exprs begin
+    [text::Value] => [TextNode(text)]
     [Expr(:call, [table::Symbol, vars...], _), child] => [QueryNode(parse_node(child), table, map(parse_var, vars))]
-    _ => map(parse_node, forms)
+    _ => map(parse_node, exprs)
   end
 end
   
-function parse_var(form)
-  @match form begin
+function parse_var(expr)
+  @match expr begin
     Expr(::, [name::Symbol, typ::Symbol], _) => Var(name, typ)
-    _ => error("What are this? $form")
+    _ => error("What are this? $expr")
   end
 end
 
-function parse_dom(form)
-  @match form begin
+function parse_dom(expr)
+  @match expr begin
     Expr(:block, [Expr(:line, _, _), child], _) => parse_node(preprocess(child))
-    _ => parse_node(preprocess(form))
+    _ => parse_node(preprocess(expr))
   end
+end
+
+function walk(node, bound_vars, parent_id, child_pos, output)
+  node_id = "$(parent_id)_$(child_pos)"
+  @match node begin
+    TextNode(text) => nothing # handled in generate_node on the parent
+    FixedNode(tag, attributes, children) => begin
+      generate_node(node, nothing, parent_id, node_id, child_pos, bound_vars, Var[], output)
+      for (i, child) in enumerate(children)
+        walk(child, bound_vars, node_id, i, output)
+      end
+    end
+    QueryNode(FixedNode(tag, attributes, children), table, vars) => begin
+      free_vars = Var[var for var in vars if !(var in bound_vars)]
+      generate_node(node.node, node, parent_id, node_id, child_pos, bound_vars, free_vars, output)
+      new_bound_vars = vcat(bound_vars, free_vars)
+      for (i, child) in enumerate(children)
+        walk(child, new_bound_vars, node_id, i, output)
+      end
+    end
+  end
+end
+
+function walk(dom)
+  output = String[]
+  walk(dom, Var[Var(:session, :string)], "lb", 0, output)
+  println(join(output, "\n\n"))
+end
+
+function var_string(var::Var) 
+  @match var.typ begin
+    :int => "int:string:convert($(var.name))"
+    :string => "int:string:convert(string:hash($(var.name)))"
+    _ => error("What type are this? $(var)")
+  end
+end
+
+function val_string(val::Value)
+  @match val begin
+    _::String => "\"$val\""
+    _::Symbol => "$val"
+  end
+end
+
+function generate_node(node, query, parent_id, node_id, child_pos, bound_vars, free_vars, output)
+  bound_var_names = join(["$(var.name)" for var in bound_vars], ",")
+  free_var_names = join(["$(var.name)" for var in free_vars], ",")
+  
+  vars = vcat(bound_vars, free_vars)
+  var_names = join(["$(var.name)" for var in vars], ",")
+  var_types = join(["$(var.typ)($(var.name))" for var in vars], ",")
+  var_strings = join([var_string(var) for var in vars], " + \"/\" + ")
+  
+  query_string = @match query begin
+    QueryNode(_, table, vars) => string(Expr(:call, table, [var.name for var in vars]...), ",")
+    _ => ""
+  end
+  
+  id_type = "id_$(node_id)[$(var_names)] = id ->\n    $(var_types)."
+  id_data = "id_$(node_id)[$(var_names)] = \"$(node_id)/\" + $(var_strings) <-\n    $(query_string) id_$(parent_id)[$(bound_var_names)] = _."
+  push!(output, id_type, id_data)
+  
+  parent = "dom:parent[session, child] = parent <-\n    id_$(node_id)[$(var_names)] = child, id_$(parent_id)[$(bound_var_names)] = parent."
+  push!(output, parent)
+  
+  @match query begin
+    QueryNode(_, _, _) => begin
+      position_var_names = join(["$(var.name)" for var in vcat(bound_vars, [Var(:pos, :int)], free_vars, [Var(:id, :int)])], ",")
+      position_type = "position_$(node_id)($(position_var_names)) ->\n    $(var_types), int(pos), string(id)."
+      position_data = "position_$(node_id)($(position_var_names)) <-\n    seq<<>> id_$(node_id)[$(var_names)] = id."
+      position = "dom:position[session, id] = pos <-\n    position_$(node_id)($(position_var_names))."
+      push!(output, position_type, position_data, position)
+    end
+    _ => begin
+      position = "dom:position[session, id] = $(child_pos-1) <-\n    id_$(node_id)[$(var_names)] = id."
+      push!(output, position)
+    end
+  end
+  
+  node_data = ["dom:node(session, id)"]
+  attribute_data = ["dom:attribute[session, id, \"$(attribute.key)\"] = $(val_string(attribute.val))" for attribute in node.attributes]
+  text_data = @match node.children begin
+    [TextNode(text)] => ["dom:text[session, id] = $(val_string(text))"]
+    _ => []
+  end
+  dom_data_head = join(vcat(node_data, attribute_data, text_data), ",\n")
+  dom_data = "$(dom_data_head) <-\n    id_$(node_id)[$(var_names)] = id."
+  push!(output, dom_data)
 end
 
 d = quote 
@@ -102,45 +189,6 @@ d = quote
 ]
 end
 
-parse_dom(d)
-
-# foreach needs to be only child of parent
-
-# id_1[session] = "1_" + int:string:convert(string:hash(session)) <-
-#   id_0[session] = _,
-#   chat(session).
-# 
-# dom:parent[child] = parent <-
-#   id_1[session] = child,
-#   id_0[session] = parent.
-#   
-# position_1(session, i; id) <-
-#   seq<<>>
-#   id_1[session] = id.
-#   
-# # i comes after parent vars, before new unique vars
-# position_4(session, i; message, text, time, id) <-
-#   seq<<>>
-#   id_4[session, message, text, time] = id.
-#   
-# dom:position[session, id] = i <-
-#   position_4(session, i; message, text, time, id).
-#   
-# # OR
-# 
-# dom:position[session, id] = 0 <-
-#   id_5[session, message, text, time] = id.
-#   
-# # then  
-#   
-# dom:node(session, id),
-# dom:attribute[session, id, "className"] = "message-time",
-# dom:text[session, id] = time <-
-#   id_5[session, message, text, time] = id.
-
-# parse and convert into tree of fixed vs query
-# with novel vars at each step
-# spit out ids for each step, then parent, position
-# spit out node, attribute, text
+walk(parse_dom(d))
 
 end

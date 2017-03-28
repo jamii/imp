@@ -112,13 +112,18 @@ end
 function walk(dom)
   output = String[]
   walk(dom, Var[Var(:session, :string)], "lb", 0, output)
-  println(join(output, "\n\n"))
+  
+  unshift!(output, 
+    "id_lb[session] = id -> string(session), string(id).", 
+    "id_lb[session] = \"root\" <- dom:session(session).")
+  
+  join(output, "\n\n")
 end
 
 function var_string(var::Var) 
   @match var.typ begin
-    :int => "int:string:convert($(var.name))"
-    :string => "int:string:convert(string:hash($(var.name)))"
+    :int => "int:string:convert[$(var.name)]"
+    :string => "int:string:convert[string:hash[$(var.name)]]"
     _ => error("What type are this? $(var)")
   end
 end
@@ -144,7 +149,7 @@ function generate_node(node, query, parent_id, node_id, child_pos, bound_vars, f
     _ => ""
   end
   
-  id_type = "id_$(node_id)[$(var_names)] = id ->\n    $(var_types)."
+  id_type = "id_$(node_id)[$(var_names)] = id ->\n    $(var_types), string(id)."
   id_data = "id_$(node_id)[$(var_names)] = \"$(node_id)/\" + $(var_strings) <-\n    $(query_string) id_$(parent_id)[$(bound_var_names)] = _."
   push!(output, id_type, id_data)
   
@@ -176,19 +181,95 @@ function generate_node(node, query, parent_id, node_id, child_pos, bound_vars, f
   push!(output, dom_data)
 end
 
-d = quote 
-[div
-  chat(session:string)
+chat = 
+"""
+block(`chat) {
+  alias(`ui:dom, `dom),
+  
+  clauses(`{
+    // state 
+    
+    text[message] = text ->
+      int(message), string(text).
+      
+    session[message] = session ->
+      int(message), string(session).
+      
+    time[message] = time ->
+      int(message), datetime(time).
+      
+    input_text[session] = text ->
+      string(session), string(text).
+      
+    user_name[session] = user_name ->
+      string(session), string(user_name).
+      
+    input_user_name[session] = user_name ->
+      string(session), string(user_name).
+      
+    // computed
+    
+    max_message[] = max_message <-
+      agg<<max_message = max(message)>>
+      text[message] = _.
+    
+    max_message[] = 0 <-
+      !text[_] = _.
+      
+    // event handlers
+    
+    ^input_user_name[session] = text <-
+      +dom:change[session, "user-name"] = text.
+      
+    +user_name[session] = input_user_name[session] <-
+      +dom:key_down[session, "user-name"] = 13, // ENTER
+      input_user_name[session] != "".
+    
+    ^input_text[session] = text <-
+      +dom:change[session, "new-message-entry"] = text.
+    
+    +text[message] = input_text[session],
+    +session[message] = session,
+    +time[message] = datetime:now[],
+    +dom:clear(session, "new-message-entry"),
+    +dom:scroll_into_view(session, "message-" + int:string:convert[message]) <-
+      +dom:key_down[session, "new-message-entry"] = 13, // ENTER
+      input_text[session] != "",
+      message = max_message@prev[] + 1.
+      
+    // ui
+    
+    login(session) <-
+      dom:url_fragment[session] = "#chat",
+      !user_name[session] = _.
+  
+    chat(session) <-
+      dom:url_fragment[session] = "#chat".
+      // user_name[session] = _.
+      
+    message(message, text[message], datetime:string:convert[time[message]]).
+    
+$(walk(parse_dom(quote 
   [div
-    message(message:int, text:string, time:string)
+    chat(session:string)
     [div
-      [span class="message-time" time]
-      [span class="message-text" text]
+      message(message:int, text:string, time:string)
+      [div
+        [span class="message-time" time]
+        [span class="message-text" text]
+      ]
     ]
   ]
-]
+end)))
+    
+  })
+} <-- .
+"""
+
+open("lb/demo/chat.logic", "w") do f
+  write(f, chat)
 end
 
-walk(parse_dom(d))
+run(`bash ./lb/build.sh`)
 
 end

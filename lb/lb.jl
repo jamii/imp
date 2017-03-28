@@ -10,7 +10,7 @@ end
 typealias Value Union{String, Symbol}
 
 immutable Attribute
-  key::Symbol
+  key::Value
   val::Value
 end
 
@@ -57,7 +57,7 @@ function parse_attributes(exprs)
   attributes = Attribute[]
   while true
     @match exprs begin
-      [Expr(:(=), [key::Symbol, val::Value], _), rest...] => begin
+      [Expr(:(=), [key::Value, val::Value], _), rest...] => begin
         push!(attributes, Attribute(key, val))
         exprs = rest
       end
@@ -172,7 +172,7 @@ function generate_node(node, query, parent_id, node_id, child_pos, bound_vars, f
   
   node_data = ["dom:node(session, id)"]
   tag_data = ["dom:tag[session, id] = \"$(node.tag)\""]
-  attribute_data = ["dom:attribute[session, id, \"$(attribute.key)\"] = $(val_string(attribute.val))" for attribute in node.attributes]
+  attribute_data = ["dom:attribute[session, id, $(val_string(attribute.key))] = $(val_string(attribute.val))" for attribute in node.attributes]
   text_data = @match node.children begin
     [TextNode(text)] => ["dom:text[session, id] = $(val_string(text))"]
     _ => []
@@ -258,7 +258,7 @@ $(compile(quote
   [div
     [div
       login(session:string)
-      [input $(:type)="text" placeholder="What should we call you?"]
+      [input "type"="text" "placeholder"="What should we call you?"]
     ]
     [div
       chat(session:string)
@@ -266,12 +266,12 @@ $(compile(quote
         [div
           message(message:int, text:string, time:string)
           [div
-            [span class="message-time" time]
-            [span class="message-text" text]
+            [span "class"="message-time" time]
+            [span "class"="message-text" text]
           ]
         ]
         [div 
-          [input $(:type)="text" placeholder="What do you want to say?"]
+          [input "type"="text" "placeholder"="What do you want to say?"]
         ]
       ]
     ]
@@ -281,6 +281,24 @@ end))
   })
 } <-- .
 """
+
+# [div
+#   login(session:string) {
+#     [input $(:type)="text" placeholder="What should we call you?"]
+#   }
+#   
+#   chat(session:string) {
+#     [div
+#       message(message:int, text:string, time:string) {
+#         [div
+#           [span class="message-time" time]
+#           [span class="message-text" text]
+#         ]
+#       }
+#     ]
+#     [input $(:type)="text" placeholder="What do you want to say?"]
+#   }
+# ]
 
 open("lb/demo/chat.logic", "w") do f
   write(f, chat)

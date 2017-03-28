@@ -171,14 +171,19 @@ function generate_node(node, query, parent_id, node_id, child_pos, bound_vars, f
   end
   
   node_data = ["dom:node(session, id)"]
+  tag_data = ["dom:tag[session, id] = \"$(node.tag)\""]
   attribute_data = ["dom:attribute[session, id, \"$(attribute.key)\"] = $(val_string(attribute.val))" for attribute in node.attributes]
   text_data = @match node.children begin
     [TextNode(text)] => ["dom:text[session, id] = $(val_string(text))"]
     _ => []
   end
-  dom_data_head = join(vcat(node_data, attribute_data, text_data), ",\n")
+  dom_data_head = join(vcat(node_data, tag_data, attribute_data, text_data), ",\n")
   dom_data = "$(dom_data_head) <-\n    id_$(node_id)[$(var_names)] = id."
   push!(output, dom_data)
+end
+
+function compile(expr)
+  walk(parse_dom(expr))
 end
 
 chat = 
@@ -249,18 +254,29 @@ block(`chat) {
       
     message(message, text[message], datetime:string:convert[time[message]]).
     
-$(walk(parse_dom(quote 
+$(compile(quote
   [div
-    chat(session:string)
     [div
-      message(message:int, text:string, time:string)
+      login(session:string)
+      [input $(:type)="text" placeholder="What should we call you?"]
+    ]
+    [div
+      chat(session:string)
       [div
-        [span class="message-time" time]
-        [span class="message-text" text]
+        [div
+          message(message:int, text:string, time:string)
+          [div
+            [span class="message-time" time]
+            [span class="message-text" text]
+          ]
+        ]
+        [div 
+          [input $(:type)="text" placeholder="What do you want to say?"]
+        ]
       ]
     ]
   ]
-end)))
+end))
     
   })
 } <-- .

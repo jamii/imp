@@ -4,106 +4,215 @@ module UI
 # AtomShell.install()
 
 using Data
-using Query
-using Flows
+# using Query
+# using Flows
 using Blink
+using Match
+using Hiccup
 
-# typealias Id UInt
-
-# macro id(args...)
-#   h = :(zero(UInt))
-#   for arg in args
-#     h = :(hash($(esc(arg)), $h))
-#   end
-#   h
-# end
-
-# root = UInt(0)
-
-typealias Id String
-
-macro id(args...)
-  :(join([$(map(esc,args)...)], "-"))
-end
-
-root = "root"
-
-pre = Sequence([
-  @transient node(Id) => (Id, Int64, String) # (id) => (parent, ix, tag)
-  @transient style(Id, String) => String
-  @transient text(Id) => String
-  @transient onclick(Id)
-  @transient click(Id)
-  @transient onkeydown(Id)
-  @transient keydown(Id) => (Int64, String)
-])
-
-post = Sequence([
-  # (level, parent, ix, id, tag)
-  @transient sorted_node(Int64, Id, Int64, Id, String)
-
-  @merge begin
-    root = UI.root
-    node(id) => (root, ix, tag)
-    return sorted_node(1, root, ix, id, tag)
-  end
+# --- ast ---
   
-  Fixpoint(
-    @merge begin
-      sorted_node(level, _, _, parent, _,)
-      node(id) => (parent, ix, tag)
-      return sorted_node(level+1, parent, ix, id, tag)
+immutable Var 
+  name::Symbol
+  typ::Symbol
+end
+
+typealias Value Union{String, Symbol}
+
+immutable Attribute
+  key::Value
+  val::Value
+end
+
+abstract Node
+
+immutable TextNode <: Node
+  text::Value
+end
+
+immutable FixedNode <: Node
+  tag::Symbol
+  attributes::Vector{Attribute}
+  children::Vector{Node}
+end
+
+immutable QueryNode <: Node
+  table::Symbol
+  vars::Vector{Var}
+  children::Vector{Node}
+end
+
+# --- parsing ---
+
+function preprocess(expr)
+  @match expr begin
+    Expr(:vect || :vcat || :hcat, args, _) => map(preprocess, args)
+    Expr(head, args, _) => Expr(head, map(preprocess, args)...)
+    args::Vector => args
+    value::Union{Symbol, String, Number} => value
+    _ => error("What are this? $expr")
+  end
+end
+
+function parse_nodes(exprs)
+  map(parse_node, exprs)
+end
+
+function parse_node(expr) 
+  @match expr begin
+    text::Value => TextNode(text)
+    Expr(:call, [table::Symbol, children_expr, var_exprs...], _) => begin
+      @match children_expr begin
+        Expr(:->, [Expr(:tuple, [], _), Expr(:block, children_exprs, _)], _) => begin
+          children = parse_nodes(filter((e) -> !is_line_number(e), children_exprs))
+          vars = map(parse_var, var_exprs)
+          QueryNode(table, vars, children)
+        end
+        _ => error("What are this? $children_expr")
+      end
     end
+    [tag::Symbol, args...] => begin
+      (attributes, more_args) = parse_attributes(args)
+      nodes = parse_nodes(more_args)
+      FixedNode(tag, attributes, nodes)
+    end
+    _ => error("What are this? $expr")
+  end
+end
+
+function is_line_number(expr)
+  @match expr begin
+    Expr(:line, _, _) => true
+    _ => false
+  end
+end
+
+function parse_attributes(exprs)
+  attributes = Attribute[]
+  while true
+    @match exprs begin
+      [Expr(:(=), [key::Value, val::Value], _), rest...] => begin
+        push!(attributes, Attribute(key, val))
+        exprs = rest
+      end
+      _ => return (attributes, exprs)
+    end
+  end
+end
+  
+function parse_var(expr)
+  @match expr begin
+    Expr(::, [name::Symbol, typ::Symbol], _) => Var(name, typ)
+    _ => error("What are this? $expr")
+  end
+end
+
+function parse_dom(expr)
+  @match expr begin
+    Expr(:block, [Expr(:line, _, _), child], _) => parse_node(preprocess(child))
+    _ => parse_node(preprocess(expr))
+  end
+end
+
+# --- interpreting ---
+# dumb slow version just to get the logic right
+# TODO not that
+
+function interpret_value(value, bound_vars)
+  string(isa(value, Symbol) ? bound_vars[value] : value)
+end
+
+function interpret_node(node::TextNode, bound_vars, data)
+  return [interpret_value(node.text, bound_vars)]
+end
+
+function interpret_node(node::FixedNode, bound_vars, data)
+  attributes = Dict{String, String}()
+  for attribute in node.attributes
+    attributes[interpret_value(attribute.key, bound_vars)] = interpret_value(attribute.val, bound_vars)
+  end
+  nodes = vcat([interpret_node(child, bound_vars, data) for child in node.children]...)
+  return [Hiccup.Node(node.tag, attributes, nodes)]
+end
+
+function interpret_node(node::QueryNode, bound_vars, data)
+  nodes = []
+  columns = data[node.table].columns
+  @assert length(node.vars) == length(columns)
+  for r in 1:length(columns[1])
+    if all((!(var.name in keys(bound_vars)) || (bound_vars[var.name] == columns[c][r]) for (c, var) in enumerate(node.vars)))
+      new_bound_vars = copy(bound_vars)
+      for (c, var) in enumerate(node.vars)
+        new_bound_vars[var.name] = columns[c][r]
+      end
+      for child in node.children
+        push!(nodes, interpret_node(child, new_bound_vars, data)...)
+      end
+    end
+  end
+  return nodes
+end
+
+d = quote
+  [div
+    login(session:string) do
+      [input "type"="text" "placeholder"="What should we call you?"]
+    end
+    
+    chat(session:string) do
+      [div
+        message(message:int, text:string, time:string) do
+          [div
+            [span "class"="message-time" time]
+            [span "class"="message-text" text]
+          ]
+        end
+      ]
+      [input "type"="text" "placeholder"="What do you want to say?"]
+    end
+  ]
+end
+
+node = parse_dom(d)
+
+data = Dict(
+  :login => Relation(([],), 1),
+  :chat => Relation((["my session"],), 1),
+  :message => Relation(([0, 1], ["foo", "bar"], [11, 22]), 1)
   )
-])
+  
+@show interpret_node(node, Dict{Symbol, Any}(:session => "my session"), data)[1].children[1].children[1].children[1].attrs
 
-@noinline function render(window, old_state, new_state)
-  (removed, inserted) = Data.diff(old_state[:sorted_node], new_state[:sorted_node])
-  (_, _, _, removed_id, _) = removed
-  (_, parent, ix, id, tag) = inserted
-  (_, (style_id, style_key, style_val)) = Data.diff(old_state[:style], new_state[:style])
-  (_, (text_id, text)) = Data.diff(old_state[:text], new_state[:text])
-  (_, (onclick,)) = Data.diff(old_state[:onclick], new_state[:onclick])
-  (_, (onkeydown,)) = Data.diff(old_state[:onkeydown], new_state[:onkeydown])
-  # @show removed_id parent ix id tag style_id style text_id text onclick onkeydown
-  # TODO remove old event handlers
-  @js_(window, render($removed_id, $parent, $ix, $id, $tag, $style_id, $style_key, $style_val, $text_id, $text, $onclick, $onkeydown))
-end
+# --- plumbing ---
 
-function render(window, state)
-  empty_state = Dict(name => empty(relation) for (name, relation) in state)
-  render(window, empty_state, state)
-end
-
-function watch_and_load(window, file)
-  load!(window, file)
-  @schedule begin
-    (waits, _) = open(`inotifywait -me CLOSE_WRITE $file`)
-    while true
-      readline(waits)
-      load!(window, file)
-    end
-  end
-end
-
-function window(world)
-  window = Window()
-  opentools(window)
-  watch_and_load(window, "src/Imp.js")
-  sleep(3) # :(
-  handle(window, "event") do event
-    @show event
-    refresh(world, Symbol(event["table"]), tuple(event["values"]...))
-  end
-  watch(world) do old_state, new_state
-    render(window, old_state, new_state)
-  end
-  innerHTML = "<div id=\"$root\"></div>"
-  @js(window, document.body.innerHTML = $innerHTML)
-  render(window, world.state)
-  window
-end
-
-export render, window, Id, @id, root
+# function watch_and_load(window, file)
+#   load!(window, file)
+#   @schedule begin
+#     (waits, _) = open(`inotifywait -me CLOSE_WRITE $file`)
+#     while true
+#       readline(waits)
+#       load!(window, file)
+#     end
+#   end
+# end
+# 
+# function window(world)
+#   window = Window()
+#   opentools(window)
+#   watch_and_load(window, "src/Imp.js")
+#   sleep(3) # :(
+#   handle(window, "event") do event
+#     refresh(world, Symbol(event["table"]), tuple(event["values"]...))
+#   end
+#   watch(world) do old_state, new_state
+#     render(window, old_state, new_state)
+#   end
+#   innerHTML = "<div id=\"$root\"></div>"
+#   @js(window, document.body.innerHTML = $innerHTML)
+#   render(window, world.state)
+#   window
+# end
+# 
+# export render, window, Id, @id, root
 
 end

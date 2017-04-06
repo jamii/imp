@@ -252,7 +252,7 @@ function empty(relation::Relation)
   Relation(map((c) -> Vector{eltype(c)}(), relation.columns), relation.num_keys)
 end
 
-export Relation, @relation, index, project, parse_relation, empty, diff
+export Relation, @relation, index, parse_relation, empty, diff
 
 function test()
   for i in 1:10000

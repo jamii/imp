@@ -11,11 +11,6 @@ using Match
 using Hiccup
 
 # --- ast ---
-  
-immutable Var 
-  name::Symbol
-  typ::Symbol
-end
 
 typealias Value Union{String, Symbol}
 
@@ -38,7 +33,7 @@ end
 
 immutable QueryNode <: Node
   table::Symbol
-  vars::Vector{Var}
+  vars::Vector{Symbol}
   children::Vector{Node}
 end
 
@@ -61,11 +56,10 @@ end
 function parse_node(expr) 
   @match expr begin
     text::Value => TextNode(text)
-    Expr(:call, [table::Symbol, children_expr, var_exprs...], _) => begin
+    Expr(:call, [table::Symbol, children_expr, vars...], _) => begin
       @match children_expr begin
         Expr(:->, [Expr(:tuple, [], _), Expr(:block, children_exprs, _)], _) => begin
           children = parse_nodes(filter((e) -> !is_line_number(e), children_exprs))
-          vars = map(parse_var, var_exprs)
           QueryNode(table, vars, children)
         end
         _ => error("What are this? $children_expr")
@@ -97,13 +91,6 @@ function parse_attributes(exprs)
       end
       _ => return (attributes, exprs)
     end
-  end
-end
-  
-function parse_var(expr)
-  @match expr begin
-    Expr(::, [name::Symbol, typ::Symbol], _) => Var(name, typ)
-    _ => error("What are this? $expr")
   end
 end
 
@@ -140,10 +127,10 @@ function interpret_node(node::QueryNode, bound_vars, data)
   columns = data[node.table].columns
   @assert length(node.vars) == length(columns)
   for r in 1:length(columns[1])
-    if all((!(var.name in keys(bound_vars)) || (bound_vars[var.name] == columns[c][r]) for (c, var) in enumerate(node.vars)))
+    if all((!(var in keys(bound_vars)) || (bound_vars[var] == columns[c][r]) for (c, var) in enumerate(node.vars)))
       new_bound_vars = copy(bound_vars)
       for (c, var) in enumerate(node.vars)
-        new_bound_vars[var.name] = columns[c][r]
+        new_bound_vars[var] = columns[c][r]
       end
       for child in node.children
         push!(nodes, interpret_node(child, new_bound_vars, data)...)
@@ -155,13 +142,13 @@ end
 
 d = quote
   [div
-    login(session:string) do
+    login(session) do
       [input "type"="text" "placeholder"="What should we call you?"]
     end
     
-    chat(session:string) do
+    chat(session) do
       [div
-        message(message:int, text:string, time:string) do
+        message(message, text, time) do
           [div
             [span "class"="message-time" time]
             [span "class"="message-text" text]
@@ -181,7 +168,7 @@ data = Dict(
   :message => Relation(([0, 1], ["foo", "bar"], [11, 22]), 1)
   )
   
-@show interpret_node(node, Dict{Symbol, Any}(:session => "my session"), data)[1].children[1].children[1].children[1].attrs
+@show interpret_node(node, Dict{Symbol, Any}(:session => "my session"), data)[1]
 
 # --- plumbing ---
 

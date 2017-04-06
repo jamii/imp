@@ -8012,3 +8012,122 @@ end
 Doing the diffing should be fairly easy if I track which dom nodes correspond to which query node + bound_vars. This is kinda similar to how Om has a much easier time diffing immutable data compared to React which needs programmer help. But even better, because we get automatic list keys too.
 
 I think the next thing is to get events hooked up.
+
+The tricky part about events is that they often need to grab values from the dom or the event, or run some js code before sending the event to the server. But they also need to grab values from the server. If I only cared about the latter I could do something like `"onclick" = add_message(next_id, "foo")`. If I only cared about the former I could do soemthing like `"onclick" = "imp.send_event('add_message', [1, this.value])"`. But if I need both? I could add js values to the first like `"onclick" = add_message(next_id, js"this.value")` but that still doesn't allow making decisions on the client side. I could attach the query values to the dom node itself, so the event would be `"onclick" = "imp.send_event('add_message', [this.data.next_id, this.value])"`, but that gets pretty verbose. I could splice server-side values into the js like `"onclick" = "imp.send_event('add_message', [$next_id, this.value])"` but that would create a different function for each dom node, and each function needs to be parsed, compiled and stored. I also don't like the lack of symmetry between query and event syntax.
+
+How expensive are js functions? Every source I can find so far only seems to look at closures, where there is one version of the source code and multiple instantiations. If attaching the functions happens on the client I could maybe create a factory function for each event binding in the template.
+
+```js
+factory = function(next_id) {
+  function (event) {
+    imp.send_event('add_message', [next_id, this.value])
+  }
+}
+
+node.onclick = factory(5).bind(node)
+```
+
+(That's probably wrong because js is crazy, but the idea is there.)
+
+Or I could keep server-side data on the server and just send over some id that identifies the row. That would avoid problems with round-tripping interesting types through js, but it introduces concurrency problems where the client might send the id of a node that no longer exists on the server. Not sure which one is going to be messier.
+
+Is there some 80% solution? Let's look at the most common use-cases:
+
+1. Pressing a button to delete a todo.
+2. Submitting the contents of a text box on pressing enter.
+3. Submitting and clearing the contents of a text box on pressing enter.
+
+1 doesn't require anything interesting to happen on the client. 2 will spam the server with data if we create an event on every button press, so we really want the client to look at the keypress first. 3 has to both submit a server event and call a js function, which ideally we would like to do without an extra roundtrip.
+
+Splicing stuff into js functions seems like the only thing that will handle all three nicely. We just need to make the syntax cleaner and the avoid the cost of creating many similar functions. 
+
+If we tag specific relations as events then we can create js functions for them and write `"onclick" = "add_message($next_id, this.value)"`.
+
+Avoiding many similar functions seems to *have* a feasible solution, which means I can put it off doing it until it actually becomes a problem. 
+
+Julia parses `"add_message($next_id, this.value)"` as `Expr(:string, "add_message(", :next_id, ", this.value)")` so it will be easy detect in the template parser.
+
+I added support for string interpolation everywhere the template accepts string, so now this a valid template:
+
+``` julia
+[div
+  login(session) do
+    [input "type"="text" "placeholder"="What should we call you?"]
+  end
+  
+  chat(session) do
+    [div
+      message(message, text, time) do
+        [div
+          [span "class"="message-time" "time: $time"]
+          [span "class"="message-text" text]
+        ]
+      end
+    ]
+    next_message(id) do
+      [input 
+        "type"="text" 
+        "placeholder"="What do you want to say?"
+        "onkeydown"="if (event.keypress == 13) {new_message($id, this.value)}"
+        ]
+    end
+  end
+]
+```
+
+But now that I look at it I realize that with my intended diff semantics, this will replace the input node every time the next message id changes. Which would be fine except that that also wipes the contents of the input. It's the same problem for all the approaches I came up with above - the core problem is that we can't change attributes without replacing the node. Maybe I need to be able to move the query inside the node?
+
+``` julia
+[input 
+  "type"="text" 
+  "placeholder"="What do you want to say?"
+  next_message(id) do "onkeydown"="if (event.keypress == 13) {new_message($id, this.value)}" end
+]
+```
+
+I'd have to change the syntax and the interpeter, and it will make diffs a bit more complicated, but it should work.
+
+It would also incidentally add the ability to do stuff like:
+
+``` julia
+[button 
+  style("funky", k, v) do k=v end 
+  "bring the funk"
+]
+```
+
+Which is not super important, but it was the one thing that the current ui system can do that the templates can't.
+
+Oh, I guess tags too. Let's make tags interpolatable.
+
+``` julia
+["div"
+  login(session) do
+    ["input" "type"="text" "placeholder"="What should we call you?"]
+  end
+  
+  chat(session) do
+    ["div"
+      message(message, text, time) do
+        ["div"
+          ["span" "class"="message-time" "time: $time"]
+          ["span" "class"="message-text" text]
+        ]
+      end
+    ]
+    next_message(id) do
+      ["input"
+        "type"="text" 
+        "placeholder"="What do you want to say?"
+        "onkeydown"="if (event.keypress == 13) {new_message($id, this.value)}"
+        ]
+    end
+  end
+]
+```
+
+A little gross. An actual html parser would be better, but I don't have time to write one and I can't figure out a good way to reuse one while keeping the queries and template together.
+
+Still don't like the asymmetry between queries and events either.
+
+:S

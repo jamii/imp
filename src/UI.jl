@@ -12,7 +12,11 @@ using Hiccup
 
 # --- ast ---
 
-typealias Value Union{String, Symbol}
+immutable StringExpr
+  values::Vector{Union{String, Symbol}}
+end
+
+typealias Value Union{StringExpr, Symbol, Any} # where Any is convertable to string
 
 immutable Attribute
   key::Value
@@ -26,7 +30,7 @@ immutable TextNode <: Node
 end
 
 immutable FixedNode <: Node
-  tag::Symbol
+  tag::Value
   attributes::Vector{Attribute}
   children::Vector{Node}
 end
@@ -49,27 +53,11 @@ function preprocess(expr)
   end
 end
 
-function parse_nodes(exprs)
-  map(parse_node, exprs)
-end
-
-function parse_node(expr) 
+function parse_value(expr)
   @match expr begin
-    text::Value => TextNode(text)
-    Expr(:call, [table::Symbol, children_expr, vars...], _) => begin
-      @match children_expr begin
-        Expr(:->, [Expr(:tuple, [], _), Expr(:block, children_exprs, _)], _) => begin
-          children = parse_nodes(filter((e) -> !is_line_number(e), children_exprs))
-          QueryNode(table, vars, children)
-        end
-        _ => error("What are this? $children_expr")
-      end
-    end
-    [tag::Symbol, args...] => begin
-      (attributes, more_args) = parse_attributes(args)
-      nodes = parse_nodes(more_args)
-      FixedNode(tag, attributes, nodes)
-    end
+    _::String => expr
+    _::Symbol => expr
+    Expr(:string, args, _) => StringExpr(map(parse_value, args))
     _ => error("What are this? $expr")
   end
 end
@@ -85,12 +73,36 @@ function parse_attributes(exprs)
   attributes = Attribute[]
   while true
     @match exprs begin
-      [Expr(:(=), [key::Value, val::Value], _), rest...] => begin
-        push!(attributes, Attribute(key, val))
+      [Expr(:(=), [key, val], _), rest...] => begin
+        push!(attributes, Attribute(parse_value(key), parse_value(val)))
         exprs = rest
       end
       _ => return (attributes, exprs)
     end
+  end
+end
+
+function parse_nodes(exprs)
+  map(parse_node, exprs)
+end
+
+function parse_node(expr) 
+  @match expr begin
+    Expr(:call, [table::Symbol, children_expr, vars...], _) => begin
+      @match children_expr begin
+        Expr(:->, [Expr(:tuple, [], _), Expr(:block, children_exprs, _)], _) => begin
+          children = parse_nodes(filter((e) -> !is_line_number(e), children_exprs))
+          QueryNode(table, vars, children)
+        end
+        _ => error("What are this? $children_expr")
+      end
+    end
+    [tag, args...] => begin
+      (attributes, more_args) = parse_attributes(args)
+      nodes = parse_nodes(more_args)
+      FixedNode(parse_value(tag), attributes, nodes)
+    end
+    text => TextNode(parse_value(text))
   end
 end
 
@@ -106,7 +118,11 @@ end
 # TODO not that
 
 function interpret_value(value, bound_vars)
-  string(isa(value, Symbol) ? bound_vars[value] : value)
+  @match value begin
+    _::Symbol => string(bound_vars[value])
+    _::StringExpr => string((interpret_value(v, bound_vars) for v in value.values)...)
+    _ => string(value)
+  end
 end
 
 function interpret_node(node::TextNode, bound_vars, data)
@@ -114,12 +130,13 @@ function interpret_node(node::TextNode, bound_vars, data)
 end
 
 function interpret_node(node::FixedNode, bound_vars, data)
+  tag = Symbol(interpret_value(node.tag, bound_vars))
   attributes = Dict{String, String}()
   for attribute in node.attributes
     attributes[interpret_value(attribute.key, bound_vars)] = interpret_value(attribute.val, bound_vars)
   end
   nodes = vcat([interpret_node(child, bound_vars, data) for child in node.children]...)
-  return [Hiccup.Node(node.tag, attributes, nodes)]
+  return [Hiccup.Node(tag, attributes, nodes)]
 end
 
 function interpret_node(node::QueryNode, bound_vars, data)
@@ -141,21 +158,27 @@ function interpret_node(node::QueryNode, bound_vars, data)
 end
 
 d = quote
-  [div
-    login(session) do
-      [input "type"="text" "placeholder"="What should we call you?"]
+  ["div"
+    while login(session) 
+      ["input" "type"="text" "placeholder"="What should we call you?"]
     end
     
-    chat(session) do
-      [div
-        message(message, text, time) do
-          [div
-            [span "class"="message-time" time]
-            [span "class"="message-text" text]
+    while chat(session)
+      ["div"
+        while message(message, text, time)
+          ["div"
+            ["span" "class"="message-time" "time: $time"]
+            ["span" "class"="message-text" text]
           ]
         end
       ]
-      [input "type"="text" "placeholder"="What do you want to say?"]
+      ["input"
+       "type"="text" 
+       "placeholder"="What do you want to say?"
+       while next_message(id)
+         "onkeydown"="if (event.keypress == 13) {new_message($id, this.value)}"
+       end
+       ]
     end
   ]
 end
@@ -165,8 +188,17 @@ node = parse_dom(d)
 data = Dict(
   :login => Relation(([],), 1),
   :chat => Relation((["my session"],), 1),
-  :message => Relation(([0, 1], ["foo", "bar"], [11, 22]), 1)
+  :message => Relation(([0, 1], ["foo", "bar"], [11, 22]), 1),
+  :next_message => Relation(([3],), 1)
   )
+  
+(quote
+  input[ 
+    "type"="text",
+    "placeholder"="What do you want to say?",
+    next_message(id)["onkeydown"="if (event.keypress == 13) {new_message($id, this.value)}"]
+  ]
+end).args[2]
   
 @show interpret_node(node, Dict{Symbol, Any}(:session => "my session"), data)[1]
 

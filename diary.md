@@ -7934,3 +7934,81 @@ The rendering breaks in hard to reproduce ways, and it took me a while to figure
 I ported the minesweeper example to the new flow/UI system. It's noticably faster - building the hiccup.jl vdom was the majority of the runtime in the previous version, which is daft.
 
 I also hooked in the table browser so I can poke about inside the minesweeper state.
+
+### 2017 Apr 6
+
+(Been a while. Was working on a parallel project. Details later.)
+
+Having to create ids for every dom node sucks. It's boilerplate. 
+
+Also don't like that because I don't have a way to nest queries, I can't directly represent the nested structure of the dom and instead have to break it up into multiple queries.
+
+Could solve the last problem by introducing nested queries to Imp, and I still want to do something like that at some point to solve the context problem, but for now I can solve both by introducing html templates.
+
+``` julia
+[div
+  login(session) do
+    [input "type"="text" "placeholder"="What should we call you?"]
+  end
+  
+  chat(session) do
+    [div
+      message(message, text, time) do
+        [div
+          [span "class"="message-time" time]
+          [span "class"="message-text" text]
+        ]
+      end
+    ]
+    [input "type"="text" "placeholder"="What do you want to say?"]
+  end
+]
+```
+
+Anything that looks like a datalog clause eg `login(session)` repeats the template inside it for every row, sorted in the order that the variables appear. Nested clauses implicitly join against all their ancestors, uh, which makes this a bad example because there are no joins. Later...
+
+In my other project these get compiled into a bunch of datalog views that generate a relational dom model much like the one I used in imp, but once I had it working I realized that now I have templates it would be much simpler to just read data out of the relations and interpret the templates directly, rather than doing all the fiddly codegen. 
+
+``` julia
+# dumb slow version just to get the logic right
+# TODO not that
+
+function interpret_value(value, bound_vars)
+  string(isa(value, Symbol) ? bound_vars[value] : value)
+end
+
+function interpret_node(node::TextNode, bound_vars, data)
+  return [interpret_value(node.text, bound_vars)]
+end
+
+function interpret_node(node::FixedNode, bound_vars, data)
+  attributes = Dict{String, String}()
+  for attribute in node.attributes
+    attributes[interpret_value(attribute.key, bound_vars)] = interpret_value(attribute.val, bound_vars)
+  end
+  nodes = vcat([interpret_node(child, bound_vars, data) for child in node.children]...)
+  return [Hiccup.Node(node.tag, attributes, nodes)]
+end
+
+function interpret_node(node::QueryNode, bound_vars, data)
+  nodes = []
+  columns = data[node.table].columns
+  @assert length(node.vars) == length(columns)
+  for r in 1:length(columns[1])
+    if all((!(var.name in keys(bound_vars)) || (bound_vars[var.name] == columns[c][r]) for (c, var) in enumerate(node.vars)))
+      new_bound_vars = copy(bound_vars)
+      for (c, var) in enumerate(node.vars)
+        new_bound_vars[var.name] = columns[c][r]
+      end
+      for child in node.children
+        push!(nodes, interpret_node(child, new_bound_vars, data)...)
+      end
+    end
+  end
+  return nodes
+end
+```
+
+Doing the diffing should be fairly easy if I track which dom nodes correspond to which query node + bound_vars. This is kinda similar to how Om has a much easier time diffing immutable data compared to React which needs programmer help. But even better, because we get automatic list keys too.
+
+I think the next thing is to get events hooked up.

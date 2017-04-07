@@ -8131,3 +8131,36 @@ A little gross. An actual html parser would be better, but I don't have time to 
 Still don't like the asymmetry between queries and events either.
 
 :S
+
+### 2017 Apr 7
+
+Parsing and interpreter needed a bit of tweaking to handle attributes inside queries. Treat them as nodes in their own right now rather than as a field of FixedNode. Get pushed into their parent node.
+
+Decided to require string escaping rather than allowing raw symbols. Makes less typing in the template, makes it really clear when values are moving from the server to the client and makes it clear that values will be converted to strings.
+
+``` julia
+[div
+  login(session) do
+    [input placeholder="What should we call you?"]
+  end
+  
+  chat(session) do
+    [div
+      message(message, text, time) do
+        [div
+          [span class="message-time" "time: $time"]
+          [span class="message-text" "$text"]
+        ]
+      end
+    ]
+    [input
+     placeholder="What do you want to say?"
+     next_message(id) do
+       onkeydown="if (event.keypress == 13) {new_message($id, this.value)}"
+     end
+     ]
+  end
+]
+```
+
+I feel much better about this. Glad I slept on it.

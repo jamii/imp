@@ -16,7 +16,7 @@ immutable StringExpr
   values::Vector{Union{String, Symbol}}
 end
 
-typealias Value Union{StringExpr, Symbol, Any} # where Any is convertable to string
+typealias Value Union{StringExpr, Any} # where Any is converted to string
 
 abstract Node
 
@@ -101,10 +101,10 @@ end
 # TODO not that
 
 function interpret_value(value, bound_vars)
-  @match value begin
-    _::Symbol => string(bound_vars[value])
-    _::StringExpr => string((interpret_value(v, bound_vars) for v in value.values)...)
-    _ => string(value)
+  if isa(value, StringExpr) 
+    string((isa(v,Symbol) ? string(bound_vars[v]) : string(v) for v in value.values)...)
+  else
+    string(value)
   end
 end
 
@@ -142,25 +142,24 @@ function interpret_node(parent, node::QueryNode, bound_vars, data)
 end
 
 d = quote
-  ["div"
+  [div
     login(session) do
-      ["input" "type"="text" "placeholder"="What should we call you?"]
+      [input placeholder="What should we call you?"]
     end
     
     chat(session) do
-      ["div"
+      [div
         message(message, text, time) do
-          ["div"
-            ["span" "class"="message-time" "time: $time"]
-            ["span" "class"="message-text" text]
+          [div
+            [span class="message-time" "time: $time"]
+            [span class="message-text" "$text"]
           ]
         end
       ]
-      ["input"
-       "type"="text" 
-       "placeholder"="What do you want to say?"
+      [input
+       placeholder="What do you want to say?"
        next_message(id) do
-         "onkeydown"="if (event.keypress == 13) {new_message($id, this.value)}"
+         onkeydown="if (event.keypress == 13) {new_message($id, this.value)}"
        end
        ]
     end
@@ -176,7 +175,11 @@ data = Dict(
   :next_message => Relation(([3],), 1)
   )
   
-@show interpret_node(node, Dict{Symbol, Any}(:session => "my session"), data)[1]
+@show begin
+  root = Hiccup.Node(:div)
+  interpret_node(root, node, Dict{Symbol, Any}(:session => "my session"), data)
+  root
+end
 
 # --- plumbing ---
 

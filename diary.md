@@ -8239,3 +8239,88 @@ end
 I checked that changing `next_message` updates the event listener without blowing away the input box.
 
 Next thing is getting events hooked up, and then handling sessions properly.
+
+Client-side we have:
+
+``` js
+function imp_event(table) {
+    return function () {
+        Blink.msg("event", {"table": table, "values": Array.from(arguments)});
+        return false;
+    }
+}
+```
+
+Flows get extended with a new kind of relation, which is exactly like a transient except that it can be inserted into from the client:
+
+``` julia
+macro event(relation)
+  (name, keys, vals) = parse_relation(relation)
+  :(Create($(Expr(:quote, name)), [$(map(esc, keys)...)], [$(map(esc, vals)...)], true, true))
+end
+```
+
+In render we create new event functions for every event:
+
+``` julia
+function render(window, view, world)
+  for event in world.events
+    js(window, Blink.JSString("$event = imp_event(\"$event\")"), callback=false)
+  end
+  ...
+end
+```
+
+I repeatedly ran into the same old hangs with Blink. I'll try upgrading to the latest version and see if they continue to plague me.
+
+Here is the chat with working events:
+
+``` julia
+world = World()
+view = View()
+
+world[:chat] = Relation((["my session"],), 1)
+
+begin 
+  set_flow!(world, Sequence([
+    @stateful login(String)
+    @stateful chat(String)
+    @stateful message(Int64) => (String, DateTime)
+    @event new_message(String)
+    
+    @merge begin
+      new_message(text)
+      @query begin
+        message(id) => (_, _)
+      end
+      return message(1 + length(id)) => (text, now())
+    end
+  ]))
+  set_template!(view, quote
+    [div
+      login(session) do
+        [input placeholder="What should we call you?"]
+      end
+    
+      chat(session) do
+        [div
+          message(message, text, time) do
+            [div
+              [span class="message-time" "time: $time"]
+              [span class="message-text" "$text"]
+            ]
+          end
+        ]
+        [input
+          placeholder="What do you want to say?"
+          onkeydown="if (event.which == 13) {new_message(this.value); this.value=''}"
+        ]
+      end
+    ]
+  end)
+end
+
+w = window(world, view)
+```
+
+So I need to deal with sessions and then add some css and we're done.

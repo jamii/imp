@@ -9,7 +9,8 @@ type Create <: Flow
   output_name::Symbol
   keys::Vector{Type}
   vals::Vector{Type}
-  transient::Bool
+  is_transient::Bool
+  is_event::Bool
 end
 
 type Merge <: Flow
@@ -30,6 +31,7 @@ end
 type World
   state::Dict{Symbol, Relation}
   transients::Set{Symbol}
+  events::Set{Symbol}
   flow::Flow
   watchers::Set{Any}
 end
@@ -54,8 +56,11 @@ function (create::Create)(world::World)
   if !haskey(world.state, create.output_name) 
     output = Relation(tuple((Vector{typ}() for typ in [create.keys..., create.vals...])...), length(create.keys))
     world.state[create.output_name] = output
-    if create.transient 
+    if create.is_transient 
       push!(world.transients, create.output_name)
+    end
+    if create.is_event
+      push!(world.events, create.output_name)
     end
   end
 end
@@ -88,12 +93,17 @@ end
 
 macro stateful(relation)
   (name, keys, vals) = parse_relation(relation)
-  :(Create($(Expr(:quote, name)), [$(map(esc, keys)...)], [$(map(esc, vals)...)], false))
+  :(Create($(Expr(:quote, name)), [$(map(esc, keys)...)], [$(map(esc, vals)...)], false, false))
 end
 
 macro transient(relation)
   (name, keys, vals) = parse_relation(relation)
-  :(Create($(Expr(:quote, name)), [$(map(esc, keys)...)], [$(map(esc, vals)...)], true))
+  :(Create($(Expr(:quote, name)), [$(map(esc, keys)...)], [$(map(esc, vals)...)], true, false))
+end
+
+macro event(relation)
+  (name, keys, vals) = parse_relation(relation)
+  :(Create($(Expr(:quote, name)), [$(map(esc, keys)...)], [$(map(esc, vals)...)], true, true))
 end
 
 macro merge(query)
@@ -111,7 +121,7 @@ macro merge(query)
 end
 
 function World()
-  World(Dict{Symbol, Relation}(), Set{Symbol}(), Sequence([]), Set{Any}())
+  World(Dict{Symbol, Relation}(), Set{Symbol}(),Set{Symbol}(), Sequence([]), Set{Any}())
 end
 
 function refresh(world::World)
@@ -126,6 +136,7 @@ function refresh(world::World)
 end
 
 function refresh(world::World, event_table::Symbol, event_row::Tuple)
+  @show :event event_table event_row
   old_state = copy(world.state)
   for transient in world.transients
     world.state[transient] = empty(world.state[transient])
@@ -155,6 +166,6 @@ function watch(watcher, world::World)
   push!(world.watchers, watcher)
 end
 
-export Create, Merge, Sequence, Fixpoint, @stateful, @transient, @merge, World, watch, set_flow!, refresh
+export Create, Merge, Sequence, Fixpoint, @stateful, @transient, @event, @merge, World, watch, set_flow!, refresh
 
 end

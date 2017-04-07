@@ -5,7 +5,7 @@ module UI
 
 using Data
 # using Query
-# using Flows
+using Flows
 using Blink
 using Match
 using Hiccup
@@ -89,7 +89,7 @@ function parse_node(expr)
   end
 end
 
-function parse_dom(expr)
+function parse_template(expr)
   @match expr begin
     Expr(:block, [Expr(:line, _, _), child], _) => parse_node(preprocess(child))
     _ => parse_node(preprocess(expr))
@@ -108,25 +108,25 @@ function interpret_value(value, bound_vars)
   end
 end
 
-function interpret_node(parent, node::TextNode, bound_vars, data)
+function interpret_node(parent, node::TextNode, bound_vars, state)
   push!(parent.children, interpret_value(node.text, bound_vars))
 end
 
-function interpret_node(parent, node::AttributeNode, bound_vars, data)
+function interpret_node(parent, node::AttributeNode, bound_vars, state)
   parent.attrs[interpret_value(node.key, bound_vars)] = interpret_value(node.val, bound_vars)
 end
 
-function interpret_node(parent, node::FixedNode, bound_vars, data)
+function interpret_node(parent, node::FixedNode, bound_vars, state)
   tag = Symbol(interpret_value(node.tag, bound_vars))
   child = Hiccup.Node(tag)
   push!(parent.children, child)
   for grandchild in node.children
-    interpret_node(child, grandchild, bound_vars, data) 
+    interpret_node(child, grandchild, bound_vars, state) 
   end
 end
 
-function interpret_node(parent, node::QueryNode, bound_vars, data)
-  columns = data[node.table].columns
+function interpret_node(parent, node::QueryNode, bound_vars, state)
+  columns = state[node.table].columns
   @assert length(node.vars) == length(columns)
   for r in 1:length(columns[1])
     if all((!(var in keys(bound_vars)) || (bound_vars[var] == columns[c][r]) for (c, var) in enumerate(node.vars)))
@@ -135,82 +135,75 @@ function interpret_node(parent, node::QueryNode, bound_vars, data)
         new_bound_vars[var] = columns[c][r]
       end
       for child in node.children
-        interpret_node(parent, child, new_bound_vars, data)
+        interpret_node(parent, child, new_bound_vars, state)
       end
     end
   end
 end
 
-d = quote
-  [div
-    login(session) do
-      [input placeholder="What should we call you?"]
-    end
-    
-    chat(session) do
-      [div
-        message(message, text, time) do
-          [div
-            [span class="message-time" "time: $time"]
-            [span class="message-text" "$text"]
-          ]
-        end
-      ]
-      [input
-       placeholder="What do you want to say?"
-       next_message(id) do
-         onkeydown="if (event.keypress == 13) {new_message($id, this.value)}"
-       end
-       ]
-    end
-  ]
-end
-
-node = parse_dom(d)
-
-data = Dict(
-  :login => Relation(([],), 1),
-  :chat => Relation((["my session"],), 1),
-  :message => Relation(([0, 1], ["foo", "bar"], [11, 22]), 1),
-  :next_message => Relation(([3],), 1)
-  )
-  
-@show begin
-  root = Hiccup.Node(:div)
-  interpret_node(root, node, Dict{Symbol, Any}(:session => "my session"), data)
-  root
-end
-
 # --- plumbing ---
 
-# function watch_and_load(window, file)
-#   load!(window, file)
-#   @schedule begin
-#     (waits, _) = open(`inotifywait -me CLOSE_WRITE $file`)
-#     while true
-#       readline(waits)
-#       load!(window, file)
-#     end
-#   end
-# end
-# 
-# function window(world)
-#   window = Window()
-#   opentools(window)
-#   watch_and_load(window, "src/Imp.js")
-#   sleep(3) # :(
-#   handle(window, "event") do event
-#     refresh(world, Symbol(event["table"]), tuple(event["values"]...))
-#   end
-#   watch(world) do old_state, new_state
-#     render(window, old_state, new_state)
-#   end
-#   innerHTML = "<div id=\"$root\"></div>"
-#   @js(window, document.body.innerHTML = $innerHTML)
-#   render(window, world.state)
-#   window
-# end
-# 
-# export render, window, Id, @id, root
+type View
+  template::Any
+  parsed_template::Node
+  watchers::Set{Any}
+end
+
+function View() 
+  template = quote [div] end
+  View(template, parse_template(template), Set{Any}())
+end
+
+function set_template!(view::View, template)
+  view.template = template
+  view.parsed_template = parse_template(template)
+  for watcher in view.watchers
+    watcher()
+  end
+end
+
+function Flows.watch(watcher, view::View)
+  push!(view.watchers, watcher)
+end
+
+function render(window, view, state)
+  root = Hiccup.Node(:div)
+  interpret_node(root, view.parsed_template, Dict{Symbol, Any}(:session => "my session"), state)
+  @js(window, diff.innerHTML(document.body, $(string(root))))
+end
+
+function watch_and_load(window, file)
+  load!(window, file)
+  @schedule begin
+    (waits, _) = open(`inotifywait -me CLOSE_WRITE $file`)
+    while true
+      readline(waits)
+      load!(window, file)
+    end
+  end
+end
+
+function window(world, view)
+  window = Window()
+  opentools(window)
+  load!(window, "src/diffhtml.js")
+  # watch_and_load(window, "src/Imp.css")
+  # watch_and_load(window, "src/Imp.js")
+  sleep(3) # :(
+  handle(window, "event") do event
+    refresh(world, Symbol(event["table"]), tuple(event["values"]...))
+  end
+  watch(world) do old_state, new_state
+    render(window, view, new_state)
+  end
+  watch(view) do
+    render(window, view, world.state)
+  end
+  @js(window, document.body.innerHTML = $(string(Hiccup.Node(:div))))
+  render(window, view, world.state)
+  window
+end
+
+export View, set_template!, window, watch
 
 end

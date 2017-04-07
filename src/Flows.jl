@@ -146,7 +146,7 @@ function Base.setindex!{R <: Relation}(world::World, relation::R, name::Symbol)
   refresh(world)
 end
 
-function setflow(world::World, flow::Flow)
+function set_flow!(world::World, flow::Flow)
   world.flow = flow
   refresh(world)
 end
@@ -155,6 +155,6 @@ function watch(watcher, world::World)
   push!(world.watchers, watcher)
 end
 
-export Create, Merge, Sequence, Fixpoint, @stateful, @transient, @merge, World, watch, setflow, refresh
+export Create, Merge, Sequence, Fixpoint, @stateful, @transient, @merge, World, watch, set_flow!, refresh
 
 end

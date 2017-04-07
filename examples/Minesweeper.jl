@@ -6,7 +6,6 @@ using Flows
 using UI
 using Match
 using Blink
-using Table
 
 world = World()
 
@@ -22,8 +21,6 @@ num_mines = 90
 
 begin 
   setflow(world, Sequence([
-    UI.pre
-  
     @stateful state() => Symbol
     @stateful mine(Int64, Int64)
     @stateful mine_count(Int64, Int64) => Int64
@@ -58,11 +55,11 @@ begin
       return mine_count(x, y) => length(nx)
     end
     
-    @merge begin
-      click(id)
-      grid(id) => (x, y)
-      return cleared(x, y)
-    end
+    # @merge begin
+    #   click(id)
+    #   grid(id) => (x, y)
+    #   return cleared(x, y)
+    # end
     
     Fixpoint(
       @merge begin
@@ -86,53 +83,49 @@ begin
       return state() => :game_won
     end 
     
-    @merge begin
-      click(id)
-      grid(id) => (x,y)
-      mine(x,y)
-      return state() => :game_lost
-    end
+    # @merge begin
+    #   click(id)
+    #   grid(id) => (x,y)
+    #   mine(x,y)
+    #   return state() => :game_lost
+    # end
     
-    @merge begin 
-      return node(@id(:grid)) => (@id(:root), 1, "div")
-      return style(@id(:grid), "display") => "flex"
-      return style(@id(:grid), "flex-direction") => "column"
-    end
-    
-    @merge begin 
-      x in 1:num_x
-      return node(@id(:grid, x)) => (@id(:grid), x, "div")
-      return style(@id(:grid, x), "display") => "flex"
-      return style(@id(:grid, x), "flex-direction") => "row"
-    end
-    
-    @merge begin
-      state() => current_state
-      x in 1:num_x
-      y in 1:num_y
-      @query begin cleared(x,y); is_cleared = true; end
-      @query begin mine(x,y); is_mine = true; end
-      mine_count(x, y) => count
-      text = @match (current_state, !isempty(is_mine), !isempty(is_cleared), count) begin
-        (:game_in_progress, _, true, 0) => "_"
-        (:game_in_progress, _, true, _) => string(count)
-        (:game_in_progress, _, false, _) => ""
-        (:game_won, true, _, _) => "💣"
-        (:game_lost, true, _, _) => "☀"
-        (_, false, _, _) => string(count)
-        other => error("The hell is this: $other")
-      end
-      return grid(@id(:grid, x, y)) => (x, y)
-      return node(@id(:grid, x, y)) => (@id(:grid, x), y, "button")
-      return text(@id(:grid, x, y)) => text
-      return onclick(@id(:grid, x, y))
-      return style(@id(:grid, x, y), "width") => "2em"
-      return style(@id(:grid, x, y), "height") => "2em"
-    end
-    
-    Table.post(world)
-  
-    UI.post
+    # @merge begin 
+    #   return node(@id(:grid)) => (@id(:root), 1, "div")
+    #   return style(@id(:grid), "display") => "flex"
+    #   return style(@id(:grid), "flex-direction") => "column"
+    # end
+    # 
+    # @merge begin 
+    #   x in 1:num_x
+    #   return node(@id(:grid, x)) => (@id(:grid), x, "div")
+    #   return style(@id(:grid, x), "display") => "flex"
+    #   return style(@id(:grid, x), "flex-direction") => "row"
+    # end
+    # 
+    # @merge begin
+    #   state() => current_state
+    #   x in 1:num_x
+    #   y in 1:num_y
+    #   @query begin cleared(x,y); is_cleared = true; end
+    #   @query begin mine(x,y); is_mine = true; end
+    #   mine_count(x, y) => count
+    #   text = @match (current_state, !isempty(is_mine), !isempty(is_cleared), count) begin
+    #     (:game_in_progress, _, true, 0) => "_"
+    #     (:game_in_progress, _, true, _) => string(count)
+    #     (:game_in_progress, _, false, _) => ""
+    #     (:game_won, true, _, _) => "💣"
+    #     (:game_lost, true, _, _) => "☀"
+    #     (_, false, _, _) => string(count)
+    #     other => error("The hell is this: $other")
+    #   end
+    #   return grid(@id(:grid, x, y)) => (x, y)
+    #   return node(@id(:grid, x, y)) => (@id(:grid, x), y, "button")
+    #   return text(@id(:grid, x, y)) => text
+    #   return onclick(@id(:grid, x, y))
+    #   return style(@id(:grid, x, y), "width") => "2em"
+    #   return style(@id(:grid, x, y), "height") => "2em"
+    # end
   ]))
 end
 

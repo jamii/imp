@@ -8164,3 +8164,78 @@ Decided to require string escaping rather than allowing raw symbols. Makes less 
 ```
 
 I feel much better about this. Glad I slept on it.
+
+Let's hook it up.
+
+Wrap the templates in a mutable thing to enable live-coding:
+
+``` julia
+type View
+  template::Any
+  parsed_template::Node
+  watchers::Set{Any}
+end
+
+function View() 
+  template = quote [div] end
+  View(template, parse_template(template), Set{Any}())
+end
+
+function set_template!(view::View, template)
+  view.template = template
+  view.parsed_template = parse_template(template)
+  for watcher in view.watchers
+    watcher()
+  end
+end
+
+function Flows.watch(watcher, view::View)
+  push!(view.watchers, watcher)
+end
+```
+
+Render the whole template each time and use [diffhtml](https://diffhtml.org/) to patch the dom. 
+
+``` julia
+function render(window, view, state)
+  root = Hiccup.Node(:div)
+  interpret_node(root, view.parsed_template, Dict{Symbol, Any}(:session => "my session"), state)
+  @js(window, diff.innerHTML(document.body, $(string(root))))
+end
+
+function watch_and_load(window, file)
+  load!(window, file)
+  @schedule begin
+    (waits, _) = open(`inotifywait -me CLOSE_WRITE $file`)
+    while true
+      readline(waits)
+      load!(window, file)
+    end
+  end
+end
+
+function window(world, view)
+  window = Window()
+  opentools(window)
+  load!(window, "src/diffhtml.js")
+  # watch_and_load(window, "src/Imp.css")
+  # watch_and_load(window, "src/Imp.js")
+  sleep(3) # :(
+  handle(window, "event") do event
+    refresh(world, Symbol(event["table"]), tuple(event["values"]...))
+  end
+  watch(world) do old_state, new_state
+    render(window, view, new_state)
+  end
+  watch(view) do
+    render(window, view, world.state)
+  end
+  @js(window, document.body.innerHTML = $(string(Hiccup.Node(:div))))
+  render(window, view, world.state)
+  window
+end
+```
+
+I checked that changing `next_message` updates the event listener without blowing away the input box.
+
+Next thing is getting events hooked up, and then handling sessions properly.

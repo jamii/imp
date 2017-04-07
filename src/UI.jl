@@ -18,20 +18,19 @@ end
 
 typealias Value Union{StringExpr, Symbol, Any} # where Any is convertable to string
 
-immutable Attribute
-  key::Value
-  val::Value
-end
-
 abstract Node
 
 immutable TextNode <: Node
   text::Value
 end
 
+immutable AttributeNode <: Node
+  key::Value
+  val::Value
+end
+
 immutable FixedNode <: Node
   tag::Value
-  attributes::Vector{Attribute}
   children::Vector{Node}
 end
 
@@ -69,19 +68,6 @@ function is_line_number(expr)
   end
 end
 
-function parse_attributes(exprs)
-  attributes = Attribute[]
-  while true
-    @match exprs begin
-      [Expr(:(=), [key, val], _), rest...] => begin
-        push!(attributes, Attribute(parse_value(key), parse_value(val)))
-        exprs = rest
-      end
-      _ => return (attributes, exprs)
-    end
-  end
-end
-
 function parse_nodes(exprs)
   map(parse_node, exprs)
 end
@@ -97,11 +83,8 @@ function parse_node(expr)
         _ => error("What are this? $children_expr")
       end
     end
-    [tag, args...] => begin
-      (attributes, more_args) = parse_attributes(args)
-      nodes = parse_nodes(more_args)
-      FixedNode(parse_value(tag), attributes, nodes)
-    end
+    [tag, args...] => FixedNode(parse_value(tag), parse_nodes(args))
+    Expr(:(=), [key, val], _) => AttributeNode(parse_value(key), parse_value(val))
     text => TextNode(parse_value(text))
   end
 end
@@ -125,22 +108,24 @@ function interpret_value(value, bound_vars)
   end
 end
 
-function interpret_node(node::TextNode, bound_vars, data)
-  return [interpret_value(node.text, bound_vars)]
+function interpret_node(parent, node::TextNode, bound_vars, data)
+  push!(parent.children, interpret_value(node.text, bound_vars))
 end
 
-function interpret_node(node::FixedNode, bound_vars, data)
+function interpret_node(parent, node::AttributeNode, bound_vars, data)
+  parent.attrs[interpret_value(node.key, bound_vars)] = interpret_value(node.val, bound_vars)
+end
+
+function interpret_node(parent, node::FixedNode, bound_vars, data)
   tag = Symbol(interpret_value(node.tag, bound_vars))
-  attributes = Dict{String, String}()
-  for attribute in node.attributes
-    attributes[interpret_value(attribute.key, bound_vars)] = interpret_value(attribute.val, bound_vars)
+  child = Hiccup.Node(tag)
+  push!(parent.children, child)
+  for grandchild in node.children
+    interpret_node(child, grandchild, bound_vars, data) 
   end
-  nodes = vcat([interpret_node(child, bound_vars, data) for child in node.children]...)
-  return [Hiccup.Node(tag, attributes, nodes)]
 end
 
-function interpret_node(node::QueryNode, bound_vars, data)
-  nodes = []
+function interpret_node(parent, node::QueryNode, bound_vars, data)
   columns = data[node.table].columns
   @assert length(node.vars) == length(columns)
   for r in 1:length(columns[1])
@@ -150,22 +135,21 @@ function interpret_node(node::QueryNode, bound_vars, data)
         new_bound_vars[var] = columns[c][r]
       end
       for child in node.children
-        push!(nodes, interpret_node(child, new_bound_vars, data)...)
+        interpret_node(parent, child, new_bound_vars, data)
       end
     end
   end
-  return nodes
 end
 
 d = quote
   ["div"
-    while login(session) 
+    login(session) do
       ["input" "type"="text" "placeholder"="What should we call you?"]
     end
     
-    while chat(session)
+    chat(session) do
       ["div"
-        while message(message, text, time)
+        message(message, text, time) do
           ["div"
             ["span" "class"="message-time" "time: $time"]
             ["span" "class"="message-text" text]
@@ -175,7 +159,7 @@ d = quote
       ["input"
        "type"="text" 
        "placeholder"="What do you want to say?"
-       while next_message(id)
+       next_message(id) do
          "onkeydown"="if (event.keypress == 13) {new_message($id, this.value)}"
        end
        ]
@@ -191,14 +175,6 @@ data = Dict(
   :message => Relation(([0, 1], ["foo", "bar"], [11, 22]), 1),
   :next_message => Relation(([3],), 1)
   )
-  
-(quote
-  input[ 
-    "type"="text",
-    "placeholder"="What do you want to say?",
-    next_message(id)["onkeydown"="if (event.keypress == 13) {new_message($id, this.value)}"]
-  ]
-end).args[2]
   
 @show interpret_node(node, Dict{Symbol, Any}(:session => "my session"), data)[1]
 

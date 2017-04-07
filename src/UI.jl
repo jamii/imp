@@ -102,7 +102,7 @@ end
 
 function interpret_value(value, bound_vars)
   if isa(value, StringExpr) 
-    string((isa(v,Symbol) ? string(bound_vars[v]) : string(v) for v in value.values)...)
+    string((isa(v,Symbol) ? string(bound_vars[v]) : v for v in value.values)...)
   else
     string(value)
   end
@@ -166,13 +166,13 @@ function Flows.watch(watcher, view::View)
   push!(view.watchers, watcher)
 end
 
-function render(window, view, world)
+function render(window, view, world, session)
   @show :event_funs
   for event in world.events
     js(window, Blink.JSString("$event = imp_event(\"$event\")"), callback=false) # these never return! :(
   end
   root = Hiccup.Node(:div)
-  interpret_node(root, view.parsed_template, Dict{Symbol, Any}(:session => "my session"), world.state)
+  interpret_node(root, view.parsed_template, Dict{Symbol, Any}(:session => session), world.state)
   @show :rendering root
   @js_(window, diff.innerHTML(document.body, $(string(root))))
 end
@@ -188,24 +188,28 @@ function watch_and_load(window, file)
   end
 end
 
+pre = Sequence([
+  @stateful session(String)
+])
+
 function window(world, view)
   window = Window()
+  session = string(now()) # TODO uuid
   opentools(window)
   load!(window, "src/diffhtml.js")
   load!(window, "src/Imp.js")
-  # watch_and_load(window, "src/Imp.js")
+  @js_(window, session = $session)
   sleep(3) # :(
   handle(window, "event") do event
     refresh(world, Symbol(event["table"]), tuple(event["values"]...))
   end
   watch(world) do old_state, new_state
-    render(window, view, world)
+    render(window, view, world, session)
   end
   watch(view) do
-    render(window, view, world)
+    render(window, view, world, session)
   end
-  @js(window, document.body.innerHTML = $(string(Hiccup.Node(:div))))
-  render(window, view, world)
+  refresh(world, :session, tuple(session))
   window
 end
 

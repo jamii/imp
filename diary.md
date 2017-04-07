@@ -8324,3 +8324,94 @@ w = window(world, view)
 ```
 
 So I need to deal with sessions and then add some css and we're done.
+
+The window setup generates a 'unique' session id and stores it in a relation:
+
+``` julia
+function window(world, view)
+  window = Window()
+  session = string(now()) # TODO uuid
+  ...
+  refresh(world, :session, tuple(session))
+  window
+end
+```
+
+It also gets passed to every render call where it becomes an in-scope variable for the template:
+
+``` julia
+function render(window, view, world, session)
+  ...
+  interpret_node(root, view.parsed_template, Dict{Symbol, Any}(:session => session), world.state)
+  ...
+end
+```
+
+With sessions we can now handle logging in:
+
+``` julia
+set_flow!(world, Sequence([
+  UI.pre
+  
+  @stateful username(String) => String
+  @stateful message(Int64) => (String, String, DateTime)
+  
+  @transient not_logged_in(String)
+  
+  @event new_login() => (String, String)
+  @event new_message() => (String, String)
+  
+  @merge begin
+    new_login() => (session, username)
+    return username(session) => username
+  end
+  
+  @merge begin
+    new_message() => (session, text)
+    @query begin
+      message(id) => (_, _)
+    end
+    return message(1 + length(id)) => (session, text, now())
+  end
+  
+  @merge begin
+    session(session)
+    @query username(session) => un # TODO hygiene bug :(
+    @when length(un) == 0
+    return not_logged_in(session)
+  end
+]))
+set_template!(view, quote
+  [div
+    not_logged_in(session) do
+      [input 
+        placeholder="What should we call you?"
+        onkeydown="if (event.which == 13) {new_login('$session', this.value)}"
+        ]
+    end
+  
+    username(session, _) do
+      [div
+        [span "$username"]
+        message(message, message_session, text, time) do
+          [div
+            username(message_session, message_username) do
+              [span class="message-username" "$message_username"]
+            end
+            [span class="message-time" "time: $time"]
+            [span class="message-text" "$text"]
+          ]
+        end
+      ]
+      [input
+        placeholder="What do you want to say?"
+        onkeydown="if (event.which == 13) {new_message('$session', this.value); this.value=''}"
+      ]
+    end
+  ]
+end)
+```
+
+Uh, I realized that I'm handling string slicing poorly. I want `repr` in events but `string` inside attributes and text. That's why the session in the events is in single quotes. I can work around it for now, but need to think about it more carefully later.
+
+Also I ran into a scoping/hygiene bug in subqueries that I had forgotten about. And I also forget that I don't have working negation anymore. The todo list grows faster and faster.

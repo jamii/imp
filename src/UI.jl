@@ -113,7 +113,9 @@ function interpret_node(parent, node::TextNode, bound_vars, state)
 end
 
 function interpret_node(parent, node::AttributeNode, bound_vars, state)
-  parent.attrs[interpret_value(node.key, bound_vars)] = interpret_value(node.val, bound_vars)
+  key = interpret_value(node.key, bound_vars)
+  val = interpret_value(node.val, bound_vars)
+  parent.attrs[key] = string(get(parent.attrs, key, ""), val) 
 end
 
 function interpret_node(parent, node::FixedNode, bound_vars, state)
@@ -144,19 +146,28 @@ end
 # --- plumbing ---
 
 type View
-  template::Any
-  parsed_template::Node
+  head::Any
+  parsed_head::Node
+  body::Any
+  parsed_body::Node
   watchers::Set{Any}
 end
 
 function View() 
-  template = quote [div] end
-  View(template, parse_template(template), Set{Any}())
+  View(nothing, TextNode(""), nothing, FixedNode(:span, [TextNode("loading...")]), Set{Any}())
 end
 
-function set_template!(view::View, template)
-  view.template = template
-  view.parsed_template = parse_template(template)
+function set_head!(view::View, head)
+  view.head = head
+  view.parsed_head = parse_template(head)
+  for watcher in view.watchers
+    watcher()
+  end
+end
+
+function set_body!(view::View, body)
+  view.body = body
+  view.parsed_body = parse_template(body)
   for watcher in view.watchers
     watcher()
   end
@@ -171,10 +182,13 @@ function render(window, view, world, session)
   for event in world.events
     js(window, Blink.JSString("$event = imp_event(\"$event\")"), callback=false) # these never return! :(
   end
-  root = Hiccup.Node(:div)
-  interpret_node(root, view.parsed_template, Dict{Symbol, Any}(:session => session), world.state)
-  @show :rendering root
-  @js_(window, diff.innerHTML(document.body, $(string(root))))
+  head = Hiccup.Node(:head)
+  interpret_node(head, view.parsed_head, Dict{Symbol, Any}(:session => session), world.state)
+  body = Hiccup.Node(:body)
+  interpret_node(body, view.parsed_body, Dict{Symbol, Any}(:session => session), world.state)
+  @show :rendering head body
+  @js_(window, diff.outerHTML(document.head, $(string(head))))
+  @js_(window, diff.outerHTML(document.body, $(string(body))))
 end
 
 function watch_and_load(window, file)
@@ -213,6 +227,6 @@ function window(world, view)
   window
 end
 
-export View, set_template!, window, watch
+export View, set_head!, set_body!, window, watch
 
 end

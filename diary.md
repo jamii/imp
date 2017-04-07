@@ -8415,3 +8415,86 @@ end)
 Uh, I realized that I'm handling string slicing poorly. I want `repr` in events but `string` inside attributes and text. That's why the session in the events is in single quotes. I can work around it for now, but need to think about it more carefully later.
 
 Also I ran into a scoping/hygiene bug in subqueries that I had forgotten about. And I also forget that I don't have working negation anymore. The todo list grows faster and faster.
+
+I can add css by just creating css nodes in the head and the diffing works fine. Styling inline works with existing attributes too.
+
+``` julia
+set_head!(view, quote
+  [style
+    "type"="text/css"
+    """
+    .vbox {
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .vbox * {
+      flex: 1 1 auto;
+    }
+    
+    .hbox {
+      display: flex;
+      flex-direction: row;
+    }
+    
+    .hbox * {
+      flex: 1 1 auto;
+    }
+    """]
+end)
+set_body!(view, quote
+  [div
+    not_logged_in(session) do
+      [div 
+        class="hbox"
+        [input 
+          style="margin: 50vh 30vw;"
+          placeholder="What should we call you?"
+          onkeydown="if (event.which == 13) {new_login('$session', this.value)}"
+        ]
+      ]
+    end
+  
+    username(session, username) do
+      [div 
+        class="vbox"
+        style="height: 80vh; width: 80vw; margin: 10vh 10vw;"
+        [div 
+          style="height: 100%; overflow: scroll;"
+          [table
+            style="width: 100%;"
+            message(message, message_session, text, time) do
+              [tr
+                username(message_session, message_username) do
+                  [td style="font-weight: bold" "$message_username:"]
+                end
+                [td style="width: 100%" "$text"]
+                [td "$time"]
+              ]
+            end
+          ]
+        ]
+        [input
+          style="width: 100%; height: 2em"
+          placeholder="What do you want to say?"
+          onkeydown="if (event.which == 13) {new_message('$session', this.value); this.value=''}"
+        ] 
+      ]
+    end
+  ]
+end)
+```
+
+A nice touch for complex styles would be to concatenate multiple attributes.
+
+``` julia
+function interpret_node(parent, node::AttributeNode, bound_vars, state)
+  key = interpret_value(node.key, bound_vars)
+  val = interpret_value(node.val, bound_vars)
+  parent.attrs[key] = string(get(parent.attrs, key, ""), val) 
+end
+```
+
+So everything is pretty now. What next?
+
+Would be nice to scrollIntoView on new elements. Can we fit that into the existing event system?

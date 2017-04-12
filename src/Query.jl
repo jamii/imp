@@ -157,7 +157,7 @@ function parse_query(query)
   for clause in old_clauses
     if typeof(clause) in [Row, Return]
       for (ix, expr) in enumerate(clause.vars)
-        if !isa(expr, Symbol)
+        if !isa(expr, Symbol) || isupper(string(expr)[1])
           var = gensym("constant")
           clause.vars[ix] = var
           value = @match expr begin

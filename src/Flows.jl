@@ -2,6 +2,7 @@ module Flows
 
 using Data
 using Query
+using Match
 
 abstract Flow
 
@@ -18,6 +19,10 @@ type Merge <: Flow
   input_names::Vector{Symbol}
   meta::Any
   eval::Function
+end
+
+type Clear <: Flow
+  output_name::Symbol
 end
 
 type Sequence <: Flow
@@ -42,6 +47,10 @@ end
 
 function output_names(merge::Merge)
   Set(merge.output_names)
+end
+
+function output_names(clear::Clear)
+  Set([clear.output_name])
 end
 
 function output_names(sequence::Sequence)
@@ -72,6 +81,12 @@ function (merge::Merge)(world::World)
   end
 end
 
+function (clear::Clear)(world::World)
+  input = world.state[clear.output_name]
+  output = Relation(tuple((Vector{eltype(c)}() for c in input.columns)...), input.num_keys)
+  world.state[clear.output_name] = output
+end
+
 function (sequence::Sequence)(world::World)
   for flow in sequence.flows
     # @show flow
@@ -85,25 +100,39 @@ function (fixpoint::Fixpoint)(world::World)
     old_values = map((name) -> world.state[name].columns, names)
     fixpoint.flow(world)
     new_values = map((name) -> world.state[name].columns, names)
+    @show old_values new_values
     if old_values == new_values
       return
     end
   end
 end
 
+function get_type(expr) 
+  @match expr begin
+    Expr(:(::), [_, typ], _) => typ
+    _ => expr
+  end
+end
+
 macro stateful(relation)
   (name, keys, vals) = parse_relation(relation)
-  :(Create($(Expr(:quote, name)), [$(map(esc, keys)...)], [$(map(esc, vals)...)], false, false))
+  key_types = map(get_type, keys)
+  val_types = map(get_type, vals)
+  :(Create($(Expr(:quote, name)), [$(map(esc, key_types)...)], [$(map(esc, val_types)...)], false, false))
 end
 
 macro transient(relation)
   (name, keys, vals) = parse_relation(relation)
-  :(Create($(Expr(:quote, name)), [$(map(esc, keys)...)], [$(map(esc, vals)...)], true, false))
+  key_types = map(get_type, keys)
+  val_types = map(get_type, vals)
+  :(Create($(Expr(:quote, name)), [$(map(esc, key_types)...)], [$(map(esc, val_types)...)], true, false))
 end
 
 macro event(relation)
   (name, keys, vals) = parse_relation(relation)
-  :(Create($(Expr(:quote, name)), [$(map(esc, keys)...)], [$(map(esc, vals)...)], true, true))
+  key_types = map(get_type, keys)
+  val_types = map(get_type, vals)
+  :(Create($(Expr(:quote, name)), [$(map(esc, key_types)...)], [$(map(esc, val_types)...)], true, true))
 end
 
 macro merge(query)
@@ -118,6 +147,10 @@ macro merge(query)
     $code
   end
   :(Merge($([return_clause.name for return_clause in return_clauses]), $(collect(input_names)), $(Expr(:quote, query)), $(Expr(:->, Expr(:tuple, input_names...), code))))
+end
+
+macro clear(name)
+  :(Clear($(Expr(:quote, name))))
 end
 
 function World()
@@ -166,6 +199,6 @@ function watch(watcher, world::World)
   push!(world.watchers, watcher)
 end
 
-export Create, Merge, Sequence, Fixpoint, @stateful, @transient, @event, @merge, World, watch, set_flow!, refresh
+export Create, Merge, Sequence, Fixpoint, @stateful, @transient, @event, @merge, @clear, World, watch, set_flow!, refresh
 
 end

@@ -61,44 +61,64 @@ function output_names(fixpoint::Fixpoint)
   output_names(fixpoint.flow)
 end
 
-function (create::Create)(world::World)
-  if !haskey(world.state, create.output_name) 
+function init_flow(_, world::World)
+  # do nothing by default
+end
+
+function init_flow(create::Create, world::World)
+  if create.is_transient || !haskey(world.state, create.output_name) 
     output = Relation(tuple((Vector{typ}() for typ in [create.keys..., create.vals...])...), length(create.keys))
     world.state[create.output_name] = output
-    if create.is_transient 
-      push!(world.transients, create.output_name)
-    end
-    if create.is_event
-      push!(world.events, create.output_name)
-    end
+  end
+  if create.is_transient 
+    push!(world.transients, create.output_name)
+  end
+  if create.is_event
+    push!(world.events, create.output_name)
   end
 end
 
-function (merge::Merge)(world::World)
+function init_flow(sequence::Sequence, world::World)
+  for flow in sequence.flows
+    init_flow(flow, world)
+  end
+end
+
+function init_flow(fixpoint::Fixpoint, world::World)
+  for flow in sequence.flows
+    init_flow(flow, world)
+  end
+end
+
+function run_flow(_, world::World)
+  # do nothing by default
+end
+
+function run_flow(merge::Merge, world::World)
   outputs = merge.eval(map((name) -> world.state[name], merge.input_names)...)
   for (output_name, output) in zip(merge.output_names, outputs)
     world.state[output_name] = Base.merge(world.state[output_name], output)
   end
 end
 
-function (clear::Clear)(world::World)
+function run_flow(clear::Clear, world::World)
   input = world.state[clear.output_name]
   output = Relation(tuple((Vector{eltype(c)}() for c in input.columns)...), input.num_keys)
   world.state[clear.output_name] = output
 end
 
-function (sequence::Sequence)(world::World)
+function run_flow(sequence::Sequence, world::World)
   for flow in sequence.flows
     # @show flow
-    flow(world)
+    run_flow(flow, world)
   end
 end
 
-function (fixpoint::Fixpoint)(world::World)
+function run_flow(fixpoint::Fixpoint, world::World)
   names = collect(output_names(fixpoint.flow))
   while true
     old_values = map((name) -> world.state[name].columns, names)
-    fixpoint.flow(world)
+    run_flow(fixpoint.flow, world)
     new_values = map((name) -> world.state[name].columns, names)
     @show old_values new_values
     if old_values == new_values
@@ -159,10 +179,8 @@ end
 
 function refresh(world::World)
   old_state = copy(world.state)
-  for transient in world.transients
-    world.state[transient] = empty(world.state[transient])
-  end
-  world.flow(world)
+  init_flow(world.flow, world)
+  run_flow(world.flow, world)
   for watcher in world.watchers
     watcher(old_state, world.state)
   end
@@ -171,11 +189,9 @@ end
 function refresh(world::World, event_table::Symbol, event_row::Tuple)
   @show :event event_table event_row
   old_state = copy(world.state)
-  for transient in world.transients
-    world.state[transient] = empty(world.state[transient])
-  end
+  init_flow(world.flow, world)
   push!(world.state[event_table], event_row)
-  world.flow(world)
+  run_flow(world.flow, world)
   for watcher in world.watchers
     watcher(old_state, world.state)
   end

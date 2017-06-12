@@ -16,7 +16,7 @@ immutable StringExpr
   values::Vector{Union{String, Symbol}}
 end
 
-typealias Value Union{StringExpr, Any} # where Any is converted to string
+typealias Value Union{StringExpr, String, Symbol} 
 
 abstract Node
 
@@ -96,6 +96,116 @@ function parse_template(expr)
   end
 end
 
+# --- compiling ---
+
+type CompiledQueryNode
+  id::Symbol
+  parent_id::Symbol
+  bound_vars::Vector{Symbol}
+  query_node::QueryNode
+  fragment::Vector{Union{Symbol, String}}
+  compiled_fragment::Function
+end
+
+function generate_fragment(value::Union{String, Symbol}, fragment)
+  push!(fragment, string(value))
+end
+
+function generate_fragment(expr::StringExpr, fragment)
+  for value in expr.values
+    push!(fragment, value)
+  end
+end
+
+function generate_fragment(node::TextNode, fragment)
+  generate_fragment(node.text, fragment)
+end
+
+function generate_fragment(node::AttributeNode, fragment)
+  push!(fragment, " ")
+  generate_fragment(node.key, fragment)
+  push!(fragment, "=")
+  generate_fragment(node.val, fragment)
+end
+
+function generate_fragment(node::FixedNode, fragment)
+  push!(fragment, "<")
+  generate_fragment(node.tag, fragment)
+  for child in node.children
+    if typeof(child) == AttributeNode
+      generate_fragment(child, fragment)
+    end
+  end
+  push!(fragment, ">")
+  for child in node.children
+    if typeof(child) != AttributeNode
+      generate_fragment(child, fragment)
+    end
+  end
+  push!(fragment, "</")
+  generate_fragment(node.tag, fragment)
+  push!(fragment, ">")
+end
+
+function generate_fragment(node::QueryNode, fragment)
+  # TODO no html generated, but do we need to record the position or something? maybe put a dummy node in?
+end
+
+function concat_fragment(fragment)
+  new_fragment = Union{Symbol, String}[]
+  for value in fragment 
+    if isa(value, String) && (length(new_fragment) > 0) && isa(new_fragment[end], String)
+      new_fragment[end] = string(new_fragment[end], value)
+    else
+      push!(new_fragment, value)
+    end
+  end
+  new_fragment
+end
+
+function compile_fragment(id::Symbol, node::QueryNode, bound_vars::Vector{Symbol})
+  fragment = Union{Symbol, String}[]
+  for child in node.children
+    generate_fragment(child, fragment)
+  end
+  fragment = concat_fragment(fragment)
+  name = Symbol("fragment_", id)
+  fun = @eval function $(name)($(bound_vars...))
+    string($(fragment...))
+  end
+  (fragment, fun)
+end
+
+function compile_query_nodes(parent_id, parent_bound_vars, node, compiled_query_nodes)
+  if typeof(node) == QueryNode
+    id = Symbol("query_node_", hash((parent_id, node)))
+    bound_vars = copy(parent_bound_vars)
+    for var in node.vars
+      if !(var in parent_bound_vars)
+        push!(bound_vars, var)
+      end
+    end
+    (fragment, compiled_fragment) = compile_fragment(id, node, bound_vars)
+    compiled_query_node = CompiledQueryNode(id, parent_id, bound_vars, node, fragment, compiled_fragment)
+    push!(compiled_query_nodes, compiled_query_node)
+    for child in node.children
+      compile_query_nodes(id, bound_vars, child, compiled_query_nodes)
+    end
+  end
+  if typeof(node) == FixedNode
+    for child in node.children
+      compile_query_nodes(parent_id, parent_bound_vars, child, compiled_query_nodes)
+    end
+  end
+end
+
+function compile_node(node)
+  wrapper = QueryNode(:session, [:session], [node])
+  compiled_query_nodes = []
+  compile_query_nodes(:root, Symbol[], wrapper, compiled_query_nodes)
+  @show compiled_query_nodes
+end
+
 # --- interpreting ---
 # dumb slow version just to get the logic right
 # TODO not that
@@ -154,7 +264,7 @@ type View
 end
 
 function View() 
-  View(nothing, TextNode(""), nothing, FixedNode(:span, [TextNode("loading...")]), Set{Any}())
+  View(nothing, TextNode(""), nothing, FixedNode("span", [TextNode("loading...")]), Set{Any}())
 end
 
 function set_head!(view::View, head)
@@ -168,6 +278,7 @@ end
 function set_body!(view::View, body)
   view.body = body
   view.parsed_body = parse_template(body)
+  compile_node(view.parsed_body) # TODO temporary
   for watcher in view.watchers
     watcher()
   end

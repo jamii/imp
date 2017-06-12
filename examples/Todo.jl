@@ -153,7 +153,7 @@ begin
     
     @transient displaying(session::String, todo::Int64)
     @merge begin
-      editing(session::String) => editing
+      editing(session) => editing
       visible(session, todo) 
       @when todo != editing
       return displaying(session, todo)

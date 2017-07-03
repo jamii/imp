@@ -95,6 +95,7 @@ function run_flow(_, world::World)
 end
 
 function run_flow(merge::Merge, world::World)
+  @show merge
   outputs = merge.eval(map((name) -> world.state[name], merge.input_names)...)
   for (output_name, output) in zip(merge.output_names, outputs)
     world.state[output_name] = Base.merge(world.state[output_name], output)

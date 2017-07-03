@@ -212,11 +212,22 @@ end
 
 function compile_server_tree(node::FixedNode, parent_id, parent_vars, flows)
   id = Symbol("node_$(hash(node))")
-  flow = @eval @merge begin
-    $parent_id($(parent_vars...))
-    return $id($(parent_vars...))
-  end
-  push!(flows, flow)
+  transient_flow = @eval @transient $id($([Any for _ in parent_vars]...)) => UInt64
+  merge_flow = 
+    if parent_id == nothing
+      @eval @merge begin
+        session(session)
+        child_id = hash(session, $(hash(node)))
+        return $id($(parent_vars...)) => child_id
+      end
+    else
+      @eval @merge begin
+        $parent_id($(parent_vars...)) => parent_id
+        child_id = hash(parent_id, $(hash(node)))
+        return $id($(parent_vars...)) => child_id
+      end
+    end
+  push!(flows, transient_flow, merge_flow)
   for child in node.children
     compile_server_tree(child, id, parent_vars, flows)
   end
@@ -225,12 +236,14 @@ end
 function compile_server_tree(node::QueryNode, parent_id, parent_vars, flows)
   id = Symbol("node_$(hash(node))")
   vars = unique(vcat(parent_vars, node.vars))
-  flow = @eval @merge begin
-    $parent_id($(parent_vars...))
+  transient_flow = @eval @transient $id($([Any for _ in vars]...)) => UInt64
+  merge_flow = @eval @merge begin
+    $parent_id($(parent_vars...)) => parent_id
     $(node.table)($(node.vars...))
-    return $id($(vars...))
+    child_id = hash(tuple($(node.vars...), parent_id), $(hash(node)))
+    return $id($(vars...)) => child_id
   end
-  push!(flows, flow)
+  push!(flows, transient_flow, merge_flow)
   for child in node.children
     compile_server_tree(child, id, vars, flows)
   end
@@ -241,28 +254,31 @@ function collect_sort_key(node, parent_vars, key, keyed_children)
 end
 
 function collect_sort_key(node::FixedNode, parent_vars, key, keyed_children)
-  push!(keyed_children, (copy(key), node))
+  push!(keyed_children, (copy(key), parent_vars, node))
 end
 
 function collect_sort_key(node::QueryNode, parent_vars, key, keyed_children)
   vars = unique(vcat(parent_vars, node.vars))
   new_vars = vars[(1+length(parent_vars)):end]
-  start_ix = length(key)
-  push!(key, new_vars) 
+  start_ix = length(key) + 1
+  append!(key, new_vars) 
   end_ix = length(key)
   collect_sort_key(node.children, vars, key, keyed_children)
-  key[start_ix:end_ix] .= nothing
+  for ix in start_ix:end_ix
+    key[ix] = nothing
+  end
 end
 
 function collect_sort_key(nodes::Vector{Node}, parent_vars, key, keyed_children)
   push!(key, 0)
+  ix = length(key)
   for node in nodes
     if typeof(node) in [FixedNode, QueryNode] # TODO handle attributes and text
-      key[end] += 1
+      key[ix] += 1
       collect_sort_key(node, parent_vars, key, keyed_children)
     end
   end
-  key[end] = 0
+  key[ix] = 0
 end
 
 function collect_sort_key(node::FixedNode, parent_vars)
@@ -270,24 +286,60 @@ function collect_sort_key(node::FixedNode, parent_vars)
   keyed_children = Any[]
   collect_sort_key(node.children, parent_vars, key, keyed_children)
   # tidy up ragged ends of keys
-  for (child_key, child) in keyed_children
+  for (child_key, vars, child) in keyed_children
+    @show child_key key[(length(child_key)+1):end]
     append!(child_key, key[(length(child_key)+1):end])
+    @show child_key
   end
   keyed_children
 end
 
-function collect_flatten_groups(node::FixedNode, groups)
+function key_expr(elem) 
+  @match elem begin
+    _::Integer => elem
+    _::Symbol => :(Nullable($elem))
+    _::Void => :(Nullable())
+    _ => error("What are this: $elem")
+  end
 end
 
-function collect_flatten_groups(node::QueryNode, groups)
+function key_type(elem)
+  @match elem begin
+    _::Integer => Int64
+    _::Symbol => Nullable{Any} # TODO figure out correct types somehow
+    _::Void => Nullable{Any}
+    _ => error("What are this: $elem")
+  end
+end
+
+function compile_client_tree(node::FixedNode, parent_vars, flows)
+  keyed_children = collect_sort_key(node, parent_vars)
+  @show keyed_children
+  group_id = Symbol("group_$(hash(node))")
+  parent_node_id = Symbol("node_$(hash(node))")
+  for (key, child_vars, child) in keyed_children
+    child_node_id = Symbol("node_$(hash(child))")
+    key_exprs = map(key_expr, key)
+    key_types = map(key_type, key)
+    transient_flow = @eval @transient $group_id($(key_types...)) => (UInt64, UInt64, String)
+    merge_flow = @eval @merge begin
+      $parent_node_id($(parent_vars...)) => parent_id
+      $child_node_id($(child_vars...)) => child_id
+      return $group_id($(key_exprs...)) => (parent_id, child_id, $(string(child.tag)))
+    end
+    push!(flows, transient_flow, merge_flow)
+  end
+  for (_, child_vars, child) in keyed_children
+    compile_client_tree(child, child_vars, flows)
+  end
 end
 
 function compile_ui(node)
   flows = Flow[]
-  compile_server_tree(node, :session, [:session], flows)
+  compile_server_tree(node, nothing, [:session], flows)
+  compile_client_tree(node, [:session], flows)
   @show flows
-  @show map(first, collect_sort_key(node, [:session]))
-  flow = Sequence(flows)
+  Sequence(flows)
 end
 
 # --- interpreting ---
@@ -337,6 +389,11 @@ function interpret_node(parent, node::QueryNode, bound_vars, state)
   end
 end
 
+# TODO this is defined in Julia 0.6 but can't currently upgrade because of https://github.com/kmsquire/Match.jl/issues/35
+function Base.isless{T}(x::Nullable{T}, y::Nullable{T})
+  !Base.isnull(x) && (Base.isnull(y) || (get(x) < get(y)))
+end
+
 # --- plumbing ---
 
 type View
@@ -362,7 +419,6 @@ end
 function set_body!(view::View, body)
   view.body = body
   view.parsed_body = parse_template(body)
-  compile_ui(view.parsed_body) # TODO temporary
   for watcher in view.watchers
     watcher()
   end
@@ -384,6 +440,14 @@ function render(window, view, world, session)
   @show :rendering head body
   @js_(window, diff.outerHTML(document.head, $(string(head))))
   @js_(window, diff.outerHTML(document.body, $(string(body))))
+  begin # TODO temporary
+    flow = compile_ui(view.parsed_body) 
+    Flows.init_flow(flow, world)
+    Flows.run_flow(flow, world)
+    for (name, relation) in world.state
+      @show name relation
+    end
+  end
 end
 
 function watch_and_load(window, file)

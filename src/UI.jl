@@ -211,10 +211,10 @@ function compile_server_tree(node, parent_id, parent_vars, flows)
 end
 
 function compile_server_tree(node::FixedNode, parent_id, parent_vars, flows)
-  id = hash(node)
+  id = Symbol("node_$(hash(node))")
   flow = @eval @merge begin
-    $(Symbol("node_$parent_id"))($(parent_vars...))
-    return $(Symbol("node_$id"))($(parent_vars...))
+    $parent_id($(parent_vars...))
+    return $id($(parent_vars...))
   end
   push!(flows, flow)
   for child in node.children
@@ -223,12 +223,12 @@ function compile_server_tree(node::FixedNode, parent_id, parent_vars, flows)
 end
 
 function compile_server_tree(node::QueryNode, parent_id, parent_vars, flows)
-  id = hash(node)
+  id = Symbol("node_$(hash(node))")
   vars = unique(vcat(parent_vars, node.vars))
   flow = @eval @merge begin
-    $(Symbol("node_$parent_id"))($(parent_vars...))
+    $parent_id($(parent_vars...))
     $(node.table)($(node.vars...))
-    return $(Symbol("node_$id"))($(vars...))
+    return $id($(vars...))
   end
   push!(flows, flow)
   for child in node.children
@@ -236,10 +236,58 @@ function compile_server_tree(node::QueryNode, parent_id, parent_vars, flows)
   end
 end
 
+function collect_sort_key(node, parent_vars, key, keyed_children)
+  # TODO handle attributes and text
+end
+
+function collect_sort_key(node::FixedNode, parent_vars, key, keyed_children)
+  push!(keyed_children, (copy(key), node))
+end
+
+function collect_sort_key(node::QueryNode, parent_vars, key, keyed_children)
+  vars = unique(vcat(parent_vars, node.vars))
+  new_vars = vars[(1+length(parent_vars)):end]
+  start_ix = length(key)
+  push!(key, new_vars) 
+  end_ix = length(key)
+  collect_sort_key(node.children, vars, key, keyed_children)
+  key[start_ix:end_ix] .= nothing
+end
+
+function collect_sort_key(nodes::Vector{Node}, parent_vars, key, keyed_children)
+  push!(key, 0)
+  for node in nodes
+    if typeof(node) in [FixedNode, QueryNode] # TODO handle attributes and text
+      key[end] += 1
+      collect_sort_key(node, parent_vars, key, keyed_children)
+    end
+  end
+  key[end] = 0
+end
+
+function collect_sort_key(node::FixedNode, parent_vars)
+  key = Any[]
+  keyed_children = Any[]
+  collect_sort_key(node.children, parent_vars, key, keyed_children)
+  # tidy up ragged ends of keys
+  for (child_key, child) in keyed_children
+    append!(child_key, key[(length(child_key)+1):end])
+  end
+  keyed_children
+end
+
+function collect_flatten_groups(node::FixedNode, groups)
+end
+
+function collect_flatten_groups(node::QueryNode, groups)
+end
+
 function compile_ui(node)
   flows = Flow[]
-  compile_server_tree(node, 0, Symbol[:session], flows)
+  compile_server_tree(node, :session, [:session], flows)
   @show flows
+  @show map(first, collect_sort_key(node, [:session]))
+  flow = Sequence(flows)
 end
 
 # --- interpreting ---

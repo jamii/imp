@@ -4,7 +4,7 @@ module UI
 # AtomShell.install()
 
 using Data
-# using Query
+using Query
 using Flows
 using Blink
 using Match
@@ -206,6 +206,42 @@ function compile_node(node)
   @show compiled_query_nodes
 end
 
+function compile_server_tree(node, parent_id, parent_vars, flows)
+  # do nothing by default
+end
+
+function compile_server_tree(node::FixedNode, parent_id, parent_vars, flows)
+  id = hash(node)
+  flow = @eval @merge begin
+    $(Symbol("node_$parent_id"))($(parent_vars...))
+    return $(Symbol("node_$id"))($(parent_vars...))
+  end
+  push!(flows, flow)
+  for child in node.children
+    compile_server_tree(child, id, parent_vars, flows)
+  end
+end
+
+function compile_server_tree(node::QueryNode, parent_id, parent_vars, flows)
+  id = hash(node)
+  vars = unique(vcat(parent_vars, node.vars))
+  flow = @eval @merge begin
+    $(Symbol("node_$parent_id"))($(parent_vars...))
+    $(node.table)($(node.vars...))
+    return $(Symbol("node_$id"))($(vars...))
+  end
+  push!(flows, flow)
+  for child in node.children
+    compile_server_tree(child, id, vars, flows)
+  end
+end
+
+function compile_ui(node)
+  flows = Flow[]
+  compile_server_tree(node, 0, Symbol[:session], flows)
+  @show flows
+end
+
 # --- interpreting ---
 # dumb slow version just to get the logic right
 # TODO not that
@@ -278,7 +314,7 @@ end
 function set_body!(view::View, body)
   view.body = body
   view.parsed_body = parse_template(body)
-  compile_node(view.parsed_body) # TODO temporary
+  compile_ui(view.parsed_body) # TODO temporary
   for watcher in view.watchers
     watcher()
   end

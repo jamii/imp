@@ -215,6 +215,6 @@ function watch(watcher, world::World)
   push!(world.watchers, watcher)
 end
 
-export Create, Merge, Sequence, Fixpoint, @stateful, @transient, @event, @merge, @clear, World, watch, set_flow!, refresh
+export Flow, Create, Merge, Sequence, Fixpoint, @stateful, @transient, @event, @merge, @clear, World, watch, set_flow!, refresh
 
 end

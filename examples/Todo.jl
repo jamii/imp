@@ -214,7 +214,7 @@ begin
             class="toggle-all" 
             "type"="checkbox" 
             all_checked(todo) do
-              checked="true"
+              checked="checked"
             end
             onclick="toggle_all(true)"]
           [ul
@@ -229,7 +229,7 @@ begin
                         class="toggle" 
                         "type"="checkbox" 
                         checked(todo) do
-                          checked="true"
+                          checked="checked"
                         end
                         onclick="toggle($todo)"
                       ] 

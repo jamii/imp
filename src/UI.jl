@@ -103,15 +103,16 @@ function flatten_value(value::Value)
   end
 end
 
-function compile_server_tree(node::AttributeNode, parent_id, parent_vars, flows)
+function compile_server_tree(node::AttributeNode, parent_id, parent_vars, fixed_parent_id, fixed_parent_vars, flows)
   merge_flow = @eval @merge begin
-    $parent_id($(parent_vars...)) => parent_id
+    $fixed_parent_id($(fixed_parent_vars...)) => parent_id
+    $parent_id($(parent_vars...)) => _
     return attribute(parent_id, string($(flatten_value(node.key)...))) => string($(flatten_value(node.val)...))
   end
   push!(flows, merge_flow)
 end
 
-function compile_server_tree(node::FixedNode, parent_id, parent_vars, flows)
+function compile_server_tree(node::FixedNode, parent_id, parent_vars, fixed_parent_id, fixed_parent_vars, flows)
   id = Symbol("node_$(hash(node))")
   transient_flow = @eval @transient $id($([Any for _ in parent_vars]...)) => UInt64
   merge_flow = 
@@ -130,11 +131,11 @@ function compile_server_tree(node::FixedNode, parent_id, parent_vars, flows)
     end
   push!(flows, transient_flow, merge_flow)
   for child in node.children
-    compile_server_tree(child, id, parent_vars, flows)
+    compile_server_tree(child, id, parent_vars, id, parent_vars, flows)
   end
 end
 
-function compile_server_tree(node::QueryNode, parent_id, parent_vars, flows)
+function compile_server_tree(node::QueryNode, parent_id, parent_vars, fixed_parent_id, fixed_parent_vars, flows)
   id = Symbol("node_$(hash(node))")
   vars = unique(vcat(parent_vars, node.vars))
   transient_flow = @eval @transient $id($([Any for _ in vars]...)) => UInt64
@@ -146,7 +147,7 @@ function compile_server_tree(node::QueryNode, parent_id, parent_vars, flows)
   end
   push!(flows, transient_flow, merge_flow)
   for child in node.children
-    compile_server_tree(child, id, vars, flows)
+    compile_server_tree(child, id, vars, fixed_parent_id, fixed_parent_vars, flows)
   end
 end
 
@@ -241,9 +242,9 @@ function compile_client_tree(node::FixedNode, parent_vars, flows, group_ids)
 end
 
 function compile_template(node)
-  flows = Flow[]
+  flows = Flow[@transient attribute(id::UInt64, key::String) => value::String]
   group_ids = Symbol[]
-  compile_server_tree(node, nothing, [:session], flows)
+  compile_server_tree(node, nothing, [:session], nothing, [:session], flows)
   compile_client_tree(node, [:session], flows, group_ids)
   (Sequence(flows), group_ids)
 end
@@ -331,7 +332,7 @@ function render(window, view, world, session)
     js(window, Blink.JSString("$event = imp_event(\"$event\")"), callback=false) # these never return! :(
   end
   old_groups = Dict{Symbol, Union{Relation, Void}}(name => get(world.state, name, nothing) for name in view.group_names)
-  old_attributes = world.state[:attribute]
+  old_attributes = get(world.state, :attribute, nothing)
   Flows.init_flow(view.compiled, world)
   Flows.run_flow(view.compiled, world)
   new_groups = Dict{Symbol, Relation}(name => world.state[name] for name in view.group_names)
@@ -340,6 +341,9 @@ function render(window, view, world, session)
     if old_groups[name] == nothing
       old_groups[name] = empty(new_groups[name])
     end
+  end
+  if old_attributes == nothing
+    old_attributes = empty(new_attributes)
   end
   node_delete_parents = Vector{UInt64}()
   node_delete_childs = Set{UInt64}()
@@ -360,14 +364,14 @@ function render(window, view, world, session)
     new_child_ids = new_columns[end-2]
     new_kinds = new_columns[end-1]
     new_contents = new_columns[end-0]
-    Data.foreach_diff(old_columns, new_columns, old_columns[1:end-3], new_columns[1:end-3],
+    Data.foreach_diff(old_columns, new_columns, old_columns[1:end-4], new_columns[1:end-4],
       (o, i) -> begin
+        push!(node_delete_childs, old_child_ids[i])
         if !(old_parent_ids[i] in node_delete_childs)
           parent = old_parent_ids[i]
           prev_i = findprev((prev_parent) -> prev_parent != parent, old_parent_ids, i-1)
           ix = i - prev_i - 1 # 0-indexed
           push!(node_delete_parents, parent)
-          push!(node_delete_childs, old_child_ids[i])
           push!(node_delete_ixes, ix)
         end
       end,
@@ -393,6 +397,10 @@ function render(window, view, world, session)
   reverse!(node_delete_parents)
   reverse!(node_delete_ixes)
   ((attribute_delete_childs, attribute_delete_keys, _), (attribute_create_childs, attribute_create_keys, attribute_create_vals)) = Data.diff(old_attributes, new_attributes)
+  nonredundant_attribute_deletes = [i for i in 1:length(attribute_delete_childs) if !(attribute_delete_childs[i] in node_delete_childs)]
+  attribute_delete_childs = attribute_delete_childs[nonredundant_attribute_deletes]
+  attribute_delete_keys = attribute_delete_keys[nonredundant_attribute_deletes]
+  # TODO the implicit unchecked UInt64 -> JSFloat is probably going to be trouble sooner or later
   @js_(window, render($node_delete_parents, $node_delete_ixes, $html_create_parents, $html_create_ixes, $html_create_childs, $html_create_tags, $text_create_parents, $text_create_ixes, $text_create_contents, $attribute_delete_childs, $attribute_delete_keys, $attribute_create_childs, $attribute_create_keys, $attribute_create_vals))
 end
 
@@ -409,7 +417,6 @@ end
 
 pre = Sequence([
   @stateful session(String)
-  @transient attribute(id::UInt64, key::String) => value::String
 ])
 
 function window(world, view)

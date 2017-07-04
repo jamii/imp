@@ -137,12 +137,13 @@ end
 
 function compile_server_tree(node::QueryNode, parent_id, parent_vars, fixed_parent_id, fixed_parent_vars, flows)
   id = Symbol("node_$(hash(node))")
-  vars = unique(vcat(parent_vars, node.vars))
+  node_real_vars = filter((var) -> var != :(_), node.vars)
+  vars = unique(vcat(parent_vars, node_real_vars))
   transient_flow = @eval @transient $id($([Any for _ in vars]...)) => UInt64
   merge_flow = @eval @merge begin
     $parent_id($(parent_vars...)) => parent_id
     $(node.table)($(node.vars...))
-    child_id = hash(tuple($(node.vars...), parent_id), $(hash(node)))
+    child_id = hash(tuple($(node_real_vars...), parent_id), $(hash(node)))
     return $id($(vars...)) => child_id
   end
   push!(flows, transient_flow, merge_flow)
@@ -160,7 +161,8 @@ function collect_sort_key(node::FixedNode, parent_vars, key, keyed_children)
 end
 
 function collect_sort_key(node::QueryNode, parent_vars, key, keyed_children)
-  vars = unique(vcat(parent_vars, node.vars))
+  node_real_vars = filter((var) -> var != :(_), node.vars)
+  vars = unique(vcat(parent_vars, node_real_vars))
   new_vars = vars[(1+length(parent_vars)):end]
   start_ix = length(key) + 1
   append!(key, new_vars) 
@@ -247,49 +249,6 @@ function compile_template(node)
   compile_server_tree(node, nothing, [:session], nothing, [:session], flows)
   compile_client_tree(node, [:session], flows, group_ids)
   (Sequence(flows), group_ids)
-end
-
-# --- interpreting ---
-# dumb slow version just to get the logic right
-# TODO not that
-
-function interpret_value(value, bound_vars)
-  if isa(value, StringExpr) 
-    string((isa(v,Symbol) ? string(bound_vars[v]) : v for v in value.values)...)
-  else
-    string(value)
-  end
-end
-
-function interpret_node(parent, node::AttributeNode, bound_vars, state)
-  key = interpret_value(node.key, bound_vars)
-  val = interpret_value(node.val, bound_vars)
-  parent.attrs[key] = string(get(parent.attrs, key, ""), val) 
-end
-
-function interpret_node(parent, node::FixedNode, bound_vars, state)
-  tag = Symbol(interpret_value(node.tag, bound_vars))
-  child = Hiccup.Node(tag)
-  push!(parent.children, child)
-  for grandchild in node.children
-    interpret_node(child, grandchild, bound_vars, state) 
-  end
-end
-
-function interpret_node(parent, node::QueryNode, bound_vars, state)
-  columns = state[node.table].columns
-  @assert length(node.vars) == length(columns)
-  for r in 1:length(columns[1])
-    if all((!(var in keys(bound_vars)) || (bound_vars[var] == columns[c][r]) for (c, var) in enumerate(node.vars)))
-      new_bound_vars = copy(bound_vars)
-      for (c, var) in enumerate(node.vars)
-        new_bound_vars[var] = columns[c][r]
-      end
-      for child in node.children
-        interpret_node(parent, child, new_bound_vars, state)
-      end
-    end
-  end
 end
 
 # --- plumbing ---
@@ -423,7 +382,6 @@ function window(world, view)
   window = Window()
   session = string(now()) # TODO uuid
   opentools(window)
-  load!(window, "src/diffhtml.js")
   load!(window, "src/Imp.js")
   @js_(window, session = $session)
   sleep(3) # :(

@@ -263,8 +263,16 @@ begin
           end
           [ul
             class="filters"
-            filter_class(session, filter, class) do
-              [li [a class="$class" onclick="set_filter('$session', '$filter')" "$filter"]]
+            filter_class(session, filter, _) do
+              [li 
+                [a 
+                  filter_class(session, filter, class) do
+                    class="$class"
+                  end 
+                  onclick="set_filter('$session', '$filter')" 
+                  "$filter"
+                ]
+              ]
             end 
           ]
           [button class="clear-completed" "Clear completed" onclick="clear_completed(true)"]

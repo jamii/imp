@@ -20,10 +20,6 @@ typealias Value Union{StringExpr, String, Symbol}
 
 abstract Node
 
-immutable TextNode <: Node
-  text::Value
-end
-
 immutable AttributeNode <: Node
   key::Value
   val::Value
@@ -31,6 +27,7 @@ end
 
 immutable FixedNode <: Node
   tag::Value
+  kind::Symbol # :text or :html
   children::Vector{Node}
 end
 
@@ -83,9 +80,9 @@ function parse_node(expr)
         _ => error("What are this? $children_expr")
       end
     end
-    [tag, args...] => FixedNode(parse_value(tag), parse_nodes(args))
+    [tag, args...] => FixedNode(parse_value(tag), :html, parse_nodes(args))
     Expr(:(=), [key, val], _) => AttributeNode(parse_value(key), parse_value(val))
-    text => TextNode(parse_value(text))
+    text => FixedNode(parse_value(text), :text, Node[])
   end
 end
 
@@ -115,10 +112,6 @@ function generate_fragment(expr::StringExpr, fragment)
   for value in expr.values
     push!(fragment, value)
   end
-end
-
-function generate_fragment(node::TextNode, fragment)
-  generate_fragment(node.text, fragment)
 end
 
 function generate_fragment(node::AttributeNode, fragment)
@@ -203,7 +196,6 @@ function compile_node(node)
   wrapper = QueryNode(:session, [:session], [node])
   compiled_query_nodes = []
   compile_query_nodes(:root, Symbol[], wrapper, compiled_query_nodes)
-  @show compiled_query_nodes
 end
 
 function compile_server_tree(node, parent_id, parent_vars, flows)
@@ -282,14 +274,12 @@ function collect_sort_key(nodes::Vector{Node}, parent_vars, key, keyed_children)
 end
 
 function collect_sort_key(node::FixedNode, parent_vars)
-  key = Any[]
+  key = Vector{Any}(parent_vars)
   keyed_children = Any[]
   collect_sort_key(node.children, parent_vars, key, keyed_children)
   # tidy up ragged ends of keys
   for (child_key, vars, child) in keyed_children
-    @show child_key key[(length(child_key)+1):end]
     append!(child_key, key[(length(child_key)+1):end])
-    @show child_key
   end
   keyed_children
 end
@@ -317,6 +307,14 @@ function key_type(elem)
   end
 end
 
+function flatten_value(value::Value) 
+  @match value begin
+    _::String => [value]
+    _::Symbol => [string(value)]
+    _::StringExpr => value.values
+  end
+end
+
 function compile_client_tree(node::FixedNode, parent_vars, flows, group_ids)
   keyed_children = collect_sort_key(node, parent_vars)
   group_id = Symbol("group_$(hash(node))")
@@ -328,11 +326,11 @@ function compile_client_tree(node::FixedNode, parent_vars, flows, group_ids)
     child_node_id = Symbol("node_$(hash(child))")
     key_exprs = map(key_expr, key)
     key_types = map(key_type, key)
-    transient_flow = @eval @transient $group_id($(key_types...)) => (UInt64, UInt64, String)
+    transient_flow = @eval @transient $group_id($(key_types...)) => (UInt64, UInt64, Symbol, String)
     merge_flow = @eval @merge begin
       $parent_node_id($(parent_vars...)) => parent_id
       $child_node_id($(child_vars...)) => child_id
-      return $group_id($(key_exprs...)) => (parent_id, child_id, $(string(child.tag)))
+      return $group_id($(key_exprs...)) => (parent_id, child_id, $(Expr(:quote, child.kind)), string($(flatten_value(child.tag)...)))
     end
     push!(flows, transient_flow, merge_flow)
   end
@@ -346,7 +344,6 @@ function compile_template(node)
   group_ids = Symbol[]
   compile_server_tree(node, nothing, [:session], flows)
   compile_client_tree(node, [:session], flows, group_ids)
-  @show flows
   (Sequence(flows), group_ids)
 end
 
@@ -360,10 +357,6 @@ function interpret_value(value, bound_vars)
   else
     string(value)
   end
-end
-
-function interpret_node(parent, node::TextNode, bound_vars, state)
-  push!(parent.children, interpret_value(node.text, bound_vars))
 end
 
 function interpret_node(parent, node::AttributeNode, bound_vars, state)
@@ -410,7 +403,7 @@ end
 function View() 
   View(
     nothing, 
-    FixedNode("body", [TextNode("loading...")]), 
+    FixedNode("body", :html, [FixedNode("loading...", :text, Node[])]), 
     Sequence(Flow[]), 
     Symbol[], 
     Set{Any}()
@@ -445,35 +438,59 @@ function render(window, view, world, session)
       old_groups[name] = empty(new_groups[name])
     end
   end
-  deletes = Set{UInt64}()
-  creates = Vector{Tuple{UInt64, Union{UInt64, Void}, UInt64, String}}()
+  delete_parents = Vector{UInt64}()
+  delete_childs = Set{UInt64}()
+  delete_ixes = Vector{Int64}()
+  html_create_parents = Vector{UInt64}()
+  html_create_ixes = Vector{Int64}()
+  html_create_childs = Vector{UInt64}()
+  html_create_tags = Vector{String}()
+  text_create_parents = Vector{UInt64}()
+  text_create_ixes = Vector{Int64}()
+  text_create_contents = Vector{String}()
   for name in view.group_names
     old_columns = old_groups[name].columns
-    old_parent_ids = old_columns[end-2]
-    old_child_ids = old_columns[end-1]
+    old_parent_ids = old_columns[end-3]
+    old_child_ids = old_columns[end-2]
     new_columns = new_groups[name].columns
-    new_parent_ids = new_columns[end-2]
-    new_child_ids = new_columns[end-1]
+    new_parent_ids = new_columns[end-3]
+    new_child_ids = new_columns[end-2]
+    new_kinds = new_columns[end-1]
     new_contents = new_columns[end-0]
     Data.foreach_diff(old_columns, new_columns, old_columns[1:end-3], new_columns[1:end-3],
       (o, i) -> begin
-        if !(old_parent_ids[i] in deletes)
-          push!(deletes, old_child_ids[i])
+        if !(old_parent_ids[i] in delete_childs)
+          parent = old_parent_ids[i]
+          prev_i = findprev((prev_parent) -> prev_parent != parent, old_parent_ids, i-1)
+          ix = i - prev_i - 1 # 0-indexed
+          push!(delete_parents, parent)
+          push!(delete_childs, old_child_ids[i])
+          push!(delete_ixes, ix)
         end
       end,
       (n, i) -> begin
-        if (i < length(new_parent_ids)) && (new_parent_ids[i] == new_parent_ids[i+1])
-          sibling = new_child_ids[i+1]
-        else 
-          sibling = nothing
+        parent = new_parent_ids[i]
+        prev_i = findprev((prev_parent) -> prev_parent != parent, new_parent_ids, i-1)
+        ix = i - prev_i - 1 # 0-indexed
+        if new_kinds[i] == :html
+          push!(html_create_parents, parent)
+          push!(html_create_ixes, ix)
+          push!(html_create_childs, new_child_ids[i])
+          push!(html_create_tags, new_contents[i])
+        else
+          push!(text_create_parents, parent)
+          push!(text_create_ixes, ix)
+          push!(text_create_contents, new_contents[i])
         end
-        push!(creates, (new_parent_ids[i], sibling, new_child_ids[i], new_contents[i]))
       end,
       (o, n, oi, ni) -> ()
     )
   end
-  @show deletes creates
-  @js(window, render($deletes, $creates))
+  # deletions have to be handled in reverse order to make sure the ixes are correct
+  reverse!(delete_parents)
+  reverse!(delete_ixes)
+  @show delete_parents delete_ixes html_create_parents html_create_ixes html_create_childs html_create_tags text_create_parents text_create_ixes text_create_contents
+  @js_(window, render($delete_parents, $delete_ixes, $html_create_parents, $html_create_ixes, $html_create_childs, $html_create_tags, $text_create_parents, $text_create_ixes, $text_create_contents))
 end
 
 function watch_and_load(window, file)
@@ -503,10 +520,10 @@ function window(world, view)
     refresh(world, Symbol(event["table"]), tuple(event["values"]...))
   end
   watch(world) do old_state, new_state
-    render(window, view, world, session)
+    @time render(window, view, world, session)
   end
   watch(view) do
-    render(window, view, world, session)
+    @time render(window, view, world, session)
   end
   refresh(world, :session, tuple(session))
   window

@@ -294,6 +294,11 @@ function collect_sort_key(node::FixedNode, parent_vars)
   keyed_children
 end
 
+# TODO this is defined in Julia 0.6 but can't currently upgrade because of https://github.com/kmsquire/Match.jl/issues/35
+function Base.isless{T}(x::Nullable{T}, y::Nullable{T})
+  !Base.isnull(x) && (Base.isnull(y) || (get(x) < get(y)))
+end
+
 function key_expr(elem) 
   @match elem begin
     _::Integer => elem
@@ -312,11 +317,13 @@ function key_type(elem)
   end
 end
 
-function compile_client_tree(node::FixedNode, parent_vars, flows)
+function compile_client_tree(node::FixedNode, parent_vars, flows, group_ids)
   keyed_children = collect_sort_key(node, parent_vars)
-  @show keyed_children
   group_id = Symbol("group_$(hash(node))")
   parent_node_id = Symbol("node_$(hash(node))")
+  if !isempty(keyed_children)
+    push!(group_ids, group_id)
+  end
   for (key, child_vars, child) in keyed_children
     child_node_id = Symbol("node_$(hash(child))")
     key_exprs = map(key_expr, key)
@@ -330,16 +337,17 @@ function compile_client_tree(node::FixedNode, parent_vars, flows)
     push!(flows, transient_flow, merge_flow)
   end
   for (_, child_vars, child) in keyed_children
-    compile_client_tree(child, child_vars, flows)
+    compile_client_tree(child, child_vars, flows, group_ids)
   end
 end
 
-function compile_ui(node)
+function compile_template(node)
   flows = Flow[]
+  group_ids = Symbol[]
   compile_server_tree(node, nothing, [:session], flows)
-  compile_client_tree(node, [:session], flows)
+  compile_client_tree(node, [:session], flows, group_ids)
   @show flows
-  Sequence(flows)
+  (Sequence(flows), group_ids)
 end
 
 # --- interpreting ---
@@ -389,36 +397,30 @@ function interpret_node(parent, node::QueryNode, bound_vars, state)
   end
 end
 
-# TODO this is defined in Julia 0.6 but can't currently upgrade because of https://github.com/kmsquire/Match.jl/issues/35
-function Base.isless{T}(x::Nullable{T}, y::Nullable{T})
-  !Base.isnull(x) && (Base.isnull(y) || (get(x) < get(y)))
-end
-
 # --- plumbing ---
 
 type View
-  head::Any
-  parsed_head::Node
-  body::Any
-  parsed_body::Node
+  template::Any
+  parsed::Node
+  compiled::Flow
+  group_names::Vector{Symbol}
   watchers::Set{Any}
 end
 
 function View() 
-  View(nothing, TextNode(""), nothing, FixedNode("span", [TextNode("loading...")]), Set{Any}())
+  View(
+    nothing, 
+    FixedNode("body", [TextNode("loading...")]), 
+    Sequence(Flow[]), 
+    Symbol[], 
+    Set{Any}()
+  )
 end
 
-function set_head!(view::View, head)
-  view.head = head
-  view.parsed_head = parse_template(head)
-  for watcher in view.watchers
-    watcher()
-  end
-end
-
-function set_body!(view::View, body)
-  view.body = body
-  view.parsed_body = parse_template(body)
+function set_template!(view::View, template)
+  view.template = template
+  view.parsed = parse_template(template)
+  (view.compiled, view.group_names) = compile_template(view.parsed)
   for watcher in view.watchers
     watcher()
   end
@@ -428,26 +430,50 @@ function Flows.watch(watcher, view::View)
   push!(view.watchers, watcher)
 end
 
+# TODO figure out how to handle changes in template
+# TODO handle sessions
 function render(window, view, world, session)
-  @show :event_funs
   for event in world.events
     js(window, Blink.JSString("$event = imp_event(\"$event\")"), callback=false) # these never return! :(
   end
-  head = Hiccup.Node(:head)
-  interpret_node(head, view.parsed_head, Dict{Symbol, Any}(:session => session), world.state)
-  body = Hiccup.Node(:body)
-  interpret_node(body, view.parsed_body, Dict{Symbol, Any}(:session => session), world.state)
-  @show :rendering head body
-  @js_(window, diff.outerHTML(document.head, $(string(head))))
-  @js_(window, diff.outerHTML(document.body, $(string(body))))
-  begin # TODO temporary
-    flow = compile_ui(view.parsed_body) 
-    Flows.init_flow(flow, world)
-    Flows.run_flow(flow, world)
-    for (name, relation) in world.state
-      @show name relation
+  old_groups = Dict{Symbol, Union{Relation, Void}}(name => get(world.state, name, nothing) for name in view.group_names)
+  Flows.init_flow(view.compiled, world)
+  Flows.run_flow(view.compiled, world)
+  new_groups = Dict{Symbol, Relation}(name => world.state[name] for name in view.group_names)
+  for name in view.group_names
+    if old_groups[name] == nothing
+      old_groups[name] = empty(new_groups[name])
     end
   end
+  deletes = Set{UInt64}()
+  creates = Vector{Tuple{UInt64, Union{UInt64, Void}, UInt64, String}}()
+  for name in view.group_names
+    old_columns = old_groups[name].columns
+    old_parent_ids = old_columns[end-2]
+    old_child_ids = old_columns[end-1]
+    new_columns = new_groups[name].columns
+    new_parent_ids = new_columns[end-2]
+    new_child_ids = new_columns[end-1]
+    new_contents = new_columns[end-0]
+    Data.foreach_diff(old_columns, new_columns, old_columns[1:end-3], new_columns[1:end-3],
+      (o, i) -> begin
+        if !(old_parent_ids[i] in deletes)
+          push!(deletes, old_child_ids[i])
+        end
+      end,
+      (n, i) -> begin
+        if (i < length(new_parent_ids)) && (new_parent_ids[i] == new_parent_ids[i+1])
+          sibling = new_child_ids[i+1]
+        else 
+          sibling = nothing
+        end
+        push!(creates, (new_parent_ids[i], sibling, new_child_ids[i], new_contents[i]))
+      end,
+      (o, n, oi, ni) -> ()
+    )
+  end
+  @show deletes creates
+  @js(window, render($deletes, $creates))
 end
 
 function watch_and_load(window, file)
@@ -486,6 +512,6 @@ function window(world, view)
   window
 end
 
-export View, set_head!, set_body!, window, watch
+export View, set_template!, window, watch
 
 end

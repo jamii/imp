@@ -190,85 +190,89 @@ begin
       return filter_class(session, filter) => class
     end
   ]))
-  set_head!(view, quote
-    [link rel="stylesheet" href="http://todomvc.com/examples/backbone/node_modules/todomvc-app-css/index.css"]
-  end)
-  set_body!(view, quote
-    [section 
-      class="todoapp"
-      [header 
-        class="header" 
-        [h1 "todos"]
-        [input 
-          class="new-todo" 
-          placeholder="What needs to be done?" 
-          "type"="text" 
-          onkeydown="if (event.which == 13) {new_todo(this.value); this.value=''}"
-        ]
-      ]
+  set_template!(view, quote
+  [html
+    [head 
+      [link rel="stylesheet" href="http://todomvc.com/examples/backbone/node_modules/todomvc-app-css/index.css"]
+    ]
+    [body
       [section 
-        class="main"
-        [input 
-          class="toggle-all" 
-          "type"="checkbox" 
-          all_checked(todo) do
-            checked="true"
-          end
-          onclick="toggle_all(true)"]
-        [ul
-          class="todo-list"
-          visible(session, todo) do
-            text(todo, text) do
-              displaying(session, todo) do
-                [li 
-                  [div 
-                    class="view" 
-                    [input 
-                      class="toggle" 
-                      "type"="checkbox" 
-                      checked(todo) do
-                        checked="true"
-                      end
-                      onclick="toggle($todo)"
-                    ] 
-                    [label "$text" ondblclick="start_editing('$session', $todo)"]
-                    [button class="destroy" onclick="delete_todo($todo)"]
+        class="todoapp"
+        [header 
+          class="header" 
+          [h1 "todos"]
+          [input 
+            class="new-todo" 
+            placeholder="What needs to be done?" 
+            "type"="text" 
+            onkeydown="if (event.which == 13) {new_todo(this.value); this.value=''}"
+          ]
+        ]
+        [section 
+          class="main"
+          [input 
+            class="toggle-all" 
+            "type"="checkbox" 
+            all_checked(todo) do
+              checked="true"
+            end
+            onclick="toggle_all(true)"]
+          [ul
+            class="todo-list"
+            visible(session, todo) do
+              text(todo, text) do
+                displaying(session, todo) do
+                  [li 
+                    [div 
+                      class="view" 
+                      [input 
+                        class="toggle" 
+                        "type"="checkbox" 
+                        checked(todo) do
+                          checked="true"
+                        end
+                        onclick="toggle($todo)"
+                      ] 
+                      [label "$text" ondblclick="start_editing('$session', $todo)"]
+                      [button class="destroy" onclick="delete_todo($todo)"]
+                    ]
                   ]
-                ]
-              end
-              editing(session, todo) do
-                [li
-                  class="editing"
-                  [input  
-                    class="edit"
-                    value="$text"
-                    onkeydown="""
-                      if (event.which == 13) finish_editing('$session', $todo, this.value)
-                      if (event.which == 27) escape_editing('$session', $todo)
-                    """
-                    onblur="escape_editing('$session', $todo)"
+                end
+                editing(session, todo) do
+                  [li
+                    class="editing"
+                    [input  
+                      class="edit"
+                      value="$text"
+                      onkeydown="""
+                        if (event.which == 13) finish_editing('$session', $todo, this.value)
+                        if (event.which == 27) escape_editing('$session', $todo)
+                      """
+                      onblur="escape_editing('$session', $todo)"
+                    ]
                   ]
-                ]
+                end
               end
             end
+          ]
+        ]
+        [footer
+          class="footer"
+          completed_count_text(text) do
+            [span class="todo-count" "$text"]
           end
+          [ul
+            class="filters"
+            filter_class(session, filter, class) do
+              [li [a class="$class" onclick="set_filter('$session', '$filter')" "$filter"]]
+            end 
+          ]
+          [button class="clear-completed" "Clear completed" onclick="clear_completed(true)"]
         ]
-      ]
-      [footer
-        class="footer"
-        completed_count_text(text) do
-          [span class="todo-count" "$text"]
-        end
-        [ul
-          class="filters"
-          filter_class(session, filter, class) do
-            [li [a class="$class" onclick="set_filter('$session', '$filter')" "$filter"]]
-          end 
-        ]
-        [button class="clear-completed" "Clear completed" onclick="clear_completed(true)"]
       ]
     ]
-  end)
+  ]
+end)
 end
 
 w = window(world, view)

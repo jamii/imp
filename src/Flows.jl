@@ -95,7 +95,6 @@ function run_flow(_, world::World)
 end
 
 function run_flow(merge::Merge, world::World)
-  @show merge
   outputs = merge.eval(map((name) -> world.state[name], merge.input_names)...)
   for (output_name, output) in zip(merge.output_names, outputs)
     world.state[output_name] = Base.merge(world.state[output_name], output)
@@ -110,7 +109,6 @@ end
 
 function run_flow(sequence::Sequence, world::World)
   for flow in sequence.flows
-    # @show flow
     run_flow(flow, world)
   end
 end
@@ -121,7 +119,6 @@ function run_flow(fixpoint::Fixpoint, world::World)
     old_values = map((name) -> world.state[name].columns, names)
     run_flow(fixpoint.flow, world)
     new_values = map((name) -> world.state[name].columns, names)
-    @show old_values new_values
     if old_values == new_values
       return
     end

@@ -187,8 +187,8 @@ end
 function refresh(world::World, event_table::Symbol, event_row::Tuple)
   @show :event event_table event_row
   old_state = copy(world.state)
-  init_flow(world.flow, world)
-  push!(world.state[event_table], event_row)
+  @show @time init_flow(world.flow, world)
+  @show @time push!(world.state[event_table], event_row)
   run_flow(world.flow, world)
   for watcher in world.watchers
     watcher(old_state, world.state)

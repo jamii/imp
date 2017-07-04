@@ -2,6 +2,7 @@ document.body.innerHTML = ""; // get rid off the Blink.jl spinner
 
 function imp_event(table) {
     return function () {
+        console.time("roundtrip");
         Blink.msg("event", {"table": table, "values": Array.from(arguments)});
         return false;
     }
@@ -60,4 +61,5 @@ function render(node_delete_parents, node_delete_ixes, html_create_parents, html
         console.error(error)
     }
     console.timeEnd("render")
+    console.timeEnd("roundtrip")
 }

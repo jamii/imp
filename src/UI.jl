@@ -389,10 +389,10 @@ function window(world, view)
     refresh(world, Symbol(event["table"]), tuple(event["values"]...))
   end
   watch(world) do old_state, new_state
-    @time render(window, view, world, session)
+    @show @time render(window, view, world, session)
   end
   watch(view) do
-    @time render(window, view, world, session)
+    @show @time render(window, view, world, session)
   end
   refresh(world, :session, tuple(session))
   window

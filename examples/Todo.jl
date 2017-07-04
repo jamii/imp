@@ -44,6 +44,15 @@ begin
     
     # event handling
     
+    @event benchmark(Int64)
+    @merge begin
+      benchmark(n)
+      todo in 1:n
+      return text(todo) => "foo"
+      return completed(todo) => false
+      return deleted(todo) => false
+    end
+    
     @merge begin
       session(session)
       @query current_filter(session) => filter

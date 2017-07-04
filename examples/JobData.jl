@@ -50,7 +50,7 @@ end
 
 if !isfile("../imdb/imdb.jld")
   frames = Dict()
-  @time for (table_name, column_names) in table_column_names
+  @show @time for (table_name, column_names) in table_column_names
     column_types = table_column_types[table_name]
     @show table_name column_names column_types
     frame = readtable(open("../imdb/$(table_name).csv"), header=false, eltypes=column_types)
@@ -62,11 +62,11 @@ if !isfile("../imdb/imdb.jld")
     end
     frames[table_name] = frame
   end
-  @time save("../imdb/imdb.jld", "frames", frames)
+  @show @time save("../imdb/imdb.jld", "frames", frames)
 else 
-  frames = @time load("../imdb/imdb.jld", "frames")
+  frames = @show @time load("../imdb/imdb.jld", "frames")
   # have to intern again - not preserved by jld :(
-  @time for frame in values(frames)
+  @show @time for frame in values(frames)
     for column in frame.columns
       intern(column.data)
     end
@@ -78,7 +78,7 @@ function without_nulls(keys, vals, na)
    [vals[ix] for ix in 1:length(vals) if !na[ix]])
 end
 
-@time for (table_name, column_names) in table_column_names
+@show @time for (table_name, column_names) in table_column_names
   column_names = [replace(column_name, "_id", "") for column_name in column_names]
   frame = frames[table_name]
   typs = [Symbol("T$i") for i in 2:length(column_names)]

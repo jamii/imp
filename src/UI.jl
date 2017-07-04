@@ -95,111 +95,20 @@ end
 
 # --- compiling ---
 
-type CompiledQueryNode
-  id::Symbol
-  parent_id::Symbol
-  bound_vars::Vector{Symbol}
-  query_node::QueryNode
-  fragment::Vector{Union{Symbol, String}}
-  compiled_fragment::Function
-end
-
-function generate_fragment(value::Union{String, Symbol}, fragment)
-  push!(fragment, string(value))
-end
-
-function generate_fragment(expr::StringExpr, fragment)
-  for value in expr.values
-    push!(fragment, value)
+function flatten_value(value::Value) 
+  @match value begin
+    _::String => [value]
+    _::Symbol => [string(value)]
+    _::StringExpr => value.values
   end
 end
 
-function generate_fragment(node::AttributeNode, fragment)
-  push!(fragment, " ")
-  generate_fragment(node.key, fragment)
-  push!(fragment, "=")
-  generate_fragment(node.val, fragment)
-end
-
-function generate_fragment(node::FixedNode, fragment)
-  push!(fragment, "<")
-  generate_fragment(node.tag, fragment)
-  for child in node.children
-    if typeof(child) == AttributeNode
-      generate_fragment(child, fragment)
-    end
+function compile_server_tree(node::AttributeNode, parent_id, parent_vars, flows)
+  merge_flow = @eval @merge begin
+    $parent_id($(parent_vars...)) => parent_id
+    return attribute(parent_id, string($(flatten_value(node.key)...))) => string($(flatten_value(node.val)...))
   end
-  push!(fragment, ">")
-  for child in node.children
-    if typeof(child) != AttributeNode
-      generate_fragment(child, fragment)
-    end
-  end
-  push!(fragment, "</")
-  generate_fragment(node.tag, fragment)
-  push!(fragment, ">")
-end
-
-function generate_fragment(node::QueryNode, fragment)
-  # TODO no html generated, but do we need to record the position or something? maybe put a dummy node in?
-end
-
-function concat_fragment(fragment)
-  new_fragment = Union{Symbol, String}[]
-  for value in fragment 
-    if isa(value, String) && (length(new_fragment) > 0) && isa(new_fragment[end], String)
-      new_fragment[end] = string(new_fragment[end], value)
-    else
-      push!(new_fragment, value)
-    end
-  end
-  new_fragment
-end
-
-function compile_fragment(id::Symbol, node::QueryNode, bound_vars::Vector{Symbol})
-  fragment = Union{Symbol, String}[]
-  for child in node.children
-    generate_fragment(child, fragment)
-  end
-  fragment = concat_fragment(fragment)
-  name = Symbol("fragment_", id)
-  fun = @eval function $(name)($(bound_vars...))
-    string($(fragment...))
-  end
-  (fragment, fun)
-end
-
-function compile_query_nodes(parent_id, parent_bound_vars, node, compiled_query_nodes)
-  if typeof(node) == QueryNode
-    id = Symbol("query_node_", hash((parent_id, node)))
-    bound_vars = copy(parent_bound_vars)
-    for var in node.vars
-      if !(var in parent_bound_vars)
-        push!(bound_vars, var)
-      end
-    end
-    (fragment, compiled_fragment) = compile_fragment(id, node, bound_vars)
-    compiled_query_node = CompiledQueryNode(id, parent_id, bound_vars, node, fragment, compiled_fragment)
-    push!(compiled_query_nodes, compiled_query_node)
-    for child in node.children
-      compile_query_nodes(id, bound_vars, child, compiled_query_nodes)
-    end
-  end
-  if typeof(node) == FixedNode
-    for child in node.children
-      compile_query_nodes(parent_id, parent_bound_vars, child, compiled_query_nodes)
-    end
-  end
-end
-
-function compile_node(node)
-  wrapper = QueryNode(:session, [:session], [node])
-  compiled_query_nodes = []
-  compile_query_nodes(:root, Symbol[], wrapper, compiled_query_nodes)
-end
-
-function compile_server_tree(node, parent_id, parent_vars, flows)
-  # do nothing by default
+  push!(flows, merge_flow)
 end
 
 function compile_server_tree(node::FixedNode, parent_id, parent_vars, flows)
@@ -241,8 +150,8 @@ function compile_server_tree(node::QueryNode, parent_id, parent_vars, flows)
   end
 end
 
-function collect_sort_key(node, parent_vars, key, keyed_children)
-  # TODO handle attributes and text
+function collect_sort_key(node::AttributeNode, parent_vars, key, keyed_children)
+  # nothing to do here
 end
 
 function collect_sort_key(node::FixedNode, parent_vars, key, keyed_children)
@@ -304,14 +213,6 @@ function key_type(elem)
     _::Symbol => Nullable{Any} # TODO figure out correct types somehow
     _::Void => Nullable{Any}
     _ => error("What are this: $elem")
-  end
-end
-
-function flatten_value(value::Value) 
-  @match value begin
-    _::String => [value]
-    _::Symbol => [string(value)]
-    _::StringExpr => value.values
   end
 end
 
@@ -430,17 +331,19 @@ function render(window, view, world, session)
     js(window, Blink.JSString("$event = imp_event(\"$event\")"), callback=false) # these never return! :(
   end
   old_groups = Dict{Symbol, Union{Relation, Void}}(name => get(world.state, name, nothing) for name in view.group_names)
+  old_attributes = world.state[:attribute]
   Flows.init_flow(view.compiled, world)
   Flows.run_flow(view.compiled, world)
   new_groups = Dict{Symbol, Relation}(name => world.state[name] for name in view.group_names)
+  new_attributes = world.state[:attribute]
   for name in view.group_names
     if old_groups[name] == nothing
       old_groups[name] = empty(new_groups[name])
     end
   end
-  delete_parents = Vector{UInt64}()
-  delete_childs = Set{UInt64}()
-  delete_ixes = Vector{Int64}()
+  node_delete_parents = Vector{UInt64}()
+  node_delete_childs = Set{UInt64}()
+  node_delete_ixes = Vector{Int64}()
   html_create_parents = Vector{UInt64}()
   html_create_ixes = Vector{Int64}()
   html_create_childs = Vector{UInt64}()
@@ -459,13 +362,13 @@ function render(window, view, world, session)
     new_contents = new_columns[end-0]
     Data.foreach_diff(old_columns, new_columns, old_columns[1:end-3], new_columns[1:end-3],
       (o, i) -> begin
-        if !(old_parent_ids[i] in delete_childs)
+        if !(old_parent_ids[i] in node_delete_childs)
           parent = old_parent_ids[i]
           prev_i = findprev((prev_parent) -> prev_parent != parent, old_parent_ids, i-1)
           ix = i - prev_i - 1 # 0-indexed
-          push!(delete_parents, parent)
-          push!(delete_childs, old_child_ids[i])
-          push!(delete_ixes, ix)
+          push!(node_delete_parents, parent)
+          push!(node_delete_childs, old_child_ids[i])
+          push!(node_delete_ixes, ix)
         end
       end,
       (n, i) -> begin
@@ -487,10 +390,10 @@ function render(window, view, world, session)
     )
   end
   # deletions have to be handled in reverse order to make sure the ixes are correct
-  reverse!(delete_parents)
-  reverse!(delete_ixes)
-  @show delete_parents delete_ixes html_create_parents html_create_ixes html_create_childs html_create_tags text_create_parents text_create_ixes text_create_contents
-  @js_(window, render($delete_parents, $delete_ixes, $html_create_parents, $html_create_ixes, $html_create_childs, $html_create_tags, $text_create_parents, $text_create_ixes, $text_create_contents))
+  reverse!(node_delete_parents)
+  reverse!(node_delete_ixes)
+  ((attribute_delete_childs, attribute_delete_keys, _), (attribute_create_childs, attribute_create_keys, attribute_create_vals)) = Data.diff(old_attributes, new_attributes)
+  @js_(window, render($node_delete_parents, $node_delete_ixes, $html_create_parents, $html_create_ixes, $html_create_childs, $html_create_tags, $text_create_parents, $text_create_ixes, $text_create_contents, $attribute_delete_childs, $attribute_delete_keys, $attribute_create_childs, $attribute_create_keys, $attribute_create_vals))
 end
 
 function watch_and_load(window, file)
@@ -506,6 +409,7 @@ end
 
 pre = Sequence([
   @stateful session(String)
+  @transient attribute(id::UInt64, key::String) => value::String
 ])
 
 function window(world, view)

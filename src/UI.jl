@@ -95,11 +95,11 @@ end
 
 # --- compiling ---
 
-function flatten_value(value::Value) 
+function value_expr(value::Value) 
   @match value begin
-    _::String => [value]
-    _::Symbol => [string(value)]
-    _::StringExpr => value.values
+    _::String => value
+    _::Symbol => string(value)
+    _::StringExpr => Expr(:string, value.values...)
   end
 end
 
@@ -107,7 +107,7 @@ function compile_server_tree(node::AttributeNode, parent_id, parent_vars, fixed_
   merge_flow = @eval @merge begin
     $fixed_parent_id($(fixed_parent_vars...)) => parent_id
     $parent_id($(parent_vars...)) => _
-    return attribute(parent_id, string($(flatten_value(node.key)...))) => string($(flatten_value(node.val)...))
+    return attribute(parent_id, $(value_expr(node.key))) => $(value_expr(node.val))
   end
   push!(flows, merge_flow)
 end
@@ -234,7 +234,7 @@ function compile_client_tree(node::FixedNode, parent_vars, flows, group_ids)
     merge_flow = @eval @merge begin
       $parent_node_id($(parent_vars...)) => parent_id
       $child_node_id($(child_vars...)) => child_id
-      return $group_id($(key_exprs...)) => (parent_id, child_id, $(Expr(:quote, child.kind)), string($(flatten_value(child.tag)...)))
+      return $group_id($(key_exprs...)) => (parent_id, child_id, $(Expr(:quote, child.kind)), $(value_expr(child.tag)))
     end
     push!(flows, transient_flow, merge_flow)
   end
@@ -292,8 +292,8 @@ function render(window, view, world, session)
   end
   old_groups = Dict{Symbol, Union{Relation, Void}}(name => get(world.state, name, nothing) for name in view.group_names)
   old_attributes = get(world.state, :attribute, nothing)
-  Flows.init_flow(view.compiled, world)
-  Flows.run_flow(view.compiled, world)
+  @show @time Flows.init_flow(view.compiled, world)
+  @show @time Flows.run_flow(view.compiled, world)
   new_groups = Dict{Symbol, Relation}(name => world.state[name] for name in view.group_names)
   new_attributes = world.state[:attribute]
   for name in view.group_names

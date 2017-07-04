@@ -9,6 +9,10 @@ using Match
 world = World()
 view = View()
 
+for (k,v) in world.state
+  @show k v
+end
+
 begin 
   set_flow!(world, Sequence([
     UI.pre 
@@ -182,12 +186,10 @@ begin
       return completed_count_text() => text
     end
     
-    @transient filter_class(session::String, filter::String) => class::String
+    @transient filter(String)
     @merge begin
-      current_filter(session) => current
       filter in ["Active", "Completed", "All"]
-      class = (filter == current) ? "selected" : ""
-      return filter_class(session, filter) => class
+      return filter(filter)
     end
   ]))
   set_template!(view, quote
@@ -263,11 +265,11 @@ begin
           end
           [ul
             class="filters"
-            filter_class(session, filter, _) do
+            filter(filter) do
               [li 
                 [a 
-                  filter_class(session, filter, class) do
-                    class="$class"
+                  current_filter(session, filter) do
+                    class="selected"
                   end 
                   onclick="set_filter('$session', '$filter')" 
                   "$filter"

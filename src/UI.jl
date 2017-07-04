@@ -177,7 +177,7 @@ function collect_sort_key(nodes::Vector{Node}, parent_vars, key, keyed_children)
   push!(key, 0)
   ix = length(key)
   for node in nodes
-    if typeof(node) in [FixedNode, QueryNode] # TODO handle attributes and text
+    if typeof(node) in [FixedNode, QueryNode] 
       key[ix] += 1
       collect_sort_key(node, parent_vars, key, keyed_children)
     end

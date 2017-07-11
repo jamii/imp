@@ -145,12 +145,12 @@ function parse_relation(expr)
   (name, keys, vals)
 end
 
-function column_type{T}(_::Type{Val{T}})
+function column_type{T}(_::Type{T})
   Vector{T}
 end
 
 # TODO not useful until stack allocation of immutables is improved
-# function column_type{T}(_::Type{Val{Nullable{T}}})
+# function column_type{T}(_::Type{Nullable{T}})
 #   NullableVector{T}
 # end
 
@@ -165,7 +165,7 @@ macro relation(expr)
   typs = [keys..., vals...]
   order = collect(1:length(typs))
   body = quote 
-    columns = tuple($([:(column_type(Val{$(esc(typ))})()) for typ in typs]...))
+    columns = tuple($([:(column_type($(esc(typ)))()) for typ in typs]...))
     Relation(columns, $(length(keys)))
   end
   if name != ()

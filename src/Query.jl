@@ -244,7 +244,7 @@ function parse_query(query)
   for return_clause in return_clauses
     if return_clause.name != ()
       for (ix, var) in enumerate(return_clause.vars)
-        return_clause.typs[ix] = :(eltype($(return_clause.name)[$ix]))
+        return_clause.typs[ix] = :(eltype($(return_clause.name).columns[$ix]))
       end
     end
   end
@@ -321,7 +321,7 @@ function plan_query(clauses, vars, created_vars, input_names, return_clauses, ou
   results_inits = []
   for (clause_ix, return_clause) in enumerate(return_clauses)
     for (var_ix, typ) in enumerate(return_clause.typs)
-      results_init = :(local $(Symbol("results_$(clause_ix)_$(var_ix)")) = Data.column_type(Val{$(esc(typ))})())
+      results_init = :(local $(Symbol("results_$(clause_ix)_$(var_ix)")) = Data.column_type($(esc(typ)))())
       push!(results_inits, results_init)
     end
   end

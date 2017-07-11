@@ -101,52 +101,66 @@ function value_expr(value::Value)
   end
 end
 
-function compile_server_tree(node::AttributeNode, parent_id, parent_vars, fixed_parent_id, fixed_parent_vars, flows)
+function compile_server_tree(node::AttributeNode, parent_id, parent_vars, fixed_parent_id, fixed_parent_vars, state, flows)
   merge_flow = @eval @merge begin
-    $fixed_parent_id($(fixed_parent_vars...)) => parent_id
-    $parent_id($(parent_vars...)) => _
+    $fixed_parent_id($(map(first, fixed_parent_vars)...)) => parent_id
+    $parent_id($(map(first, parent_vars)...)) => _
     return attribute(parent_id, $(value_expr(node.key))) => $(value_expr(node.val))
   end
   push!(flows, merge_flow)
 end
 
-function compile_server_tree(node::FixedNode, parent_id, parent_vars, fixed_parent_id, fixed_parent_vars, flows)
+function compile_server_tree(node::FixedNode, parent_id, parent_vars, fixed_parent_id, fixed_parent_vars, state, flows)
   id = Symbol("node_$(hash(node))")
-  transient_flow = @eval @transient $id($([Any for _ in parent_vars]...)) => UInt64
+  transient_flow = @eval @transient $id($([typ for (_, typ) in parent_vars]...)) => UInt64
   merge_flow = 
     if parent_id == nothing
       @eval @merge begin
         session(session)
         child_id = hash(session, $(hash(node)))
-        return $id($(parent_vars...)) => child_id
+        return $id($(map(first, parent_vars)...)) => child_id
       end
     else
       @eval @merge begin
-        $parent_id($(parent_vars...)) => parent_id
+        $parent_id($(map(first, parent_vars)...)) => parent_id
         child_id = hash(parent_id, $(hash(node)))
-        return $id($(parent_vars...)) => child_id
+        return $id($(map(first, parent_vars)...)) => child_id
       end
     end
   push!(flows, transient_flow, merge_flow)
   for child in node.children
-    compile_server_tree(child, id, parent_vars, id, parent_vars, flows)
+    compile_server_tree(child, id, parent_vars, id, parent_vars, state, flows)
   end
 end
 
-function compile_server_tree(node::QueryNode, parent_id, parent_vars, fixed_parent_id, fixed_parent_vars, flows)
+function compile_server_tree(node::QueryNode, parent_id, parent_vars, fixed_parent_id, fixed_parent_vars, state, flows)
   id = Symbol("node_$(hash(node))")
-  node_real_vars = filter((var) -> var != :(_), node.vars)
-  vars = unique(vcat(parent_vars, node_real_vars))
-  transient_flow = @eval @transient $id($([Any for _ in vars]...)) => UInt64
+  vars = copy(parent_vars)
+  start_ix = length(vars) + 1
+  for (ix, var) in enumerate(node.vars)
+    if (var != :(_)) 
+      typ = eltype(state[node.table].columns[ix])
+      typed_var = (var, typ)
+      if !(typed_var in parent_vars)
+        push!(vars, (var, typ))
+      end
+    end
+  end
+  end_ix = length(vars)
+  transient_flow = @eval @transient $id($([typ for (_, typ) in vars]...)) => UInt64
+  child_id = :(hash(parent_id, $(hash(node))))
+  for var in vars[start_ix:end_ix]
+    child_id = :(hash($var, $child_id))
+  end
   merge_flow = @eval @merge begin
-    $parent_id($(parent_vars...)) => parent_id
+    $parent_id($(map(first, parent_vars)...)) => parent_id
     $(node.table)($(node.vars...))
-    child_id = hash(tuple($(node_real_vars...), parent_id), $(hash(node)))
-    return $id($(vars...)) => child_id
+    child_id = $child_id
+    return $id($(map(first, vars)...)) => child_id
   end
   push!(flows, transient_flow, merge_flow)
   for child in node.children
-    compile_server_tree(child, id, vars, fixed_parent_id, fixed_parent_vars, flows)
+    compile_server_tree(child, id, vars, fixed_parent_id, fixed_parent_vars, state, flows)
   end
 end
 
@@ -206,11 +220,14 @@ function Base.isless{T}(x::Nullable{T}, y::Nullable{T})
   !Base.isnull(x) && (Base.isnull(y) || (get(x) < get(y)))
 end
 
+default{T <: Number}(::Type{T}) = zero(T)
+default(::Type{String}) = ""
+
 function key_expr(elem) 
   @match elem begin
     _::Integer => elem
-    (_::Symbol, _::Type) => :(Nullable{$(elem[2])}($(elem[1])))
-    (_::Void, _::Type) => :(Nullable{$(elem[2])}())
+    (_::Symbol, _::Type) => elem[1]
+    (_::Void, _::Type) => default(elem[2])
     _ => error("What are this: $elem")
   end
 end
@@ -218,8 +235,8 @@ end
 function key_type(elem)
   @match elem begin
     _::Integer => Int64
-    (var::Symbol, typ::Type) => Nullable{typ}
-    (_::Void, typ::Type) => Nullable{typ}
+    (var::Symbol, typ::Type) => typ
+    (_::Void, typ::Type) => typ
     _ => error("What are this: $elem")
   end
 end
@@ -251,7 +268,7 @@ end
 function compile_template(node, state)
   flows = Flow[@transient attribute(id::UInt64, key::String) => value::String]
   group_ids = Symbol[]
-  compile_server_tree(node, nothing, [:session], nothing, [:session], flows)
+  compile_server_tree(node, nothing, [(:session, String)], nothing, [:session], state, flows)
   compile_client_tree(node, Any[(:session, String)], state, flows, group_ids)
   (Sequence(flows), group_ids)
 end

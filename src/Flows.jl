@@ -35,7 +35,6 @@ end
 
 type World
   state::Dict{Symbol, Relation}
-  transients::Set{Symbol}
   events::Set{Symbol}
   flow::Flow
 end
@@ -66,11 +65,8 @@ end
 
 function init_flow(create::Create, world::World)
   if create.is_transient || !haskey(world.state, create.output_name) 
-    output = Relation(tuple((Data.column_type(Val{typ})() for typ in [create.keys..., create.vals...])...), length(create.keys))
+    output = Relation(tuple((Data.column_type(typ)() for typ in [create.keys..., create.vals...])...), length(create.keys))
     world.state[create.output_name] = output
-  end
-  if create.is_transient 
-    push!(world.transients, create.output_name)
   end
   if create.is_event
     push!(world.events, create.output_name)
@@ -171,7 +167,7 @@ macro clear(name)
 end
 
 function World()
-  World(Dict{Symbol, Relation}(), Set{Symbol}(),Set{Symbol}(), Sequence([]))
+  World(Dict{Symbol, Relation}(), Set{Symbol}(), Sequence([]))
 end
 
 function refresh(world::World)

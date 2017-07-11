@@ -1,14 +1,12 @@
 module UI
 
-# Pkg.add("Blink")
-# AtomShell.install()
-
 using Data
 using Query
 using Flows
-using Blink
 using Match
-using Hiccup
+using HttpServer
+using WebSockets
+using JSON
 
 # --- ast ---
 
@@ -259,18 +257,31 @@ type View
   parsed::Node
   compiled::Flow
   group_names::Vector{Symbol}
-  windows::Dict{String, Window}
+  clients::Dict{String, WebSocket}
+  server::Nullable{Server}
+end
+
+function Base.close(view::View)
+  if !isnull(view.server)
+    close(get(view.server))
+  end
+  for (_, client) in view.clients
+    close(client)
+  end
 end
 
 function View() 
-  View(
+  view = View(
     World(),
     quote [div] end, 
     FixedNode("body", :html, [FixedNode("loading...", :text, Node[])]), 
     Sequence(Flow[]), 
     Symbol[],
-    Dict{String, Window}()
+    Dict{String, WebSocket}(),
+    Nullable{Server}()
   )
+  finalizer(view, close)
+  view
 end
 
 function set_template!(view::View, template::ANY)
@@ -308,12 +319,18 @@ function Flows.refresh(view::View, event_table::Symbol, event_row::Tuple)
   (old_state, view.world.state)
 end
 
+macro js_str(text)
+  parsed = parse("\"$(escape_string(text))\"")
+  if isa(parsed, Expr) && (parsed.head == :string)
+    parsed = Expr(:string, [isa(arg, String) ? arg : :(json($arg)) for arg in parsed.args]...)
+  end
+  esc(parsed)
+end
+
 # TODO figure out how to handle changes in template
 function render(view, old_state, new_state)
-  for (_, window) in view.windows
-    for event in view.world.events
-      js(window, Blink.JSString("$event = imp_event(\"$event\")"), callback=false) # these never return! :(
-    end
+  for (_, client) in view.clients
+    write(client, js"{\"events\": $(view.world.events)}")
   end
   old_groups = Dict{Symbol, Union{Relation, Void}}(name => get(old_state, name, nothing) for name in view.group_names)
   old_attributes = get(old_state, :attribute, nothing)
@@ -382,29 +399,32 @@ function render(view, old_state, new_state)
   nonredundant_attribute_deletes = [i for i in 1:length(attribute_delete_childs) if !(attribute_delete_childs[i] in node_delete_childs)]
   attribute_delete_childs = attribute_delete_childs[nonredundant_attribute_deletes]
   attribute_delete_keys = attribute_delete_keys[nonredundant_attribute_deletes]
-  @show view.windows html_create_childs
-  for (_, window) in view.windows
+  @show view.clients html_create_childs
+  for (_, client) in view.clients
     # TODO handle sessions
     # TODO the implicit unchecked UInt64 -> JSFloat is probably going to be trouble sooner or later
-    @js_(window, render($node_delete_parents, $node_delete_ixes, $html_create_parents, $html_create_ixes, $html_create_childs, $html_create_tags, $text_create_parents, $text_create_ixes, $text_create_contents, $attribute_delete_childs, $attribute_delete_keys, $attribute_create_childs, $attribute_create_keys, $attribute_create_vals))
+    write(client, js"{\"render\": [$node_delete_parents, $node_delete_ixes, $html_create_parents, $html_create_ixes, $html_create_childs, $html_create_tags, $text_create_parents, $text_create_ixes, $text_create_contents, $attribute_delete_childs, $attribute_delete_keys, $attribute_create_childs, $attribute_create_keys, $attribute_create_vals]}")
   end
 end
 
-function window(view)
-  window = Window()
-  opentools(window)
-  load!(window, "src/Imp.js")
-  session = string(now()) # TODO uuid
-  @js_(window, session = $session)
-  sleep(3) # waiting for async load of Imp.js :(
-  handle(window, "event") do event
-    refresh(view, Symbol(event["table"]), tuple(event["values"]...))
+function serve(view)
+  handler = WebSocketHandler() do req,client
+    begin
+      session = string(now()) # TODO uuid
+      write(client, js"{\"session\": $session}")
+      view.clients[session] = client
+      refresh(view, :session, tuple(session))
+      while true
+        event = JSON.parse(String(read(client)))
+        refresh(view, Symbol(event["table"]), tuple(event["values"]...))
+      end
+    end
   end
-  refresh(view, :session, tuple(session))
-  view.windows[session] = window
-  window
+  server = Server(handler)
+  @async run(server,8080)
+  view.server = Nullable(server)
 end
 
-export View, set_template!, window
+export View, set_template!, serve
 
 end

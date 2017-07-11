@@ -289,6 +289,6 @@ begin
 end)
 end
 
-w = window(view)
+serve(view)
 
 end

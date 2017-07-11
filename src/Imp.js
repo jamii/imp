@@ -1,15 +1,33 @@
-document.body.innerHTML = ""; // get rid off the Blink.jl spinner
+ws = new WebSocket("ws://localhost:8080");
 
 function imp_event(table) {
     return function () {
         console.time("roundtrip");
-        Blink.msg("event", {"table": table, "values": Array.from(arguments)});
+        ws.send(JSON.stringify({"table": table, "values": Array.from(arguments)}));
         return false;
     }
 }
 
+ws.onerror = function (error) {
+    console.log(error);
+}
+
+ws.onmessage = function (event) {
+    msg = JSON.parse(event.data)
+    if (msg.session) {
+        window.session = msg.session;
+    }
+    if (msg.events) {
+        for (var i = 0; i < msg.events.length; i++) {
+            window[msg.events[i]] = imp_event(msg.events[i]);
+        }
+    }
+    if (msg.render) {
+        render.apply(this, msg.render);
+    }
+}
+
 function render(node_delete_parents, node_delete_ixes, html_create_parents, html_create_ixes, html_create_childs, html_create_tags, text_create_parents, text_create_ixes, text_create_contents, attribute_delete_childs, attribute_delete_keys, attribute_create_childs, attribute_create_keys, attribute_create_vals) {
-    console.log(arguments)
     console.time("render")
     try {
         for (i = 0; i < node_delete_parents.length; i++) {

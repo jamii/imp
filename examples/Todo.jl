@@ -6,15 +6,10 @@ using Flows
 using UI
 using Match
 
-world = World()
 view = View()
 
-for (k,v) in world.state
-  @show k v
-end
-
 begin 
-  set_flow!(world, Sequence([
+  set_flow!(view, Sequence([
     UI.pre 
     
     # shared state 
@@ -294,6 +289,6 @@ begin
 end)
 end
 
-w = window(world, view)
+w = window(view)
 
 end

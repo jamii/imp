@@ -38,7 +38,6 @@ type World
   transients::Set{Symbol}
   events::Set{Symbol}
   flow::Flow
-  watchers::Set{Any}
 end
 
 function output_names(create::Create)
@@ -172,16 +171,14 @@ macro clear(name)
 end
 
 function World()
-  World(Dict{Symbol, Relation}(), Set{Symbol}(),Set{Symbol}(), Sequence([]), Set{Any}())
+  World(Dict{Symbol, Relation}(), Set{Symbol}(),Set{Symbol}(), Sequence([]))
 end
 
 function refresh(world::World)
   old_state = copy(world.state)
   init_flow(world.flow, world)
   run_flow(world.flow, world)
-  for watcher in world.watchers
-    watcher(old_state, world.state)
-  end
+  (old_state, world.state)
 end
 
 function refresh(world::World, event_table::Symbol, event_row::Tuple)
@@ -190,9 +187,7 @@ function refresh(world::World, event_table::Symbol, event_row::Tuple)
   @show @time init_flow(world.flow, world)
   @show @time push!(world.state[event_table], event_row)
   run_flow(world.flow, world)
-  for watcher in world.watchers
-    watcher(old_state, world.state)
-  end
+  (old_state, world.state)
 end
 
 function Base.getindex(world::World, name::Symbol)
@@ -209,10 +204,6 @@ function set_flow!(world::World, flow::Flow)
   refresh(world)
 end
 
-function watch(watcher, world::World)
-  push!(world.watchers, watcher)
-end
-
-export Flow, Create, Merge, Sequence, Fixpoint, @stateful, @transient, @event, @merge, @clear, World, watch, set_flow!, refresh
+export Flow, Create, Merge, Sequence, Fixpoint, @stateful, @transient, @event, @merge, @clear, World, set_flow!, refresh
 
 end

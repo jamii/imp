@@ -254,48 +254,71 @@ end
 # --- plumbing ---
 
 type View
+  world::World
   template::Any
   parsed::Node
   compiled::Flow
   group_names::Vector{Symbol}
-  watchers::Set{Any}
+  windows::Dict{String, Window}
 end
 
 function View() 
   View(
-    nothing, 
+    World(),
+    quote [div] end, 
     FixedNode("body", :html, [FixedNode("loading...", :text, Node[])]), 
     Sequence(Flow[]), 
-    Symbol[], 
-    Set{Any}()
+    Symbol[],
+    Dict{String, Window}()
   )
 end
 
-function set_template!(view::View, template)
+function set_template!(view::View, template::ANY)
   view.template = template
   view.parsed = parse_template(template)
   (view.compiled, view.group_names) = compile_template(view.parsed)
-  for watcher in view.watchers
-    watcher()
-  end
+  refresh(view)
 end
 
-function Flows.watch(watcher, view::View)
-  push!(view.watchers, watcher)
+function Flows.set_flow!(view::View, flow::Flow)
+  set_flow!(view.world, flow)
+  set_template!(view, view.template) # need to recompile template in case the types have changed
+  refresh(view)
+end
+
+pre = Sequence([
+  @stateful session(String)
+])
+
+function Flows.refresh(view::View)
+  Flows.init_flow(pre, view.world)
+  (old_state, _) = refresh(view.world)
+  @show @time Flows.init_flow(view.compiled, view.world)
+  @show @time Flows.run_flow(view.compiled, view.world)
+  render(view, old_state, view.world.state)
+  (old_state, view.world.state)
+end
+
+function Flows.refresh(view::View, event_table::Symbol, event_row::Tuple)
+  Flows.init_flow(pre, view.world)
+  (old_state, _) = refresh(view.world, event_table, event_row)
+  @show @time Flows.init_flow(view.compiled, view.world)
+  @show @time Flows.run_flow(view.compiled, view.world)
+  render(view, old_state, view.world.state)
+  (old_state, view.world.state)
 end
 
 # TODO figure out how to handle changes in template
-# TODO handle sessions
-function render(window, view, world, session)
-  for event in world.events
-    js(window, Blink.JSString("$event = imp_event(\"$event\")"), callback=false) # these never return! :(
+function render(view, old_state, new_state)
+  for (_, window) in view.windows
+    for event in view.world.events
+      js(window, Blink.JSString("$event = imp_event(\"$event\")"), callback=false) # these never return! :(
+    end
   end
-  old_groups = Dict{Symbol, Union{Relation, Void}}(name => get(world.state, name, nothing) for name in view.group_names)
-  old_attributes = get(world.state, :attribute, nothing)
-  @show @time Flows.init_flow(view.compiled, world)
-  @show @time Flows.run_flow(view.compiled, world)
-  new_groups = Dict{Symbol, Relation}(name => world.state[name] for name in view.group_names)
-  new_attributes = world.state[:attribute]
+  old_groups = Dict{Symbol, Union{Relation, Void}}(name => get(old_state, name, nothing) for name in view.group_names)
+  old_attributes = get(old_state, :attribute, nothing)
+  new_groups = Dict{Symbol, Relation}(name => new_state[name] for name in view.group_names)
+  new_attributes = new_state[:attribute]
   for name in view.group_names
     if old_groups[name] == nothing
       old_groups[name] = empty(new_groups[name])
@@ -359,45 +382,29 @@ function render(window, view, world, session)
   nonredundant_attribute_deletes = [i for i in 1:length(attribute_delete_childs) if !(attribute_delete_childs[i] in node_delete_childs)]
   attribute_delete_childs = attribute_delete_childs[nonredundant_attribute_deletes]
   attribute_delete_keys = attribute_delete_keys[nonredundant_attribute_deletes]
-  # TODO the implicit unchecked UInt64 -> JSFloat is probably going to be trouble sooner or later
-  @js_(window, render($node_delete_parents, $node_delete_ixes, $html_create_parents, $html_create_ixes, $html_create_childs, $html_create_tags, $text_create_parents, $text_create_ixes, $text_create_contents, $attribute_delete_childs, $attribute_delete_keys, $attribute_create_childs, $attribute_create_keys, $attribute_create_vals))
-end
-
-function watch_and_load(window, file)
-  load!(window, file)
-  @schedule begin
-    (waits, _) = open(`inotifywait -me CLOSE_WRITE $file`)
-    while true
-      readline(waits)
-      load!(window, file)
-    end
+  @show view.windows html_create_childs
+  for (_, window) in view.windows
+    # TODO handle sessions
+    # TODO the implicit unchecked UInt64 -> JSFloat is probably going to be trouble sooner or later
+    @js_(window, render($node_delete_parents, $node_delete_ixes, $html_create_parents, $html_create_ixes, $html_create_childs, $html_create_tags, $text_create_parents, $text_create_ixes, $text_create_contents, $attribute_delete_childs, $attribute_delete_keys, $attribute_create_childs, $attribute_create_keys, $attribute_create_vals))
   end
 end
 
-pre = Sequence([
-  @stateful session(String)
-])
-
-function window(world, view)
+function window(view)
   window = Window()
-  session = string(now()) # TODO uuid
   opentools(window)
   load!(window, "src/Imp.js")
+  session = string(now()) # TODO uuid
   @js_(window, session = $session)
-  sleep(3) # :(
+  sleep(3) # waiting for async load of Imp.js :(
   handle(window, "event") do event
-    refresh(world, Symbol(event["table"]), tuple(event["values"]...))
+    refresh(view, Symbol(event["table"]), tuple(event["values"]...))
   end
-  watch(world) do old_state, new_state
-    @show @time render(window, view, world, session)
-  end
-  watch(view) do
-    @show @time render(window, view, world, session)
-  end
-  refresh(world, :session, tuple(session))
+  refresh(view, :session, tuple(session))
+  view.windows[session] = window
   window
 end
 
-export View, set_template!, window, watch
+export View, set_template!, window
 
 end

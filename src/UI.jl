@@ -150,43 +150,50 @@ function compile_server_tree(node::QueryNode, parent_id, parent_vars, fixed_pare
   end
 end
 
-function collect_sort_key(node::AttributeNode, parent_vars, key, keyed_children)
+function collect_sort_key(node::AttributeNode, parent_vars, state, key, keyed_children)
   # nothing to do here
 end
 
-function collect_sort_key(node::FixedNode, parent_vars, key, keyed_children)
-  push!(keyed_children, (copy(key), parent_vars, node))
+function collect_sort_key(node::FixedNode, parent_vars, state, key, keyed_children)
+  push!(keyed_children, (copy(key), copy(parent_vars), node))
 end
 
-function collect_sort_key(node::QueryNode, parent_vars, key, keyed_children)
-  node_real_vars = filter((var) -> var != :(_), node.vars)
-  vars = unique(vcat(parent_vars, node_real_vars))
-  new_vars = vars[(1+length(parent_vars)):end]
+function collect_sort_key(node::QueryNode, parent_vars, state, key, keyed_children)
+  vars = copy(parent_vars)
   start_ix = length(key) + 1
-  append!(key, new_vars) 
+  for (ix, var) in enumerate(node.vars)
+    if (var != :(_)) 
+      typ = eltype(state[node.table].columns[ix])
+      typed_var = (var, typ)
+      if !(typed_var in parent_vars)
+        push!(vars, (var, typ))
+        push!(key, (var, typ))
+      end
+    end
+  end
   end_ix = length(key)
-  collect_sort_key(node.children, vars, key, keyed_children)
+  collect_sort_key(node.children, vars, state, key, keyed_children)
   for ix in start_ix:end_ix
-    key[ix] = nothing
+    key[ix] = (nothing, key[ix][2])
   end
 end
 
-function collect_sort_key(nodes::Vector{Node}, parent_vars, key, keyed_children)
+function collect_sort_key(nodes::Vector{Node}, parent_vars, state, key, keyed_children)
   push!(key, 0)
   ix = length(key)
   for node in nodes
     if typeof(node) in [FixedNode, QueryNode] 
       key[ix] += 1
-      collect_sort_key(node, parent_vars, key, keyed_children)
+      collect_sort_key(node, parent_vars, state, key, keyed_children)
     end
   end
   key[ix] = 0
 end
 
-function collect_sort_key(node::FixedNode, parent_vars)
-  key = Vector{Any}(parent_vars)
+function collect_sort_key(node::FixedNode, parent_vars, state)
+  key = copy(parent_vars)
   keyed_children = Any[]
-  collect_sort_key(node.children, parent_vars, key, keyed_children)
+  collect_sort_key(node.children, parent_vars, state, key, keyed_children)
   # tidy up ragged ends of keys
   for (child_key, vars, child) in keyed_children
     append!(child_key, key[(length(child_key)+1):end])
@@ -202,8 +209,8 @@ end
 function key_expr(elem) 
   @match elem begin
     _::Integer => elem
-    _::Symbol => :(Nullable($elem))
-    _::Void => :(Nullable())
+    (_::Symbol, _::Type) => :(Nullable{$(elem[2])}($(elem[1])))
+    (_::Void, _::Type) => :(Nullable{$(elem[2])}())
     _ => error("What are this: $elem")
   end
 end
@@ -211,14 +218,14 @@ end
 function key_type(elem)
   @match elem begin
     _::Integer => Int64
-    _::Symbol => Nullable{Any} # TODO figure out correct types somehow
-    _::Void => Nullable{Any}
+    (var::Symbol, typ::Type) => Nullable{typ}
+    (_::Void, typ::Type) => Nullable{typ}
     _ => error("What are this: $elem")
   end
 end
 
-function compile_client_tree(node::FixedNode, parent_vars, flows, group_ids)
-  keyed_children = collect_sort_key(node, parent_vars)
+function compile_client_tree(node::FixedNode, parent_vars, state, flows, group_ids)
+  keyed_children = collect_sort_key(node, parent_vars, state)
   group_id = Symbol("group_$(hash(node))")
   parent_node_id = Symbol("node_$(hash(node))")
   if !isempty(keyed_children)
@@ -230,22 +237,22 @@ function compile_client_tree(node::FixedNode, parent_vars, flows, group_ids)
     key_types = map(key_type, key)
     transient_flow = @eval @transient $group_id($(key_types...)) => (UInt64, UInt64, Symbol, String)
     merge_flow = @eval @merge begin
-      $parent_node_id($(parent_vars...)) => parent_id
-      $child_node_id($(child_vars...)) => child_id
+      $parent_node_id($(map(first, parent_vars)...)) => parent_id
+      $child_node_id($(map(first, child_vars)...)) => child_id
       return $group_id($(key_exprs...)) => (parent_id, child_id, $(Expr(:quote, child.kind)), $(value_expr(child.tag)))
     end
     push!(flows, transient_flow, merge_flow)
   end
   for (_, child_vars, child) in keyed_children
-    compile_client_tree(child, child_vars, flows, group_ids)
+    compile_client_tree(child, child_vars, state, flows, group_ids)
   end
 end
 
-function compile_template(node)
+function compile_template(node, state)
   flows = Flow[@transient attribute(id::UInt64, key::String) => value::String]
   group_ids = Symbol[]
   compile_server_tree(node, nothing, [:session], nothing, [:session], flows)
-  compile_client_tree(node, [:session], flows, group_ids)
+  compile_client_tree(node, Any[(:session, String)], state, flows, group_ids)
   (Sequence(flows), group_ids)
 end
 
@@ -287,7 +294,7 @@ end
 function set_template!(view::View, template::ANY)
   view.template = template
   view.parsed = parse_template(template)
-  (view.compiled, view.group_names) = compile_template(view.parsed)
+  (view.compiled, view.group_names) = compile_template(view.parsed, view.world.state)
   refresh(view)
 end
 
@@ -399,7 +406,6 @@ function render(view, old_state, new_state)
   nonredundant_attribute_deletes = [i for i in 1:length(attribute_delete_childs) if !(attribute_delete_childs[i] in node_delete_childs)]
   attribute_delete_childs = attribute_delete_childs[nonredundant_attribute_deletes]
   attribute_delete_keys = attribute_delete_keys[nonredundant_attribute_deletes]
-  @show view.clients html_create_childs
   for (_, client) in view.clients
     # TODO handle sessions
     # TODO the implicit unchecked UInt64 -> JSFloat is probably going to be trouble sooner or later

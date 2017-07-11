@@ -415,7 +415,7 @@ function plan_query(clauses, vars, created_vars, input_names, return_clauses, ou
           $body 
         end
       end
-      tuple($(results...))
+      Relation[$(results...)]
     end
   end
 end

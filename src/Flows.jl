@@ -10,8 +10,14 @@ type Create <: Flow
   output_name::Symbol
   keys::Vector{Type}
   vals::Vector{Type}
+  empty::Relation
   is_transient::Bool
   is_event::Bool
+end
+
+function Create(output_name, keys, vals, is_transient, is_event)
+  empty = Relation(tuple((Data.column_type(typ)() for typ in [keys..., vals...])...), length(keys))
+  Create(output_name, keys, vals, empty, is_transient, is_event)
 end
 
 type Merge <: Flow
@@ -21,16 +27,17 @@ type Merge <: Flow
   eval::Function
 end
 
-type Clear <: Flow
-  output_name::Symbol
-end
-
 type Sequence <: Flow
   flows::Vector{Flow}
 end
 
 type Fixpoint <: Flow
   flow::Flow
+  output_names::Vector{Symbol}
+end
+
+function Fixpoint(flow::Flow)
+  Fixpoint(flow, collect(output_names(flow)))
 end
 
 type World
@@ -47,10 +54,6 @@ function output_names(merge::Merge)
   Set(merge.output_names)
 end
 
-function output_names(clear::Clear)
-  Set([clear.output_name])
-end
-
 function output_names(sequence::Sequence)
   union(map(output_names, sequence.flows)...)
 end
@@ -63,57 +66,47 @@ function init_flow(_, world::World)
   # do nothing by default
 end
 
-function init_flow(create::Create, world::World)
-  if create.is_transient || !haskey(world.state, create.output_name) 
-    output = Relation(tuple((Data.column_type(typ)() for typ in [create.keys..., create.vals...])...), length(create.keys))
-    world.state[create.output_name] = output
+function init_flow(flow::Create, world::World)
+  if flow.is_transient || !haskey(world.state, flow.output_name) 
+    world.state[flow.output_name] = copy(flow.empty)
   end
-  if create.is_event
-    push!(world.events, create.output_name)
-  end
-end
-
-function init_flow(sequence::Sequence, world::World)
-  for flow in sequence.flows
-    init_flow(flow, world)
+  if flow.is_event
+    push!(world.events, flow.output_name)
   end
 end
 
-function init_flow(fixpoint::Fixpoint, world::World)
-  for flow in sequence.flows
-    init_flow(flow, world)
+function init_flow(flow::Sequence, world::World)
+  for child in flow.flows
+    init_flow(child, world)
   end
+end
+
+function init_flow(flow::Fixpoint, world::World)
+  init_flow(flow.flow, world)
 end
 
 function run_flow(_, world::World)
   # do nothing by default
 end
 
-function run_flow(merge::Merge, world::World)
-  outputs = merge.eval(map((name) -> world.state[name], merge.input_names)...)
-  for (output_name, output) in zip(merge.output_names, outputs)
+function run_flow(flow::Merge, world::World)
+  outputs::Vector{Relation} = flow.eval(map((name) -> world.state[name], flow.input_names)...)
+  for (output_name, output) in zip(flow.output_names, outputs)
     world.state[output_name] = Base.merge(world.state[output_name], output)
   end
 end
 
-function run_flow(clear::Clear, world::World)
-  input = world.state[clear.output_name]
-  output = Relation(tuple((Vector{eltype(c)}() for c in input.columns)...), input.num_keys)
-  world.state[clear.output_name] = output
-end
-
-function run_flow(sequence::Sequence, world::World)
-  for flow in sequence.flows
-    run_flow(flow, world)
+function run_flow(flow::Sequence, world::World)
+  for child in flow.flows
+    run_flow(child, world)
   end
 end
 
-function run_flow(fixpoint::Fixpoint, world::World)
-  names = collect(output_names(fixpoint.flow))
+function run_flow(flow::Fixpoint, world::World)
   while true
-    old_values = map((name) -> world.state[name].columns, names)
-    run_flow(fixpoint.flow, world)
-    new_values = map((name) -> world.state[name].columns, names)
+    old_values = map((name) -> world.state[name].columns, flow.output_names)
+    run_flow(flow.flow, world)
+    new_values = map((name) -> world.state[name].columns, flow.output_names)
     if old_values == new_values
       return
     end
@@ -162,10 +155,6 @@ macro merge(query)
   :(Merge($([return_clause.name for return_clause in return_clauses]), $(collect(input_names)), $(Expr(:quote, query)), $(Expr(:->, Expr(:tuple, input_names...), code))))
 end
 
-macro clear(name)
-  :(Clear($(Expr(:quote, name))))
-end
-
 function World()
   World(Dict{Symbol, Relation}(), Set{Symbol}(), Sequence([]))
 end
@@ -182,7 +171,7 @@ function refresh(world::World, event_table::Symbol, event_row::Tuple)
   old_state = copy(world.state)
   @show @time init_flow(world.flow, world)
   @show @time push!(world.state[event_table], event_row)
-  run_flow(world.flow, world)
+  @show @time run_flow(world.flow, world)
   (old_state, world.state)
 end
 
@@ -200,6 +189,6 @@ function set_flow!(world::World, flow::Flow)
   refresh(world)
 end
 
-export Flow, Create, Merge, Sequence, Fixpoint, @stateful, @transient, @event, @merge, @clear, World, set_flow!, refresh
+export Flow, Create, Merge, Sequence, Fixpoint, @stateful, @transient, @event, @merge, World, set_flow!, refresh
 
 end

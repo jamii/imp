@@ -266,6 +266,10 @@ function empty(relation::Relation)
   Relation(map((c) -> empty(c), relation.columns), relation.num_keys)
 end
 
+function Base.copy(relation::Relation)
+  Relation(relation.columns, relation.num_keys, copy(relation.indexes))
+end
+
 export Relation, @relation, index, parse_relation, empty, diff
 
 function test()

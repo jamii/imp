@@ -149,7 +149,7 @@ function compile_server_tree(node::QueryNode, parent_id, parent_vars, fixed_pare
   end_ix = length(vars)
   transient_flow = @eval @transient $id($([typ for (_, typ) in vars]...)) => UInt64
   child_id = :(hash(parent_id, $(hash(node))))
-  for var in vars[start_ix:end_ix]
+  for (var, _) in vars[start_ix:end_ix]
     child_id = :(hash($var, $child_id))
   end
   merge_flow = @eval @merge begin

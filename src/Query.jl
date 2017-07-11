@@ -4,7 +4,7 @@ using Data
 using Match
 
 # gallop cribbed from http://www.frankmcsherry.org/dataflow/relational/join/2015/04/11/genericjoin.html
-function gallop{T}(column::Vector{T}, value::T, lo::Int, hi::Int, threshold) 
+function gallop{T}(column::AbstractArray{T}, value::T, lo::Int, hi::Int, threshold) 
   c = -1
   @inbounds if (lo < hi) && (c2 = cmp(column[lo], value); c *= c2; c2 < threshold)
     step = 1
@@ -321,7 +321,7 @@ function plan_query(clauses, vars, created_vars, input_names, return_clauses, ou
   results_inits = []
   for (clause_ix, return_clause) in enumerate(return_clauses)
     for (var_ix, typ) in enumerate(return_clause.typs)
-      results_init = :(local $(Symbol("results_$(clause_ix)_$(var_ix)")) = Vector{$(esc(typ))}())
+      results_init = :(local $(Symbol("results_$(clause_ix)_$(var_ix)")) = Data.column_type(Val{$(esc(typ))})())
       push!(results_inits, results_init)
     end
   end

@@ -1,6 +1,7 @@
 module Data
 
 using Match
+using NullableArrays
 using Base.Test
 using BenchmarkTools
 
@@ -100,7 +101,7 @@ end
 
 function index{T}(relation::Relation{T}, order::Vector{Int})
   get!(relation.indexes, order) do
-    columns = tuple(((ix in order) ? copy(column) : Vector{eltype(column)}() for (ix, column) in enumerate(relation.columns))...)
+    columns = tuple(((ix in order) ? copy(column) : empty(column) for (ix, column) in enumerate(relation.columns))...)
     quicksort!(tuple((columns[ix] for ix in order)...))
     columns
   end::T
@@ -118,7 +119,7 @@ function dedup_sorted!{T}(columns::T, key, val, deduped::T)
 end
 
 function Relation(columns, num_keys::Int)
-  deduped::typeof(columns) = map((column) -> Vector{eltype(column)}(), columns)
+  deduped::typeof(columns) = map((column) -> empty(column), columns)
   quicksort!(columns)
   key = columns[1:num_keys]
   val = columns[num_keys+1:1]
@@ -144,6 +145,15 @@ function parse_relation(expr)
   (name, keys, vals)
 end
 
+function column_type{T}(_::Type{Val{T}})
+  Vector{T}
+end
+
+# TODO not useful until stack allocation of immutables is improved
+# function column_type{T}(_::Type{Val{Nullable{T}}})
+#   NullableVector{T}
+# end
+
 # examples:
 # @relation (Int, Float64)
 # @relation (Int,) => Int
@@ -155,7 +165,7 @@ macro relation(expr)
   typs = [keys..., vals...]
   order = collect(1:length(typs))
   body = quote 
-    columns = tuple($([:(Vector{$(esc(typ))}()) for typ in typs]...))
+    columns = tuple($([:(column_type(Val{$(esc(typ))})()) for typ in typs]...))
     Relation(columns, $(length(keys)))
   end
   if name != ()
@@ -201,8 +211,8 @@ function diff{T}(old::Relation{T}, new::Relation{T})
   order = collect(1:length(old.columns))
   old_index = index(old, order)
   new_index = index(new, order)
-  old_only_columns = tuple([Vector{eltype(column)}() for column in old.columns]...)
-  new_only_columns = tuple([Vector{eltype(column)}() for column in new.columns]...)
+  old_only_columns = tuple([empty(column) for column in old.columns]...)
+  new_only_columns = tuple([empty(column) for column in new.columns]...)
   foreach_diff(old_index, new_index, old_index[1:length(old.columns)], new_index[1:length(new.columns)], 
     (o, i) -> push_in!(old_only_columns, o, i),
     (n, i) -> push_in!(new_only_columns, n, i),
@@ -217,7 +227,7 @@ function Base.merge{T}(old::Relation{T}, new::Relation{T})
   order = collect(1:length(old.columns))
   old_index = old.indexes[order]
   new_index = new.indexes[order]
-  result_columns::T = tuple((Vector{eltype(column)}() for column in old.columns)...)
+  result_columns::T = tuple((empty(column) for column in old.columns)...)
   foreach_diff(old_index, new_index, old_index[1:old.num_keys], new_index[1:new.num_keys], 
     (o, i) -> push_in!(result_columns, o, i),
     (n, i) -> push_in!(result_columns, n, i),
@@ -248,8 +258,12 @@ end
   relation.columns[ix]
 end
 
+function empty(coll)
+  typeof(coll)()
+end
+
 function empty(relation::Relation) 
-  Relation(map((c) -> Vector{eltype(c)}(), relation.columns), relation.num_keys)
+  Relation(map((c) -> empty(c), relation.columns), relation.num_keys)
 end
 
 export Relation, @relation, index, parse_relation, empty, diff
@@ -284,7 +298,7 @@ function test()
     a = Relation((x1,y), 1)
     b = Relation((x2,z), 1)
     c = merge(a,b)
-    @test length(c) == length(x1) + length(x2)
+    @test length(c.columns[1]) == length(x1) + length(x2)
   end
   
   @test Base.return_types(Relation, (Tuple{Vector{Int}, Vector{String}}, Int)) == [Relation{Tuple{Vector{Int}, Vector{String}}}]

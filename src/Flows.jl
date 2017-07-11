@@ -66,7 +66,7 @@ end
 
 function init_flow(create::Create, world::World)
   if create.is_transient || !haskey(world.state, create.output_name) 
-    output = Relation(tuple((Vector{typ}() for typ in [create.keys..., create.vals...])...), length(create.keys))
+    output = Relation(tuple((Data.column_type(Val{typ})() for typ in [create.keys..., create.vals...])...), length(create.keys))
     world.state[create.output_name] = output
   end
   if create.is_transient 

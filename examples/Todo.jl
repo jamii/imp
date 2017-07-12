@@ -289,6 +289,4 @@ begin
 end)
 end
 
-serve(view)
-
 end

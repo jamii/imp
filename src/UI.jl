@@ -286,12 +286,16 @@ type View
 end
 
 function Base.close(view::View)
-  if !isnull(view.server)
+  if !isnull(view.server) && isopen(get(view.server))
     close(get(view.server))
   end
   for (_, client) in view.clients
-    close(client)
+    if isopen(get(view.server))
+      close(client)
+    end
   end
+  view.server = Nullable{Server}()
+  view.clients = Dict{String, WebSocket}()
 end
 
 function View() 
@@ -443,6 +447,7 @@ function serve(view)
   server = Server(handler)
   @async run(server,8080)
   view.server = Nullable(server)
+  server
 end
 
 export View, set_template!, serve

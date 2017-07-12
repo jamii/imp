@@ -1,16 +1,10 @@
 include("src/Data.jl")
-Data.test()
-include("examples/JobData.jl")
-
 include("src/Query.jl")
-include("examples/Graph.jl")
-Graph.test()
-include("examples/Chinook.jl")
-Chinook.test()
-include("examples/Job.jl")
-Job.test()
-
-Job.bench()
-
-# include("src/UI.jl")
-# include("examples/Minesweeper.jl")
+include("src/Flows.jl")
+include("src/UI.jl")
+if isdefined(:Todo)
+  close(Todo.view)
+end
+include("examples/Todo.jl")
+close(Todo.view)
+UI.serve(Todo.view)

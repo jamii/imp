@@ -220,6 +220,20 @@ function diff{T}(old::Relation{T}, new::Relation{T})
   (old_only_columns, new_only_columns)
 end
 
+function diff_ixes{T}(old::Relation{T}, new::Relation{T})::Tuple{Vector{Int64}, Vector{Int64}}
+  @assert old.num_keys == new.num_keys 
+  order = collect(1:length(old.columns))
+  old_index = index(old, order)
+  new_index = index(new, order)
+  old_only_ixes = Vector{Int64}()
+  new_only_ixes = Vector{Int64}()
+  foreach_diff(old_index, new_index, old_index[1:length(old.columns)], new_index[1:length(new.columns)], 
+    (o, i) -> push!(old_only_ixes, i),
+    (n, i) -> push!(new_only_ixes, i),
+    (o, n, oi, ni) -> ())
+  (old_only_ixes, new_only_ixes)
+end
+
 function Base.merge{T}(old::Relation{T}, new::Relation{T})
   if old.num_keys != new.num_keys 
     error("Mismatch in num_keys - $(old.num_keys) vs $(new.num_keys) in merge($old, $new)")

@@ -330,7 +330,7 @@ function Flows.refresh(view::View)
   (old_state, _) = refresh(view.world)
   @show @time Flows.init_flow(view.compiled, view.world)
   @show @time Flows.run_flow(view.compiled, view.world)
-  render(view, old_state, view.world.state)
+  @show @time render(view, old_state, view.world.state)
   (old_state, view.world.state)
 end
 
@@ -339,7 +339,7 @@ function Flows.refresh(view::View, event_table::Symbol, event_row::Tuple)
   (old_state, _) = refresh(view.world, event_table, event_row)
   @show @time Flows.init_flow(view.compiled, view.world)
   @show @time Flows.run_flow(view.compiled, view.world)
-  render(view, old_state, view.world.state)
+  @show @time render(view, old_state, view.world.state)
   (old_state, view.world.state)
 end
 
@@ -356,18 +356,10 @@ function render(view, old_state, new_state)
   for (_, client) in view.clients
     write(client, js"{\"events\": $(view.world.events)}")
   end
-  old_groups = Dict{Symbol, Union{Relation, Void}}(name => get(old_state, name, nothing) for name in view.group_names)
-  old_attributes = get(old_state, :attribute, nothing)
+  old_groups = Dict{Symbol, Relation}(name => get(() -> empty(new_state[name]), old_state, name) for name in view.group_names)
+  old_attributes::Relation{Tuple{Vector{UInt64}, Vector{String}, Vector{String}}} = get(() -> empty(new_state[:attribute]), old_state, :attribute)
   new_groups = Dict{Symbol, Relation}(name => new_state[name] for name in view.group_names)
-  new_attributes = new_state[:attribute]
-  for name in view.group_names
-    if old_groups[name] == nothing
-      old_groups[name] = empty(new_groups[name])
-    end
-  end
-  if old_attributes == nothing
-    old_attributes = empty(new_attributes)
-  end
+  new_attributes::Relation{Tuple{Vector{UInt64}, Vector{String}, Vector{String}}} = new_state[:attribute]
   node_delete_parents = Vector{UInt64}()
   node_delete_childs = Set{UInt64}()
   node_delete_ixes = Vector{Int64}()
@@ -379,54 +371,59 @@ function render(view, old_state, new_state)
   text_create_ixes = Vector{Int64}()
   text_create_contents = Vector{String}()
   for name in view.group_names
+    (olds, news) = Data.diff_ixes(old_groups[name], new_groups[name])
     old_columns = old_groups[name].columns
-    old_parent_ids = old_columns[end-3]
-    old_child_ids = old_columns[end-2]
     new_columns = new_groups[name].columns
-    new_parent_ids = new_columns[end-3]
-    new_child_ids = new_columns[end-2]
-    new_kinds = new_columns[end-1]
-    new_contents = new_columns[end-0]
-    Data.foreach_diff(old_columns, new_columns, old_columns[1:end-4], new_columns[1:end-4],
-      (o, i) -> begin
-        push!(node_delete_childs, old_child_ids[i])
-        if !(old_parent_ids[i] in node_delete_childs)
-          parent = old_parent_ids[i]
-          prev_i = findprev((prev_parent) -> prev_parent != parent, old_parent_ids, i-1)
-          ix = i - prev_i - 1 # 0-indexed
-          push!(node_delete_parents, parent)
-          push!(node_delete_ixes, ix)
-        end
-      end,
-      (n, i) -> begin
-        parent = new_parent_ids[i]
-        prev_i = findprev((prev_parent) -> prev_parent != parent, new_parent_ids, i-1)
-        ix = i - prev_i - 1 # 0-indexed
-        if new_kinds[i] == :html
-          push!(html_create_parents, parent)
-          push!(html_create_ixes, ix)
-          push!(html_create_childs, new_child_ids[i])
-          push!(html_create_tags, new_contents[i])
-        else
-          push!(text_create_parents, parent)
-          push!(text_create_ixes, ix)
-          push!(text_create_contents, new_contents[i])
-        end
-      end,
-      (o, n, oi, ni) -> ()
-    )
+    old_parent_ids::Vector{UInt64} = old_columns[end-3]
+    old_child_ids::Vector{UInt64} = old_columns[end-2]
+    new_parent_ids::Vector{UInt64} = new_columns[end-3]
+    new_child_ids::Vector{UInt64} = new_columns[end-2]
+    new_kinds::Vector{Symbol} = new_columns[end-1]
+    new_contents::Vector{String} = new_columns[end-0]
+    for i in olds
+      push!(node_delete_childs, old_child_ids[i])
+      if !(old_parent_ids[i] in node_delete_childs)
+        parent = old_parent_ids[i]
+        (next_i, _) = gallop(old_parent_ids, parent, i, length(old_parent_ids)+1, 1)
+        ix = next_i - i
+        push!(node_delete_parents, parent)
+        push!(node_delete_ixes, ix)
+      end
+    end
+    for i in reverse(news) # go backwards so that ixes are correct by the time they are reached
+      parent = new_parent_ids[i]
+      (next_i, _) = gallop(new_parent_ids, parent, i, length(new_parent_ids)+1, 1)
+      ix = next_i - i - 1 
+      if new_kinds[i] == :html
+        push!(html_create_parents, parent)
+        push!(html_create_ixes, ix)
+        push!(html_create_childs, new_child_ids[i])
+        push!(html_create_tags, new_contents[i])
+      else
+        push!(text_create_parents, parent)
+        push!(text_create_ixes, ix)
+        push!(text_create_contents, new_contents[i])
+      end
+    end
   end
-  # deletions have to be handled in reverse order to make sure the ixes are correct
-  reverse!(node_delete_parents)
-  reverse!(node_delete_ixes)
-  ((attribute_delete_childs, attribute_delete_keys, _), (attribute_create_childs, attribute_create_keys, attribute_create_vals)) = Data.diff(old_attributes, new_attributes)
-  nonredundant_attribute_deletes = [i for i in 1:length(attribute_delete_childs) if !(attribute_delete_childs[i] in node_delete_childs)]
-  attribute_delete_childs = attribute_delete_childs[nonredundant_attribute_deletes]
-  attribute_delete_keys = attribute_delete_keys[nonredundant_attribute_deletes]
+  (olds, news) = Data.diff_ixes(old_attributes, new_attributes)
+  attribute_delete_childs = old_attributes.columns[1][olds]
+  attribute_delete_keys = old_attributes.columns[2][olds]
+  attribute_create_childs = new_attributes.columns[1][news]
+  attribute_create_keys = new_attributes.columns[2][news]
+  attribute_create_vals = new_attributes.columns[3][news]
+  nonredundant_attribute_delete_childs = empty(attribute_delete_childs)
+  nonredundant_attribute_delete_keys = empty(attribute_delete_keys)
+  for (i, child) in enumerate(attribute_delete_childs)
+    if !(child in node_delete_childs)
+      push!(nonredundant_attribute_delete_childs, child)
+      push!(nonredundant_attribute_delete_keys, attribute_delete_keys[i])
+    end
+  end
   for (_, client) in view.clients
     # TODO handle sessions
     # TODO the implicit unchecked UInt64 -> JSFloat is probably going to be trouble sooner or later
-    write(client, js"{\"render\": [$node_delete_parents, $node_delete_ixes, $html_create_parents, $html_create_ixes, $html_create_childs, $html_create_tags, $text_create_parents, $text_create_ixes, $text_create_contents, $attribute_delete_childs, $attribute_delete_keys, $attribute_create_childs, $attribute_create_keys, $attribute_create_vals]}")
+    write(client, js"{\"render\": [$node_delete_parents, $node_delete_ixes, $html_create_parents, $html_create_ixes, $html_create_childs, $html_create_tags, $text_create_parents, $text_create_ixes, $text_create_contents, $nonredundant_attribute_delete_childs, $nonredundant_attribute_delete_keys, $attribute_create_childs, $attribute_create_keys, $attribute_create_vals]}")
   end
 end
 

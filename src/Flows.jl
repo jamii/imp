@@ -4,9 +4,9 @@ using Data
 using Query
 using Match
 
-abstract Flow
+abstract type Flow end
 
-type Create <: Flow
+struct Create <: Flow
   output_name::Symbol
   keys::Vector{Type}
   vals::Vector{Type}
@@ -20,18 +20,18 @@ function Create(output_name, keys, vals, is_transient, is_event)
   Create(output_name, keys, vals, empty, is_transient, is_event)
 end
 
-type Merge <: Flow
+struct Merge <: Flow
   output_names::Vector{Symbol}
   input_names::Vector{Symbol}
   meta::Any
   eval::Function
 end
 
-type Sequence <: Flow
+struct Sequence <: Flow
   flows::Vector{Flow}
 end
 
-type Fixpoint <: Flow
+struct Fixpoint <: Flow
   flow::Flow
   output_names::Vector{Symbol}
 end
@@ -40,7 +40,7 @@ function Fixpoint(flow::Flow)
   Fixpoint(flow, collect(output_names(flow)))
 end
 
-type World
+mutable struct World
   state::Dict{Symbol, Relation}
   events::Set{Symbol}
   flow::Flow
@@ -90,7 +90,7 @@ function run_flow(_, world::World)
 end
 
 function run_flow(flow::Merge, world::World)
-  outputs::Vector{Relation} = flow.eval(map((name) -> world.state[name], flow.input_names)...)
+  outputs::Vector{Relation} = Base.invokelatest(flow.eval, map((name) -> world.state[name], flow.input_names)...)
   for (output_name, output) in zip(flow.output_names, outputs)
     world.state[output_name] = Base.merge(world.state[output_name], output)
   end

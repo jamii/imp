@@ -10,7 +10,7 @@ using JSON
 
 # --- ast ---
 
-immutable StringExpr
+struct StringExpr
   values::Vector{Union{String, Symbol}}
 end
 
@@ -18,18 +18,18 @@ typealias Value Union{StringExpr, String, Symbol}
 
 abstract Node
 
-immutable AttributeNode <: Node
+struct AttributeNode <: Node
   key::Value
   val::Value
 end
 
-immutable FixedNode <: Node
+struct FixedNode <: Node
   tag::Value
   kind::Symbol # :text or :html
   children::Vector{Node}
 end
 
-immutable QueryNode <: Node
+struct QueryNode <: Node
   table::Symbol
   vars::Vector{Symbol}
   children::Vector{Node}
@@ -275,7 +275,7 @@ end
 
 # --- plumbing ---
 
-type View
+mutable struct View
   world::World
   template::Any
   parsed::Node
@@ -286,7 +286,7 @@ type View
 end
 
 function Base.close(view::View)
-  if !isnull(view.server) && isopen(get(view.server))
+  if !isnull(view.server) && isopen(get(view.server).http.sock) # TODO https://github.com/JuliaWeb/HttpServer.jl/pull/119
     close(get(view.server))
   end
   for (_, client) in view.clients

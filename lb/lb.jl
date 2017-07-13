@@ -4,31 +4,31 @@ using Match
 
 # --- ast ---
   
-immutable Var 
+struct Var 
   name::Symbol
   typ::Symbol
 end
 
 typealias Value Union{String, Symbol}
 
-immutable Attribute
+struct Attribute
   key::Value
   val::Value
 end
 
 abstract Node
 
-immutable TextNode <: Node
+struct TextNode <: Node
   text::Value
 end
 
-immutable FixedNode <: Node
+struct FixedNode <: Node
   tag::Symbol
   attributes::Vector{Attribute}
   children::Vector{Node}
 end
 
-immutable QueryNode <: Node
+struct QueryNode <: Node
   children::Vector{Node}
   table::Symbol
   vars::Vector{Var}

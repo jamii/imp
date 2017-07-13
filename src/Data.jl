@@ -93,7 +93,7 @@ function quicksort!{T <: Tuple}(cs::T)
 end
 
 # TODO should be typed {K,V} instead of {T}, but pain in the ass to change now
-type Relation{T <: Tuple} # where T is a tuple of columns
+mutable struct Relation{T <: Tuple} # where T is a tuple of columns
   columns::T
   num_keys::Int
   indexes::Dict{Vector{Int},T}
@@ -130,7 +130,7 @@ end
 
 function parse_relation(expr)
   (head, tail) = @match expr begin
-    Expr(:(=>), [head, tail], _) => (head, tail)
+    Expr(:call, [:(=>), head, tail], _) => (head, tail)
     head => (head, :(()))
   end
   (name, keys) = @match head begin
@@ -149,7 +149,7 @@ function column_type{T}(_::Type{T})
   Vector{T}
 end
 
-# TODO not useful until stack allocation of immutables is improved
+# TODO not useful until stack allocation of structs is improved
 # function column_type{T}(_::Type{Nullable{T}})
 #   NullableVector{T}
 # end

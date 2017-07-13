@@ -48,7 +48,7 @@ function intersect(columns, los, his, next_los, next_his, var, body)
   total = gensym("total")
   quote
     begin
-      $([:(local $next_hi, $next_lo = $lo) for (next_hi, next_lo, lo) in zip(next_his, next_los, los)]...)
+      $([:(local $next_hi; local $next_lo = $lo) for (next_hi, next_lo, lo) in zip(next_his, next_los, los)]...)
       $total = 1
       while true
         if $total == $n
@@ -101,13 +101,13 @@ function parse_typ(expr)
   end
 end
   
-type Row; name; vars; num_keys; end
-type When; expr; vars; end
-type Assign; var; expr; vars; escape end
-type In; var; expr; vars; end
-type Hint; vars; end
-type Return; name; vars; typs; num_keys; end  
-type SubQuery; query; var; clauses; vars; created_vars; input_names; return_clauses; end
+struct Row; name; vars; num_keys; end
+struct When; expr; vars; end
+struct Assign; var; expr; vars::Vector{Symbol}; escape end
+struct In; var; expr; vars::Vector{Symbol}; end
+struct Hint; vars::Vector{Symbol}; end
+struct Return; name; vars::Vector{Any}; typs; num_keys; end  
+struct SubQuery; query; var; clauses; vars::Vector{Symbol}; created_vars; input_names; return_clauses; end
 
 function parse_query(query)
   # unwrap block
@@ -132,7 +132,7 @@ function parse_query(query)
       Expr(:return, [expr], _) => begin 
         (name, keys, vals) = parse_relation(expr) 
         typed_vars = Any[keys..., vals...]
-        Return(name, map(parse_var, typed_vars), map(parse_typ, typed_vars), length(keys)) 
+        Return(name, map(parse_var, typed_vars), convert(Vector{Any}, map(parse_typ, typed_vars)), length(keys)) 
       end
       _ => begin
         (name, keys, vals) = parse_relation(line)
@@ -237,7 +237,7 @@ function parse_query(query)
   # add a return if needed
   return_clauses = [clause for clause in clauses if typeof(clause) == Return]
   if length(return_clauses) == 0
-    push!(return_clauses, Return((), vars, [:Any for _ in vars], length(vars)))
+    push!(return_clauses, Return((), vars, Any[:Any for _ in vars], length(vars)))
   end
   
   # use types of return relation if available

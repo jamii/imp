@@ -333,9 +333,6 @@ end
 
 # TODO figure out how to handle changes in template
 function render(view, old_state, new_state)
-  for (_, client) in view.clients
-    write(client, js"{\"events\": $(view.world.events)}")
-  end
   old_groups = Dict{Symbol, Relation}(group_id => get(() -> empty(new_state[group_id]), old_state, group_id) for group_id in view.compiled.group_ids)
   old_attributes::Relation{Tuple{Vector{UInt64}, Vector{String}, Vector{String}}} = get(() -> empty(new_state[:attribute]), old_state, :attribute)
   new_groups = Dict{Symbol, Relation}(group_id => new_state[group_id] for group_id in view.compiled.group_ids)
@@ -403,7 +400,7 @@ function render(view, old_state, new_state)
   for (_, client) in view.clients
     # TODO handle sessions
     # TODO the implicit unchecked UInt64 -> JSFloat is probably going to be trouble sooner or later
-    write(client, js"{\"render\": [$node_delete_parents, $node_delete_ixes, $html_create_parents, $html_create_ixes, $html_create_childs, $html_create_tags, $text_create_parents, $text_create_ixes, $text_create_contents, $nonredundant_attribute_delete_childs, $nonredundant_attribute_delete_keys, $attribute_create_childs, $attribute_create_keys, $attribute_create_vals]}")
+    write(client, js"{\"events\": $(view.world.events), \"render\": [$node_delete_parents, $node_delete_ixes, $html_create_parents, $html_create_ixes, $html_create_childs, $html_create_tags, $text_create_parents, $text_create_ixes, $text_create_contents, $nonredundant_attribute_delete_childs, $nonredundant_attribute_delete_keys, $attribute_create_childs, $attribute_create_keys, $attribute_create_vals]}")
   end
 end
 

@@ -117,8 +117,8 @@ function compile(node, parent, column_type::Function)
   
   vars = Dict{Int64, Vector{Symbol}}(0 => [:session])
   types = Dict{Int64, Vector{Type}}(0 => [String])
-  free_vars = Dict{Int64, Vector{Symbol}}(0 => [:session])
-  free_types = Dict{Int64, Vector{Type}}(0 => [String])
+  free_vars = Dict{Int64, Vector{Symbol}}(0 => [])
+  free_types = Dict{Int64, Vector{Type}}(0 => [])
   for (id, my_node) in enumerate(node)
     my_vars = vars[id] = copy(vars[parent[id]])
     my_types = types[id] = copy(types[parent[id]])
@@ -136,16 +136,28 @@ function compile(node, parent, column_type::Function)
     end
   end
   
-  num_children = Dict{Int64, Int64}(id => 0 for id in 0:length(node))
-  ix = Dict{Int64, Int64}()
-  family = Dict{Int64, Vector{Int64}}(id => Vector{Int64}() for (_, id) in fixed_parent)
-  ancestors = Dict{Int64, Vector{Int64}}()
+  family = Dict{Int64, Vector{Int64}}(id => [id] for (_, id) in fixed_parent)
   for (id, my_node) in enumerate(node)
     if !(my_node isa AttributeNode)
-      ix[id] = (num_children[parent[id]] += 1)
       push!(family[fixed_parent[id]], id)
-      ancestors[id] = (parent[id] == fixed_parent[id]) ? Vector{Int64}() : ancestors[parent[id]]
-      push!(ancestors[id], id)
+    end
+  end
+  
+  num_children = Dict{Int64, Int64}(id => 0 for id in 0:length(node))
+  lineage = Dict{Tuple{Int64, Int64}, Int64}()
+  # lineage[hi, lo] = n iff lo is the nth child of hi or a descendant thereof
+  # lineage[hi, lo] = 0 otherwise
+  for (_, my_family) in family
+    for hi_id in my_family
+      for lo_id in my_family
+        if hi_id >= lo_id # note ids are numbered depth-first
+          lineage[hi_id, lo_id] = 0
+        elseif hi_id == parent[lo_id]
+          lineage[hi_id, lo_id] = (num_children[hi_id] += 1)
+        else
+          lineage[hi_id, lo_id] = lineage[hi_id, parent[lo_id]]
+        end
+      end
     end
   end
   
@@ -154,35 +166,35 @@ function compile(node, parent, column_type::Function)
   for (my_fixed_parent, my_family) in family
     base_key = Vector{KeyElem}()
     append!(base_key, zip(vars[my_fixed_parent], types[my_fixed_parent]))
-    for id in my_family
-      if node[id] isa FixedNode
-        @assert !haskey(key, id)
-        my_key = key[id] = copy(base_key)
-        my_ancestors = ancestors[id]
-        for other_id in my_family
-          if other_id in my_ancestors
-            push!(my_key, ix[other_id])
-            append!(my_key, zip(free_vars[other_id], free_types[other_id]))
-          else
-            push!(my_key, 0)
-            append!(my_key, free_types[other_id])
+    for lo_id in my_family[2:end] # don't include parent
+      if node[lo_id] isa FixedNode
+        @assert !haskey(key, lo_id)
+        my_key = key[lo_id] = copy(base_key)
+        for hi_id in my_family
+          if (hi_id == my_fixed_parent) || (node[hi_id] isa QueryNode) 
+            if lineage[hi_id, lo_id] == 0
+              append!(my_key, free_types[hi_id])
+              push!(my_key, 0)
+            else
+              append!(my_key, zip(free_vars[hi_id], free_types[hi_id]))
+              push!(my_key, lineage[hi_id, lo_id])
+            end
           end
         end
       end
     end
   end
-  @show sort(key)
   
-  key_vars = Dict{Int64, Vector{Symbol}}()
+  key_vars = Dict{Int64, Vector{Any}}()
   key_exprs = Dict{Int64, Vector{Any}}()
   key_types = Dict{Int64, Vector{Type}}()
   for (id, my_key) in key
-    my_key_vars = key_vars[id] = Vector{Symbol}()
+    my_key_vars = key_vars[id] = Vector{Any}()
     my_key_exprs = key_exprs[id] = Vector{Any}()
     my_key_types = key_types[id] = Vector{Type}()
     for key_elem in my_key
       (var, expr, typ) = @match key_elem begin
-        _::Int64 => (:(_), key_elem, Int64)
+        _::Int64 => (key_elem, key_elem, Int64)
         _::Type => (:(_), :(default($key_elem)), key_elem)
         (var, typ) => (var, var, typ)
       end
@@ -203,11 +215,11 @@ function compile(node, parent, column_type::Function)
         return query_0(session) => hash(session)
       end)
       push!(group_ids, :group_0)
-      push!(creates, @transient group_0(String) => (UInt64, UInt64, FixedNodeKind, String))
+      push!(creates, @transient group_0(String, Int64) => (UInt64, UInt64, FixedNodeKind, String))
       push!(merges, @merge begin
         query_0(session) => query_hash
         my_hash = hash(0, query_hash)
-        return group_0(session) => (0, my_hash, Html, "html")
+        return group_0(session, 1) => (UInt64(0), my_hash, Html, "html")
       end)
       
     elseif my_node isa QueryNode
@@ -281,8 +293,8 @@ end
 
 function set_template!(view::View, template::ANY)
   view.template = template
-  @show @time view.parsed = parse(template)
-  @show @time view.compiled = compile(view.parsed.node, view.parsed.parent, (table, ix) -> eltype(view.world.state[table].columns[ix]))
+  @show :parse; @time view.parsed = parse(template)
+  @show :compile; @time view.compiled = compile(view.parsed.node, view.parsed.parent, (table, ix) -> eltype(view.world.state[table].columns[ix]))
   refresh(view)
 end
 

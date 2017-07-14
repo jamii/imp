@@ -62,7 +62,7 @@ function output_names(fixpoint::Fixpoint)
   output_names(fixpoint.flow)
 end
 
-function init_flow(_, world::World)
+function init_flow(_::Flow, world::World)
   # do nothing by default
 end
 
@@ -85,7 +85,7 @@ function init_flow(flow::Fixpoint, world::World)
   init_flow(flow.flow, world)
 end
 
-function run_flow(_, world::World)
+function run_flow(_::Flow, world::World)
   # do nothing by default
 end
 

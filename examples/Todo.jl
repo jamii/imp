@@ -10,8 +10,6 @@ view = View()
 
 begin 
   set_flow!(view, Sequence([
-    UI.pre 
-    
     # shared state 
     
     @stateful text(todo::Int64) => text::String

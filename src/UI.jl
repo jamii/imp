@@ -17,10 +17,10 @@ struct AttributeNode
   val::Splice
 end
 
-@enum FixedNodeKind text html
+@enum FixedNodeKind Text Html
 
 struct FixedNode
-  tag::Splice
+  content::Splice
   kind::FixedNodeKind
 end
 
@@ -49,30 +49,30 @@ function parse(expr)
   node = Vector{Node}()
   parent = Vector{Int64}()
   
-  parse_stack = Vector{Tuple{Int64, Any}}()
-  push!(parse_stack, (0, expr))
-  while !isempty(parse_stack)
-    (my_parent, expr) = pop!(parse_stack)
+  parse_queue = Vector{Tuple{Int64, Any}}()
+  push!(parse_queue, (0, expr))
+  while !isempty(parse_queue)
+    (my_parent, expr) = shift!(parse_queue)
     @match expr begin
       Expr(:line, _, _) => nothing
       Expr(:block, [Expr(:line, _, _), expr], _) => begin
-        push!(parse_stack, (my_parent, expr))
+        push!(parse_queue, (my_parent, expr))
       end
       Expr(:vect || :vcat || :hcat, exprs, _) => begin 
-        push!(parse_stack, (my_parent, exprs))
+        push!(parse_queue, (my_parent, exprs))
       end
       Expr(:call, [table::Symbol, Expr(:->, [Expr(:tuple, [], _), Expr(:block, exprs, _)], _), vars...], _) => begin
         push!(node, QueryNode(table, vars))
         push!(parent, my_parent)
-        for expr in reverse(exprs)
-          push!(parse_stack, (length(node), expr))
+        for expr in exprs
+          push!(parse_queue, (length(node), expr))
         end
       end
       [tag, exprs...] => begin
-        push!(node, FixedNode(parse_value(tag), :html))
+        push!(node, FixedNode(parse_value(tag), Html))
         push!(parent, my_parent)
-        for expr in reverse(exprs)
-          push!(parse_stack, (length(node), expr))
+        for expr in exprs
+          push!(parse_queue, (length(node), expr))
         end
       end
       Expr(:(=), [key, val], _) => begin
@@ -80,7 +80,7 @@ function parse(expr)
         push!(parent, my_parent)
       end
       other => begin
-        push!(node, FixedNode(parse_value(other), :text))
+        push!(node, FixedNode(parse_value(other), Text))
         push!(parent, my_parent)
       end
     end
@@ -91,7 +91,18 @@ end
 
 # --- compiling ---
 
+default{T <: Number}(::Type{T}) = zero(T)
+default(::Type{String}) = ""
+
+struct Compiled
+  flow::Flow
+  group_ids::Vector{Symbol}
+end
+
 function compile(node, parent, column_type::Function)
+  @assert node[1] isa FixedNode 
+  @assert node[1].content == ["html"]
+  
   fixed_parent = Dict{Int64, Int64}(1 => 0)
   query_parent = Dict{Int64, Int64}(1 => 0)
   for id in 2:length(node) # node 1 has no real parents
@@ -110,7 +121,7 @@ function compile(node, parent, column_type::Function)
   free_types = Dict{Int64, Vector{Type}}(0 => [String])
   for (id, my_node) in enumerate(node)
     my_vars = vars[id] = copy(vars[parent[id]])
-    my_types = types[id] = copy(var_types[parent[id]])
+    my_types = types[id] = copy(types[parent[id]])
     my_free_vars = free_vars[id] = Vector{Symbol}()
     my_free_types = free_types[id] = Vector{Type}()
     if my_node isa QueryNode
@@ -138,13 +149,15 @@ function compile(node, parent, column_type::Function)
     end
   end
   
-  key = Dict{Int64, Vector{Union{Int64, Type, Tuple{Symbol, Type}}}}()
+  const KeyElem = Union{Int64, Type, Tuple{Symbol, Type}}
+  key = Dict{Int64, Vector{KeyElem}}(0 => KeyElem[(:session, String)])
   for (my_fixed_parent, my_family) in family
-    base_key = Vector{Union{Int64, Type, Tuple{Symbol, Type}}}()
+    base_key = Vector{KeyElem}()
     append!(base_key, zip(vars[my_fixed_parent], types[my_fixed_parent]))
     for id in my_family
       if node[id] isa FixedNode
-        my_key = copy(base_key)
+        @assert !haskey(key, id)
+        my_key = key[id] = copy(base_key)
         my_ancestors = ancestors[id]
         for other_id in my_family
           if other_id in my_ancestors
@@ -158,473 +171,261 @@ function compile(node, parent, column_type::Function)
       end
     end
   end
+  @show sort(key)
   
-  flows = Vector{Flow}()
-  for (id, my_node) in enumerate(nodes)
-    if my_node isa AttributeNode
-      # TODO figure out correct ids
-      merge_flow = @eval @merge begin
-        $(Symbol("query_", query_parent[id]))($(vars[query_parent[id]])...) => query_parent_hash
-        fixed_parent_hash = hash($(fixed_parent[id]), query_parent_hash)
-        return attribute(fixed_parent_hash, string($(node.key)...)) => string($(node.val)...)
+  key_vars = Dict{Int64, Vector{Symbol}}()
+  key_exprs = Dict{Int64, Vector{Any}}()
+  key_types = Dict{Int64, Vector{Type}}()
+  for (id, my_key) in key
+    my_key_vars = key_vars[id] = Vector{Symbol}()
+    my_key_exprs = key_exprs[id] = Vector{Any}()
+    my_key_types = key_types[id] = Vector{Type}()
+    for key_elem in my_key
+      (var, expr, typ) = @match key_elem begin
+        _::Int64 => (:(_), key_elem, Int64)
+        _::Type => (:(_), :(default($key_elem)), key_elem)
+        (var, typ) => (var, var, typ)
       end
-        push!(flows, merge_flow)
-  # for each query node, figure out valid values
-  # for each fixed node, emit key from query_parent
-  # for each attribute node, emit values from query_parent and hash id from fixed_parent
-end    
-
-template = quote
-[html
-  [head 
-    [link rel="stylesheet" href="http://todomvc.com/examples/backbone/node_modules/todomvc-app-css/index.css"]
-  ]
-  [body
-    [section 
-      class="todoapp"
-      [header 
-        class="header" 
-        [h1 "todos"]
-        [input 
-          class="new-todo" 
-          placeholder="What needs to be done?" 
-          "type"="text" 
-          onkeydown="if (event.which == 13) {new_todo(this.value); this.value=''}"
-        ]
-      ]
-      [section 
-        class="main"
-        [input 
-          class="toggle-all" 
-          "type"="checkbox" 
-          all_checked(todo) do
-            checked="checked"
-          end
-          onclick="toggle_all(true)"]
-        [ul
-          class="todo-list"
-          visible(session, todo) do
-            text(todo, text) do
-              displaying(session, todo) do
-                [li 
-                  [div 
-                    class="view" 
-                    [input 
-                      class="toggle" 
-                      "type"="checkbox" 
-                      checked(todo) do
-                        checked="checked"
-                      end
-                      onclick="toggle($todo)"
-                    ] 
-                    [label "$text" ondblclick="start_editing('$session', $todo)"]
-                    [button class="destroy" onclick="delete_todo($todo)"]
-                  ]
-                ]
-              end
-              editing(session, todo) do
-                [li
-                  class="editing"
-                  [input  
-                    class="edit"
-                    value="$text"
-                    onkeydown="""
-                      if (event.which == 13) finish_editing('$session', $todo, this.value)
-                      if (event.which == 27) escape_editing('$session', $todo)
-                    """
-                    onblur="escape_editing('$session', $todo)"
-                  ]
-                ]
-              end
-            end
-          end
-        ]
-      ]
-      [footer
-        class="footer"
-        completed_count_text(text) do
-          [span class="todo-count" "$text"]
-        end
-        [ul
-          class="filters"
-          filter(filter) do
-            [li 
-              [a 
-                current_filter(session, filter) do
-                  class="selected"
-                end 
-                onclick="set_filter('$session', '$filter')" 
-                "$filter"
-              ]
-            ]
-          end 
-        ]
-        [button class="clear-completed" "Clear completed" onclick="clear_completed(true)"]
-      ]
-    ]
-  ]
-]
+      push!(my_key_vars, var)
+      push!(my_key_exprs, expr)
+      push!(my_key_types, typ)
+    end
+  end
+  
+  creates = Vector{Create}()
+  merges = Vector{Merge}()
+  group_ids = Vector{Symbol}()
+  for (id, my_node) in enumerate(node)
+    if id == 1 # node 1 is always [html ...]
+      push!(creates, @transient query_0(String) => UInt64)
+      push!(merges, @merge begin
+        session(session)
+        return query_0(session) => hash(session)
+      end)
+      push!(group_ids, :group_0)
+      push!(creates, @transient group_0(String) => (UInt64, UInt64, FixedNodeKind, String))
+      push!(merges, @merge begin
+        query_0(session) => query_hash
+        my_hash = hash(0, query_hash)
+        return group_0(session) => (0, my_hash, Html, "html")
+      end)
+      
+    elseif my_node isa QueryNode
+      my_hash = :(hash($id, query_parent_hash))
+      for var in my_node.vars
+        my_hash = :(hash($var, $my_hash))
+      end
+      push!(creates, @eval @transient $(Symbol("query_", id))($(types[id])...) => UInt64)
+      push!(merges, @eval @merge begin
+        $(Symbol("query_", query_parent[id]))($(vars[query_parent[id]]...)) => query_parent_hash
+        $(my_node.table)($(my_node.vars...))
+        my_hash = $my_hash
+        return $(Symbol("query_", id))($(vars[id]...)) => my_hash
+      end)
+      
+    elseif my_node isa FixedNode 
+      push!(group_ids, Symbol("group_", fixed_parent[id]))
+      push!(creates, @eval @transient $(Symbol("group_", fixed_parent[id]))($(key_types[id]...)) => (UInt64, UInt64, FixedNodeKind, String))
+      push!(merges, @eval @merge begin
+        $(Symbol("group_", fixed_parent[fixed_parent[id]]))($(key_vars[fixed_parent[id]]...)) => (_, fixed_parent_hash, _, _)
+        $(Symbol("query_", query_parent[id]))($(vars[query_parent[id]]...)) => query_parent_hash
+        my_hash = hash($id, query_parent_hash)
+        return $(Symbol("group_", fixed_parent[id]))($(key_exprs[id]...)) => (fixed_parent_hash, my_hash, $(my_node.kind), string($(my_node.content...)))
+      end)
+      
+    elseif my_node isa AttributeNode
+      push!(merges, @eval @merge begin
+        $(Symbol("group_", fixed_parent[fixed_parent[id]]))($(key_vars[fixed_parent[id]]...)) => (_, fixed_parent_hash, _, _)
+        $(Symbol("query_", query_parent[id]))($(vars[query_parent[id]]...)) => _
+        return attribute(fixed_parent_hash, string($(my_node.key...))) => string($(my_node.val...))
+      end)
+    end
+    
+  end
+  
+  flow = Sequence(Flow[
+    @transient attribute(UInt64, String) => String
+    unique((flow) -> flow.output_name, creates)...
+    merges...
+  ])
+  
+  group_ids = unique(group_ids)
+  @assert shift!(group_ids) == :group_0 # not a real group
+  
+  return Compiled(flow, group_ids)
 end
 
-# --- compiling ---
+# --- plumbing ---
 
-# function value_expr(value::Value) 
-#   @match value begin
-#     _::String => value
-#     _::Symbol => string(value)
-#     _::StringExpr => Expr(:string, value.values...)
-#   end
-# end
-# 
-# function compile_server_tree(node::AttributeNode, parent_id, parent_vars, fixed_parent_id, fixed_parent_vars, state, flows)
-#   merge_flow = @eval @merge begin
-#     $fixed_parent_id($(map(first, fixed_parent_vars)...)) => parent_id
-#     $parent_id($(map(first, parent_vars)...)) => _
-#     return attribute(parent_id, $(value_expr(node.key))) => $(value_expr(node.val))
-#   end
-#   push!(flows, merge_flow)
-# end
-# 
-# function compile_server_tree(node::FixedNode, parent_id, parent_vars, fixed_parent_id, fixed_parent_vars, state, flows)
-#   id = Symbol("node_$(hash(node))")
-#   transient_flow = @eval @transient $id($([typ for (_, typ) in parent_vars]...)) => UInt64
-#   merge_flow = 
-#     if parent_id == nothing
-#       @eval @merge begin
-#         session(session)
-#         child_id = hash(session, $(hash(node)))
-#         return $id($(map(first, parent_vars)...)) => child_id
-#       end
-#     else
-#       @eval @merge begin
-#         $parent_id($(map(first, parent_vars)...)) => parent_id
-#         child_id = hash(parent_id, $(hash(node)))
-#         return $id($(map(first, parent_vars)...)) => child_id
-#       end
-#     end
-#   push!(flows, transient_flow, merge_flow)
-#   for child in node.children
-#     compile_server_tree(child, id, parent_vars, id, parent_vars, state, flows)
-#   end
-# end
-# 
-# function compile_server_tree(node::QueryNode, parent_id, parent_vars, fixed_parent_id, fixed_parent_vars, state, flows)
-#   id = Symbol("node_$(hash(node))")
-#   vars = copy(parent_vars)
-#   start_ix = length(vars) + 1
-#   for (ix, var) in enumerate(node.vars)
-#     if (var != :(_)) 
-#       typ = eltype(state[node.table].columns[ix])
-#       typed_var = (var, typ)
-#       if !(typed_var in parent_vars)
-#         push!(vars, (var, typ))
-#       end
-#     end
-#   end
-#   end_ix = length(vars)
-#   transient_flow = @eval @transient $id($([typ for (_, typ) in vars]...)) => UInt64
-#   child_id = :(hash(parent_id, $(hash(node))))
-#   for (var, _) in vars[start_ix:end_ix]
-#     child_id = :(hash($var, $child_id))
-#   end
-#   merge_flow = @eval @merge begin
-#     $parent_id($(map(first, parent_vars)...)) => parent_id
-#     $(node.table)($(node.vars...))
-#     child_id = $child_id
-#     return $id($(map(first, vars)...)) => child_id
-#   end
-#   push!(flows, transient_flow, merge_flow)
-#   for child in node.children
-#     compile_server_tree(child, id, vars, fixed_parent_id, fixed_parent_vars, state, flows)
-#   end
-# end
-# 
-# function collect_sort_key(node::AttributeNode, parent_vars, state, key, keyed_children)
-#   # nothing to do here
-# end
-# 
-# function collect_sort_key(node::FixedNode, parent_vars, state, key, keyed_children)
-#   push!(keyed_children, (copy(key), copy(parent_vars), node))
-# end
-# 
-# function collect_sort_key(node::QueryNode, parent_vars, state, key, keyed_children)
-#   vars = copy(parent_vars)
-#   start_ix = length(key) + 1
-#   for (ix, var) in enumerate(node.vars)
-#     if (var != :(_)) 
-#       typ = eltype(state[node.table].columns[ix])
-#       typed_var = (var, typ)
-#       if !(typed_var in parent_vars)
-#         push!(vars, (var, typ))
-#         push!(key, (var, typ))
-#       end
-#     end
-#   end
-#   end_ix = length(key)
-#   collect_sort_key(node.children, vars, state, key, keyed_children)
-#   for ix in start_ix:end_ix
-#     key[ix] = (nothing, key[ix][2])
-#   end
-# end
-# 
-# function collect_sort_key(nodes::Vector{Node}, parent_vars, state, key, keyed_children)
-#   push!(key, 0)
-#   ix = length(key)
-#   for node in nodes
-#     if typeof(node) in [FixedNode, QueryNode] 
-#       key[ix] += 1
-#       collect_sort_key(node, parent_vars, state, key, keyed_children)
-#     end
-#   end
-#   key[ix] = 0
-# end
-# 
-# function collect_sort_key(node::FixedNode, parent_vars, state)
-#   key = copy(parent_vars)
-#   keyed_children = Any[]
-#   collect_sort_key(node.children, parent_vars, state, key, keyed_children)
-#   # tidy up ragged ends of keys
-#   for (child_key, vars, child) in keyed_children
-#     append!(child_key, key[(length(child_key)+1):end])
-#   end
-#   keyed_children
-# end
-# 
-# # TODO this is defined in Julia 0.6 but can't currently upgrade because of https://github.com/kmsquire/Match.jl/issues/35
-# function Base.isless{T}(x::Nullable{T}, y::Nullable{T})
-#   !Base.isnull(x) && (Base.isnull(y) || (get(x) < get(y)))
-# end
-# 
-# default{T <: Number}(::Type{T}) = zero(T)
-# default(::Type{String}) = ""
-# 
-# function key_expr(elem) 
-#   @match elem begin
-#     _::Integer => elem
-#     (_::Symbol, _::Type) => elem[1]
-#     (_::Void, _::Type) => default(elem[2])
-#     _ => error("What are this: $elem")
-#   end
-# end
-# 
-# function key_type(elem)
-#   @match elem begin
-#     _::Integer => Int64
-#     (var::Symbol, typ::Type) => typ
-#     (_::Void, typ::Type) => typ
-#     _ => error("What are this: $elem")
-#   end
-# end
-# 
-# function compile_client_tree(node::FixedNode, parent_vars, state, flows, group_ids)
-#   keyed_children = collect_sort_key(node, parent_vars, state)
-#   group_id = Symbol("group_$(hash(node))")
-#   parent_node_id = Symbol("node_$(hash(node))")
-#   if !isempty(keyed_children)
-#     push!(group_ids, group_id)
-#   end
-#   for (key, child_vars, child) in keyed_children
-#     child_node_id = Symbol("node_$(hash(child))")
-#     key_exprs = map(key_expr, key)
-#     key_types = map(key_type, key)
-#     transient_flow = @eval @transient $group_id($(key_types...)) => (UInt64, UInt64, Symbol, String)
-#     merge_flow = @eval @merge begin
-#       $parent_node_id($(map(first, parent_vars)...)) => parent_id
-#       $child_node_id($(map(first, child_vars)...)) => child_id
-#       return $group_id($(key_exprs...)) => (parent_id, child_id, $(Expr(:quote, child.kind)), $(value_expr(child.tag)))
-#     end
-#     push!(flows, transient_flow, merge_flow)
-#   end
-#   for (_, child_vars, child) in keyed_children
-#     compile_client_tree(child, child_vars, state, flows, group_ids)
-#   end
-# end
-# 
-# function compile_template(node, state)
-#   flows = Flow[@transient attribute(id::UInt64, key::String) => value::String]
-#   group_ids = Symbol[]
-#   compile_server_tree(node, nothing, [(:session, String)], nothing, [:session], state, flows)
-#   compile_client_tree(node, Any[(:session, String)], state, flows, group_ids)
-#   (Sequence(flows), group_ids)
-# end
-# 
-# # --- plumbing ---
-# 
-# mutable struct View
-#   world::World
-#   template::Any
-#   parsed::Node
-#   compiled::Flow
-#   group_names::Vector{Symbol}
-#   clients::Dict{String, WebSocket}
-#   server::Nullable{Server}
-# end
-# 
-# function Base.close(view::View)
-#   if !isnull(view.server) && isopen(get(view.server))
-#     close(get(view.server))
-#   end
-#   for (_, client) in view.clients
-#     if isopen(get(view.server))
-#       close(client)
-#     end
-#   end
-#   view.server = Nullable{Server}()
-#   view.clients = Dict{String, WebSocket}()
-# end
-# 
-# function View() 
-#   view = View(
-#     World(),
-#     quote [div] end, 
-#     FixedNode("body", :html, [FixedNode("loading...", :text, Node[])]), 
-#     Sequence(Flow[]), 
-#     Symbol[],
-#     Dict{String, WebSocket}(),
-#     Nullable{Server}()
-#   )
-#   finalizer(view, close)
-#   view
-# end
-# 
-# function set_template!(view::View, template::ANY)
-#   view.template = template
-#   view.parsed = parse_template(template)
-#   (view.compiled, view.group_names) = compile_template(view.parsed, view.world.state)
-#   refresh(view)
-# end
-# 
-# function Flows.set_flow!(view::View, flow::Flow)
-#   set_flow!(view.world, flow)
-#   set_template!(view, view.template) # need to recompile template in case the types have changed
-#   refresh(view)
-# end
-# 
-# pre = Sequence([
-#   @stateful session(String)
-# ])
-# 
-# function Flows.refresh(view::View)
-#   Flows.init_flow(pre, view.world)
-#   (old_state, _) = refresh(view.world)
-#   @show @time Flows.init_flow(view.compiled, view.world)
-#   @show @time Flows.run_flow(view.compiled, view.world)
-#   @show @time render(view, old_state, view.world.state)
-#   (old_state, view.world.state)
-# end
-# 
-# function Flows.refresh(view::View, event_table::Symbol, event_row::Tuple)
-#   Flows.init_flow(pre, view.world)
-#   (old_state, _) = refresh(view.world, event_table, event_row)
-#   @show @time Flows.init_flow(view.compiled, view.world)
-#   @show @time Flows.run_flow(view.compiled, view.world)
-#   @show @time render(view, old_state, view.world.state)
-#   (old_state, view.world.state)
-# end
-# 
-# macro js_str(text)
-#   parsed = parse("\"$(escape_string(text))\"")
-#   if isa(parsed, Expr) && (parsed.head == :string)
-#     parsed = Expr(:string, [isa(arg, String) ? arg : :(json($arg)) for arg in parsed.args]...)
-#   end
-#   esc(parsed)
-# end
-# 
-# # TODO figure out how to handle changes in template
-# function render(view, old_state, new_state)
-#   for (_, client) in view.clients
-#     write(client, js"{\"events\": $(view.world.events)}")
-#   end
-#   old_groups = Dict{Symbol, Relation}(name => get(() -> empty(new_state[name]), old_state, name) for name in view.group_names)
-#   old_attributes::Relation{Tuple{Vector{UInt64}, Vector{String}, Vector{String}}} = get(() -> empty(new_state[:attribute]), old_state, :attribute)
-#   new_groups = Dict{Symbol, Relation}(name => new_state[name] for name in view.group_names)
-#   new_attributes::Relation{Tuple{Vector{UInt64}, Vector{String}, Vector{String}}} = new_state[:attribute]
-#   node_delete_parents = Vector{UInt64}()
-#   node_delete_childs = Set{UInt64}()
-#   node_delete_ixes = Vector{Int64}()
-#   html_create_parents = Vector{UInt64}()
-#   html_create_ixes = Vector{Int64}()
-#   html_create_childs = Vector{UInt64}()
-#   html_create_tags = Vector{String}()
-#   text_create_parents = Vector{UInt64}()
-#   text_create_ixes = Vector{Int64}()
-#   text_create_contents = Vector{String}()
-#   for name in view.group_names
-#     (olds, news) = Data.diff_ixes(old_groups[name], new_groups[name])
-#     old_columns = old_groups[name].columns
-#     new_columns = new_groups[name].columns
-#     old_parent_ids::Vector{UInt64} = old_columns[end-3]
-#     old_child_ids::Vector{UInt64} = old_columns[end-2]
-#     new_parent_ids::Vector{UInt64} = new_columns[end-3]
-#     new_child_ids::Vector{UInt64} = new_columns[end-2]
-#     new_kinds::Vector{Symbol} = new_columns[end-1]
-#     new_contents::Vector{String} = new_columns[end-0]
-#     for i in olds
-#       push!(node_delete_childs, old_child_ids[i])
-#       if !(old_parent_ids[i] in node_delete_childs)
-#         parent = old_parent_ids[i]
-#         (next_i, _) = gallop(old_parent_ids, parent, i, length(old_parent_ids)+1, 1)
-#         ix = next_i - i
-#         push!(node_delete_parents, parent)
-#         push!(node_delete_ixes, ix)
-#       end
-#     end
-#     for i in reverse(news) # go backwards so that ixes are correct by the time they are reached
-#       parent = new_parent_ids[i]
-#       (next_i, _) = gallop(new_parent_ids, parent, i, length(new_parent_ids)+1, 1)
-#       ix = next_i - i - 1 
-#       if new_kinds[i] == :html
-#         push!(html_create_parents, parent)
-#         push!(html_create_ixes, ix)
-#         push!(html_create_childs, new_child_ids[i])
-#         push!(html_create_tags, new_contents[i])
-#       else
-#         push!(text_create_parents, parent)
-#         push!(text_create_ixes, ix)
-#         push!(text_create_contents, new_contents[i])
-#       end
-#     end
-#   end
-#   (olds, news) = Data.diff_ixes(old_attributes, new_attributes)
-#   attribute_delete_childs = old_attributes.columns[1][olds]
-#   attribute_delete_keys = old_attributes.columns[2][olds]
-#   attribute_create_childs = new_attributes.columns[1][news]
-#   attribute_create_keys = new_attributes.columns[2][news]
-#   attribute_create_vals = new_attributes.columns[3][news]
-#   nonredundant_attribute_delete_childs = empty(attribute_delete_childs)
-#   nonredundant_attribute_delete_keys = empty(attribute_delete_keys)
-#   for (i, child) in enumerate(attribute_delete_childs)
-#     if !(child in node_delete_childs)
-#       push!(nonredundant_attribute_delete_childs, child)
-#       push!(nonredundant_attribute_delete_keys, attribute_delete_keys[i])
-#     end
-#   end
-#   for (_, client) in view.clients
-#     # TODO handle sessions
-#     # TODO the implicit unchecked UInt64 -> JSFloat is probably going to be trouble sooner or later
-#     write(client, js"{\"render\": [$node_delete_parents, $node_delete_ixes, $html_create_parents, $html_create_ixes, $html_create_childs, $html_create_tags, $text_create_parents, $text_create_ixes, $text_create_contents, $nonredundant_attribute_delete_childs, $nonredundant_attribute_delete_keys, $attribute_create_childs, $attribute_create_keys, $attribute_create_vals]}")
-#   end
-# end
-# 
-# function serve(view)
-#   handler = WebSocketHandler() do req,client
-#     begin
-#       session = string(now()) # TODO uuid
-#       write(client, js"{\"session\": $session}")
-#       view.clients[session] = client
-#       refresh(view, :session, tuple(session))
-#       while true
-#         event = JSON.parse(String(read(client)))
-#         refresh(view, Symbol(event["table"]), tuple(event["values"]...))
-#       end
-#     end
-#   end
-#   server = Server(handler)
-#   @async run(server,8080)
-#   view.server = Nullable(server)
-#   server
-# end
+mutable struct View
+  world::World
+  template::Any
+  parsed::Parsed
+  compiled::Compiled
+  clients::Dict{String, WebSocket}
+  server::Nullable{Server}
+end
 
-# export View, set_template!, serve
+function View() 
+  view = View(
+    World(),
+    quote [html] end, 
+    Parsed(Node[], Int64[]), 
+    Compiled(Sequence(Flow[]), Symbol[]),
+    Dict{String, WebSocket}(),
+    Nullable{Server}()
+  )
+  finalizer(view, close)
+  view
+end
+
+function set_template!(view::View, template::ANY)
+  view.template = template
+  @show @time view.parsed = parse(template)
+  @show @time view.compiled = compile(view.parsed.node, view.parsed.parent, (table, ix) -> eltype(view.world.state[table].columns[ix]))
+  refresh(view)
+end
+
+function Flows.set_flow!(view::View, flow::Flow)
+  view.world.flow = Sequence([
+    @stateful session(String)
+    flow
+  ])
+  set_template!(view, view.template) # need to recompile template in case the types have changed
+end
+
+function Flows.refresh(view::View)
+  (old_state, _) = refresh(view.world)
+  @show @time Flows.init_flow(view.compiled.flow, view.world)
+  @show @time Flows.run_flow(view.compiled.flow, view.world)
+  @show @time render(view, old_state, view.world.state)
+  (old_state, view.world.state)
+end
+
+function Flows.refresh(view::View, event_table::Symbol, event_row::Tuple)
+  (old_state, _) = refresh(view.world, event_table, event_row)
+  @show @time Flows.init_flow(view.compiled.flow, view.world)
+  @show @time Flows.run_flow(view.compiled.flow, view.world)
+  @show @time render(view, old_state, view.world.state)
+  (old_state, view.world.state)
+end
+
+macro js_str(text)
+  parsed = Base.parse("\"$(escape_string(text))\"")
+  if isa(parsed, Expr) && (parsed.head == :string)
+    parsed = Expr(:string, [isa(arg, String) ? arg : :(json($arg)) for arg in parsed.args]...)
+  end
+  esc(parsed)
+end
+
+# TODO figure out how to handle changes in template
+function render(view, old_state, new_state)
+  for (_, client) in view.clients
+    write(client, js"{\"events\": $(view.world.events)}")
+  end
+  old_groups = Dict{Symbol, Relation}(group_id => get(() -> empty(new_state[group_id]), old_state, group_id) for group_id in view.compiled.group_ids)
+  old_attributes::Relation{Tuple{Vector{UInt64}, Vector{String}, Vector{String}}} = get(() -> empty(new_state[:attribute]), old_state, :attribute)
+  new_groups = Dict{Symbol, Relation}(group_id => new_state[group_id] for group_id in view.compiled.group_ids)
+  new_attributes::Relation{Tuple{Vector{UInt64}, Vector{String}, Vector{String}}} = new_state[:attribute]
+  node_delete_parents = Vector{UInt64}()
+  node_delete_childs = Set{UInt64}()
+  node_delete_ixes = Vector{Int64}()
+  html_create_parents = Vector{UInt64}()
+  html_create_ixes = Vector{Int64}()
+  html_create_childs = Vector{UInt64}()
+  html_create_tags = Vector{String}()
+  text_create_parents = Vector{UInt64}()
+  text_create_ixes = Vector{Int64}()
+  text_create_contents = Vector{String}()
+  for group_id in view.compiled.group_ids
+    (olds, news) = Data.diff_ixes(old_groups[group_id], new_groups[group_id])
+    old_columns = old_groups[group_id].columns
+    new_columns = new_groups[group_id].columns
+    old_parent_ids::Vector{UInt64} = old_columns[end-3]
+    old_child_ids::Vector{UInt64} = old_columns[end-2]
+    new_parent_ids::Vector{UInt64} = new_columns[end-3]
+    new_child_ids::Vector{UInt64} = new_columns[end-2]
+    new_kinds::Vector{FixedNodeKind} = new_columns[end-1]
+    new_contents::Vector{String} = new_columns[end-0]
+    for i in olds
+      push!(node_delete_childs, old_child_ids[i])
+      if !(old_parent_ids[i] in node_delete_childs)
+        parent = old_parent_ids[i]
+        (next_i, _) = gallop(old_parent_ids, parent, i, length(old_parent_ids)+1, 1)
+        ix = next_i - i
+        push!(node_delete_parents, parent)
+        push!(node_delete_ixes, ix)
+      end
+    end
+    for i in reverse(news) # go backwards so that ixes are correct by the time they are reached
+      parent = new_parent_ids[i]
+      (next_i, _) = gallop(new_parent_ids, parent, i, length(new_parent_ids)+1, 1)
+      ix = next_i - i - 1 
+      if new_kinds[i] == Html
+        push!(html_create_parents, parent)
+        push!(html_create_ixes, ix)
+        push!(html_create_childs, new_child_ids[i])
+        push!(html_create_tags, new_contents[i])
+      else
+        push!(text_create_parents, parent)
+        push!(text_create_ixes, ix)
+        push!(text_create_contents, new_contents[i])
+      end
+    end
+  end
+  (olds, news) = Data.diff_ixes(old_attributes, new_attributes)
+  attribute_delete_childs = old_attributes.columns[1][olds]
+  attribute_delete_keys = old_attributes.columns[2][olds]
+  attribute_create_childs = new_attributes.columns[1][news]
+  attribute_create_keys = new_attributes.columns[2][news]
+  attribute_create_vals = new_attributes.columns[3][news]
+  nonredundant_attribute_delete_childs = empty(attribute_delete_childs)
+  nonredundant_attribute_delete_keys = empty(attribute_delete_keys)
+  for (i, child) in enumerate(attribute_delete_childs)
+    if !(child in node_delete_childs)
+      push!(nonredundant_attribute_delete_childs, child)
+      push!(nonredundant_attribute_delete_keys, attribute_delete_keys[i])
+    end
+  end
+  for (_, client) in view.clients
+    # TODO handle sessions
+    # TODO the implicit unchecked UInt64 -> JSFloat is probably going to be trouble sooner or later
+    write(client, js"{\"render\": [$node_delete_parents, $node_delete_ixes, $html_create_parents, $html_create_ixes, $html_create_childs, $html_create_tags, $text_create_parents, $text_create_ixes, $text_create_contents, $nonredundant_attribute_delete_childs, $nonredundant_attribute_delete_keys, $attribute_create_childs, $attribute_create_keys, $attribute_create_vals]}")
+  end
+end
+
+function serve(view)
+  handler = WebSocketHandler() do req,client
+    begin
+      session = string(now()) # TODO uuid
+      write(client, js"{\"session\": $session}")
+      view.clients[session] = client
+      refresh(view, :session, tuple(session))
+      while true
+        event = JSON.parse(String(read(client)))
+        refresh(view, Symbol(event["table"]), tuple(event["values"]...))
+      end
+    end
+  end
+  server = Server(handler)
+  @async run(server,8080)
+  view.server = Nullable(server)
+  server
+end
+
+function Base.close(view::View)
+  if !isnull(view.server) && isopen(get(view.server).http.sock)
+    close(get(view.server))
+  end
+  for (_, client) in view.clients
+    if isopen(client)
+      close(client)
+    end
+  end
+  view.server = Nullable{Server}()
+  view.clients = Dict{String, WebSocket}()
+end
+
+export View, set_template!, serve
 
 end

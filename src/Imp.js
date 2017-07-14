@@ -13,7 +13,11 @@ ws.onerror = function (error) {
 }
 
 ws.onmessage = function (event) {
-    msg = JSON.parse(event.data)
+    console.time("parse");
+    msg = JSON.parse(event.data);
+    console.timeEnd("parse");
+    console.log(msg);
+    console.time("handle");
     if (msg.session) {
         window.session = msg.session;
     }
@@ -24,12 +28,12 @@ ws.onmessage = function (event) {
     }
     if (msg.render) {
         render.apply(this, msg.render);
+        console.timeEnd("roundtrip");
     }
+    console.timeEnd("handle");
 }
 
 function render(node_delete_parents, node_delete_ixes, html_create_parents, html_create_ixes, html_create_childs, html_create_tags, text_create_parents, text_create_ixes, text_create_contents, attribute_delete_childs, attribute_delete_keys, attribute_create_childs, attribute_create_keys, attribute_create_vals) {
-    console.log(arguments)
-    console.time("render")
     try {
         for (i = 0; i < node_delete_parents.length; i++) {
             parent = document.getElementById(node_delete_parents[i]);
@@ -81,8 +85,6 @@ function render(node_delete_parents, node_delete_ixes, html_create_parents, html
             }
         }
     } catch (error) {
-        console.error(error)
+        console.error(error);
     }
-    console.timeEnd("render")
-    console.timeEnd("roundtrip")
 }

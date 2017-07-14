@@ -1,5 +1,6 @@
 module UI
 
+using Util
 using Data
 using Query
 using Flows
@@ -293,8 +294,8 @@ end
 
 function set_template!(view::View, template::ANY)
   view.template = template
-  @show :parse; @time view.parsed = parse(template)
-  @show :compile; @time view.compiled = compile(view.parsed.node, view.parsed.parent, (table, ix) -> eltype(view.world.state[table].columns[ix]))
+  @showtime view.parsed = parse(template)
+  @showtime view.compiled = compile(view.parsed.node, view.parsed.parent, (table, ix) -> eltype(view.world.state[table].columns[ix]))
   refresh(view)
 end
 
@@ -308,17 +309,17 @@ end
 
 function Flows.refresh(view::View)
   (old_state, _) = refresh(view.world)
-  @show @time Flows.init_flow(view.compiled.flow, view.world)
-  @show @time Flows.run_flow(view.compiled.flow, view.world)
-  @show @time render(view, old_state, view.world.state)
+  @showtime Flows.init_flow(view.compiled.flow, view.world)
+  @showtime Flows.run_flow(view.compiled.flow, view.world)
+  @showtime render(view, old_state, view.world.state)
   (old_state, view.world.state)
 end
 
 function Flows.refresh(view::View, event_table::Symbol, event_row::Tuple)
   (old_state, _) = refresh(view.world, event_table, event_row)
-  @show @time Flows.init_flow(view.compiled.flow, view.world)
-  @show @time Flows.run_flow(view.compiled.flow, view.world)
-  @show @time render(view, old_state, view.world.state)
+  @showtime Flows.init_flow(view.compiled.flow, view.world)
+  @showtime Flows.run_flow(view.compiled.flow, view.world)
+  @showtime render(view, old_state, view.world.state)
   (old_state, view.world.state)
 end
 
@@ -414,8 +415,9 @@ function serve(view)
       view.clients[session] = client
       refresh(view, :session, tuple(session))
       while true
-        event = JSON.parse(String(read(client)))
-        refresh(view, Symbol(event["table"]), tuple(event["values"]...))
+        bytes = read(client)
+        @showtime event = JSON.parse(String(bytes))
+        @showtime refresh(view, Symbol(event["table"]), tuple(event["values"]...))
       end
     end
   end

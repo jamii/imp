@@ -1,3 +1,4 @@
+include("src/Util.jl")
 include("src/Data.jl")
 include("src/Query.jl")
 include("src/Flows.jl")

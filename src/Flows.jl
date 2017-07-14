@@ -1,5 +1,6 @@
 module Flows
 
+using Util
 using Data
 using Query
 using Match
@@ -169,9 +170,9 @@ end
 function refresh(world::World, event_table::Symbol, event_row::Tuple)
   @show :event event_table event_row
   old_state = copy(world.state)
-  @show @time init_flow(world.flow, world)
-  @show @time push!(world.state[event_table], event_row)
-  @show @time run_flow(world.flow, world)
+  @showtime init_flow(world.flow, world)
+  @showtime push!(world.state[event_table], event_row)
+  @showtime run_flow(world.flow, world)
   (old_state, world.state)
 end
 

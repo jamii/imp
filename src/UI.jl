@@ -333,20 +333,21 @@ end
 
 # TODO figure out how to handle changes in template
 function render(view, old_state, new_state)
+  sessions = Set{String}(vcat(get(() -> new_state[:query_0], old_state, :query_0).columns[1], new_state[:query_0].columns[1]))
   old_groups = Dict{Symbol, Relation}(group_id => get(() -> empty(new_state[group_id]), old_state, group_id) for group_id in view.compiled.group_ids)
   old_attributes::Relation{Tuple{Vector{String}, Vector{UInt64}, Vector{String}, Vector{String}}} = get(() -> empty(new_state[:attribute]), old_state, :attribute)
   new_groups = Dict{Symbol, Relation}(group_id => new_state[group_id] for group_id in view.compiled.group_ids)
   new_attributes::Relation{Tuple{Vector{String}, Vector{UInt64}, Vector{String}, Vector{String}}} = new_state[:attribute]
-  node_delete_parents = Dict(session => Vector{UInt64}() for (session, _) in view.clients)
+  node_delete_parents = Dict(session => Vector{UInt64}() for session in sessions)
   node_delete_childs = Set{UInt64}()
-  node_delete_ixes = Dict(session => Vector{Int64}() for (session, _) in view.clients)
-  html_create_parents = Dict(session => Vector{UInt64}() for (session, _) in view.clients)
-  html_create_ixes = Dict(session => Vector{Int64}() for (session, _) in view.clients)
-  html_create_childs = Dict(session => Vector{UInt64}() for (session, _) in view.clients)
-  html_create_tags = Dict(session => Vector{String}() for (session, _) in view.clients)
-  text_create_parents = Dict(session => Vector{UInt64}() for (session, _) in view.clients)
-  text_create_ixes = Dict(session => Vector{Int64}() for (session, _) in view.clients)
-  text_create_contents = Dict(session => Vector{String}() for (session, _) in view.clients)
+  node_delete_ixes = Dict(session => Vector{Int64}() for session in sessions)
+  html_create_parents = Dict(session => Vector{UInt64}() for session in sessions)
+  html_create_ixes = Dict(session => Vector{Int64}() for session in sessions)
+  html_create_childs = Dict(session => Vector{UInt64}() for session in sessions)
+  html_create_tags = Dict(session => Vector{String}() for session in sessions)
+  text_create_parents = Dict(session => Vector{UInt64}() for session in sessions)
+  text_create_ixes = Dict(session => Vector{Int64}() for session in sessions)
+  text_create_contents = Dict(session => Vector{String}() for session in sessions)
   for group_id in view.compiled.group_ids
     (olds, news) = Data.diff_ixes(old_groups[group_id], new_groups[group_id])
     old_columns = old_groups[group_id].columns
@@ -364,8 +365,9 @@ function render(view, old_state, new_state)
       if !(old_parent_ids[i] in node_delete_childs)
         session = old_sessions[i]
         parent = old_parent_ids[i]
-        (next_i, _) = gallop(old_parent_ids, parent, i, length(old_parent_ids)+1, 1)
-        ix = next_i - i
+        (next_i1, _) = gallop(old_sessions, session, i, length(old_sessions)+1, 1)
+        (next_i2, _) = gallop(old_parent_ids, parent, i, length(old_parent_ids)+1, 1)
+        ix = min(next_i1, next_i2) - i
         push!(node_delete_parents[session], parent)
         push!(node_delete_ixes[session], ix)
       end
@@ -373,8 +375,9 @@ function render(view, old_state, new_state)
     for i in reverse(news) # go backwards so that ixes are correct by the time they are reached
       session = new_sessions[i]
       parent = new_parent_ids[i]
-      (next_i, _) = gallop(new_parent_ids, parent, i, length(new_parent_ids)+1, 1)
-      ix = next_i - i - 1 
+      (next_i1, _) = gallop(new_sessions, session, i, length(new_sessions)+1, 1)
+      (next_i2, _) = gallop(new_parent_ids, parent, i, length(new_parent_ids)+1, 1)
+      ix = min(next_i1, next_i2) - i - 1 
       if new_kinds[i] == Html
         push!(html_create_parents[session], parent)
         push!(html_create_ixes[session], ix)
@@ -395,8 +398,8 @@ function render(view, old_state, new_state)
   new_keys::Vector{String} = new_attributes.columns[3]
   new_vals::Vector{String} = new_attributes.columns[4]
   (olds, news) = Data.diff_ixes(old_attributes, new_attributes)
-  attribute_delete_childs = Dict(session => Vector{UInt64}() for (session, _) in view.clients)
-  attribute_delete_keys = Dict(session => Vector{String}() for (session, _) in view.clients)
+  attribute_delete_childs = Dict(session => Vector{UInt64}() for session in sessions)
+  attribute_delete_keys = Dict(session => Vector{String}() for session in sessions)
   for i in olds
     if !(old_childs[i] in node_delete_childs)
       session = old_sessions[i]
@@ -404,9 +407,9 @@ function render(view, old_state, new_state)
       push!(attribute_delete_keys[session], old_keys[i])
     end
   end
-  attribute_create_childs = Dict(session => Vector{UInt64}() for (session, _) in view.clients)
-  attribute_create_keys = Dict(session => Vector{String}() for (session, _) in view.clients)
-  attribute_create_vals = Dict(session => Vector{String}() for (session, _) in view.clients)
+  attribute_create_childs = Dict(session => Vector{UInt64}() for session in sessions)
+  attribute_create_keys = Dict(session => Vector{String}() for session in sessions)
+  attribute_create_vals = Dict(session => Vector{String}() for session in sessions)
   for i in news
     session = new_sessions[i]
     push!(attribute_create_childs[session], new_childs[i])
@@ -415,7 +418,13 @@ function render(view, old_state, new_state)
   end
   for (session, client) in view.clients
     # TODO the implicit unchecked UInt64 -> JSFloat is probably going to be trouble sooner or later
-    write(client, js"{\"events\": $(view.world.events), \"render\": [$(node_delete_parents[session]), $(node_delete_ixes[session]), $(html_create_parents[session]), $(html_create_ixes[session]), $(html_create_childs[session]), $(html_create_tags[session]), $(text_create_parents[session]), $(text_create_ixes[session]), $(text_create_contents[session]), $(attribute_delete_childs[session]), $(attribute_delete_keys[session]), $(attribute_create_childs[session]), $(attribute_create_keys[session]), $(attribute_create_vals[session])]}")
+    try
+      write(client, js"{\"events\": $(view.world.events), \"render\": [$(node_delete_parents[session]), $(node_delete_ixes[session]), $(html_create_parents[session]), $(html_create_ixes[session]), $(html_create_childs[session]), $(html_create_tags[session]), $(text_create_parents[session]), $(text_create_ixes[session]), $(text_create_contents[session]), $(attribute_delete_childs[session]), $(attribute_delete_keys[session]), $(attribute_create_childs[session]), $(attribute_create_keys[session]), $(attribute_create_vals[session])]}")
+    catch error
+      info(error)
+      delete!(view.clients, session)
+      view.world.state[:session] = Relation((filter((s) -> s != session, view.world.state[:session].columns[1]),), 1)
+    end
   end
 end
 
@@ -427,7 +436,14 @@ function serve(view)
       view.clients[session] = client
       refresh(view, :session, tuple(session))
       while true
-        bytes = read(client)
+        bytes = try
+          read(client)
+        catch error
+          info(error)
+          delete!(view.clients, session)
+          view.world.state[:session] = Relation((filter((s) -> s != session, view.world.state[:session].columns[1]),), 1)
+          return
+        end
         @showtime event = JSON.parse(String(bytes))
         @showtime refresh(view, Symbol(event["table"]), tuple(event["values"]...))
       end
@@ -441,15 +457,23 @@ end
 
 function Base.close(view::View)
   if !isnull(view.server) && isopen(get(view.server).http.sock)
-    close(get(view.server))
+    try
+      close(get(view.server))
+    catch error
+      warn(error)
+    end
   end
   for (_, client) in view.clients
     if isopen(client)
-      close(client)
+      try
+        close(client)
+      catch error
+        warn(error)
+      end
     end
   end
   view.server = Nullable{Server}()
-  view.clients = Dict{String, WebSocket}()
+  empty!(view.clients)
 end
 
 export View, set_template!, serve

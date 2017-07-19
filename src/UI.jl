@@ -250,14 +250,14 @@ function compile(node, parent, column_type::Function)
       push!(merges, @eval @merge begin
         $(Symbol("group_", fixed_parent[fixed_parent[id]]))($(key_vars[fixed_parent[id]]...)) => (_, fixed_parent_hash, _, _)
         $(Symbol("query_", query_parent[id]))($(vars[query_parent[id]]...)) => _
-        return attribute(fixed_parent_hash, string($(my_node.key...))) => string($(my_node.val...))
+        return attribute(session, fixed_parent_hash, string($(my_node.key...))) => string($(my_node.val...))
       end)
     end
     
   end
   
   flow = Sequence(Flow[
-    @transient attribute(UInt64, String) => String
+    @transient attribute(String, UInt64, String) => String
     unique((flow) -> flow.output_name, creates)...
     merges...
   ])
@@ -334,25 +334,27 @@ end
 # TODO figure out how to handle changes in template
 function render(view, old_state, new_state)
   old_groups = Dict{Symbol, Relation}(group_id => get(() -> empty(new_state[group_id]), old_state, group_id) for group_id in view.compiled.group_ids)
-  old_attributes::Relation{Tuple{Vector{UInt64}, Vector{String}, Vector{String}}} = get(() -> empty(new_state[:attribute]), old_state, :attribute)
+  old_attributes::Relation{Tuple{Vector{String}, Vector{UInt64}, Vector{String}, Vector{String}}} = get(() -> empty(new_state[:attribute]), old_state, :attribute)
   new_groups = Dict{Symbol, Relation}(group_id => new_state[group_id] for group_id in view.compiled.group_ids)
-  new_attributes::Relation{Tuple{Vector{UInt64}, Vector{String}, Vector{String}}} = new_state[:attribute]
-  node_delete_parents = Vector{UInt64}()
+  new_attributes::Relation{Tuple{Vector{String}, Vector{UInt64}, Vector{String}, Vector{String}}} = new_state[:attribute]
+  node_delete_parents = Dict(session => Vector{UInt64}() for (session, _) in view.clients)
   node_delete_childs = Set{UInt64}()
-  node_delete_ixes = Vector{Int64}()
-  html_create_parents = Vector{UInt64}()
-  html_create_ixes = Vector{Int64}()
-  html_create_childs = Vector{UInt64}()
-  html_create_tags = Vector{String}()
-  text_create_parents = Vector{UInt64}()
-  text_create_ixes = Vector{Int64}()
-  text_create_contents = Vector{String}()
+  node_delete_ixes = Dict(session => Vector{Int64}() for (session, _) in view.clients)
+  html_create_parents = Dict(session => Vector{UInt64}() for (session, _) in view.clients)
+  html_create_ixes = Dict(session => Vector{Int64}() for (session, _) in view.clients)
+  html_create_childs = Dict(session => Vector{UInt64}() for (session, _) in view.clients)
+  html_create_tags = Dict(session => Vector{String}() for (session, _) in view.clients)
+  text_create_parents = Dict(session => Vector{UInt64}() for (session, _) in view.clients)
+  text_create_ixes = Dict(session => Vector{Int64}() for (session, _) in view.clients)
+  text_create_contents = Dict(session => Vector{String}() for (session, _) in view.clients)
   for group_id in view.compiled.group_ids
     (olds, news) = Data.diff_ixes(old_groups[group_id], new_groups[group_id])
     old_columns = old_groups[group_id].columns
     new_columns = new_groups[group_id].columns
+    old_sessions::Vector{String} = old_columns[1]
     old_parent_ids::Vector{UInt64} = old_columns[end-3]
     old_child_ids::Vector{UInt64} = old_columns[end-2]
+    new_sessions::Vector{String} = new_columns[1]
     new_parent_ids::Vector{UInt64} = new_columns[end-3]
     new_child_ids::Vector{UInt64} = new_columns[end-2]
     new_kinds::Vector{FixedNodeKind} = new_columns[end-1]
@@ -360,47 +362,60 @@ function render(view, old_state, new_state)
     for i in olds
       push!(node_delete_childs, old_child_ids[i])
       if !(old_parent_ids[i] in node_delete_childs)
+        session = old_sessions[i]
         parent = old_parent_ids[i]
         (next_i, _) = gallop(old_parent_ids, parent, i, length(old_parent_ids)+1, 1)
         ix = next_i - i
-        push!(node_delete_parents, parent)
-        push!(node_delete_ixes, ix)
+        push!(node_delete_parents[session], parent)
+        push!(node_delete_ixes[session], ix)
       end
     end
     for i in reverse(news) # go backwards so that ixes are correct by the time they are reached
+      session = new_sessions[i]
       parent = new_parent_ids[i]
       (next_i, _) = gallop(new_parent_ids, parent, i, length(new_parent_ids)+1, 1)
       ix = next_i - i - 1 
       if new_kinds[i] == Html
-        push!(html_create_parents, parent)
-        push!(html_create_ixes, ix)
-        push!(html_create_childs, new_child_ids[i])
-        push!(html_create_tags, new_contents[i])
+        push!(html_create_parents[session], parent)
+        push!(html_create_ixes[session], ix)
+        push!(html_create_childs[session], new_child_ids[i])
+        push!(html_create_tags[session], new_contents[i])
       else
-        push!(text_create_parents, parent)
-        push!(text_create_ixes, ix)
-        push!(text_create_contents, new_contents[i])
+        push!(text_create_parents[session], parent)
+        push!(text_create_ixes[session], ix)
+        push!(text_create_contents[session], new_contents[i])
       end
     end
   end
+  old_sessions = old_attributes.columns[1]
+  old_childs::Vector{UInt64} = old_attributes.columns[2]
+  old_keys::Vector{String} = old_attributes.columns[3]
+  new_sessions = new_attributes.columns[1]
+  new_childs::Vector{UInt64} = new_attributes.columns[2]
+  new_keys::Vector{String} = new_attributes.columns[3]
+  new_vals::Vector{String} = new_attributes.columns[4]
   (olds, news) = Data.diff_ixes(old_attributes, new_attributes)
-  attribute_delete_childs = old_attributes.columns[1][olds]
-  attribute_delete_keys = old_attributes.columns[2][olds]
-  attribute_create_childs = new_attributes.columns[1][news]
-  attribute_create_keys = new_attributes.columns[2][news]
-  attribute_create_vals = new_attributes.columns[3][news]
-  nonredundant_attribute_delete_childs = empty(attribute_delete_childs)
-  nonredundant_attribute_delete_keys = empty(attribute_delete_keys)
-  for (i, child) in enumerate(attribute_delete_childs)
-    if !(child in node_delete_childs)
-      push!(nonredundant_attribute_delete_childs, child)
-      push!(nonredundant_attribute_delete_keys, attribute_delete_keys[i])
+  attribute_delete_childs = Dict(session => Vector{UInt64}() for (session, _) in view.clients)
+  attribute_delete_keys = Dict(session => Vector{String}() for (session, _) in view.clients)
+  for i in olds
+    if !(old_childs[i] in node_delete_childs)
+      session = old_sessions[i]
+      push!(attribute_delete_childs[session], old_childs[i])
+      push!(attribute_delete_keys[session], old_keys[i])
     end
   end
-  for (_, client) in view.clients
-    # TODO handle sessions
+  attribute_create_childs = Dict(session => Vector{UInt64}() for (session, _) in view.clients)
+  attribute_create_keys = Dict(session => Vector{String}() for (session, _) in view.clients)
+  attribute_create_vals = Dict(session => Vector{String}() for (session, _) in view.clients)
+  for i in news
+    session = new_sessions[i]
+    push!(attribute_create_childs[session], new_childs[i])
+    push!(attribute_create_keys[session], new_keys[i])
+    push!(attribute_create_vals[session], new_vals[i])
+  end
+  for (session, client) in view.clients
     # TODO the implicit unchecked UInt64 -> JSFloat is probably going to be trouble sooner or later
-    write(client, js"{\"events\": $(view.world.events), \"render\": [$node_delete_parents, $node_delete_ixes, $html_create_parents, $html_create_ixes, $html_create_childs, $html_create_tags, $text_create_parents, $text_create_ixes, $text_create_contents, $nonredundant_attribute_delete_childs, $nonredundant_attribute_delete_keys, $attribute_create_childs, $attribute_create_keys, $attribute_create_vals]}")
+    write(client, js"{\"events\": $(view.world.events), \"render\": [$(node_delete_parents[session]), $(node_delete_ixes[session]), $(html_create_parents[session]), $(html_create_ixes[session]), $(html_create_childs[session]), $(html_create_tags[session]), $(text_create_parents[session]), $(text_create_ixes[session]), $(text_create_contents[session]), $(attribute_delete_childs[session]), $(attribute_delete_keys[session]), $(attribute_create_childs[session]), $(attribute_create_keys[session]), $(attribute_create_vals[session])]}")
   end
 end
 

@@ -35,32 +35,32 @@ ws.onmessage = function (event) {
     }
 }
 
-function render(node_delete_parents, node_delete_ixes, html_create_parents, html_create_ixes, html_create_childs, html_create_tags, text_create_parents, text_create_ixes, text_create_contents, attribute_delete_childs, attribute_delete_keys, attribute_create_childs, attribute_create_keys, attribute_create_vals) {
+nodes = {}
+
+function render(node_delete_childs, html_create_parents, html_create_siblings, html_create_childs, html_create_tags, text_create_parents, text_create_siblings, text_create_childs, text_create_contents, attribute_delete_childs, attribute_delete_keys, attribute_create_childs, attribute_create_keys, attribute_create_vals) {
     try {
-        for (i = 0; i < node_delete_parents.length; i++) {
-            parent = document.getElementById(node_delete_parents[i]);
-            ix = parent.childNodes.length - node_delete_ixes[i];
-            parent.childNodes[ix].remove();
+        for (i = 0; i < node_delete_childs.length; i++) {
+            nodes[node_delete_childs[i]].remove();
+            delete nodes[node_delete_childs[i]];
         }
         for (i = 0; i < html_create_parents.length; i++) {
             // super hacky way to root things
             if (html_create_tags[i] == "head") {
-                document.head.id = html_create_childs[i];
+                nodes[html_create_childs[i]] = document.head;
             } else if (html_create_tags[i] == "body") {
-                document.body.id = html_create_childs[i];
+                nodes[html_create_childs[i]] = document.body;
             } else {
-                parent = document.getElementById(html_create_parents[i]);
+                parent = nodes[html_create_parents[i]];
                 child = document.createElement(html_create_tags[i]);
-                ix = parent.childNodes.length - html_create_ixes[i];
-                child.id = html_create_childs[i];
-                parent.insertBefore(child, parent.childNodes[ix]);
+                nodes[html_create_childs[i]] = child;
+                parent.insertBefore(child, nodes[html_create_siblings[i]]);
             }
         }
         for (i = 0; i < text_create_parents.length; i++) {
-            parent = document.getElementById(text_create_parents[i]);
+            parent = nodes[text_create_parents[i]];
             child = document.createTextNode(text_create_contents[i]);
-            ix = parent.childNodes.length - text_create_ixes[i];
-            parent.insertBefore(child, parent.childNodes[ix]);
+            nodes[text_create_childs[i]] = child;
+            parent.insertBefore(child, nodes[text_create_siblings[i]]);
         }
         for (i = 0; i < attribute_create_childs.length; i++) {
             key = attribute_create_keys[i];
@@ -69,10 +69,10 @@ function render(node_delete_parents, node_delete_ixes, html_create_parents, html
             }
             if (key.startsWith("on")) {
                 // events have to be handled by setting attributes, because the string needs to be evaled
-                document.getElementById(attribute_create_childs[i]).setAttribute(key, attribute_create_vals[i]);
+                nodes[attribute_create_childs[i]].setAttribute(key, attribute_create_vals[i]);
             } else {
                 // everything else is better off as a property
-                document.getElementById(attribute_create_childs[i])[key] = attribute_create_vals[i];
+                nodes[attribute_create_childs[i]][key] = attribute_create_vals[i];
             }
         }
         for (i = 0; i < attribute_delete_childs.length; i++) {
@@ -81,9 +81,9 @@ function render(node_delete_parents, node_delete_ixes, html_create_parents, html
                 key = "className"; 
             }
             if (key.startsWith("on")) {
-                document.getElementById(attribute_delete_childs[i]).removeAttribute(key);
+                nodes[attribute_delete_childs[i]].removeAttribute(key);
             } else {
-                document.getElementById(attribute_delete_childs[i])[key] = undefined;
+                nodes[attribute_delete_childs[i]][key] = undefined;
             }
         }
     } catch (error) {

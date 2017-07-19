@@ -213,7 +213,7 @@ function diff{T}(old::Relation{T}, new::Relation{T})
   new_index = index(new, order)
   old_only_columns = tuple([empty(column) for column in old.columns]...)
   new_only_columns = tuple([empty(column) for column in new.columns]...)
-  foreach_diff(old_index, new_index, old_index[1:length(old.columns)], new_index[1:length(new.columns)], 
+  foreach_diff(old_index, new_index, old_index, new_index, 
     (o, i) -> push_in!(old_only_columns, o, i),
     (n, i) -> push_in!(new_only_columns, n, i),
     (o, n, oi, ni) -> ())
@@ -227,7 +227,7 @@ function diff_ixes{T}(old::Relation{T}, new::Relation{T})::Tuple{Vector{Int64}, 
   new_index = index(new, order)
   old_only_ixes = Vector{Int64}()
   new_only_ixes = Vector{Int64}()
-  foreach_diff(old_index, new_index, old_index[1:length(old.columns)], new_index[1:length(new.columns)], 
+  foreach_diff(old_index, new_index, old_index, new_index, 
     (o, i) -> push!(old_only_ixes, i),
     (n, i) -> push!(new_only_ixes, i),
     (o, n, oi, ni) -> ())

@@ -62,6 +62,17 @@ function render(node_delete_childs, html_create_parents, html_create_siblings, h
             nodes[text_create_childs[i]] = child;
             parent.insertBefore(child, nodes[text_create_siblings[i]]);
         }
+        for (i = 0; i < attribute_delete_childs.length; i++) {
+            key = attribute_delete_keys[i];
+            if (key == "class") {
+                key = "className"; 
+            }
+            if (key.startsWith("on")) {
+                nodes[attribute_delete_childs[i]].removeAttribute(key);
+            } else {
+                nodes[attribute_delete_childs[i]][key] = undefined;
+            }
+        }
         for (i = 0; i < attribute_create_childs.length; i++) {
             key = attribute_create_keys[i];
             if (key == "class") {
@@ -73,17 +84,6 @@ function render(node_delete_childs, html_create_parents, html_create_siblings, h
             } else {
                 // everything else is better off as a property
                 nodes[attribute_create_childs[i]][key] = attribute_create_vals[i];
-            }
-        }
-        for (i = 0; i < attribute_delete_childs.length; i++) {
-            key = attribute_delete_keys[i];
-            if (key == "class") {
-                key = "className"; 
-            }
-            if (key.startsWith("on")) {
-                nodes[attribute_delete_childs[i]].removeAttribute(key);
-            } else {
-                nodes[attribute_delete_childs[i]][key] = undefined;
             }
         }
     } catch (error) {

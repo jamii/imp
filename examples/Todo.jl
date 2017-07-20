@@ -224,38 +224,43 @@ begin
           [ul
             class="todo-list"
             visible(session, todo) do
-              text(todo, text) do
-                displaying(session, todo) do
-                  [li 
-                    [div 
-                      class="view" 
-                      [input 
-                        class="toggle" 
-                        "type"="checkbox" 
-                        checked(todo) do
-                          checked="checked"
-                        end
-                        onclick="toggle($todo)"
-                      ] 
-                      [label "$text" ondblclick="start_editing('$session', $todo)"]
-                      [button class="destroy" onclick="delete_todo($todo)"]
+              displaying(session, todo) do
+                [li 
+                  [div 
+                    class="view" 
+                    [input 
+                      class="toggle" 
+                      "type"="checkbox" 
+                      checked(todo) do
+                        checked="checked"
+                      end
+                      onclick="toggle($todo)"
+                    ] 
+                    [label 
+                      ondblclick="start_editing('$session', $todo)"
+                      text(todo, text) do
+                        "$text" 
+                      end
                     ]
+                    [button class="destroy" onclick="delete_todo($todo)"]
                   ]
-                end
-                editing(session, todo) do
-                  [li
-                    class="editing"
-                    [input  
-                      class="edit"
-                      value="$text"
-                      onkeydown="""
-                        if (event.which == 13) finish_editing('$session', $todo, this.value)
-                        if (event.which == 27) escape_editing('$session', $todo)
-                      """
-                      onblur="escape_editing('$session', $todo)"
-                    ]
+                ]
+              end
+              editing(session, todo) do
+                [li
+                  class="editing"
+                  [input  
+                    class="edit"
+                    text(todo, text) do
+                      defaultValue="$text"
+                    end
+                    onkeydown="""
+                      if (event.which == 13) finish_editing('$session', $todo, this.value)
+                      if (event.which == 27) escape_editing('$session', $todo)
+                    """
+                    onblur="escape_editing('$session', $todo)"
                   ]
-                end
+                ]
               end
             end
           ]

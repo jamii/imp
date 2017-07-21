@@ -118,14 +118,27 @@ function dedup_sorted!{T}(columns::T, key, val, deduped::T)
   end
 end
 
+function is_unique_and_sorted{T}(columns::T)
+  for i in 2:length(columns[1])
+    if cmp_in(columns, columns, i, i-1) != 1
+      return false
+    end
+  end
+  return true
+end
+
 function Relation(columns, num_keys::Int)
-  deduped::typeof(columns) = map((column) -> empty(column), columns)
-  quicksort!(columns)
-  key = columns[1:num_keys]
-  val = columns[num_keys+1:1]
-  dedup_sorted!(columns, key, val, deduped)
   order = collect(1:length(columns))
-  Relation(deduped, num_keys, Dict{Vector{Int}, typeof(deduped)}(order => deduped))
+  if is_unique_and_sorted(columns)
+    Relation(columns, num_keys, Dict{Vector{Int}, typeof(columns)}(order => columns))
+  else
+    quicksort!(columns)
+    deduped::typeof(columns) = map((column) -> empty(column), columns)
+    key = columns[1:num_keys]
+    val = columns[num_keys+1:1]
+    dedup_sorted!(columns, key, val, deduped)
+    Relation(deduped, num_keys, Dict{Vector{Int}, typeof(deduped)}(order => deduped))
+  end
 end
 
 function parse_relation(expr)
@@ -238,6 +251,12 @@ function Base.merge{T}(old::Relation{T}, new::Relation{T})
   if old.num_keys != new.num_keys 
     error("Mismatch in num_keys - $(old.num_keys) vs $(new.num_keys) in merge($old, $new)")
   end
+  if length(old.columns[1]) == 0
+    return new
+  end
+  if length(new.columns[1]) == 0
+    return old
+  end
   order = collect(1:length(old.columns))
   old_index = old.indexes[order]
   new_index = new.indexes[order]
@@ -277,7 +296,7 @@ function empty(coll)
 end
 
 function empty(relation::Relation) 
-  Relation(map((c) -> empty(c), relation.columns), relation.num_keys)
+  Relation(map((c) -> empty(c), relation.columns), relation.num_keys, empty(relation.indexes))
 end
 
 function Base.copy(relation::Relation)

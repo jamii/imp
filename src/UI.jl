@@ -252,8 +252,8 @@ function compile(node, parent, column_type::Function)
       push!(group_ids, Symbol("group_", fixed_parent[id]))
       push!(creates, @eval @transient $(Symbol("group_", fixed_parent[id]))($(key_types[id]...)) => (UInt64, UInt64, FixedNodeKind, String))
       push!(merges, @eval @merge begin
-        $(Symbol("group_", fixed_parent[fixed_parent[id]]))($(key_vars[fixed_parent[id]]...)) => (_, fixed_parent_hash, _, _)
         $(Symbol("query_", query_parent[id]))($(vars[query_parent[id]]...)) => query_parent_hash
+        $(Symbol("group_", fixed_parent[fixed_parent[id]]))($(key_vars[fixed_parent[id]]...)) => (_, fixed_parent_hash, _, _)
         my_hash = hash($id, query_parent_hash)
         return $(Symbol("group_", fixed_parent[id]))($(key_exprs[id]...)) => (fixed_parent_hash, my_hash, $(my_node.kind), $(string_expr(my_node.content)))
       end)
@@ -262,8 +262,8 @@ function compile(node, parent, column_type::Function)
       push!(attribute_ids, Symbol("attribute_", id))
       push!(creates, @eval @transient $(Symbol("attribute_", id))(Session, UInt64, String) => String)
       push!(merges, @eval @merge begin
-        $(Symbol("group_", fixed_parent[fixed_parent[id]]))($(key_vars[fixed_parent[id]]...)) => (_, fixed_parent_hash, _, _)
         $(Symbol("query_", query_parent[id]))($(vars[query_parent[id]]...)) => _
+        $(Symbol("group_", fixed_parent[fixed_parent[id]]))($(key_vars[fixed_parent[id]]...)) => (_, fixed_parent_hash, _, _)
         return $(Symbol("attribute_", id))(session, fixed_parent_hash, $(string_expr(my_node.key))) => $(string_expr(my_node.val))
       end)
     end

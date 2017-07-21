@@ -18,8 +18,8 @@ begin
     
     # session state 
     
-    @stateful current_filter(session::String) => filter::String
-    @stateful editing(session::String) => todo::Int64
+    @stateful current_filter(Session) => filter::String
+    @stateful editing(Session) => todo::Int64
     
     # redundant computed state (TODO need @prev)
     
@@ -91,26 +91,26 @@ begin
       return completed(todo) => !completed
     end
     
-    @event start_editing(session::String, todo::Int64)
+    @event start_editing(Session, todo::Int64)
     @merge begin
       start_editing(session, todo)
       return editing(session) => todo
     end
     
-    @event finish_editing(session::String, todo::Int64, text::String)
+    @event finish_editing(Session, todo::Int64, text::String)
     @merge begin
       finish_editing(session, todo, text)
       return editing(session) => -1 # TODO allow deletion
       return text(todo) => text
     end
     
-    @event escape_editing(session::String, todo::Int64)
+    @event escape_editing(Session, todo::Int64)
     @merge begin
       escape_editing(session, todo)
       return editing(session) => -1
     end
     
-    @event set_filter(session::String, filter::String)
+    @event set_filter(Session, filter::String)
     @merge begin
       set_filter(session, filter)
       return current_filter(session) => filter
@@ -137,7 +137,7 @@ begin
       return all_completed() => (length(todo) == 0)
     end
     
-    @transient visible(session::String, todo::Int64)
+    @transient visible(Session, todo::Int64)
     @merge begin
       current_filter(session) => "Active"
       completed(todo) => false
@@ -157,7 +157,7 @@ begin
       return visible(session, todo)
     end
     
-    @transient displaying(session::String, todo::Int64)
+    @transient displaying(Session, todo::Int64)
     @merge begin
       editing(session) => editing
       visible(session, todo) 

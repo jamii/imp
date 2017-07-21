@@ -9,6 +9,8 @@ using HttpServer
 using WebSockets
 using JSON
 
+const Session = Int64 
+
 # --- parsing ---
 
 const Splice = Vector{Union{String, Symbol}} 
@@ -126,7 +128,7 @@ function compile(node, parent, column_type::Function)
   end
   
   vars = Dict{Int64, Vector{Symbol}}(0 => [:session])
-  types = Dict{Int64, Vector{Type}}(0 => [String])
+  types = Dict{Int64, Vector{Type}}(0 => [Session])
   free_vars = Dict{Int64, Vector{Symbol}}(0 => [])
   free_types = Dict{Int64, Vector{Type}}(0 => [])
   for (id, my_node) in enumerate(node)
@@ -172,7 +174,7 @@ function compile(node, parent, column_type::Function)
   end
   
   const KeyElem = Union{Int64, Type, Tuple{Symbol, Type}}
-  key = Dict{Int64, Vector{KeyElem}}(0 => KeyElem[(:session, String)])
+  key = Dict{Int64, Vector{KeyElem}}(0 => KeyElem[(:session, Session)])
   for (my_fixed_parent, my_family) in family
     base_key = Vector{KeyElem}()
     append!(base_key, zip(vars[my_fixed_parent], types[my_fixed_parent]))
@@ -220,13 +222,13 @@ function compile(node, parent, column_type::Function)
   attribute_ids = Vector{Symbol}()
   for (id, my_node) in enumerate(node)
     if id == 1 # node 1 is always [html ...]
-      push!(creates, @transient query_0(String) => UInt64)
+      push!(creates, @transient query_0(Session) => UInt64)
       push!(merges, @merge begin
         session(session)
         return query_0(session) => hash(session)
       end)
       push!(group_ids, :group_0)
-      push!(creates, @transient group_0(String, Int64) => (UInt64, UInt64, FixedNodeKind, String))
+      push!(creates, @transient group_0(Session, Int64) => (UInt64, UInt64, FixedNodeKind, String))
       push!(merges, @merge begin
         query_0(session) => query_hash
         my_hash = hash(0, query_hash)
@@ -258,7 +260,7 @@ function compile(node, parent, column_type::Function)
       
     elseif my_node isa AttributeNode
       push!(attribute_ids, Symbol("attribute_", id))
-      push!(creates, @eval @transient $(Symbol("attribute_", id))(String, UInt64, String) => String)
+      push!(creates, @eval @transient $(Symbol("attribute_", id))(Session, UInt64, String) => String)
       push!(merges, @eval @merge begin
         $(Symbol("group_", fixed_parent[fixed_parent[id]]))($(key_vars[fixed_parent[id]]...)) => (_, fixed_parent_hash, _, _)
         $(Symbol("query_", query_parent[id]))($(vars[query_parent[id]]...)) => _
@@ -288,7 +290,7 @@ mutable struct View
   template::Any
   parsed::Parsed
   compiled::Compiled
-  clients::Dict{String, WebSocket}
+  clients::Dict{Session, WebSocket}
   server::Nullable{Server}
 end
 
@@ -298,7 +300,7 @@ function View()
     quote [html] end, 
     Parsed(Node[], Int64[]), 
     Compiled(Sequence(Flow[]), Symbol[], Symbol[]),
-    Dict{String, WebSocket}(),
+    Dict{Session, WebSocket}(),
     Nullable{Server}()
   )
   finalizer(view, close)
@@ -314,7 +316,7 @@ end
 
 function Flows.set_flow!(view::View, flow::Flow)
   view.world.flow = Sequence([
-    @stateful session(String)
+    @stateful session(Session)
     flow
   ])
   set_template!(view, view.template) # need to recompile template in case the types have changed
@@ -346,7 +348,7 @@ end
 
 # TODO use subarrays instead of verbosely creating all these dicts
 function render(view, old_state, new_state)
-  sessions = Set{String}(vcat(get(() -> new_state[:query_0], old_state, :query_0).columns[1], new_state[:query_0].columns[1]))
+  sessions = Set{Session}(vcat(get(() -> new_state[:query_0], old_state, :query_0).columns[1], new_state[:query_0].columns[1]))
 
   deleted_nodes = Set{UInt64}()
   node_delete_childs = Dict(session => Vector{UInt64}() for session in sessions)
@@ -363,7 +365,7 @@ function render(view, old_state, new_state)
     old_group = get(() -> empty(new_group), old_state, group_id)
     (deleted, created) = Data.diff_ixes(old_group, new_group)
   
-    old_sessions::Vector{String} = old_group.columns[1]
+    old_sessions::Vector{Session} = old_group.columns[1]
     old_parent_ids::Vector{UInt64} = old_group.columns[end-3]
     old_child_ids::Vector{UInt64} = old_group.columns[end-2]
     for i in deleted
@@ -374,7 +376,7 @@ function render(view, old_state, new_state)
       end
     end
   
-    new_sessions::Vector{String} = new_group.columns[1]
+    new_sessions::Vector{Session} = new_group.columns[1]
     new_parent_ids::Vector{UInt64} = new_group.columns[end-3]
     new_child_ids::Vector{UInt64} = new_group.columns[end-2]
     new_kinds::Vector{FixedNodeKind} = new_group.columns[end-1]
@@ -410,8 +412,8 @@ function render(view, old_state, new_state)
   attribute_create_keys = Dict(session => Vector{String}() for session in sessions)
   attribute_create_vals = Dict(session => Vector{String}() for session in sessions)
   for attribute_id in view.compiled.attribute_ids
-    new_attributes::Relation{Tuple{Vector{String}, Vector{UInt64}, Vector{String}, Vector{String}}} = new_state[attribute_id]
-    old_attributes::Relation{Tuple{Vector{String}, Vector{UInt64}, Vector{String}, Vector{String}}} = get(old_state, attribute_id, new_attributes)
+    new_attributes::Relation{Tuple{Vector{Session}, Vector{UInt64}, Vector{String}, Vector{String}}} = new_state[attribute_id]
+    old_attributes::Relation{Tuple{Vector{Session}, Vector{UInt64}, Vector{String}, Vector{String}}} = get(old_state, attribute_id, new_attributes)
     (deleted, created) = Data.diff_ixes(old_attributes, new_attributes)
     
     old_sessions = old_attributes.columns[1]
@@ -452,7 +454,7 @@ end
 function serve(view)
   handler = WebSocketHandler() do req,client
     begin
-      session = string(now()) # TODO uuid
+      session = Dates.value(now()) # TODO uuid
       write(client, js"{\"session\": $session}")
       view.clients[session] = client
       refresh(view, :session, tuple(session))
@@ -497,6 +499,6 @@ function Base.close(view::View)
   empty!(view.clients)
 end
 
-export View, set_template!, serve, js_str
+export Session, View, set_template!, serve, js_str
 
 end

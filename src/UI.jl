@@ -98,6 +98,15 @@ default(::Type{String}) = ""
 struct Compiled
   flow::Flow
   group_ids::Vector{Symbol}
+  attribute_ids::Vector{Symbol}
+end
+
+function string_expr(values)
+  if all(value isa String for value in values)
+    string(values...)
+  else
+    :(string($(values...)))
+  end
 end
 
 function compile(node, parent, column_type::Function)
@@ -208,6 +217,7 @@ function compile(node, parent, column_type::Function)
   creates = Vector{Create}()
   merges = Vector{Merge}()
   group_ids = Vector{Symbol}()
+  attribute_ids = Vector{Symbol}()
   for (id, my_node) in enumerate(node)
     if id == 1 # node 1 is always [html ...]
       push!(creates, @transient query_0(String) => UInt64)
@@ -243,21 +253,22 @@ function compile(node, parent, column_type::Function)
         $(Symbol("group_", fixed_parent[fixed_parent[id]]))($(key_vars[fixed_parent[id]]...)) => (_, fixed_parent_hash, _, _)
         $(Symbol("query_", query_parent[id]))($(vars[query_parent[id]]...)) => query_parent_hash
         my_hash = hash($id, query_parent_hash)
-        return $(Symbol("group_", fixed_parent[id]))($(key_exprs[id]...)) => (fixed_parent_hash, my_hash, $(my_node.kind), string($(my_node.content...)))
+        return $(Symbol("group_", fixed_parent[id]))($(key_exprs[id]...)) => (fixed_parent_hash, my_hash, $(my_node.kind), $(string_expr(my_node.content)))
       end)
       
     elseif my_node isa AttributeNode
+      push!(attribute_ids, Symbol("attribute_", id))
+      push!(creates, @eval @transient $(Symbol("attribute_", id))(String, UInt64, String) => String)
       push!(merges, @eval @merge begin
         $(Symbol("group_", fixed_parent[fixed_parent[id]]))($(key_vars[fixed_parent[id]]...)) => (_, fixed_parent_hash, _, _)
         $(Symbol("query_", query_parent[id]))($(vars[query_parent[id]]...)) => _
-        return attribute(session, fixed_parent_hash, string($(my_node.key...))) => string($(my_node.val...))
+        return $(Symbol("attribute_", id))(session, fixed_parent_hash, $(string_expr(my_node.key))) => $(string_expr(my_node.val))
       end)
     end
     
   end
   
   flow = Sequence(Flow[
-    @transient attribute(String, UInt64, String) => String
     unique((flow) -> flow.output_name, creates)...
     merges...
   ])
@@ -265,7 +276,9 @@ function compile(node, parent, column_type::Function)
   group_ids = unique(group_ids)
   @assert shift!(group_ids) == :group_0 # not a real group
   
-  return Compiled(flow, group_ids)
+  attribute_ids = unique(attribute_ids)
+  
+  return Compiled(flow, group_ids, attribute_ids)
 end
 
 # --- plumbing ---
@@ -284,7 +297,7 @@ function View()
     World(),
     quote [html] end, 
     Parsed(Node[], Int64[]), 
-    Compiled(Sequence(Flow[]), Symbol[]),
+    Compiled(Sequence(Flow[]), Symbol[], Symbol[]),
     Dict{String, WebSocket}(),
     Nullable{Server}()
   )
@@ -391,35 +404,37 @@ function render(view, old_state, new_state)
     end
   end
   
-  old_attributes::Relation{Tuple{Vector{String}, Vector{UInt64}, Vector{String}, Vector{String}}} = get(() -> empty(new_state[:attribute]), old_state, :attribute)
-  new_attributes::Relation{Tuple{Vector{String}, Vector{UInt64}, Vector{String}, Vector{String}}} = new_state[:attribute]
-  (deleted, created) = Data.diff_ixes(old_attributes, new_attributes)
-  
   attribute_delete_childs = Dict(session => Vector{UInt64}() for session in sessions)
   attribute_delete_keys = Dict(session => Vector{String}() for session in sessions)
-  old_sessions = old_attributes.columns[1]
-  old_childs::Vector{UInt64} = old_attributes.columns[2]
-  old_keys::Vector{String} = old_attributes.columns[3]
-  for i in deleted
-    if !(old_childs[i] in deleted_nodes)
-      session = old_sessions[i]
-      push!(attribute_delete_childs[session], old_childs[i])
-      push!(attribute_delete_keys[session], old_keys[i])
-    end
-  end
-  
   attribute_create_childs = Dict(session => Vector{UInt64}() for session in sessions)
   attribute_create_keys = Dict(session => Vector{String}() for session in sessions)
   attribute_create_vals = Dict(session => Vector{String}() for session in sessions)
-  new_sessions = new_attributes.columns[1]
-  new_childs::Vector{UInt64} = new_attributes.columns[2]
-  new_keys::Vector{String} = new_attributes.columns[3]
-  new_vals::Vector{String} = new_attributes.columns[4]
-  for i in created
-    session = new_sessions[i]
-    push!(attribute_create_childs[session], new_childs[i])
-    push!(attribute_create_keys[session], new_keys[i])
-    push!(attribute_create_vals[session], new_vals[i])
+  for attribute_id in view.compiled.attribute_ids
+    new_attributes::Relation{Tuple{Vector{String}, Vector{UInt64}, Vector{String}, Vector{String}}} = new_state[attribute_id]
+    old_attributes::Relation{Tuple{Vector{String}, Vector{UInt64}, Vector{String}, Vector{String}}} = get(old_state, attribute_id, new_attributes)
+    (deleted, created) = Data.diff_ixes(old_attributes, new_attributes)
+    
+    old_sessions = old_attributes.columns[1]
+    old_childs::Vector{UInt64} = old_attributes.columns[2]
+    old_keys::Vector{String} = old_attributes.columns[3]
+    for i in deleted
+      if !(old_childs[i] in deleted_nodes)
+        session = old_sessions[i]
+        push!(attribute_delete_childs[session], old_childs[i])
+        push!(attribute_delete_keys[session], old_keys[i])
+      end
+    end
+    
+    new_sessions = new_attributes.columns[1]
+    new_childs::Vector{UInt64} = new_attributes.columns[2]
+    new_keys::Vector{String} = new_attributes.columns[3]
+    new_vals::Vector{String} = new_attributes.columns[4]
+    for i in created
+      session = new_sessions[i]
+      push!(attribute_create_childs[session], new_childs[i])
+      push!(attribute_create_keys[session], new_keys[i])
+      push!(attribute_create_vals[session], new_vals[i])
+    end
   end
   
   for (session, client) in view.clients

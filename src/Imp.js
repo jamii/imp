@@ -2,7 +2,6 @@ ws = new WebSocket("ws://localhost:8080");
 
 function imp_event(table) {
     return function () {
-        console.time("roundtrip");
         ws.send(JSON.stringify({"table": table, "values": Array.from(arguments)}));
         return false;
     }
@@ -13,29 +12,26 @@ ws.onerror = function (error) {
 }
 
 ws.onmessage = function (event) {
-    console.time("parse");
     msg = JSON.parse(event.data);
-    console.timeEnd("parse");
-    console.log(msg);
     if (msg.session) {
         window.session = msg.session;
     }
     if (msg.events) {
-        console.time("event handlers");
         for (var i = 0; i < msg.events.length; i++) {
             window[msg.events[i]] = imp_event(msg.events[i]);
         }
-        console.timeEnd("event handlers");
     }
     if (msg.render) {
-        console.time("render");
         render.apply(this, msg.render);
-        console.timeEnd("render");
-        console.timeEnd("roundtrip");
     }
 }
 
 nodes = {}
+queue = []
+
+function onrender(callback) {
+    queue.push(callback);
+}
 
 function render(node_delete_childs, html_create_parents, html_create_siblings, html_create_childs, html_create_tags, text_create_parents, text_create_siblings, text_create_childs, text_create_contents, attribute_delete_childs, attribute_delete_keys, attribute_create_childs, attribute_create_keys, attribute_create_vals) {
     try {
@@ -85,6 +81,9 @@ function render(node_delete_childs, html_create_parents, html_create_siblings, h
                 // everything else is better off as a property
                 nodes[attribute_create_childs[i]][key] = attribute_create_vals[i];
             }
+        }
+        while (queue.length > 0) {
+            queue.pop().call();
         }
     } catch (error) {
         console.error(error);

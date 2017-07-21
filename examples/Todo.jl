@@ -209,7 +209,7 @@ begin
             class="new-todo" 
             placeholder="What needs to be done?" 
             "type"="text" 
-            onkeydown="if (event.which == 13) {new_todo(this.value); this.value=''}"
+            onkeydown="if (event.which == 13) {new_todo(this.value); me = this; onrender(function() {me.value=''})}" # TODO figure out a better way to handle these kinds of edge-triggered changes
           ]
         ]
         [section 

@@ -99,10 +99,31 @@ mutable struct Relation{T <: Tuple} # where T is a tuple of columns
   indexes::Dict{Vector{Int},T}
 end
 
+function is_sorted{T}(columns::T)
+  for i in 2:length(columns[1])
+    if cmp_in(columns, columns, i, i-1) == -1
+      return false
+    end
+  end
+  return true
+end
+
+function is_unique_and_sorted{T}(columns::T)
+  for i in 2:length(columns[1])
+    if cmp_in(columns, columns, i, i-1) != 1
+      return false
+    end
+  end
+  return true
+end
+
 function index{T}(relation::Relation{T}, order::Vector{Int})
   get!(relation.indexes, order) do
     columns = tuple(((ix in order) ? copy(column) : empty(column) for (ix, column) in enumerate(relation.columns))...)
-    quicksort!(tuple((columns[ix] for ix in order)...))
+    sortable_columns = tuple((columns[ix] for ix in order)...)
+    if !is_sorted(sortable_columns)
+      quicksort!(sortable_columns)
+    end
     columns
   end::T
 end
@@ -116,15 +137,6 @@ function dedup_sorted!{T}(columns::T, key, val, deduped::T)
       @assert cmp_in(val, val, at, at-1) == 0 # no key collisions allowed
     end
   end
-end
-
-function is_unique_and_sorted{T}(columns::T)
-  for i in 2:length(columns[1])
-    if cmp_in(columns, columns, i, i-1) != 1
-      return false
-    end
-  end
-  return true
 end
 
 function Relation(columns, num_keys::Int)

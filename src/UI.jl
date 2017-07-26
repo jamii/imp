@@ -97,6 +97,7 @@ end
 
 default{T <: Number}(::Type{T}) = zero(T)
 default(::Type{String}) = ""
+default(::Type{DateTime}) = DateTime(0)
 
 struct Compiled
   flow::Flow
@@ -239,7 +240,9 @@ function compile(node, parent, column_type::Function)
     elseif my_node isa QueryNode
       my_hash = :(hash($id, query_parent_hash))
       for var in my_node.vars
-        my_hash = :(hash($var, $my_hash))
+        if var != :(_)
+          my_hash = :(hash($var, $my_hash))
+        end
       end
       push!(creates, @eval @transient $(Symbol("query_", id))($(types[id])...) => UInt64)
       push!(merges, @eval @merge begin

@@ -217,28 +217,28 @@ begin
           [input 
             class="toggle-all" 
             "type"="checkbox" 
-            all_checked(todo) do
+            @query all_checked(todo) begin
               checked="checked"
             end
             onclick="toggle_all(true)"]
           [ul
             class="todo-list"
-            visible(session, todo) do
-              displaying(session, todo) do
+            @query visible(session, todo) begin
+              @query displaying(session, todo) begin
                 [li 
                   [div 
                     class="view" 
                     [input 
                       class="toggle" 
                       "type"="checkbox" 
-                      checked(todo) do
+                      @query checked(todo) begin
                         checked="checked"
                       end
                       onclick="toggle($todo)"
                     ] 
                     [label 
                       ondblclick="start_editing('$session', $todo)"
-                      text(todo, text) do
+                      @query text(todo) => text begin
                         "$text" 
                       end
                     ]
@@ -246,12 +246,12 @@ begin
                   ]
                 ]
               end
-              editing(session, todo) do
+              @query editing(session) => todo begin
                 [li
                   class="editing"
                   [input  
                     class="edit"
-                    text(todo, text) do
+                    @query text(todo) => text begin
                       defaultValue="$text"
                     end
                     onkeydown="""
@@ -267,15 +267,15 @@ begin
         ]
         [footer
           class="footer"
-          completed_count_text(text) do
+          @query completed_count_text(text) begin
             [span class="todo-count" "$text"]
           end
           [ul
             class="filters"
-            filter(filter) do
+            @query filter(filter) begin
               [li 
                 [a 
-                  current_filter(session, filter) do
+                  @query current_filter(session) => filter begin
                     class="selected"
                   end 
                   onclick="set_filter('$session', '$filter')" 

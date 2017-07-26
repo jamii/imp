@@ -64,8 +64,9 @@ function parse(expr)
       Expr(:vect || :vcat || :hcat, exprs, _) => begin 
         push!(parse_queue, (my_parent, exprs))
       end
-      Expr(:call, [table::Symbol, Expr(:->, [Expr(:tuple, [], _), Expr(:block, exprs, _)], _), vars...], _) => begin
-        push!(node, QueryNode(table, vars))
+      Expr(:macrocall, [macroname, relation, Expr(:block, exprs, _)], _) => begin
+        (name, keys, vals) = Data.parse_relation(relation)
+        push!(node, QueryNode(name, vcat(keys, vals)))
         push!(parent, my_parent)
         for expr in exprs
           push!(parse_queue, (length(node), expr))

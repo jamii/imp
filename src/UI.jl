@@ -164,7 +164,7 @@ function compile(node, parent, column_type::Function)
   for (_, my_family) in family
     for hi_id in my_family
       for lo_id in my_family
-        if hi_id >= lo_id # note ids are numbered depth-first
+        if hi_id >= lo_id # note ids are numbered in pre-order
           lineage[hi_id, lo_id] = 0
         elseif hi_id == parent[lo_id]
           lineage[hi_id, lo_id] = (num_children[hi_id] += 1)

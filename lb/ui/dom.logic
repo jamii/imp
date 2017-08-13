@@ -1,0 +1,101 @@
+block(`dom) {
+ export(`{ 
+   session(session) ->
+     string(session).
+     
+   node(session, node) -> 
+     string(session), string(node).
+ 
+   parent[session, node] = parent ->
+     string(session), string(node), string(parent). // session(session), node(session, node), node(session, parent).
+      
+   position[session, node] = position -> 
+     string(session), string(node), int(position). // session(session), node(session, node). 
+     
+   tag[session, node] = tag -> // defaults to "div"
+     string(session), string(node), string(tag). // session(session), node(session, node).
+     
+   attribute[session, node, key] = val ->
+     string(session), string(node), string(key), string(val). // session(session), node(session, node).
+ 
+   style[session, node, key] = val ->
+     string(session), string(node), string(key), string(val). // session(session), node(session, node).
+ 
+   text[session, node] = text ->
+     string(session), string(node), string(text). // session(session), node(session, node).
+     
+   event(event) -> 
+     string(event).
+ 
+   listen_to(session, node, event) ->
+     string(session), string(node), string(event), event(event). // session(session), node(session, node).
+     
+   focus[session] = node ->
+     string(session), string(node). // session(session), node(session, node).
+     
+   url_fragment[session] = url_fragment ->
+     string(session), string(url_fragment). // session(session)
+     
+   clear(session, node) ->
+     string(session), string(node). // session(session), node(session, node).
+     
+   scroll_into_view(session, node) ->
+     string(session), string(node).
+     
+   // events only constrain string(node) and not node(session, node) because node might already be deleted
+ 
+   click(session, node) ->
+     string(session), string(node). 
+ 
+   key_down[session, node] = key ->
+     string(session), string(node), int(key).
+     
+   change[session, node] = text ->
+     string(session), string(node), string(text).
+     
+    double_click(session, node) ->
+      string(session), string(node).
+      
+    blur(session, node) ->
+      string(session), string(node).
+      
+    // dummy event for animations, physics etc  
+    frame(session) ->
+      string(session). 
+  }),
+  clauses(`{
+    lang:pulse(`click).
+    lang:pulse(`key_down).
+    lang:pulse(`change).
+    lang:pulse(`double_click).
+    lang:pulse(`blur).
+    lang:pulse(`frame).
+    
+    node(session, "root") <-
+      session(session).
+    
+    event("click").
+    event("key_down").
+    event("change").
+    event("double_click").
+    event("blur").
+    
+    // every node except the root must have a parent
+    node(session, node) -> 
+      node = "root"; parent[session, node] = _.
+      
+    // no two nodes at same position
+    parent[session, child1] = parent[session, child2], child1 != child2 ->
+      position[session, child1] != position[session, child2].
+    
+    // TODO this doesn't compile
+    // no gaps in position
+    // position[child1] = p, p > 0 ->
+    //  parent[child2] = parent[child1],
+    //  position[child2] = p-1.
+      
+    // can EITHER set text OR have children (because setting node.textContent deletes any existing children)
+    text[session, node] = _ ->
+      !parent[session, _] = node. 
+  })
+} <-- .

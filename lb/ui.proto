@@ -1,0 +1,67 @@
+package ui;
+
+message Request
+{
+  optional Click click = 1;
+  optional KeyDown key_down = 2;
+  optional Change change = 3;
+  optional DoubleClick double_click = 4;
+  optional Blur blur = 5;
+  optional string url_fragment = 6;
+  required string session = 7;
+}
+
+message Click 
+{
+  required string node = 1;
+}
+
+message KeyDown 
+{
+  required string node = 1;
+  required int64 key = 2;
+}
+
+message Change
+{
+  required string node = 1;
+  required string text = 2;
+}
+
+message DoubleClick
+{
+  required string node = 1;
+}
+
+message Blur
+{
+  required string node = 1;
+}
+
+message Response
+{
+  repeated string delete_node_node = 1;
+  repeated string change_tag_node = 2;
+  repeated string change_tag_tag = 3;
+  repeated string change_text_node = 4;
+  repeated string change_text_text = 5;
+  repeated string create_node_node = 6;
+  repeated string create_node_tag = 7;
+  repeated string move_node_parent = 8;
+  repeated int64 move_node_position = 9;
+  repeated string move_node_child = 10;
+  repeated string change_attribute_node = 11;
+  repeated string change_attribute_key = 12;
+  repeated string change_attribute_val = 13;
+  repeated string change_style_node = 14;
+  repeated string change_style_key = 15;
+  repeated string change_style_val = 16;
+  repeated string start_listening_to_node = 17;
+  repeated string start_listening_to_event = 18;
+  repeated string stop_listening_to_node = 19;
+  repeated string stop_listening_to_event = 20;
+  optional string change_focus_node = 21;
+  optional string change_url_fragment = 22;
+  repeated string clear_node = 23;
+  repeated string scroll_into_view_node = 24;
+}

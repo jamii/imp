@@ -1,7 +1,0 @@
-?an:text is on a metal playlist
-+
-playlist ?p is named "Heavy Metal Classic"
-track ?t is on playlist ?p
-track ?t is on album ?al
-album ?al is by artist ?a
-artist ?a is named ?an

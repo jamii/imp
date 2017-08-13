@@ -1,0 +1,34 @@
+?p:text works at ?c:text for ?d:number USD
+=
+"alice" "alice corp" 100
+"bob" "alice corp" 50
+"cin" "alice corp" 50
+"eve" "alice corp" 100
+"eve" "evil eve studios" 100
+
+?p:text is secretly evil
+=
+"eve"
+"sauron"
+
+?p:text has ?n:number cats
+=
+"eve" 0
+"alice" 1
+"bob" 2
+"cin" 3
+
+?p:text is a non evil employee of alice corp
++
+?p works at "alice corp" for _ USD
+! ?p is secretly evil
+
+?p:text is an undercatted employee of alice crop
++
+?p works at "alice corp" for _ USD
+! ?p has 3 cats
+
+?p:text works at alice crop but not evil eve studios
++
+?p works at "alice corp" for _ USD
+! ?p works at "evil eve studios" for _ USD

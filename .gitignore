@@ -6,3 +6,4 @@ lb/LB_SUMMARY.lbp
 *.lbb
 *.log
 lb/demo/*.logic
+.vscode

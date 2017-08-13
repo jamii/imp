@@ -1,0 +1,20 @@
+?x:text is a list of foods
+=
+"apple cake swordfish"
+
+?x:text is food number ?n:number
++
+?list is a list of foods
+result ?n of ?list split by " " is at ?a to ?b breaking at ?c
+the text at ?c to ?b in ?list is ?x
+
+?x:text is a csv list of foods
++
+?list is a list of foods
+?list with " " replaced by ", " is ?x
+
+?x:text is an A food
++
+?list is a list of foods
+result _ of ?list searched by "\ba\S*" is at ?a to ?b
+the text at ?a to ?b in ?list is ?x

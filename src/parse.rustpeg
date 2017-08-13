@@ -1,0 +1,172 @@
+use runtime::{Direction, Kind};
+use bootstrap::{Input, Binding, Value, AbstractView, AbstractSection, AbstractHeadWord, AbstractClause, AbstractClauseWord};
+
+/** Top **/
+
+#[pub]
+program -> Vec<AbstractView>
+  = view_followed_by_blank_lines+
+
+view_followed_by_blank_lines -> AbstractView
+  = v:view "\n"* { v }
+
+view -> AbstractView
+  = h:head "\n" b:section+ { AbstractView{head: h, body: b} }
+
+head -> Vec<AbstractHeadWord>
+  = head_word+
+
+/** Sections **/
+
+section -> AbstractSection
+  = insert / remove / input
+
+insert -> AbstractSection
+  = insert_header cs:clause+ { AbstractSection::Insert(cs) }
+
+remove -> AbstractSection
+  = remove_header cs:clause+ { AbstractSection::Remove(cs) }
+
+input -> AbstractSection
+  = tsv:input_header rs:row* {
+    AbstractSection::Input(Input{tsv: tsv, rows: rs})
+  }
+
+row -> Vec<Value>
+  = vs:(value ++ " ") "\n"? { vs }
+
+
+clause -> AbstractClause
+  = !section_header cs:clause_words obs:over_bindings "\n"? {
+    AbstractClause{words: cs, over_bindings: obs}
+  }
+
+clause_words -> Vec<AbstractClauseWord>
+  = clause_word+
+
+over_bindings -> Vec<(Binding, Direction)>
+  = over obs:(over_binding ++ (" "+)) { obs }
+  / { vec![] }
+
+over_binding -> (Binding, Direction)
+  = d:direction v:named_variable { (v, d) }
+
+direction -> Direction
+  = descending:"-"? {
+    match descending {
+      Some(_) => Direction::Descending,
+      None    => Direction::Ascending
+    }
+  }
+
+
+section_header = insert_header / remove_header / input_header { () }
+insert_header  = "+\n"
+remove_header  = "-\n"
+
+input_header -> Option<(String, Vec<usize>)>
+  = "=\n" { None }
+  / "= " f:file_name " " cs:columns "\n" { Some((f, cs))}
+
+file_name -> String
+  = [^ ]* { match_str.to_owned() }
+
+columns -> Vec<usize>
+  = number_usize ++ " "
+
+/** Words **/
+
+head_word -> AbstractHeadWord
+  = head_particle / variable_with_kind
+
+head_particle -> AbstractHeadWord
+  = p:particle { AbstractHeadWord::Particle(p) }
+
+variable_with_kind -> AbstractHeadWord
+  = v:variable k:kind { AbstractHeadWord::VariableWithKind(v, k) }
+
+
+clause_word -> AbstractClauseWord
+  = clause_particle / b:binding { AbstractClauseWord::Binding(b) }
+
+clause_particle -> AbstractClauseWord
+  = p:particle { AbstractClauseWord::Particle(p) }
+
+particle -> String
+  // aggressively forbids escape characters.
+  = (!over !start_of_negative_number [^?\n_0-9#".])+ {
+    match_str.to_owned()
+  }
+
+over = " over "
+
+start_of_negative_number = "-" [0-9]
+
+/** Bindings **/
+
+binding -> Binding
+  = unbound_variable / named_variable / constant
+  
+unbound_variable -> Binding
+  = "_" { Binding::Unbound }
+
+named_variable -> Binding
+  = v:variable { Binding::Variable(v) }
+
+constant -> Binding
+  = v:value { Binding::Constant(v) }
+
+/** Values **/
+
+value -> Value
+  = value_id / value_text / value_number
+
+value_id -> Value
+  = "#" id:number_u64 { Value::Id(id) }
+
+value_text -> Value
+  = s:string_literal { Value::Text(s) }
+
+value_number -> Value
+  = n:number_f64 { Value::Number(n) }
+
+/** Variables **/
+
+variable -> String
+  = "?" identifier { match_str.to_owned() }
+
+kind -> Kind
+  = ":id"     { Kind::Id }
+  / ":text"   { Kind::Text }
+  / ":number" { Kind::Number }
+  / ":" identifier { panic!("Unknown kind: {:?}", match_str) }
+
+identifier = [A-Za-z0-9_]+
+
+/** String Literals **/
+
+string_literal -> String
+  = ["] s:string_literal_contents ["] { s }
+
+string_literal_contents -> String
+  // No escaping for now.
+  = [^"]* { match_str.to_owned() }
+
+/** Numbers **/
+
+number_usize -> usize
+  = integer_digits { match_str.parse::<usize>().unwrap() }
+
+number_u64 -> u64
+  = integer_digits { match_str.parse::<u64>().unwrap() }
+
+number_f64 -> f64
+  = "-"? decimal_digits { match_str.parse::<f64>().unwrap() }
+
+decimal_digits = [0-9]+ ("." [0-9]+)? { () }
+integer_digits = [0-9]+
+
+/** Debugging **/
+
+non_blank_line -> String
+  = [^\n]+ "\n"? { match_str.to_owned() }

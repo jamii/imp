@@ -1,5 +1,0 @@
-imp, projectname
-lb_web, library
-ui.proto, proto, descName=ui lifetime=transaction
-ui, module
-demo, module

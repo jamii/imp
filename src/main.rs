@@ -51,7 +51,7 @@ fn command<Kind: Serialize, Args: Serialize>(kind: Kind, args: Args) -> OwnedMes
 fn render(state: &State) -> String {
     (html!{
         div.notes {
-            div.search div contenteditable=(true) onkeyup="if (event.which == 13 && event.ctrlKey) { message('new', [this.innerText]); this.innerText='' } else { message('search', [this.innerText])}" (state.search)
+            input.search onkeyup="if (event.which == 13 && event.ctrlKey) { message('new', [this.value]); this.value='' } else { message('search', [this.value])}" value=(state.search)
             @for (i, note) in state.notes.iter().enumerate().rev() {
                 @if note.editing {
                     div.edit contenteditable=(true) onblur={"message('finish', [" (i) ", this.innerText])"} onkeydown={"if (event.which == 13 && event.ctrlKey) message('finish', [" (i) ", this.innerText]); if (event.which == 27) message('escape', [" (i) "]);"} (&note.text)

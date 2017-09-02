@@ -40,6 +40,18 @@ struct State {
     search: String,
 }
 
+#[derive(Serialize, Deserialize)]
+enum Event {
+    Search(String),
+    New(String),
+    Finish(usize, String),
+    Edit(usize),
+}
+
+fn send(event: Event) -> String {
+    format!("es.send('{}')", json!(event))
+}
+
 fn command<Kind: Serialize, Args: Serialize>(kind: Kind, args: Args) -> OwnedMessage {
     OwnedMessage::Text(
         json!({
@@ -52,13 +64,13 @@ fn command<Kind: Serialize, Args: Serialize>(kind: Kind, args: Args) -> OwnedMes
 fn render(state: &State) -> String {
     (html!{
         div.notes {
-            input.search tabindex="0" onkeyup="if (event.which == 13 && event.ctrlKey) { message('new', [this.value]); this.value='' } else { message('search', [this.value])}" value=(state.search)
+            input.search tabindex="0" onkeyup="if (event.which == 13 && event.ctrlKey) { send({New: this.value}); this.value='' } else { send({Search: this.value}) }" value=(state.search)
             @for (i, note) in state.notes.iter().enumerate().rev() {
                 @if !note.deleted {
                 @if note.editing {
-                    div.edit id={"note-" (i)} tabindex="0" autofocus=(true) contenteditable=(true) onblur={"message('finish', [" (i) ", this.innerText])"} (&note.text)
+                    div.edit id={"note-" (i)} tabindex="0" autofocus=(true) contenteditable=(true) onblur={"send({Finish: [" (i) ", this.innerText]})"} (&note.text)
                 } @else if note.text.contains(&*state.search) {
-                    div.note id={"note-" (i)} tabindex="0" onfocus={"message('edit', [" (i) "])"} ({
+                    div.note id={"note-" (i)} tabindex="0" onfocus={"send({Edit:" (i) "})"} ({
                         let mut unsafe_html = String::new();
                         let parser = Parser::new(note.text.as_str());
                         html::push_html(&mut unsafe_html, parser);
@@ -121,41 +133,31 @@ fn main() {
                     }
                     OwnedMessage::Text(ref text) => {
                         println!("Received: {}", text);
-                        let json: Value = serde_json::from_str(text).unwrap();
+                        let event: Event = serde_json::from_str(text).unwrap();
                         let mut state = state.lock().unwrap();
-                        match json["kind"].as_str().unwrap() {
-                            "search" => {
-                                let search = json["args"][0].as_str().unwrap();
-                                state.search = search.to_owned();
+                        match event {
+                            Event::Search(text) => {
+                                state.search = text;
                             }
-                            "new" => {
-                                let new_text = json["args"][0].as_str().unwrap();
+                            Event::New(text) => {
                                 state.notes.push(Note {
-                                    text: new_text.to_owned(),
+                                    text: text,
                                     editing: false,
                                     deleted: false,
                                 });
                                 state.search = "".to_owned();
                             }
-                            "finish" => {
-                                let i = json["args"][0].as_u64().unwrap() as usize;
-                                let new_text = json["args"][1].as_str().unwrap();
-                                if Regex::new(r"\S").unwrap().is_match(new_text) {
-                                    state.notes[i].text = new_text.to_owned();
+                            Event::Finish(i, text) => {
+                                if Regex::new(r"\S").unwrap().is_match(&text) {
+                                    state.notes[i].text = text;
                                     state.notes[i].editing = false;
                                 } else {
                                     state.notes[i].deleted = true;
                                 }
                             }
-                            "edit" => {
-                                let i = json["args"][0].as_u64().unwrap() as usize;
+                            Event::Edit(i) => {
                                 state.notes[i].editing = true;
                             }
-                            "escape" => {
-                                let i = json["args"][0].as_u64().unwrap() as usize;
-                                state.notes[i].editing = false;
-                            }
-                            _ => panic!("What is this message? {}", text),
                         }
                         sender
                             .send_message(&command("render", (render(&*state),)))

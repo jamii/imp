@@ -24,6 +24,6 @@ handlers.render = function(html) {
     diff.innerHTML(document.body, html);
 }
 
-function message(kind, args) {
-    ws.send(JSON.stringify({ kind: kind, args: args }));
+send = function(event) {
+    ws.send(JSON.stringify(event));
 }

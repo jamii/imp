@@ -7,4 +7,6 @@ authors = ["Jamie Brandon <jamie@scattered-thoughts.net>"]
 websocket = "*"
 serde = "*"
 serde_json = "*"
+serde_derive = "*"
 maud = "*"
+pulldown-cmark = "*"

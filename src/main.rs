@@ -8,6 +8,7 @@ extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
 extern crate pulldown_cmark;
+extern crate regex;
 
 use maud::{html, PreEscaped};
 use pulldown_cmark::{Parser, html};
@@ -24,10 +25,18 @@ use websocket::sync::Server;
 use std::fs::File;
 use std::io::prelude::*;
 
+use regex::Regex;
+
 #[derive(Serialize, Deserialize)]
 struct Note {
     text: String,
     editing: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct State {
+    notes: Vec<Note>,
+    search: String,
 }
 
 fn command<Kind: Serialize, Args: Serialize>(kind: Kind, args: Args) -> OwnedMessage {
@@ -39,14 +48,14 @@ fn command<Kind: Serialize, Args: Serialize>(kind: Kind, args: Args) -> OwnedMes
     )
 }
 
-fn render(notes: &[Note]) -> String {
+fn render(state: &State) -> String {
     (html!{
         div.notes {
-            button onclick="message('new_note', [])" "+"
-            @for (i, note) in notes.iter().enumerate().rev() {
+            div.search div contenteditable=(true) onkeyup="if (event.which == 13 && event.ctrlKey) { message('new', [this.innerText]); this.innerText='' } else { message('search', [this.innerText])}" (state.search)
+            @for (i, note) in state.notes.iter().enumerate().rev() {
                 @if note.editing {
                     div.edit contenteditable=(true) onblur={"message('finish', [" (i) ", this.innerText])"} onkeydown={"if (event.which == 13 && event.ctrlKey) message('finish', [" (i) ", this.innerText]); if (event.which == 27) message('escape', [" (i) "]);"} (&note.text)
-                } @else {
+                } @else if note.text.contains(&*state.search) {
                     div.note onclick={"message('edit', [" (i) "])"} ({
                         let mut unsafe_html = String::new();
                         let parser = Parser::new(note.text.as_str());
@@ -59,25 +68,25 @@ fn render(notes: &[Note]) -> String {
     }).into_string()
 }
 
-fn load() -> Vec<Note> {
+fn load() -> State {
     let mut file = File::open("/home/jamie/imp.db").unwrap();
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
     serde_json::from_str(&*contents).unwrap()
 }
 
-fn save(notes: &[Note]) {
+fn save(state: &State) {
     let mut file = File::create("/home/jamie/imp.db").unwrap();
-    write!(file, "{}", json!(notes)).unwrap();
+    write!(file, "{}", json!(state)).unwrap();
 }
 
 fn main() {
-    let notes = Arc::new(Mutex::new(load()));
+    let state = Arc::new(Mutex::new(load()));
 
     let server = Server::bind("127.0.0.1:8080").unwrap();
 
     for request in server.filter_map(Result::ok) {
-        let notes = notes.clone();
+        let state = state.clone();
         thread::spawn(move || {
             let client = request.accept().unwrap();
             let ip = client.peer_addr().unwrap();
@@ -90,7 +99,7 @@ fn main() {
                 .unwrap();
 
             sender
-                .send_message(&command("render", (render(&*notes.lock().unwrap()),)))
+                .send_message(&command("render", (render(&*state.lock().unwrap()),)))
                 .unwrap();
 
             for message in receiver.incoming_messages() {
@@ -111,34 +120,44 @@ fn main() {
                         println!("Received: {}", text);
                         let json: Value = serde_json::from_str(text).unwrap();
                         match json["kind"].as_str().unwrap() {
-                            "new_note" => {
-                                notes.lock().unwrap().push(Note {
-                                    text: "".to_owned(),
-                                    editing: true,
-                                })
+                            "search" => {
+                                let search = json["args"][0].as_str().unwrap();
+                                state.lock().unwrap().search = search.to_owned();
+                            }
+                            "new" => {
+                                let new_text = json["args"][0].as_str().unwrap();
+                                state.lock().unwrap().notes.push(Note {
+                                    text: new_text.to_owned(),
+                                    editing: false,
+                                });
+                                state.lock().unwrap().search = "".to_owned();
                             }
                             "finish" => {
                                 let i = json["args"][0].as_u64().unwrap() as usize;
                                 let new_text = json["args"][1].as_str().unwrap();
-                                notes.lock().unwrap()[i] = Note {
-                                    text: new_text.to_owned(),
-                                    editing: false,
-                                };
+                                if Regex::new(r"\S").unwrap().is_match(new_text) {
+                                    state.lock().unwrap().notes[i] = Note {
+                                        text: new_text.to_owned(),
+                                        editing: false,
+                                    };
+                                } else {
+                                    state.lock().unwrap().notes.remove(i);
+                                }
                             }
                             "edit" => {
                                 let i = json["args"][0].as_u64().unwrap() as usize;
-                                notes.lock().unwrap()[i].editing = true;
+                                state.lock().unwrap().notes[i].editing = true;
                             }
                             "escape" => {
                                 let i = json["args"][0].as_u64().unwrap() as usize;
-                                notes.lock().unwrap()[i].editing = false;
+                                state.lock().unwrap().notes[i].editing = false;
                             }
                             _ => panic!("What is this message? {}", text),
                         }
                         sender
-                            .send_message(&command("render", (render(&*notes.lock().unwrap()),)))
+                            .send_message(&command("render", (render(&*state.lock().unwrap()),)))
                             .unwrap();
-                        save(&*notes.lock().unwrap())
+                        save(&*state.lock().unwrap())
                     }
                     _ => {
                         panic!("A weird message!");

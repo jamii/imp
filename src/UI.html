@@ -4,6 +4,7 @@
 <head>
     <meta charset="utf-8">
     <title>Imp</title>
+    <script src="https://unpkg.com/diffhtml@1.0.0-beta.8/dist/diffhtml.min.js"></script>
     <script src="UI.js"></script>
     <style>
         .notes {
@@ -12,7 +13,8 @@
         }
         
         .edit,
-        .note {
+        .note,
+        .search {
             flex: 1;
             padding: 0.5em;
             margin: 0.5em;
@@ -24,6 +26,11 @@
         .edit {
             resize: none;
             white-space: pre-wrap;
+        }
+        
+        .search {
+            border: 1px solid black;
+            min-height: 1em;
         }
     </style>
 </head>

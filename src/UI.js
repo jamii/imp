@@ -21,7 +21,7 @@ handlers.eval = function(code) {
 }
 
 handlers.render = function(html) {
-    document.body.innerHTML = html;
+    diff.innerHTML(document.body, html);
 }
 
 function message(kind, args) {

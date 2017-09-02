@@ -13,7 +13,7 @@ use maud::{html, PreEscaped};
 use pulldown_cmark::{Parser, html};
 
 use serde::Serialize;
-use serde_json::{Value, Error};
+use serde_json::Value;
 
 use std::thread;
 use std::sync::{Arc, Mutex};
@@ -43,9 +43,9 @@ fn render(notes: &[Note]) -> String {
     (html!{
         div.notes {
             button onclick="message('new_note', [])" "+"
-            @for (i, note) in notes.iter().enumerate() {
+            @for (i, note) in notes.iter().enumerate().rev() {
                 @if note.editing {
-                    textarea.edit onblur={"message('finish', [" (i) ", this.value])"} onkeydown={"if (event.which == 13 && event.ctrlKey) message('finish', [" (i) ", this.value]); if (event.which == 27) message('escape', [" (i) "]);"} (note.text)
+                    div.edit contenteditable=(true) onblur={"message('finish', [" (i) ", this.innerText])"} onkeydown={"if (event.which == 13 && event.ctrlKey) message('finish', [" (i) ", this.innerText]); if (event.which == 27) message('escape', [" (i) "]);"} (&note.text)
                 } @else {
                     div.note onclick={"message('edit', [" (i) "])"} ({
                         let mut unsafe_html = String::new();
@@ -113,7 +113,7 @@ fn main() {
                         match json["kind"].as_str().unwrap() {
                             "new_note" => {
                                 notes.lock().unwrap().push(Note {
-                                    text: "New!".to_owned(),
+                                    text: "".to_owned(),
                                     editing: true,
                                 })
                             }

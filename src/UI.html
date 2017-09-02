@@ -5,6 +5,27 @@
     <meta charset="utf-8">
     <title>Imp</title>
     <script src="UI.js"></script>
+    <style>
+        .notes {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .edit,
+        .note {
+            flex: 1;
+            padding: 0.5em;
+            margin: 0.5em;
+            background-color: #f7f7f7;
+            overflow-wrap: break-word;
+            overflow: visible;
+        }
+        
+        .edit {
+            resize: none;
+            white-space: pre-wrap;
+        }
+    </style>
 </head>
 
 <body>

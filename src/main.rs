@@ -31,6 +31,7 @@ use regex::Regex;
 struct Note {
     text: String,
     editing: bool,
+    deleted: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -51,17 +52,19 @@ fn command<Kind: Serialize, Args: Serialize>(kind: Kind, args: Args) -> OwnedMes
 fn render(state: &State) -> String {
     (html!{
         div.notes {
-            input.search onkeyup="if (event.which == 13 && event.ctrlKey) { message('new', [this.value]); this.value='' } else { message('search', [this.value])}" value=(state.search)
+            input.search tabindex="0" onkeyup="if (event.which == 13 && event.ctrlKey) { message('new', [this.value]); this.value='' } else { message('search', [this.value])}" value=(state.search)
             @for (i, note) in state.notes.iter().enumerate().rev() {
+                @if !note.deleted {
                 @if note.editing {
-                    div.edit contenteditable=(true) onblur={"message('finish', [" (i) ", this.innerText])"} onkeydown={"if (event.which == 13 && event.ctrlKey) message('finish', [" (i) ", this.innerText]); if (event.which == 27) message('escape', [" (i) "]);"} (&note.text)
+                    div.edit id={"note-" (i)} tabindex="0" autofocus=(true) contenteditable=(true) onblur={"message('finish', [" (i) ", this.innerText])"} (&note.text)
                 } @else if note.text.contains(&*state.search) {
-                    div.note onclick={"message('edit', [" (i) "])"} ({
+                    div.note id={"note-" (i)} tabindex="0" onfocus={"message('edit', [" (i) "])"} ({
                         let mut unsafe_html = String::new();
                         let parser = Parser::new(note.text.as_str());
                         html::push_html(&mut unsafe_html, parser);
                         PreEscaped(unsafe_html)
                     })
+                }
                 }
             }
         }
@@ -119,45 +122,45 @@ fn main() {
                     OwnedMessage::Text(ref text) => {
                         println!("Received: {}", text);
                         let json: Value = serde_json::from_str(text).unwrap();
+                        let mut state = state.lock().unwrap();
                         match json["kind"].as_str().unwrap() {
                             "search" => {
                                 let search = json["args"][0].as_str().unwrap();
-                                state.lock().unwrap().search = search.to_owned();
+                                state.search = search.to_owned();
                             }
                             "new" => {
                                 let new_text = json["args"][0].as_str().unwrap();
-                                state.lock().unwrap().notes.push(Note {
+                                state.notes.push(Note {
                                     text: new_text.to_owned(),
                                     editing: false,
+                                    deleted: false,
                                 });
-                                state.lock().unwrap().search = "".to_owned();
+                                state.search = "".to_owned();
                             }
                             "finish" => {
                                 let i = json["args"][0].as_u64().unwrap() as usize;
                                 let new_text = json["args"][1].as_str().unwrap();
                                 if Regex::new(r"\S").unwrap().is_match(new_text) {
-                                    state.lock().unwrap().notes[i] = Note {
-                                        text: new_text.to_owned(),
-                                        editing: false,
-                                    };
+                                    state.notes[i].text = new_text.to_owned();
+                                    state.notes[i].editing = false;
                                 } else {
-                                    state.lock().unwrap().notes.remove(i);
+                                    state.notes[i].deleted = true;
                                 }
                             }
                             "edit" => {
                                 let i = json["args"][0].as_u64().unwrap() as usize;
-                                state.lock().unwrap().notes[i].editing = true;
+                                state.notes[i].editing = true;
                             }
                             "escape" => {
                                 let i = json["args"][0].as_u64().unwrap() as usize;
-                                state.lock().unwrap().notes[i].editing = false;
+                                state.notes[i].editing = false;
                             }
                             _ => panic!("What is this message? {}", text),
                         }
                         sender
-                            .send_message(&command("render", (render(&*state.lock().unwrap()),)))
+                            .send_message(&command("render", (render(&*state),)))
                             .unwrap();
-                        save(&*state.lock().unwrap())
+                        save(&*state)
                     }
                     _ => {
                         panic!("A weird message!");

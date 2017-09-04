@@ -10,17 +10,15 @@ ws.onmessage = function(event) {
     console.log(event.data);
     msg = JSON.parse(event.data);
     try {
-        handlers[msg.kind].apply(this, msg.args)
+        if (msg.Render) {
+            render(msg.Render);
+        }
     } catch (error) {
         console.error(error);
     }
 }
 
-handlers.eval = function(code) {
-    eval(code);
-}
-
-handlers.render = function(html) {
+render = function(html) {
     diff.innerHTML(document.body, html);
 }
 

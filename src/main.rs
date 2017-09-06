@@ -27,6 +27,9 @@ use regex::Regex;
 
 use std::collections::BTreeMap;
 use std::iter::Iterator;
+use std::cell::Cell;
+
+use std::ops::Range;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
 struct Entity {
@@ -149,7 +152,7 @@ impl Bag {
 
     fn create<A>(&mut self, avs: Vec<(A, Value)>) -> Entity
     where
-        A: Into<Attribute>
+        A: Into<Attribute>,
     {
         let avs = avs.into_iter()
             .map(|(a, v)| (a.into(), v))
@@ -248,16 +251,20 @@ fn load() -> Bag {
     let mut file = File::open("/home/jamie/imp.db").unwrap();
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
-    let eavs:Vec<((Entity, Attribute), Value)> = serde_json::from_str(&*contents).unwrap();
-    Bag{eavs: eavs.into_iter().collect()}
+    let eavs: Vec<((Entity, Attribute), Value)> = serde_json::from_str(&*contents).unwrap();
+    Bag { eavs: eavs.into_iter().collect() }
 }
 
 fn save(bag: &Bag) {
     let mut file = File::create("/home/jamie/imp.db").unwrap();
-    write!(file, "{}", json!(bag.eavs.clone().into_iter().collect::<Vec<_>>())).unwrap();
+    write!(
+        file,
+        "{}",
+        json!(bag.eavs.clone().into_iter().collect::<Vec<_>>())
+    ).unwrap();
 }
 
-fn main() {
+fn serve() {
     let bag = Arc::new(Mutex::new(load()));
 
     let server = Server::bind("127.0.0.1:8080").unwrap();
@@ -297,8 +304,14 @@ fn main() {
                                 bag.insert(search, "text", text);
                             }
                             Event::New(text) => {
-                                let max_i = bag.find_av("kind", "note").map(|e| bag.find_ea(e, "i").unwrap().as_i64().unwrap()).max().unwrap();
-                                let note = bag.create(vec![("kind", "note".into()), ("i", (max_i + 1).into())]);
+                                let max_i = bag.find_av("kind", "note")
+                                    .map(|e| bag.find_ea(e, "i").unwrap().as_i64().unwrap())
+                                    .max()
+                                    .unwrap();
+                                let note = bag.create(vec![
+                                    ("kind", "note".into()),
+                                    ("i", (max_i + 1).into()),
+                                ]);
                                 bag.insert(note.clone(), "text", text);
                                 bag.insert(note.clone(), "editing", false);
                                 let search = bag.create(vec![("global", "search".into())]).clone();
@@ -325,5 +338,240 @@ fn main() {
                 }
             }
         });
+    }
+}
+
+// f should be |t| t < value or |t| t <= value
+pub fn gallop<'a, T, F: Fn(&T) -> bool>(slice: &'a [T], mut lo: usize, hi: usize, f: F) -> usize {
+    if lo < hi && f(&slice[lo]) {
+        let mut step = 1;
+        while lo + step < hi && f(&slice[lo + step]) {
+            lo = lo + step;
+            step = step << 1;
+        }
+
+        step = step >> 1;
+        while step > 0 {
+            if lo + step < hi && f(&slice[lo + step]) {
+                lo = lo + step;
+            }
+            step = step >> 1;
+        }
+
+        lo += 1
+    }
+    lo
+}
+
+// TODO I don't like these cells
+#[derive(Clone, Debug)]
+struct RowDomain {
+    columns: [Vec<Value>; 3],
+    ranges: [Cell<(usize, usize)>; 4],
+    current_column: Cell<usize>,
+}
+
+impl RowDomain {
+    fn narrow(&self, value: &Value) {
+        assert!(self.current_column.get() < 3);
+        let column = &self.columns[self.current_column.get()];
+        let (old_start, old_end) = self.ranges[self.current_column.get()].get();
+        self.current_column.set(self.current_column.get() + 1);
+        let start = gallop(column, old_start, old_end, |v| v < value);
+        let end = gallop(column, start, old_end, |v| v <= value); // TODO there is an extra comparison here that I cna't seem to get rid off
+        println!("{:?} {:?} {:?} {:?}", column, value, start, end);
+        self.ranges[self.current_column.get()].set((start, end));
+    }
+
+    fn widen(&self) {
+        assert!(self.current_column.get() > 0);
+        self.current_column.set(self.current_column.get() - 1);
+    }
+
+    fn foreach<F>(&self, mut f: F) -> ()
+    where
+        F: FnMut(&Value) -> (),
+    {
+        assert!(self.current_column.get() < 3);
+        let column = &self.columns[self.current_column.get()];
+        let (old_start, old_end) = self.ranges[self.current_column.get()].get();
+        self.current_column.set(self.current_column.get() + 1);
+        let mut start = old_start;
+        while start < old_end {
+            let value = &column[start];
+            let end = gallop(column, start + 1, old_end, |v| v <= value);
+            self.ranges[self.current_column.get()].set((start, end));
+            println!("{:?}", start..end);
+            f(value);
+            start = end;
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        let (start, end) = self.ranges[self.current_column.get()].get();
+        start >= end
+    }
+
+    fn sample(&self) -> [&Value; 3] {
+        [
+            &self.columns[0][self.ranges[1].get().0],
+            &self.columns[1][self.ranges[2].get().0],
+            &self.columns[2][self.ranges[3].get().0],
+        ]
+    }
+}
+
+enum Constraint {
+    Constant(usize, Value),
+    Join(Vec<usize>),
+}
+
+impl Constraint {
+    fn constrain<F>(&self, row_domains: &[RowDomain], mut f: F) -> ()
+    where
+        F: FnMut(&[RowDomain]) -> (),
+    {
+        match self {
+            &Constraint::Constant(row, ref value) => {
+                let row_domain = &row_domains[row];
+                row_domain.narrow(value);
+                if !row_domain.is_empty() {
+                    f(row_domains);
+                }
+                row_domain.widen();
+            }
+            &Constraint::Join(ref rows) => {
+                let row = rows[0]; // TODO pick smallest
+                let row_domain = &row_domains[row];
+                row_domain.foreach(|value| {
+                    for &row in &rows[1..] {
+                        row_domains[row].narrow(value);
+                    }
+                    if !rows.iter().any(|row| row_domains[*row].is_empty()) {
+                        f(row_domains);
+                    }
+                    for &row in &rows[1..] {
+                        row_domains[row].widen();
+                    }
+                });
+                row_domain.widen();
+            }
+        }
+    }
+}
+
+struct Query {
+    row_orderings: Vec<[usize; 3]>,
+    constraints: Vec<Constraint>,
+}
+
+impl Query {
+    fn solve(&self, bag: &Bag) -> Vec<Value> {
+        // TODO strip out this compat layer
+        let eavs: Vec<[Value; 3]> = bag.eavs
+            .iter()
+            .map(|(&(ref e, ref a), v)| {
+                [
+                    Value::Entity(e.clone()),
+                    Value::String(a.clone()),
+                    v.clone(),
+                ]
+            })
+            .collect();
+        let row_domains: Vec<RowDomain> = self.row_orderings
+            .iter()
+            .map(|row_ordering| {
+                let mut ordered_eavs: Vec<[Value; 3]> = eavs.iter()
+                    .map(|eav| {
+                        [
+                            eav[row_ordering[0]].clone(),
+                            eav[row_ordering[1]].clone(),
+                            eav[row_ordering[2]].clone(),
+                        ]
+                    })
+                    .collect();
+                ordered_eavs.sort_unstable();
+                let columns = [
+                    ordered_eavs.iter().map(|eav| eav[0].clone()).collect(),
+                    ordered_eavs.iter().map(|eav| eav[1].clone()).collect(),
+                    ordered_eavs.iter().map(|eav| eav[2].clone()).collect(),
+                ];
+                let range = Cell::new((0,eavs.len()));
+                RowDomain{columns:columns, ranges: [range.clone(), range.clone(), range.clone(), range.clone()], current_column: Cell::new(0)}
+            })
+            .collect();
+
+        let mut results: Vec<Value> = vec![];
+        solve_constraints(&*row_domains, &*self.constraints, &mut results);
+        results
+    }
+}
+
+fn solve_constraints(row_domains: &[RowDomain], constraints: &[Constraint], results: &mut Vec<Value>) {
+    println!("{:?}", row_domains.iter().map(|row_domain| &row_domain.ranges).collect::<Vec<_>>());
+    if constraints.len() == 0 {
+        for row_domain in row_domains {
+            for &value in &row_domain.sample() {
+                results.push(value.clone());
+            }
+        }
+    } else {
+        constraints[0].constrain(row_domains, |row_domains| solve_constraints(row_domains, &constraints[1..], results));
+    }
+}
+
+
+
+fn main() {
+    // serve();
+
+    let bag = load();
+
+    // e.kind = "note"
+    let query = Query{
+        row_orderings: vec![[1,2,0]],
+        constraints: vec![
+            Constraint::Constant(0, "kind".into()),
+            Constraint::Constant(0, "note".into()),
+            Constraint::Join(vec![0]),
+            ],
+    };
+
+    println!("{:?}", query.solve(&bag));
+
+    // e.kind = "note"
+    // e.editing = true
+    let query = Query{
+        row_orderings: vec![[1,2,0],[1,2,0]],
+        constraints: vec![
+            Constraint::Constant(0, "kind".into()),
+            Constraint::Constant(0, "note".into()),
+            Constraint::Constant(1, "editing".into()),
+            Constraint::Constant(1, true.into()),
+            Constraint::Join(vec![0, 1]),
+            ],
+    };
+
+    println!("{:?}", query.solve(&bag));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test() {
+        let col = (0..1000).collect::<Vec<_>>();
+        for i in 0..1000 {
+            assert_eq!(col[gallop(&*col, 0, 1000, |&x| x < i)], i);
+        }
+        assert_eq!(gallop(&*col, 0, col.len(), |&x| x < -1), 0);
+        assert_eq!(gallop(&*col, 0, col.len(), |&x| x < 1000), 1000);
+
+        for i in 0..999 {
+            assert_eq!(col[gallop(&*col, 0, col.len(), |&x| x <= i)], i+1);
+        }
+        assert_eq!(gallop(&*col, 0, col.len(), |&x| x <= -1), 0);
+        assert_eq!(gallop(&*col, 0, col.len(), |&x| x <= 999), 1000);
     }
 }

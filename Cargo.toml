@@ -11,3 +11,7 @@ serde_derive = "*"
 maud = "*"
 pulldown-cmark = "*"
 regex = "*"
+
+[dependencies.nom]
+version = "*"
+features = ["verbose-errors"]

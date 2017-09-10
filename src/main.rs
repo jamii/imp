@@ -10,6 +10,8 @@ extern crate serde_json;
 extern crate serde_derive;
 extern crate pulldown_cmark;
 extern crate regex;
+#[macro_use]
+extern crate nom;
 
 use maud::{html, PreEscaped};
 use pulldown_cmark::{Parser, html};
@@ -31,16 +33,18 @@ use std::cell::Cell;
 
 use std::ops::Range;
 
+use std::error::Error;
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
-struct Entity {
+pub struct Entity {
     avs: Vec<(Attribute, Value)>,
 }
 
-type Attribute = String;
+pub type Attribute = String;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
-enum Value {
-    Bool(bool),
+pub enum Value {
+    Boolean(bool),
     Integer(i64),
     String(String),
     Entity(Entity),
@@ -48,7 +52,7 @@ enum Value {
 
 impl From<bool> for Value {
     fn from(bool: bool) -> Value {
-        Value::Bool(bool)
+        Value::Boolean(bool)
     }
 }
 
@@ -73,7 +77,7 @@ impl<'a> From<&'a str> for Value {
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            &Value::Bool(bool) => bool.fmt(f),
+            &Value::Boolean(bool) => bool.fmt(f),
             &Value::Integer(integer) => integer.fmt(f),
             &Value::String(ref string) => string.fmt(f),
             &Value::Entity(ref entity) => write!(f, "{:?}", entity),
@@ -98,7 +102,7 @@ impl Value {
 
     fn as_bool(&self) -> Option<bool> {
         match self {
-            &Value::Bool(this) => Some(this),
+            &Value::Boolean(this) => Some(this),
             _ => None,
         }
     }
@@ -107,7 +111,7 @@ impl Value {
 impl PartialEq<bool> for Value {
     fn eq(&self, other: &bool) -> bool {
         match self {
-            &Value::Bool(ref this) if this == other => true,
+            &Value::Boolean(ref this) if this == other => true,
             _ => false,
         }
     }
@@ -141,7 +145,7 @@ impl PartialEq<Entity> for Value {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
-struct Bag {
+pub struct Bag {
     eavs: BTreeMap<(Entity, Attribute), Value>,
 }
 
@@ -201,7 +205,7 @@ impl Bag {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-enum Event {
+pub enum Event {
     Search(String),
     New(String),
     Finish(usize, String),
@@ -213,7 +217,7 @@ fn send(event: Event) -> String {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-enum Command {
+pub enum Command {
     Render(String),
 }
 
@@ -221,6 +225,13 @@ fn send_command(sender: &mut websocket::sender::Writer<std::net::TcpStream>, c: 
     sender
         .send_message(&OwnedMessage::Text(json!(c).to_string()))
         .unwrap()
+}
+
+fn run_query(code: &str, bag: &Bag) -> String {
+    match parse(code) {
+        Ok(query) => format!("{:?}", compile(&query).solve(bag)),
+        Err(e) => format!("{:?}", e),
+    }
 }
 
 fn render(bag: &Bag) -> String {
@@ -241,6 +252,7 @@ fn render(bag: &Bag) -> String {
                             PreEscaped(unsafe_html)
                         })
                     }
+                    div.result (run_query(text, bag))
                 }
             }
         }
@@ -365,7 +377,7 @@ pub fn gallop<'a, T, F: Fn(&T) -> bool>(slice: &'a [T], mut lo: usize, hi: usize
 
 // TODO I don't like these cells
 #[derive(Clone, Debug)]
-struct RowDomain {
+pub struct RowDomain {
     columns: [Vec<Value>; 3],
     ranges: [Cell<(usize, usize)>; 4],
     current_column: Cell<usize>,
@@ -422,7 +434,7 @@ impl RowDomain {
 }
 
 #[derive(Debug, Clone)]
-enum Constraint {
+pub enum Constraint {
     Constant(usize, Value),
     Join(Vec<usize>),
 }
@@ -462,7 +474,7 @@ impl Constraint {
 }
 
 #[derive(Debug, Clone)]
-struct Query {
+pub struct Query {
     row_orderings: Vec<[usize; 3]>,
     constraints: Vec<Constraint>,
 }
@@ -539,19 +551,19 @@ fn solve_constraints(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum ValueExpr {
+pub enum ValueExpr {
     Constant(Value),
     Variable(String),
 }
 
-type RowExpr = [ValueExpr; 3];
+pub type RowExpr = [ValueExpr; 3];
 
 #[derive(Debug, Clone)]
-struct QueryExpr {
+pub struct QueryExpr {
     rows: Vec<RowExpr>,
 }
 
-fn compile(query_expr: QueryExpr) -> Query {
+fn compile(query_expr: &QueryExpr) -> Query {
 
     // sort variables
     let mut constants: Vec<(&Value, (usize, usize))> = vec![];
@@ -559,9 +571,7 @@ fn compile(query_expr: QueryExpr) -> Query {
     for (row, row_expr) in query_expr.rows.iter().enumerate() {
         for (col, value_expr) in row_expr.iter().enumerate() {
             match value_expr {
-                &ValueExpr::Constant(ref value) => {
-                    constants.push((value, (row, col)))
-                }
+                &ValueExpr::Constant(ref value) => constants.push((value, (row, col))),
                 &ValueExpr::Variable(ref variable) => {
                     match variables.iter().position(|&(ref v, _)| *v == variable) {
                         Some(ix) => variables[ix].1.push((row, col)),
@@ -578,7 +588,9 @@ fn compile(query_expr: QueryExpr) -> Query {
         constraints.push(Constraint::Constant(row, value.clone()));
     }
     for &(_, ref rows_and_cols) in variables.iter() {
-        constraints.push(Constraint::Join(rows_and_cols.iter().map(|&(r,c)| r).collect()));
+        constraints.push(Constraint::Join(
+            rows_and_cols.iter().map(|&(r, c)| r).collect(),
+        ));
     }
 
     // sort rows
@@ -591,16 +603,59 @@ fn compile(query_expr: QueryExpr) -> Query {
             phase.insert(rc, constants.len() + i);
         }
     }
-    let row_orderings = query_expr.rows.iter().enumerate().map(|(r, _)| {
-        let mut row_ordering = [0,1,2];
-        row_ordering.sort_unstable_by(|&c1, &c2| phase.get(&(r,c1)).unwrap().cmp(phase.get(&(r,c2)).unwrap()));
-        row_ordering
-    }).collect();
+    let row_orderings = query_expr
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(r, _)| {
+            let mut row_ordering = [0, 1, 2];
+            row_ordering.sort_unstable_by(|&c1, &c2| {
+                phase.get(&(r, c1)).unwrap().cmp(
+                    phase.get(&(r, c2)).unwrap(),
+                )
+            });
+            row_ordering
+        })
+        .collect();
 
     Query {
         row_orderings,
         constraints,
     }
+}
+
+mod syntax {
+    use super::*;
+    use nom::*;
+
+    named!(integer(&[u8]) -> i64, map_res!(digit, |b| std::str::from_utf8(b).unwrap().parse::<i64>()));
+
+    named!(boolean(&[u8]) -> bool, map!(alt!(tag!("true") | tag!("false")), |b| b == b"true"));
+
+    named!(bare_string(&[u8]) -> String, map_res!(is_not!(" \t\r\n"), |b| std::str::from_utf8(b).map(|s| s.to_owned())));
+
+    named!(delimited_string(&[u8]) -> String, map_res!(delimited!(char!('"'), not!(char!('"')), char!('"')), |b| std::str::from_utf8(b).map(|s| s.to_owned())));
+
+    named!(value(&[u8]) -> Value, alt!(map!(integer, Value::Integer) | map!(boolean, Value::Boolean) | map!(delimited_string, Value::String) | map!(bare_string, Value::String)));
+
+    named!(variable(&[u8]) -> String, map_res!(tuple!(char!('?'), is_not!(" \t\r\n")), |(_, b)| std::str::from_utf8(b).map(|s| s.to_owned())));
+
+    named!(value_expr(&[u8]) -> ValueExpr, dbg_dmp!(alt!(map!(variable, ValueExpr::Variable) | map!(value, ValueExpr::Constant))));
+
+    named!(row_expr(&[u8]) -> RowExpr, dbg_dmp!(do_parse!(
+    v1: value_expr >>
+    space >>
+    v2: value_expr >>
+    space >>
+    v3: value_expr >>
+    ([v1,v2,v3])
+    )));
+
+    named!(pub query_expr(&[u8]) -> QueryExpr, dbg_dmp!(map!(separated_nonempty_list_complete!(tuple!(opt!(space), line_ending), row_expr), |rs| QueryExpr{rows:rs})));
+}
+
+fn parse(code: &str) -> Result<QueryExpr, nom::IError<&[u8]>> {
+    syntax::query_expr(code.as_bytes()).to_full_result()
 }
 
 fn main() {
@@ -635,13 +690,27 @@ fn main() {
 
     println!("{:?}", query.solve(&bag));
 
-    let query = compile(QueryExpr{rows: vec![
-        [ValueExpr::Variable("e".into()), ValueExpr::Constant("kind".into()), ValueExpr::Constant("note".into())],
-        [ValueExpr::Variable("e".into()), ValueExpr::Constant("editing".into()), ValueExpr::Constant(true.into())],
-    ]});
+    let query = compile(&QueryExpr {
+        rows: vec![
+            [
+                ValueExpr::Variable("e".into()),
+                ValueExpr::Constant("kind".into()),
+                ValueExpr::Constant("note".into()),
+            ],
+            [
+                ValueExpr::Variable("e".into()),
+                ValueExpr::Constant("editing".into()),
+                ValueExpr::Constant(true.into()),
+            ],
+        ],
+    });
 
     println!("{:?}", query);
     println!("{:?}", query.solve(&bag));
+
+    println!("{:?}", parse("?e kind note\n?e editing true"));
+
+    serve();
 }
 
 #[cfg(test)]

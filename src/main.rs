@@ -25,7 +25,7 @@ use std::io::prelude::*;
 
 use regex::Regex;
 
-use std::collections::BTreeMap;
+use std::collections::{HashMap, BTreeMap};
 use std::iter::Iterator;
 use std::cell::Cell;
 
@@ -379,7 +379,7 @@ impl RowDomain {
         self.current_column.set(self.current_column.get() + 1);
         let start = gallop(column, old_start, old_end, |v| v < value);
         let end = gallop(column, start, old_end, |v| v <= value); // TODO there is an extra comparison here that I cna't seem to get rid off
-        println!("{:?} {:?} {:?} {:?}", column, value, start, end);
+        // println!("{:?} {:?} {:?} {:?}", column, value, start, end);
         self.ranges[self.current_column.get()].set((start, end));
     }
 
@@ -401,7 +401,7 @@ impl RowDomain {
             let value = &column[start];
             let end = gallop(column, start + 1, old_end, |v| v <= value);
             self.ranges[self.current_column.get()].set((start, end));
-            println!("{:?}", start..end);
+            // println!("{:?}", start..end);
             f(value);
             start = end;
         }
@@ -421,6 +421,7 @@ impl RowDomain {
     }
 }
 
+#[derive(Debug, Clone)]
 enum Constraint {
     Constant(usize, Value),
     Join(Vec<usize>),
@@ -460,6 +461,7 @@ impl Constraint {
     }
 }
 
+#[derive(Debug, Clone)]
 struct Query {
     row_orderings: Vec<[usize; 3]>,
     constraints: Vec<Constraint>,
@@ -496,8 +498,12 @@ impl Query {
                     ordered_eavs.iter().map(|eav| eav[1].clone()).collect(),
                     ordered_eavs.iter().map(|eav| eav[2].clone()).collect(),
                 ];
-                let range = Cell::new((0,eavs.len()));
-                RowDomain{columns:columns, ranges: [range.clone(), range.clone(), range.clone(), range.clone()], current_column: Cell::new(0)}
+                let range = Cell::new((0, eavs.len()));
+                RowDomain {
+                    columns: columns,
+                    ranges: [range.clone(), range.clone(), range.clone(), range.clone()],
+                    current_column: Cell::new(0),
+                }
             })
             .collect();
 
@@ -507,8 +513,18 @@ impl Query {
     }
 }
 
-fn solve_constraints(row_domains: &[RowDomain], constraints: &[Constraint], results: &mut Vec<Value>) {
-    println!("{:?}", row_domains.iter().map(|row_domain| &row_domain.ranges).collect::<Vec<_>>());
+fn solve_constraints(
+    row_domains: &[RowDomain],
+    constraints: &[Constraint],
+    results: &mut Vec<Value>,
+) {
+    // println!(
+    //     "{:?}",
+    //     row_domains
+    //         .iter()
+    //         .map(|row_domain| &row_domain.ranges)
+    //         .collect::<Vec<_>>()
+    // );
     if constraints.len() == 0 {
         for row_domain in row_domains {
             for &value in &row_domain.sample() {
@@ -516,11 +532,76 @@ fn solve_constraints(row_domains: &[RowDomain], constraints: &[Constraint], resu
             }
         }
     } else {
-        constraints[0].constrain(row_domains, |row_domains| solve_constraints(row_domains, &constraints[1..], results));
+        constraints[0].constrain(row_domains, |row_domains| {
+            solve_constraints(row_domains, &constraints[1..], results)
+        });
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ValueExpr {
+    Constant(Value),
+    Variable(String),
+}
 
+type RowExpr = [ValueExpr; 3];
+
+#[derive(Debug, Clone)]
+struct QueryExpr {
+    rows: Vec<RowExpr>,
+}
+
+fn compile(query_expr: QueryExpr) -> Query {
+
+    // sort variables
+    let mut constants: Vec<(&Value, (usize, usize))> = vec![];
+    let mut variables: Vec<(&String, Vec<(usize, usize)>)> = vec![];
+    for (row, row_expr) in query_expr.rows.iter().enumerate() {
+        for (col, value_expr) in row_expr.iter().enumerate() {
+            match value_expr {
+                &ValueExpr::Constant(ref value) => {
+                    constants.push((value, (row, col)))
+                }
+                &ValueExpr::Variable(ref variable) => {
+                    match variables.iter().position(|&(ref v, _)| *v == variable) {
+                        Some(ix) => variables[ix].1.push((row, col)),
+                        None => variables.push((variable, vec![(row, col)])),
+                    }
+                }
+            }
+        }
+    }
+
+    // create constraints
+    let mut constraints = vec![];
+    for &(value, (row, col)) in constants.iter() {
+        constraints.push(Constraint::Constant(row, value.clone()));
+    }
+    for &(_, ref rows_and_cols) in variables.iter() {
+        constraints.push(Constraint::Join(rows_and_cols.iter().map(|&(r,c)| r).collect()));
+    }
+
+    // sort rows
+    let mut phase: HashMap<(usize, usize), usize> = HashMap::new();
+    for (i, &(_, rc)) in constants.iter().enumerate() {
+        phase.insert(rc, i);
+    }
+    for (i, &(_, ref rcs)) in variables.iter().enumerate() {
+        for &rc in rcs.iter() {
+            phase.insert(rc, constants.len() + i);
+        }
+    }
+    let row_orderings = query_expr.rows.iter().enumerate().map(|(r, _)| {
+        let mut row_ordering = [0,1,2];
+        row_ordering.sort_unstable_by(|&c1, &c2| phase.get(&(r,c1)).unwrap().cmp(phase.get(&(r,c2)).unwrap()));
+        row_ordering
+    }).collect();
+
+    Query {
+        row_orderings,
+        constraints,
+    }
+}
 
 fn main() {
     // serve();
@@ -528,30 +609,38 @@ fn main() {
     let bag = load();
 
     // e.kind = "note"
-    let query = Query{
-        row_orderings: vec![[1,2,0]],
+    let query = Query {
+        row_orderings: vec![[1, 2, 0]],
         constraints: vec![
             Constraint::Constant(0, "kind".into()),
             Constraint::Constant(0, "note".into()),
             Constraint::Join(vec![0]),
-            ],
+        ],
     };
 
     println!("{:?}", query.solve(&bag));
 
     // e.kind = "note"
     // e.editing = true
-    let query = Query{
-        row_orderings: vec![[1,2,0],[1,2,0]],
+    let query = Query {
+        row_orderings: vec![[1, 2, 0], [1, 2, 0]],
         constraints: vec![
             Constraint::Constant(0, "kind".into()),
             Constraint::Constant(0, "note".into()),
             Constraint::Constant(1, "editing".into()),
             Constraint::Constant(1, true.into()),
             Constraint::Join(vec![0, 1]),
-            ],
+        ],
     };
 
+    println!("{:?}", query.solve(&bag));
+
+    let query = compile(QueryExpr{rows: vec![
+        [ValueExpr::Variable("e".into()), ValueExpr::Constant("kind".into()), ValueExpr::Constant("note".into())],
+        [ValueExpr::Variable("e".into()), ValueExpr::Constant("editing".into()), ValueExpr::Constant(true.into())],
+    ]});
+
+    println!("{:?}", query);
     println!("{:?}", query.solve(&bag));
 }
 
@@ -569,7 +658,7 @@ mod tests {
         assert_eq!(gallop(&*col, 0, col.len(), |&x| x < 1000), 1000);
 
         for i in 0..999 {
-            assert_eq!(col[gallop(&*col, 0, col.len(), |&x| x <= i)], i+1);
+            assert_eq!(col[gallop(&*col, 0, col.len(), |&x| x <= i)], i + 1);
         }
         assert_eq!(gallop(&*col, 0, col.len(), |&x| x <= -1), 0);
         assert_eq!(gallop(&*col, 0, col.len(), |&x| x <= 999), 1000);

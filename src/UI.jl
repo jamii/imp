@@ -287,13 +287,21 @@ function compile(node, parent, column_type::Function)
   return Compiled(flow, group_ids, attribute_ids)
 end
 
+struct Template
+  source::Any
+  parsed::Parsed
+  compiled::Compiled
+end
+
+macro template(source)
+  :(Template($(Expr(:quote, source))))
+end
+
 # --- plumbing ---
 
 mutable struct View
   world::World
-  template::Any
-  parsed::Parsed
-  compiled::Compiled
+  template::Template
   clients::Dict{Session, WebSocket}
   server::Nullable{Server}
 end
@@ -301,9 +309,11 @@ end
 function View() 
   view = View(
     World(),
-    quote [html] end, 
-    Parsed(Node[], Int64[]), 
-    Compiled(Sequence(Flow[]), Symbol[], Symbol[]),
+    Template(
+      quote [html] end, 
+      Parsed(Node[], Int64[]), 
+      Compiled(Sequence(Flow[]), Symbol[], Symbol[])
+    ),
     Dict{Session, WebSocket}(),
     Nullable{Server}()
   )
@@ -311,10 +321,18 @@ function View()
   view
 end
 
-function set_template!(view::View, template::ANY)
+function Template(source::ANY, view::View)
+  @showtime parsed = parse(source)
+  @showtime compiled = compile(parsed.node, parsed.parent, (table, ix) -> eltype(view.world.state[table].columns[ix]))
+  Template(source, parsed, compiled)
+end
+
+function set_template!(view::View, source::ANY)
+  set_template!(view, Template(source, view))
+end
+
+function set_template!(view::View, template::Template)
   view.template = template
-  @showtime view.parsed = parse(template)
-  @showtime view.compiled = compile(view.parsed.node, view.parsed.parent, (table, ix) -> eltype(view.world.state[table].columns[ix]))
   refresh(view)
 end
 
@@ -323,21 +341,21 @@ function Flows.set_flow!(view::View, flow::Flow)
     @stateful session(Session)
     flow
   ])
-  set_template!(view, view.template) # need to recompile template in case the types have changed
+  set_template!(view, view.template.source) # need to recompile template in case the types have changed
 end
 
 function Flows.refresh(view::View)
   (old_state, _) = refresh(view.world)
-  @showtime Flows.init_flow(view.compiled.flow, view.world)
-  @showtime Flows.run_flow(view.compiled.flow, view.world)
+  @showtime Flows.init_flow(view.template.compiled.flow, view.world)
+  @showtime Flows.run_flow(view.template.compiled.flow, view.world)
   @showtime render(view, old_state, view.world.state)
   (old_state, view.world.state)
 end
 
 function Flows.refresh(view::View, event_table::Symbol, event_row::Tuple)
   (old_state, _) = refresh(view.world, event_table, event_row)
-  @showtime Flows.init_flow(view.compiled.flow, view.world)
-  @showtime Flows.run_flow(view.compiled.flow, view.world)
+  @showtime Flows.init_flow(view.template.compiled.flow, view.world)
+  @showtime Flows.run_flow(view.template.compiled.flow, view.world)
   @showtime render(view, old_state, view.world.state)
   (old_state, view.world.state)
 end
@@ -364,7 +382,7 @@ function render(view, old_state, new_state)
   text_create_siblings = Dict(session => Vector{UInt64}() for session in sessions)
   text_create_childs = Dict(session => Vector{UInt64}() for session in sessions)
   text_create_contents = Dict(session => Vector{String}() for session in sessions)
-  for group_id in view.compiled.group_ids
+  for group_id in view.template.compiled.group_ids
     new_group = new_state[group_id]
     old_group = get(() -> empty(new_group), old_state, group_id)
     (deleted, created) = Data.diff_ixes(old_group, new_group)
@@ -415,7 +433,7 @@ function render(view, old_state, new_state)
   attribute_create_childs = Dict(session => Vector{UInt64}() for session in sessions)
   attribute_create_keys = Dict(session => Vector{String}() for session in sessions)
   attribute_create_vals = Dict(session => Vector{String}() for session in sessions)
-  for attribute_id in view.compiled.attribute_ids
+  for attribute_id in view.template.compiled.attribute_ids
     new_attributes::Relation{Tuple{Vector{Session}, Vector{UInt64}, Vector{String}, Vector{String}}} = new_state[attribute_id]
     old_attributes::Relation{Tuple{Vector{Session}, Vector{UInt64}, Vector{String}, Vector{String}}} = get(old_state, attribute_id, new_attributes)
     (deleted, created) = Data.diff_ixes(old_attributes, new_attributes)
@@ -503,6 +521,6 @@ function Base.close(view::View)
   empty!(view.clients)
 end
 
-export Session, View, set_template!, serve, js_str
+export Session, View, Template, @template, set_template!, serve, js_str
 
 end

@@ -3,7 +3,6 @@ module Data
 using Match
 using NullableArrays
 using Base.Test
-using BenchmarkTools
 
 @generated function cmp_in{T <: Tuple}(xs::T, ys::T, x_at::Int, y_at::Int)
   n = length(T.parameters)
@@ -29,7 +28,7 @@ end
         let tmp = xs[$c][i]
           xs[$c][i] = xs[$c][j]
           xs[$c][j] = tmp
-        end
+        end	    
       end for c in 1:n]...)
     end
   end
@@ -356,11 +355,11 @@ end
 function bench()
   srand(999)
   x = rand(Int, 10000)
-  @show @benchmark quicksort!((copy($x),))
+  # @show @benchmark quicksort!((copy($x),))
   
   srand(999)
   y = [string(i) for i in rand(Int, 10000)]
-  @show @benchmark quicksort!((copy($y),))
+  # @show @benchmark quicksort!((copy($y),))
   
   srand(999)
   x = unique(rand(1:10000, 10000))
@@ -368,7 +367,7 @@ function bench()
   z = rand(1:10000, length(x))
   a = Relation((x,y), 1)
   b = Relation((x,z), 1)
-  @show @benchmark merge($a,$b)
+  # @show @benchmark merge($a,$b)
 end
 
 end

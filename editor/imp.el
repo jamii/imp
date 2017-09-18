@@ -23,12 +23,11 @@
   (message "Connected to Imp")
   nil)
 
-(defun imp-send-code (code)
-  (websocket-send-text imp-ws (json-encode (list (cons "code" code)))))
-
 (defun imp-send-code-buffer (buffer)
   (with-current-buffer imp-buffer
-    (imp-send-code (buffer-string))))
-
+    (websocket-send-text imp-ws (json-encode (list
+                                              (cons "code" (buffer-string))
+                                              (cons "cursor" (point)))))))
+  
 ;; (cancel-function-timers 'imp-send-code-buffer)
 ;; (setq timer-idle-list (car timer-idle-list))

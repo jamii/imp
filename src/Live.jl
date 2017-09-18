@@ -11,10 +11,10 @@ using HttpServer
 using WebSockets
 using JSON
 
-function parse(code, cache)
+function parse(code, cursor, cache)
   codelets = split(code, "\n\n")
   values = []
-  for codelet in codelets
+  @showtime for codelet in codelets
     value = try
       get(cache, codelet) do
         eval(Base.parse(codelet))
@@ -24,19 +24,36 @@ function parse(code, cache)
     end
     push!(values, value)
   end
+  focused = nothing
+  for i in 1:length(codelets)
+    if cursor < length(codelets[i])
+      focused = values[i]
+      break
+    else
+      cursor -= length(codelets[i])
+      cursor -= 2 # \n\n
+    end
+  end
   flow = Sequence([value for value in values if value isa Flow])
-  uis = [value for value in values if value isa Expr]
   others = [value for value in values if !(value isa Flow) && !(value isa Expr)] 
-  (flow, uis, others)
+  (flow, focused, others)
 end
 
-function run(view, code, cache)
-  (flow, uis, others) = parse(code, cache)
-  set_flow!(view, flow)
+const empty_template = Template(quote [html [head] [body]] end, View())
+
+function run(view, code, cursor, cache)
+  (flow, focused, others) = parse(code, cursor, cache)
+  @showtime view.world.flow = Sequence([
+    @stateful session(Session)
+    flow
+  ])
   @show others
-  if !isempty(uis)
-    set_template!(view, uis[1])
+  if focused isa Expr
+    @showtime view.template = Template(focused, view)
+  else
+    @showtime view.template = empty_template
   end
+  @showtime refresh(view)
 end
 
 function watch(view, filename, cache)
@@ -76,9 +93,9 @@ function serve(view, cache)
         bytes = take!(channel)
       end
       event = JSON.parse(String(bytes))
-      @show :processing event
-      if haskey(event, "code")
-        @showtime run(view, event["code"], cache)
+      @show :processing
+      if haskey(event, "code") && haskey(event, "cursor")
+        @showtime run(view, event["code"], event["cursor"], cache)
       end
     end
   end

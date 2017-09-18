@@ -2,9 +2,10 @@ module Util
 
 macro showtime(expr)
   quote
-    @time $(esc(expr))
+    result = @time $(esc(expr))
     println($(string("^ ", expr)))
     println()
+    result
   end
 end
 

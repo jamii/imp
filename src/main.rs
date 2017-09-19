@@ -658,6 +658,91 @@ fn parse(code: &str) -> Result<QueryExpr, nom::IError<&[u8]>> {
     syntax::query_expr(code.as_bytes()).to_full_result()
 }
 
+fn run_code(bag: &Bag, code: &str, cursor: i64) -> String {
+    let codelets = code.split("\n\n").collect::<Vec<_>>();
+    let mut focused = None;
+    let mut remaining_cursor = cursor;
+    for codelet in codelets {
+        remaining_cursor -= codelet.len() as i64;
+        if remaining_cursor <= 0 {
+            focused = Some(codelet);
+            break;
+        }
+        remaining_cursor -= 2; // \n\n
+        if remaining_cursor < 0 {
+            focused = None;
+            break; 
+        }
+    }
+    if let Some(codelet) = focused {
+        match parse(codelet) {
+            Ok(query_expr) => {
+                let query = compile(&query_expr);
+                format!("{}\n\n{:?}\n\n{:?}\n\n{:?}\n\n{:?}", codelet, cursor, query_expr, query, query.solve(&bag))
+            }
+            Err(error) => {
+                format!("{}\n\n{:?}\n\n{:?}", codelet, cursor, error)
+            }
+        }
+    } else {
+        format!("Nothing\n\n{:?}", cursor)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+enum EditorEvent {
+    State(String, i64)
+}
+
+fn serve_editor() {
+    let bag = Arc::new(Mutex::new(load()));
+
+    let server = Server::bind("127.0.0.1:8081").unwrap();
+
+    for request in server.filter_map(Result::ok) {
+        let bag = bag.clone();
+        thread::spawn(move || {
+            let client = request.accept().unwrap();
+            let ip = client.peer_addr().unwrap();
+            println!("Connection from {}", ip);
+
+            let (mut receiver, mut sender) = client.split().unwrap();
+
+            for message in receiver.incoming_messages() {
+                let message = message.unwrap();
+
+                match message {
+                    OwnedMessage::Close(_) => {
+                        let message = OwnedMessage::Close(None);
+                        sender.send_message(&message).unwrap();
+                        println!("Client {} disconnected", ip);
+                        return;
+                    }
+                    OwnedMessage::Ping(ping) => {
+                        let message = OwnedMessage::Pong(ping);
+                        sender.send_message(&message).unwrap();
+                    }
+                    OwnedMessage::Text(ref text) => {
+                        println!("Received: {}", text);
+                        let event: EditorEvent = serde_json::from_str(text).unwrap();
+                        let mut bag = bag.lock().unwrap();
+                        match event {
+                            EditorEvent::State(code, cursor) => {
+                                let result = run_code(&*bag, &*code, cursor);
+                                print!("\x1b[2J\x1b[1;1H");
+                                println!("{}\n\n", result);
+                            }
+                        }
+                    }
+                    _ => {
+                        panic!("A weird message! {:?}", message);
+                    }
+                }
+            }
+        });
+    }
+}
+
 fn main() {
     // serve();
 
@@ -710,7 +795,7 @@ fn main() {
 
     println!("{:?}", parse("?e kind note\n?e editing true"));
 
-    serve();
+    serve_editor();
 }
 
 #[cfg(test)]

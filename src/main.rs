@@ -229,8 +229,8 @@ fn send_command(sender: &mut websocket::sender::Writer<std::net::TcpStream>, c: 
 
 fn run_query(code: &str, bag: &Bag) -> String {
     match parse(code) {
-        Ok(query) => format!("{:?}", compile(&query).solve(bag)),
         Err(e) => format!("{:?}", e),
+        Ok(query) => format!("{:?}", compile(&query).unwrap().solve(bag)),
     }
 }
 
@@ -431,25 +431,28 @@ impl RowDomain {
             &self.columns[2][self.ranges[3].get().0],
         ]
     }
+
+    fn get(&self, col_ix: usize) -> &Value {
+        let range = self.ranges[self.current_column.get()].get();
+        &self.columns[col_ix][range.0]
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum Constraint {
     Constant(usize, Value),
     Join(Vec<usize>),
+    Emit([(usize, usize); 3]),
 }
 
-impl Constraint {
-    fn constrain<F>(&self, row_domains: &[RowDomain], mut f: F) -> ()
-    where
-        F: FnMut(&[RowDomain]) -> (),
-    {
-        match self {
+fn constrain(constraints: &[Constraint], row_domains: &[RowDomain], results: &mut [Vec<Value>; 3]) -> () {
+    if constraints.len() > 0 {
+        match &constraints[0] {
             &Constraint::Constant(row, ref value) => {
                 let row_domain = &row_domains[row];
                 row_domain.narrow(value);
                 if !row_domain.is_empty() {
-                    f(row_domains);
+                    constrain(&constraints[1..], row_domains, results);
                 }
                 row_domain.widen();
             }
@@ -461,13 +464,19 @@ impl Constraint {
                         row_domains[row].narrow(value);
                     }
                     if !rows.iter().any(|row| row_domains[*row].is_empty()) {
-                        f(row_domains);
+                        constrain(&constraints[1..], row_domains, results);
                     }
                     for &row in &rows[1..] {
                         row_domains[row].widen();
                     }
                 });
                 row_domain.widen();
+            }
+            &Constraint::Emit(row_and_col_ixes) => {
+                for (result, &(row_ix, col_ix)) in results.iter_mut().zip(row_and_col_ixes.iter()) {
+                    result.push(row_domains[row_ix].get(col_ix).clone());
+                }
+                constrain(&constraints[1..], row_domains, results);
             }
         }
     }
@@ -480,7 +489,7 @@ pub struct Query {
 }
 
 impl Query {
-    fn solve(&self, bag: &Bag) -> Vec<Value> {
+    fn solve(&self, bag: &Bag) -> [Vec<Value>; 3] {
         // TODO strip out this compat layer
         let eavs: Vec<[Value; 3]> = bag.eavs
             .iter()
@@ -519,34 +528,9 @@ impl Query {
             })
             .collect();
 
-        let mut results: Vec<Value> = vec![];
-        solve_constraints(&*row_domains, &*self.constraints, &mut results);
+        let mut results: [Vec<Value>; 3] = [vec![], vec![], vec![]];
+        constrain(&*self.constraints, &*row_domains, &mut results);
         results
-    }
-}
-
-fn solve_constraints(
-    row_domains: &[RowDomain],
-    constraints: &[Constraint],
-    results: &mut Vec<Value>,
-) {
-    // println!(
-    //     "{:?}",
-    //     row_domains
-    //         .iter()
-    //         .map(|row_domain| &row_domain.ranges)
-    //         .collect::<Vec<_>>()
-    // );
-    if constraints.len() == 0 {
-        for row_domain in row_domains {
-            for &value in &row_domain.sample() {
-                results.push(value.clone());
-            }
-        }
-    } else {
-        constraints[0].constrain(row_domains, |row_domains| {
-            solve_constraints(row_domains, &constraints[1..], results)
-        });
     }
 }
 
@@ -556,43 +540,52 @@ pub enum ValueExpr {
     Variable(String),
 }
 
-pub type RowExpr = [ValueExpr; 3];
+#[derive(Debug, Clone)]
+pub enum RowExpr {
+    Pattern([ValueExpr; 3]),
+    Assert([ValueExpr; 3]),
+}
 
 #[derive(Debug, Clone)]
 pub struct QueryExpr {
-    rows: Vec<RowExpr>,
+    rows:Vec<RowExpr>,
 }
 
-fn compile(query_expr: &QueryExpr) -> Query {
+fn compile(query_expr: &QueryExpr) -> Result<Query, String> {
 
     // sort variables
     let mut constants: Vec<(&Value, (usize, usize))> = vec![];
     let mut variables: Vec<(&String, Vec<(usize, usize)>)> = vec![];
     for (row, row_expr) in query_expr.rows.iter().enumerate() {
-        for (col, value_expr) in row_expr.iter().enumerate() {
-            match value_expr {
-                &ValueExpr::Constant(ref value) => constants.push((value, (row, col))),
-                &ValueExpr::Variable(ref variable) => {
-                    match variables.iter().position(|&(ref v, _)| *v == variable) {
-                        Some(ix) => variables[ix].1.push((row, col)),
-                        None => variables.push((variable, vec![(row, col)])),
+        match row_expr {
+            &RowExpr::Pattern(ref value_exprs) => {
+                for (col, value_expr) in value_exprs.iter().enumerate() {
+                    match value_expr {
+                        &ValueExpr::Constant(ref value) => constants.push((value, (row, col))),
+                        &ValueExpr::Variable(ref variable) => {
+                            match variables.iter().position(|&(ref v, _)| *v == variable) {
+                                Some(ix) => variables[ix].1.push((row, col)),
+                                None => variables.push((variable, vec![(row, col)])),
+                            }
+                        }
                     }
                 }
             }
+            _ => ()
         }
     }
 
-    // create constraints
+    // create constants
     let mut constraints = vec![];
-    for &(value, (row, col)) in constants.iter() {
+    for &(value, (row, _)) in constants.iter() {
         constraints.push(Constraint::Constant(row, value.clone()));
     }
     for &(_, ref rows_and_cols) in variables.iter() {
         constraints.push(Constraint::Join(
-            rows_and_cols.iter().map(|&(r, c)| r).collect(),
+            rows_and_cols.iter().map(|&(r, _)| r).collect(),
         ));
     }
-
+    
     // sort rows
     let mut phase: HashMap<(usize, usize), usize> = HashMap::new();
     for (i, &(_, rc)) in constants.iter().enumerate() {
@@ -603,9 +596,10 @@ fn compile(query_expr: &QueryExpr) -> Query {
             phase.insert(rc, constants.len() + i);
         }
     }
-    let row_orderings = query_expr
+    let row_orderings:Vec<[usize; 3]> = query_expr
         .rows
         .iter()
+        .filter(|r| match r { &&RowExpr::Pattern(_) => true, _ => false})
         .enumerate()
         .map(|(r, _)| {
             let mut row_ordering = [0, 1, 2];
@@ -618,10 +612,37 @@ fn compile(query_expr: &QueryExpr) -> Query {
         })
         .collect();
 
-    Query {
+    // create emits
+    for (row, row_expr) in query_expr.rows.iter().enumerate() {
+        match row_expr {
+            &RowExpr::Assert(ref value_exprs) => {
+                let mut row_and_col_ixes = [(0, 0), (0, 0), (0, 0)];
+                for (col, value_expr) in value_exprs.iter().enumerate() {
+                    match value_expr {
+                        &ValueExpr::Constant(_) => return Err(format!("Can't assert constants yet (row {} col {})", row, col)),
+                        &ValueExpr::Variable(ref variable) => {
+                            match variables.iter().position(|&(ref v, _)| *v == variable) {
+                                None => return Err(format!("Variable {:?} is not bound (row {} col {})", variable, row, col)),
+                                Some(ix) => {
+                                    let (r,c) = variables[ix].1[0];
+                                    let c_after_sort = row_orderings[r].iter().position(|c2| *c2 == c).unwrap();
+                                    row_and_col_ixes[col] = (r, c_after_sort);
+                                }
+                            }
+                        }
+                    }
+                }
+                constraints.push(Constraint::Emit(row_and_col_ixes));
+            }
+            _ => ()
+        }
+    }
+
+
+    Ok(Query {
         row_orderings,
         constraints,
-    }
+    })
 }
 
 mod syntax {
@@ -642,7 +663,7 @@ mod syntax {
 
     named!(value_expr(&[u8]) -> ValueExpr, dbg_dmp!(alt!(map!(variable, ValueExpr::Variable) | map!(value, ValueExpr::Constant))));
 
-    named!(row_expr(&[u8]) -> RowExpr, dbg_dmp!(do_parse!(
+    named!(values_expr(&[u8]) -> [ValueExpr;3], dbg_dmp!(do_parse!(
     v1: value_expr >>
     space >>
     v2: value_expr >>
@@ -650,6 +671,19 @@ mod syntax {
     v3: value_expr >>
     ([v1,v2,v3])
     )));
+
+    named!(row_expr(&[u8]) -> RowExpr, alt!(
+        do_parse!(
+            tag!("+") >>
+            space >>
+            values: values_expr >>
+                (RowExpr::Assert(values)))
+        |
+        do_parse!(
+            values: values_expr >>
+                (RowExpr::Pattern(values)))
+        
+    ));
 
     named!(pub query_expr(&[u8]) -> QueryExpr, dbg_dmp!(map!(separated_nonempty_list_complete!(tuple!(opt!(space), line_ending), row_expr), |rs| QueryExpr{rows:rs})));
 }
@@ -692,12 +726,13 @@ fn run_code(bag: &Bag, code: &str, cursor: i64) -> String {
     }
     if let Some(codelet) = focused {
         match parse(codelet) {
+            Err(error) => format!("{}\n\n{:?}\n\n{:?}", codelet, cursor, error),
             Ok(query_expr) => {
-                let query = compile(&query_expr);
-                format!("{}\n\n{:?}\n\n{:?}\n\n{:?}\n\n{:?}", codelet, cursor, query_expr, query, query.solve(&bag))
-            }
-            Err(error) => {
-                format!("{}\n\n{:?}\n\n{:?}", codelet, cursor, error)
+                match compile(&query_expr) {
+                    Err(error) => format!("{}\n\n{:?}\n\n{:?}\n\n{:?}", codelet, cursor, query_expr, error),
+                    Ok(query) => format!("{}\n\n{:?}\n\n{:?}\n\n{:?}\n\n{:?}", codelet, cursor, query_expr, query, query.solve(&bag))
+                }
+                
             }
         }
     } else {
@@ -760,57 +795,6 @@ fn serve_editor() {
 }
 
 fn main() {
-    // serve();
-
-    let bag = load();
-
-    // e.kind = "note"
-    let query = Query {
-        row_orderings: vec![[1, 2, 0]],
-        constraints: vec![
-            Constraint::Constant(0, "kind".into()),
-            Constraint::Constant(0, "note".into()),
-            Constraint::Join(vec![0]),
-        ],
-    };
-
-    println!("{:?}", query.solve(&bag));
-
-    // e.kind = "note"
-    // e.editing = true
-    let query = Query {
-        row_orderings: vec![[1, 2, 0], [1, 2, 0]],
-        constraints: vec![
-            Constraint::Constant(0, "kind".into()),
-            Constraint::Constant(0, "note".into()),
-            Constraint::Constant(1, "editing".into()),
-            Constraint::Constant(1, true.into()),
-            Constraint::Join(vec![0, 1]),
-        ],
-    };
-
-    println!("{:?}", query.solve(&bag));
-
-    let query = compile(&QueryExpr {
-        rows: vec![
-            [
-                ValueExpr::Variable("e".into()),
-                ValueExpr::Constant("kind".into()),
-                ValueExpr::Constant("note".into()),
-            ],
-            [
-                ValueExpr::Variable("e".into()),
-                ValueExpr::Constant("editing".into()),
-                ValueExpr::Constant(true.into()),
-            ],
-        ],
-    });
-
-    println!("{:?}", query);
-    println!("{:?}", query.solve(&bag));
-
-    println!("{:?}", parse("?e kind note\n?e editing true"));
-
     serve_editor();
 }
 

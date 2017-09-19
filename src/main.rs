@@ -654,8 +654,24 @@ mod syntax {
     named!(pub query_expr(&[u8]) -> QueryExpr, dbg_dmp!(map!(separated_nonempty_list_complete!(tuple!(opt!(space), line_ending), row_expr), |rs| QueryExpr{rows:rs})));
 }
 
-fn parse(code: &str) -> Result<QueryExpr, nom::IError<&[u8]>> {
-    syntax::query_expr(code.as_bytes()).to_full_result()
+#[derive(Debug)]
+enum ParseError<'a> {
+    NomError(nom::IError<&'a [u8]>),
+    Remaining(&'a [u8], QueryExpr)
+}
+
+fn parse(code: &str) -> Result<QueryExpr, ParseError> {
+    match syntax::query_expr(code.as_bytes()) {
+        nom::IResult::Done(remaining, query_expr) => {
+            if remaining.len() == 0 {
+                Ok(query_expr)
+            } else {
+                Err(ParseError::Remaining(remaining, query_expr))
+            }
+        }
+        nom::IResult::Error(error) => Err(ParseError::NomError(nom::IError::Error(error))),
+        nom::IResult::Incomplete(needed) => Err(ParseError::NomError(nom::IError::Incomplete(needed))),
+    }
 }
 
 fn run_code(bag: &Bag, code: &str, cursor: i64) -> String {

@@ -1,20 +1,13 @@
 #![feature(proc_macro)]
 #![feature(conservative_impl_trait)]
 
-extern crate maud;
 extern crate websocket;
-extern crate serde;
 #[macro_use(json, json_internal)]
 extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
-extern crate pulldown_cmark;
-extern crate regex;
 #[macro_use]
 extern crate nom;
-
-use maud::{html, PreEscaped};
-use pulldown_cmark::{Parser, html};
 
 use std::thread;
 use std::sync::{Arc, Mutex};
@@ -25,15 +18,8 @@ use websocket::sync::Server;
 use std::fs::File;
 use std::io::prelude::*;
 
-use regex::Regex;
-
 use std::collections::{HashMap, BTreeMap};
 use std::iter::Iterator;
-use std::cell::Cell;
-
-use std::ops::Range;
-
-use std::error::Error;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
 pub struct Entity {
@@ -175,88 +161,6 @@ impl Bag {
     {
         self.eavs.insert((entity, attribute.into()), value.into());
     }
-
-    fn find_ea<E: ?Sized, A: ?Sized>(&self, entity: &E, attribute: &A) -> Option<&Value>
-    where
-        Entity: PartialEq<E>,
-        Attribute: PartialEq<A>,
-    {
-        self.eavs
-            .iter()
-            .filter(|&(&(ref e, ref a), _)| (e == entity) && (a == attribute))
-            .map(|(_, v)| v)
-            .next()
-    }
-
-    fn find_av<'a, A: ?Sized, V: ?Sized>(
-        &'a self,
-        attribute: &'a A,
-        value: &'a V,
-    ) -> impl Iterator<Item = &Entity> + 'a
-    where
-        Attribute: PartialEq<A>,
-        Value: PartialEq<V>,
-    {
-        self.eavs
-            .iter()
-            .filter(move |&(&(_, ref a), v)| (a == attribute) && (v == value))
-            .map(move |(&(ref e, _), _)| e)
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum Event {
-    Search(String),
-    New(String),
-    Finish(usize, String),
-    Edit(usize),
-}
-
-fn send(event: Event) -> String {
-    format!("es.send('{}')", json!(event))
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum Command {
-    Render(String),
-}
-
-fn send_command(sender: &mut websocket::sender::Writer<std::net::TcpStream>, c: Command) {
-    sender
-        .send_message(&OwnedMessage::Text(json!(c).to_string()))
-        .unwrap()
-}
-
-fn run_query(code: &str, bag: &Bag) -> String {
-    match parse(code) {
-        Err(e) => format!("{:?}", e),
-        Ok(query) => format!("{:?}", compile(&query).unwrap().solve(bag)),
-    }
-}
-
-fn render(bag: &Bag) -> String {
-    (html!{
-        div.notes {
-            @let search = bag.find_ea(bag.find_av("global", "search").next().unwrap(), "text").unwrap().as_str().unwrap();
-            input.search tabindex="0" onkeyup="if (event.which == 13 && event.ctrlKey) { send({New: this.value}); this.value='' } else { send({Search: this.value}) }" value=(search)
-            @for (i, note) in bag.find_av("kind", "note").enumerate().collect::<Vec<_>>().into_iter().rev() {
-                @let text = bag.find_ea(note, "text").unwrap().as_str().unwrap();
-                @if Regex::new(r"\S").unwrap().is_match(&text) {
-                    @if bag.find_ea(note, "editing").unwrap().as_bool().unwrap() {
-                        div.edit id={"note-" (i)} tabindex="0" autofocus=(true) contenteditable=(true) onblur={"send({Finish: [" (i) ", this.innerText]})"} (text)
-                    } @else if text.contains(search) {
-                        div.note id={"note-" (i)} tabindex="0" onfocus={"send({Edit:" (i) "})"} ({
-                            let mut unsafe_html = String::new();
-                            let parser = Parser::new(text);
-                            html::push_html(&mut unsafe_html, parser);
-                            PreEscaped(unsafe_html)
-                        })
-                    }
-                    div.result (run_query(text, bag))
-                }
-            }
-        }
-    }).into_string()
 }
 
 fn load() -> Bag {
@@ -274,83 +178,6 @@ fn save(bag: &Bag) {
         "{}",
         json!(bag.eavs.clone().into_iter().collect::<Vec<_>>())
     ).unwrap();
-}
-
-fn serve() {
-    let bag = Arc::new(Mutex::new(load()));
-
-    let server = Server::bind("127.0.0.1:8080").unwrap();
-
-    for request in server.filter_map(Result::ok) {
-        let bag = bag.clone();
-        thread::spawn(move || {
-            let client = request.accept().unwrap();
-            let ip = client.peer_addr().unwrap();
-            println!("Connection from {}", ip);
-
-            let (mut receiver, mut sender) = client.split().unwrap();
-
-            send_command(&mut sender, Command::Render(render(&bag.lock().unwrap())));
-
-            for message in receiver.incoming_messages() {
-                let message = message.unwrap();
-
-                match message {
-                    OwnedMessage::Close(_) => {
-                        let message = OwnedMessage::Close(None);
-                        sender.send_message(&message).unwrap();
-                        println!("Client {} disconnected", ip);
-                        return;
-                    }
-                    OwnedMessage::Ping(ping) => {
-                        let message = OwnedMessage::Pong(ping);
-                        sender.send_message(&message).unwrap();
-                    }
-                    OwnedMessage::Text(ref text) => {
-                        println!("Received: {}", text);
-                        let event: Event = serde_json::from_str(text).unwrap();
-                        let mut bag = bag.lock().unwrap();
-                        match event {
-                            Event::Search(text) => {
-                                let search = bag.create(vec![("global", "search".into())]).clone();
-                                bag.insert(search, "text", text);
-                            }
-                            Event::New(text) => {
-                                let max_i = bag.find_av("kind", "note")
-                                    .map(|e| bag.find_ea(e, "i").unwrap().as_i64().unwrap())
-                                    .max()
-                                    .unwrap();
-                                let note = bag.create(vec![
-                                    ("kind", "note".into()),
-                                    ("i", (max_i + 1).into()),
-                                ]);
-                                bag.insert(note.clone(), "text", text);
-                                bag.insert(note.clone(), "editing", false);
-                                let search = bag.create(vec![("global", "search".into())]).clone();
-                                bag.insert(search, "text", "");
-                            }
-                            Event::Finish(i, text) => {
-                                let ii = &(i as i64);
-                                let note = bag.find_av("i", ii).next().unwrap().clone();
-                                bag.insert(note.clone(), "text", text);
-                                bag.insert(note, "editing", false);
-                            }
-                            Event::Edit(i) => {
-                                let ii = &(i as i64);
-                                let note = bag.find_av("i", ii).next().unwrap().clone();
-                                bag.insert(note, "editing", true);
-                            }
-                        }
-                        send_command(&mut sender, Command::Render(render(&bag)));
-                        save(&*bag);
-                    }
-                    _ => {
-                        panic!("A weird message! {:?}", message);
-                    }
-                }
-            }
-        });
-    }
 }
 
 // f should be |t| t < value or |t| t <= value
@@ -375,108 +202,79 @@ pub fn gallop<'a, T, F: Fn(&T) -> bool>(slice: &'a [T], mut lo: usize, hi: usize
     lo
 }
 
-// TODO I don't like these cells
-#[derive(Clone, Debug)]
-pub struct RowDomain {
-    columns: [Vec<Value>; 3],
-    ranges: [Cell<(usize, usize)>; 4],
-    current_column: Cell<usize>,
-}
-
-impl RowDomain {
-    fn narrow(&self, value: &Value) {
-        assert!(self.current_column.get() < 3);
-        let column = &self.columns[self.current_column.get()];
-        let (old_start, old_end) = self.ranges[self.current_column.get()].get();
-        self.current_column.set(self.current_column.get() + 1);
-        let start = gallop(column, old_start, old_end, |v| v < value);
-        let end = gallop(column, start, old_end, |v| v <= value); // TODO there is an extra comparison here that I cna't seem to get rid off
-        // println!("{:?} {:?} {:?} {:?}", column, value, start, end);
-        self.ranges[self.current_column.get()].set((start, end));
-    }
-
-    fn widen(&self) {
-        assert!(self.current_column.get() > 0);
-        self.current_column.set(self.current_column.get() - 1);
-    }
-
-    fn foreach<F>(&self, mut f: F) -> ()
-    where
-        F: FnMut(&Value) -> (),
-    {
-        assert!(self.current_column.get() < 3);
-        let column = &self.columns[self.current_column.get()];
-        let (old_start, old_end) = self.ranges[self.current_column.get()].get();
-        self.current_column.set(self.current_column.get() + 1);
-        let mut start = old_start;
-        while start < old_end {
-            let value = &column[start];
-            let end = gallop(column, start + 1, old_end, |v| v <= value);
-            self.ranges[self.current_column.get()].set((start, end));
-            // println!("{:?}", start..end);
-            f(value);
-            start = end;
-        }
-    }
-
-    fn is_empty(&self) -> bool {
-        let (start, end) = self.ranges[self.current_column.get()].get();
-        start >= end
-    }
-
-    fn sample(&self) -> [&Value; 3] {
-        [
-            &self.columns[0][self.ranges[1].get().0],
-            &self.columns[1][self.ranges[2].get().0],
-            &self.columns[2][self.ranges[3].get().0],
-        ]
-    }
-
-    fn get(&self, col_ix: usize) -> &Value {
-        let range = self.ranges[self.current_column.get()].get();
-        &self.columns[col_ix][range.0]
-    }
-}
+type LoHi = (usize, usize);
+type RowCol = (usize, usize);
 
 #[derive(Debug, Clone)]
 pub enum Constraint {
-    Constant(usize, Value),
-    Join(Vec<usize>),
-    Emit([(usize, usize); 3]),
+    Constant(RowCol, Value),
+    Join(Vec<RowCol>),
+    Emit([RowCol; 3]),
 }
 
-fn constrain(constraints: &[Constraint], row_domains: &[RowDomain], results: &mut [Vec<Value>; 3]) -> () {
+pub fn constrain(constraints: &[Constraint], indexes: &[[Vec<Value>; 3]], ranges: &mut [LoHi], results: &mut [Vec<Value>; 3]) -> () {
     if constraints.len() > 0 {
         match &constraints[0] {
-            &Constraint::Constant(row, ref value) => {
-                let row_domain = &row_domains[row];
-                row_domain.narrow(value);
-                if !row_domain.is_empty() {
-                    constrain(&constraints[1..], row_domains, results);
+            &Constraint::Constant((row_ix, col_ix), ref value) => {
+                let column = &indexes[row_ix][col_ix];
+                let (old_lo, old_hi) = ranges[row_ix];
+                let lo = gallop(column, old_lo, old_hi, |v| v < value);
+                let hi = gallop(column, lo, old_hi, |v| v <= value);
+                if lo < hi {
+                    ranges[row_ix] = (lo, hi);
+                    constrain(&constraints[1..], indexes, ranges, results);
+                    ranges[row_ix] = (old_lo, old_hi);
                 }
-                row_domain.widen();
             }
-            &Constraint::Join(ref rows) => {
-                let row = rows[0]; // TODO pick smallest
-                let row_domain = &row_domains[row];
-                row_domain.foreach(|value| {
-                    for &row in &rows[1..] {
-                        row_domains[row].narrow(value);
+            &Constraint::Join(ref rowcols) => {
+                let mut buffer = vec![(0,0); rowcols.len()]; // TODO pre-allocate
+                let (row_ix, col_ix) = rowcols[0]; // TODO pick smallest
+                let column = &indexes[row_ix][col_ix];
+                let (old_lo, old_hi) = ranges[row_ix];
+                let mut lo = old_lo;
+                // loop over rowcols[0]
+                while lo < old_hi {
+                    let value = &column[lo];
+                    let hi = gallop(column, lo + 1, old_hi, |v| v <= value);
+                    ranges[row_ix] = (lo, hi);
+                    {
+                        // loop over rowcols[1..]
+                        let mut i = 1;
+                        while i < rowcols.len() {
+                            let column = &indexes[row_ix][col_ix];
+                            let (old_lo, old_hi) = ranges[row_ix];
+                            let lo = gallop(column, old_lo, old_hi, |v| v < value);
+                            let hi = gallop(column, lo, old_hi, |v| v <= value);
+                            if lo < hi {
+                                ranges[row_ix] = (lo, hi);
+                                buffer[i] = (old_lo, old_hi);
+                                i += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        // if all succeeded, continue with rest of constraints
+                        if i == rowcols.len() {
+                            constrain(&constraints[1..], indexes, ranges, results);
+                        }
+                        // restore state for rowcols[1..i]
+                        while i > 1 {
+                            i -= 1;
+                            let (row_ix, _) = rowcols[i];
+                            ranges[row_ix] = buffer[i];
+                        }
                     }
-                    if !rows.iter().any(|row| row_domains[*row].is_empty()) {
-                        constrain(&constraints[1..], row_domains, results);
-                    }
-                    for &row in &rows[1..] {
-                        row_domains[row].widen();
-                    }
-                });
-                row_domain.widen();
+                    lo = hi;
+                }
+                // restore state for rowcols[0]
+                ranges[row_ix] = (old_lo, old_hi);
             }
             &Constraint::Emit(row_and_col_ixes) => {
                 for (result, &(row_ix, col_ix)) in results.iter_mut().zip(row_and_col_ixes.iter()) {
-                    result.push(row_domains[row_ix].get(col_ix).clone());
+                    let (lo, _) = ranges[row_ix];
+                    result.push(indexes[row_ix][col_ix][lo].clone());
                 }
-                constrain(&constraints[1..], row_domains, results);
+                constrain(&constraints[1..], indexes, ranges, results);
             }
         }
     }
@@ -501,7 +299,7 @@ impl Query {
                 ]
             })
             .collect();
-        let row_domains: Vec<RowDomain> = self.row_orderings
+        let indexes: Vec<[Vec<Value>; 3]> = self.row_orderings
             .iter()
             .map(|row_ordering| {
                 let mut ordered_eavs: Vec<[Value; 3]> = eavs.iter()
@@ -514,22 +312,16 @@ impl Query {
                     })
                     .collect();
                 ordered_eavs.sort_unstable();
-                let columns = [
+                [
                     ordered_eavs.iter().map(|eav| eav[0].clone()).collect(),
                     ordered_eavs.iter().map(|eav| eav[1].clone()).collect(),
                     ordered_eavs.iter().map(|eav| eav[2].clone()).collect(),
-                ];
-                let range = Cell::new((0, eavs.len()));
-                RowDomain {
-                    columns: columns,
-                    ranges: [range.clone(), range.clone(), range.clone(), range.clone()],
-                    current_column: Cell::new(0),
-                }
+                ]
             })
             .collect();
-
-        let mut results: [Vec<Value>; 3] = [vec![], vec![], vec![]];
-        constrain(&*self.constraints, &*row_domains, &mut results);
+        let mut ranges: Vec<LoHi> = indexes.iter().map(|index| (0, index[0].len())).collect();
+        let mut results = [vec![], vec![], vec![]];
+        constrain(&*self.constraints, &*indexes, &mut *ranges, &mut results);
         results
     }
 }
@@ -574,17 +366,6 @@ fn compile(query_expr: &QueryExpr) -> Result<Query, String> {
             _ => ()
         }
     }
-
-    // create constants
-    let mut constraints = vec![];
-    for &(value, (row, _)) in constants.iter() {
-        constraints.push(Constraint::Constant(row, value.clone()));
-    }
-    for &(_, ref rows_and_cols) in variables.iter() {
-        constraints.push(Constraint::Join(
-            rows_and_cols.iter().map(|&(r, _)| r).collect(),
-        ));
-    }
     
     // sort rows
     let mut phase: HashMap<(usize, usize), usize> = HashMap::new();
@@ -612,6 +393,31 @@ fn compile(query_expr: &QueryExpr) -> Result<Query, String> {
         })
         .collect();
 
+    // remap columns
+    let mut cols_after_sort: HashMap<(usize, usize), usize> = HashMap::new();
+    for (row, row_ordering) in row_orderings.iter().enumerate() {
+        for col in 0..3 {
+            let col_after_sort = row_ordering.iter().position(|c| *c == col).unwrap();
+            cols_after_sort.insert((row, col), col_after_sort);
+        }
+    }
+
+    println!("{:?}", cols_after_sort);
+
+    // create constants
+    let mut constraints = vec![];
+    for &(value, (row, col)) in constants.iter() {
+        println!("{:?}", (row, col));
+        constraints.push(Constraint::Constant((row, *cols_after_sort.get(&(row, col)).unwrap()), value.clone()));
+    }
+
+    // create joins
+    for &(_, ref rows_and_cols) in variables.iter() {
+        constraints.push(Constraint::Join(
+            rows_and_cols.iter().map(|&(row, col)| (row, *cols_after_sort.get(&(row, col)).unwrap())).collect(),
+        ));
+    }
+
     // create emits
     for (row, row_expr) in query_expr.rows.iter().enumerate() {
         match row_expr {
@@ -625,8 +431,7 @@ fn compile(query_expr: &QueryExpr) -> Result<Query, String> {
                                 None => return Err(format!("Variable {:?} is not bound (row {} col {})", variable, row, col)),
                                 Some(ix) => {
                                     let (r,c) = variables[ix].1[0];
-                                    let c_after_sort = row_orderings[r].iter().position(|c2| *c2 == c).unwrap();
-                                    row_and_col_ixes[col] = (r, c_after_sort);
+                                    row_and_col_ixes[col] = (r, *cols_after_sort.get(&(r,c)).unwrap());
                                 }
                             }
                         }
@@ -729,7 +534,7 @@ fn run_code(bag: &Bag, code: &str, cursor: i64) -> String {
             Err(error) => format!("{}\n\n{:?}\n\n{:?}", codelet, cursor, error),
             Ok(query_expr) => {
                 match compile(&query_expr) {
-                    Err(error) => format!("{}\n\n{:?}\n\n{:?}\n\n{:?}", codelet, cursor, query_expr, error),
+                    Err(error) => format!("{}\n\n{:?}\n\n{:?}\n\n{}", codelet, cursor, query_expr, error),
                     Ok(query) => format!("{}\n\n{:?}\n\n{:?}\n\n{:?}\n\n{:?}", codelet, cursor, query_expr, query, query.solve(&bag))
                 }
                 
@@ -744,6 +549,17 @@ fn run_code(bag: &Bag, code: &str, cursor: i64) -> String {
 enum EditorEvent {
     State(String, i64)
 }
+
+// #[derive(Debug, Serialize, Deserialize)]
+// pub enum Command {
+//     Render(String),
+// }
+
+// fn send_command(sender: &mut websocket::sender::Writer<std::net::TcpStream>, c: Command) {
+//     sender
+//         .send_message(&OwnedMessage::Text(json!(c).to_string()))
+//         .unwrap()
+// }
 
 fn serve_editor() {
     let bag = Arc::new(Mutex::new(load()));

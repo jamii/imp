@@ -21,6 +21,8 @@ use std::io::prelude::*;
 use std::collections::{HashMap, BTreeMap};
 use std::iter::Iterator;
 
+use std::borrow::Cow;
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
 pub struct Entity {
     avs: Vec<(Attribute, Value)>,
@@ -207,26 +209,28 @@ type RowCol = (usize, usize);
 
 #[derive(Debug, Clone)]
 pub enum Constraint {
-    Constant(RowCol, Value),
-    Join(Vec<RowCol>),
-    Emit([RowCol; 3]),
+    Narrow(RowCol, usize),
+    Join(Vec<RowCol>, usize),
+    Assert([usize; 3]),
 }
 
-pub fn constrain(constraints: &[Constraint], indexes: &[[Vec<Value>; 3]], ranges: &mut [LoHi], results: &mut [Vec<Value>; 3]) -> () {
+pub fn constrain<'a>(constraints: &[Constraint], indexes: &'a [[Vec<Value>; 3]], ranges: &mut [LoHi], variables: &mut [&'a Value], asserts: &mut [Vec<Value>; 3]) -> () {
     if constraints.len() > 0 {
         match &constraints[0] {
-            &Constraint::Constant((row_ix, col_ix), ref value) => {
+            &Constraint::Narrow((row_ix, col_ix), var_ix) => {
+                let value = variables[var_ix];
                 let column = &indexes[row_ix][col_ix];
                 let (old_lo, old_hi) = ranges[row_ix];
                 let lo = gallop(column, old_lo, old_hi, |v| v < value);
                 let hi = gallop(column, lo, old_hi, |v| v <= value);
                 if lo < hi {
                     ranges[row_ix] = (lo, hi);
-                    constrain(&constraints[1..], indexes, ranges, results);
+                    variables[var_ix] = value;
+                    constrain(&constraints[1..], indexes, ranges, variables, asserts);
                     ranges[row_ix] = (old_lo, old_hi);
                 }
             }
-            &Constraint::Join(ref rowcols) => {
+            &Constraint::Join(ref rowcols, var_ix) => {
                 let mut buffer = vec![(0,0); rowcols.len()]; // TODO pre-allocate
                 let (row_ix, col_ix) = rowcols[0]; // TODO pick smallest
                 let column = &indexes[row_ix][col_ix];
@@ -255,7 +259,8 @@ pub fn constrain(constraints: &[Constraint], indexes: &[[Vec<Value>; 3]], ranges
                         }
                         // if all succeeded, continue with rest of constraints
                         if i == rowcols.len() {
-                            constrain(&constraints[1..], indexes, ranges, results);
+                            variables[var_ix] = &column[lo];
+                            constrain(&constraints[1..], indexes, ranges, variables, asserts);
                         }
                         // restore state for rowcols[1..i]
                         while i > 1 {
@@ -269,12 +274,11 @@ pub fn constrain(constraints: &[Constraint], indexes: &[[Vec<Value>; 3]], ranges
                 // restore state for rowcols[0]
                 ranges[row_ix] = (old_lo, old_hi);
             }
-            &Constraint::Emit(row_and_col_ixes) => {
-                for (result, &(row_ix, col_ix)) in results.iter_mut().zip(row_and_col_ixes.iter()) {
-                    let (lo, _) = ranges[row_ix];
-                    result.push(indexes[row_ix][col_ix][lo].clone());
+            &Constraint::Assert(var_ixes) => {
+                for (result, var_ix) in asserts.iter_mut().zip(var_ixes.iter()) {
+                    result.push(variables[*var_ix].clone());
                 }
-                constrain(&constraints[1..], indexes, ranges, results);
+                constrain(&constraints[1..], indexes, ranges, variables, asserts);
             }
         }
     }
@@ -283,6 +287,7 @@ pub fn constrain(constraints: &[Constraint], indexes: &[[Vec<Value>; 3]], ranges
 #[derive(Debug, Clone)]
 pub struct Query {
     row_orderings: Vec<[usize; 3]>,
+    variables: Vec<Value>,
     constraints: Vec<Constraint>,
 }
 
@@ -312,17 +317,22 @@ impl Query {
                     })
                     .collect();
                 ordered_eavs.sort_unstable();
+                let mut reverse_ordering = [0, 0, 0];
+                for i in 0..3 {
+                    reverse_ordering[row_ordering[i]] = i;
+                }
                 [
-                    ordered_eavs.iter().map(|eav| eav[0].clone()).collect(),
-                    ordered_eavs.iter().map(|eav| eav[1].clone()).collect(),
-                    ordered_eavs.iter().map(|eav| eav[2].clone()).collect(),
+                    ordered_eavs.iter().map(|eav| eav[reverse_ordering[0]].clone()).collect(),
+                    ordered_eavs.iter().map(|eav| eav[reverse_ordering[1]].clone()).collect(),
+                    ordered_eavs.iter().map(|eav| eav[reverse_ordering[2]].clone()).collect(),
                 ]
             })
             .collect();
+        let mut variables: Vec<&Value> = self.variables.iter().collect();
         let mut ranges: Vec<LoHi> = indexes.iter().map(|index| (0, index[0].len())).collect();
-        let mut results = [vec![], vec![], vec![]];
-        constrain(&*self.constraints, &*indexes, &mut *ranges, &mut results);
-        results
+        let mut asserts = [vec![], vec![], vec![]];
+        constrain(&*self.constraints, &*indexes, &mut *ranges, &mut *variables, &mut asserts);
+        asserts
     }
 }
 
@@ -333,9 +343,14 @@ pub enum ValueExpr {
 }
 
 #[derive(Debug, Clone)]
+pub enum PatternKind {
+    Match,
+    Assert,
+}
+
+#[derive(Debug, Clone)]
 pub enum RowExpr {
-    Pattern([ValueExpr; 3]),
-    Assert([ValueExpr; 3]),
+    Pattern(PatternKind, [ValueExpr; 3]),
 }
 
 #[derive(Debug, Clone)]
@@ -343,109 +358,110 @@ pub struct QueryExpr {
     rows:Vec<RowExpr>,
 }
 
-fn compile(query_expr: &QueryExpr) -> Result<Query, String> {
-
-    // sort variables
-    let mut constants: Vec<(&Value, (usize, usize))> = vec![];
-    let mut variables: Vec<(&String, Vec<(usize, usize)>)> = vec![];
-    for (row, row_expr) in query_expr.rows.iter().enumerate() {
+fn compile(query_expr: &mut QueryExpr) -> Result<Query, String> {
+    // variables, in execution order
+    let mut variables: Vec<String> = vec![];
+    let mut constants: Vec<Value> = vec![];
+    let mut joins: HashMap<String, Vec<RowCol>> = HashMap::new();
+    
+    // pull out constants
+    for (row, row_expr) in query_expr.rows.iter_mut().enumerate() {
         match row_expr {
-            &RowExpr::Pattern(ref value_exprs) => {
-                for (col, value_expr) in value_exprs.iter().enumerate() {
-                    match value_expr {
-                        &ValueExpr::Constant(ref value) => constants.push((value, (row, col))),
-                        &ValueExpr::Variable(ref variable) => {
-                            match variables.iter().position(|&(ref v, _)| *v == variable) {
-                                Some(ix) => variables[ix].1.push((row, col)),
-                                None => variables.push((variable, vec![(row, col)])),
-                            }
+            &mut RowExpr::Pattern(_, ref mut value_exprs) => {
+                for (col, value_expr) in value_exprs.iter_mut().enumerate() {
+                    match value_expr.clone() { // TODO this clone is daft
+                        ValueExpr::Constant(value) => {
+                            let variable = format!("constant_{}_{}", row, col);
+                            constants.push(value);
+                            joins.insert(variable.clone(), vec![(row, col)]);
+                            variables.push(variable.clone());
+                            *value_expr = ValueExpr::Variable(variable);
                         }
+                        _ => ()
                     }
                 }
+            }
+        }
+    }
+
+    // collect joins
+    for (row, row_expr) in query_expr.rows.iter().enumerate() {
+        match row_expr {
+            &RowExpr::Pattern(PatternKind::Match, ref value_exprs) => {
+                for (col, value_expr) in value_exprs.iter().enumerate() {
+                    match value_expr { 
+                        &ValueExpr::Variable(ref variable) => {
+                            if joins.contains_key(variable) {
+                                joins.get_mut(variable).unwrap().push((row, col));
+                            } else {
+                                joins.insert(variable.clone(), vec![(row, col)]);
+                                variables.push(variable.clone());
+                            }
+                        }
+                        _ => ()
+                    }
+                }
+            }
+            _ => ()
+        }
+    }
+
+    // turn constants/joins into constraints
+    let mut constraints: Vec<Constraint> = vec![];
+    for (var_ix, variable) in variables.iter().enumerate() {
+        if var_ix < constants.len() {
+            for &(row, col) in joins.get(variable).unwrap() {
+                constraints.push(Constraint::Narrow((row, col), var_ix));
+            }
+        } else {
+            constraints.push(Constraint::Join(joins.get(variable).unwrap().clone(), var_ix));
+        }
+    }
+
+    // turn asserts into constraints
+    for row_expr in query_expr.rows.iter() {
+        match row_expr {
+            &RowExpr::Pattern(PatternKind::Assert, ref value_exprs) => {
+                let mut var_ixes = [0, 0, 0];
+                for i in 0..3 {
+                    var_ixes[i] = match value_exprs[i] {
+                        ValueExpr::Variable(ref variable) => variables.iter().position(|v| v == variable).unwrap(),
+                        _ => unreachable!(),
+                    }
+                }
+                constraints.push(Constraint::Assert(var_ixes));
             }
             _ => ()
         }
     }
     
-    // sort rows
-    let mut phase: HashMap<(usize, usize), usize> = HashMap::new();
-    for (i, &(_, rc)) in constants.iter().enumerate() {
-        phase.insert(rc, i);
-    }
-    for (i, &(_, ref rcs)) in variables.iter().enumerate() {
-        for &rc in rcs.iter() {
-            phase.insert(rc, constants.len() + i);
-        }
-    }
+    // figure out which index to use
     let row_orderings:Vec<[usize; 3]> = query_expr
         .rows
         .iter()
-        .filter(|r| match r { &&RowExpr::Pattern(_) => true, _ => false})
-        .enumerate()
-        .map(|(r, _)| {
+        // TODO this messes up rowcol addressing if any matches come after an assert
+        .filter(|r| match r { &&RowExpr::Pattern(PatternKind::Match, _) => true, _ => false})
+        .map(|&RowExpr::Pattern(_, ref value_exprs)| {
+            let var_ixes: Vec<usize> = value_exprs.iter().map(| value_expr| {
+                match value_expr {
+                    &ValueExpr::Variable(ref variable) => variables.iter().position(|v| v == variable).unwrap(),
+                    _ => unreachable!(),
+                }
+            }).collect();
             let mut row_ordering = [0, 1, 2];
-            row_ordering.sort_unstable_by(|&c1, &c2| {
-                phase.get(&(r, c1)).unwrap().cmp(
-                    phase.get(&(r, c2)).unwrap(),
-                )
-            });
+            row_ordering.sort_unstable_by(|&c1, &c2| var_ixes[c1].cmp(&var_ixes[c2]));
             row_ordering
         })
         .collect();
 
-    // remap columns
-    let mut cols_after_sort: HashMap<(usize, usize), usize> = HashMap::new();
-    for (row, row_ordering) in row_orderings.iter().enumerate() {
-        for col in 0..3 {
-            let col_after_sort = row_ordering.iter().position(|c| *c == col).unwrap();
-            cols_after_sort.insert((row, col), col_after_sort);
-        }
+    // fill remaining constants with dummy values
+    while constants.len() < variables.len() {
+        constants.push(Value::Boolean(false));
     }
-
-    println!("{:?}", cols_after_sort);
-
-    // create constants
-    let mut constraints = vec![];
-    for &(value, (row, col)) in constants.iter() {
-        println!("{:?}", (row, col));
-        constraints.push(Constraint::Constant((row, *cols_after_sort.get(&(row, col)).unwrap()), value.clone()));
-    }
-
-    // create joins
-    for &(_, ref rows_and_cols) in variables.iter() {
-        constraints.push(Constraint::Join(
-            rows_and_cols.iter().map(|&(row, col)| (row, *cols_after_sort.get(&(row, col)).unwrap())).collect(),
-        ));
-    }
-
-    // create emits
-    for (row, row_expr) in query_expr.rows.iter().enumerate() {
-        match row_expr {
-            &RowExpr::Assert(ref value_exprs) => {
-                let mut row_and_col_ixes = [(0, 0), (0, 0), (0, 0)];
-                for (col, value_expr) in value_exprs.iter().enumerate() {
-                    match value_expr {
-                        &ValueExpr::Constant(_) => return Err(format!("Can't assert constants yet (row {} col {})", row, col)),
-                        &ValueExpr::Variable(ref variable) => {
-                            match variables.iter().position(|&(ref v, _)| *v == variable) {
-                                None => return Err(format!("Variable {:?} is not bound (row {} col {})", variable, row, col)),
-                                Some(ix) => {
-                                    let (r,c) = variables[ix].1[0];
-                                    row_and_col_ixes[col] = (r, *cols_after_sort.get(&(r,c)).unwrap());
-                                }
-                            }
-                        }
-                    }
-                }
-                constraints.push(Constraint::Emit(row_and_col_ixes));
-            }
-            _ => ()
-        }
-    }
-
 
     Ok(Query {
         row_orderings,
+        variables: constants,
         constraints,
     })
 }
@@ -482,11 +498,11 @@ mod syntax {
             tag!("+") >>
             space >>
             values: values_expr >>
-                (RowExpr::Assert(values)))
+                (RowExpr::Pattern(PatternKind::Assert, values)))
         |
         do_parse!(
             values: values_expr >>
-                (RowExpr::Pattern(values)))
+                (RowExpr::Pattern(PatternKind::Match, values)))
         
     ));
 
@@ -533,9 +549,10 @@ fn run_code(bag: &Bag, code: &str, cursor: i64) -> String {
         match parse(codelet) {
             Err(error) => format!("{}\n\n{:?}\n\n{:?}", codelet, cursor, error),
             Ok(query_expr) => {
-                match compile(&query_expr) {
-                    Err(error) => format!("{}\n\n{:?}\n\n{:?}\n\n{}", codelet, cursor, query_expr, error),
-                    Ok(query) => format!("{}\n\n{:?}\n\n{:?}\n\n{:?}\n\n{:?}", codelet, cursor, query_expr, query, query.solve(&bag))
+                let mut compiled_query_expr = query_expr.clone();
+                match compile(&mut compiled_query_expr) {
+                    Err(error) => format!("{}\n\n{:?}\n\n{:?}\n\n{:?}\n\n{}", codelet, cursor, query_expr, compiled_query_expr, error),
+                    Ok(query) => format!("{}\n\n{:?}\n\n{:?}\n\n{:?}\n\n{:?}\n\n{:?}", codelet, cursor, query_expr, compiled_query_expr, query, query.solve(&bag))
                 }
                 
             }

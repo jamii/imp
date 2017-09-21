@@ -67,7 +67,14 @@ impl std::fmt::Display for Value {
         match self {
             &Value::Boolean(bool) => bool.fmt(f),
             &Value::Integer(integer) => integer.fmt(f),
-            &Value::String(ref string) => string.fmt(f),
+            &Value::String(ref string) => {
+                if string.find(char::is_whitespace).is_some() {
+                    // TODO escaping
+                    '"'.fmt(f)?; string.fmt(f)?; '"'.fmt(f)
+                } else {
+                    string.fmt(f)
+                }
+            }
             &Value::Entity(ref entity) => write!(f, "{:?}", entity),
         }
     }
@@ -214,7 +221,7 @@ pub enum Constraint {
     Assert([usize; 3]),
 }
 
-pub fn constrain<'a>(constraints: &[Constraint], indexes: &'a [[Vec<Value>; 3]], ranges: &mut [LoHi], variables: &mut [&'a Value], asserts: &mut [Vec<Value>; 3]) -> () {
+pub fn constrain<'a>(constraints: &[Constraint], indexes: &'a [[Vec<Value>; 3]], ranges: &mut [LoHi], variables: &mut [&'a Value], asserts: &mut Vec<[Value; 3]>) -> () {
     if constraints.len() > 0 {
         match &constraints[0] {
             &Constraint::Narrow((row_ix, col_ix), var_ix) => {
@@ -275,9 +282,7 @@ pub fn constrain<'a>(constraints: &[Constraint], indexes: &'a [[Vec<Value>; 3]],
                 ranges[row_ix] = (old_lo, old_hi);
             }
             &Constraint::Assert(var_ixes) => {
-                for (result, var_ix) in asserts.iter_mut().zip(var_ixes.iter()) {
-                    result.push(variables[*var_ix].clone());
-                }
+                asserts.push([variables[var_ixes[0]].clone(), variables[var_ixes[1]].clone(), variables[var_ixes[2]].clone()]);
                 constrain(&constraints[1..], indexes, ranges, variables, asserts);
             }
         }
@@ -292,7 +297,7 @@ pub struct Query {
 }
 
 impl Query {
-    fn solve(&self, bag: &Bag) -> [Vec<Value>; 3] {
+    fn solve(&self, bag: &Bag) -> Vec<[Value; 3]> {
         // TODO strip out this compat layer
         let eavs: Vec<[Value; 3]> = bag.eavs
             .iter()
@@ -330,7 +335,7 @@ impl Query {
             .collect();
         let mut variables: Vec<&Value> = self.variables.iter().collect();
         let mut ranges: Vec<LoHi> = indexes.iter().map(|index| (0, index[0].len())).collect();
-        let mut asserts = [vec![], vec![], vec![]];
+        let mut asserts = vec![];
         constrain(&*self.constraints, &*indexes, &mut *ranges, &mut *variables, &mut asserts);
         asserts
     }
@@ -373,7 +378,7 @@ fn compile(query_expr: &mut QueryExpr) -> Result<Query, String> {
                         ValueExpr::Constant(value) => {
                             let variable = format!("constant_{}_{}", row, col);
                             constants.push(value);
-                            joins.insert(variable.clone(), vec![(row, col)]);
+                            joins.insert(variable.clone(), vec![]);
                             variables.push(variable.clone());
                             *value_expr = ValueExpr::Variable(variable);
                         }
@@ -419,13 +424,17 @@ fn compile(query_expr: &mut QueryExpr) -> Result<Query, String> {
     }
 
     // turn asserts into constraints
-    for row_expr in query_expr.rows.iter() {
+    for (row, row_expr) in query_expr.rows.iter().enumerate() {
         match row_expr {
             &RowExpr::Pattern(PatternKind::Assert, ref value_exprs) => {
                 let mut var_ixes = [0, 0, 0];
                 for i in 0..3 {
                     var_ixes[i] = match value_exprs[i] {
-                        ValueExpr::Variable(ref variable) => variables.iter().position(|v| v == variable).unwrap(),
+                        ValueExpr::Variable(ref variable) =>
+                            match variables.iter().position(|v| v == variable) {
+                                Some(ix) => ix,
+                                None => return Err(format!("Unconstrained variable {:?} in row {:?}", variable, row)), 
+                            }
                         _ => unreachable!(),
                     }
                 }
@@ -476,11 +485,12 @@ mod syntax {
 
     named!(bare_string(&[u8]) -> String, map_res!(is_not!(" \t\r\n"), |b| std::str::from_utf8(b).map(|s| s.to_owned())));
 
-    named!(delimited_string(&[u8]) -> String, map_res!(delimited!(char!('"'), not!(char!('"')), char!('"')), |b| std::str::from_utf8(b).map(|s| s.to_owned())));
+    // TODO escaping
+    named!(delimited_string(&[u8]) -> String, map_res!(delimited!(char!('"'), take_until!("\""), char!('"')), |b| std::str::from_utf8(b).map(|s| s.to_owned())));
 
     named!(value(&[u8]) -> Value, alt!(map!(integer, Value::Integer) | map!(boolean, Value::Boolean) | map!(delimited_string, Value::String) | map!(bare_string, Value::String)));
 
-    named!(variable(&[u8]) -> String, map_res!(tuple!(char!('?'), is_not!(" \t\r\n")), |(_, b)| std::str::from_utf8(b).map(|s| s.to_owned())));
+    named!(variable(&[u8]) -> String, map_res!(tuple!(char!('?'), is_not!(" \t\r\n")), |(_, b)| std::str::from_utf8(b).map(|s| format!("?{}", s))));
 
     named!(value_expr(&[u8]) -> ValueExpr, dbg_dmp!(alt!(map!(variable, ValueExpr::Variable) | map!(value, ValueExpr::Constant))));
 
@@ -529,7 +539,7 @@ fn parse(code: &str) -> Result<QueryExpr, ParseError> {
     }
 }
 
-fn run_code(bag: &Bag, code: &str, cursor: i64) -> String {
+fn run_code(bag: &Bag, code: &str, cursor: i64) {
     let codelets = code.split("\n\n").collect::<Vec<_>>();
     let mut focused = None;
     let mut remaining_cursor = cursor;
@@ -545,20 +555,32 @@ fn run_code(bag: &Bag, code: &str, cursor: i64) -> String {
             break; 
         }
     }
-    if let Some(codelet) = focused {
-        match parse(codelet) {
-            Err(error) => format!("{}\n\n{:?}\n\n{:?}", codelet, cursor, error),
-            Ok(query_expr) => {
-                let mut compiled_query_expr = query_expr.clone();
-                match compile(&mut compiled_query_expr) {
-                    Err(error) => format!("{}\n\n{:?}\n\n{:?}\n\n{:?}\n\n{}", codelet, cursor, query_expr, compiled_query_expr, error),
-                    Ok(query) => format!("{}\n\n{:?}\n\n{:?}\n\n{:?}\n\n{:?}\n\n{:?}", codelet, cursor, query_expr, compiled_query_expr, query, query.solve(&bag))
+    match focused {
+        None => {
+            print!("Nothing\n\n{:?}", cursor)
+        }
+        Some(codelet) => {
+            print!("{}\n\n{}\n\n", codelet, cursor);
+            match parse(codelet) {
+                Err(error) => print!("{:?}\n\n", error),
+                Ok(query_expr) => {
+                    print!("{:?}\n\n", query_expr);
+                    let mut compiled_query_expr = query_expr.clone();
+                    let compiled = compile(&mut compiled_query_expr);
+                    print!("{:?}\n\n", compiled_query_expr);
+                    match compiled {
+                        Err(error) => print!("{}\n\n", error),
+                        Ok(query) => {
+                            print!("{:?}\n\n", query);
+                            for row in query.solve(&bag).iter() {
+                                print!("{} {} {}\n", row[0], row[1], row[2]);
+                            }
+                            print!("\n\n");
+                        }
+                    }
                 }
-                
             }
         }
-    } else {
-        format!("Nothing\n\n{:?}", cursor)
     }
 }
 
@@ -612,9 +634,8 @@ fn serve_editor() {
                         let mut bag = bag.lock().unwrap();
                         match event {
                             EditorEvent::State(code, cursor) => {
-                                let result = run_code(&*bag, &*code, cursor);
                                 print!("\x1b[2J\x1b[1;1H");
-                                println!("{}\n\n", result);
+                                run_code(&*bag, &*code, cursor);
                             }
                         }
                     }

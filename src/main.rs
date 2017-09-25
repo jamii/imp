@@ -376,9 +376,17 @@ impl Query {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FunctionExpr {
+    name: String,
+    args: Vec<ValueExpr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ValueExpr {
     Constant(Value),
     Variable(String),
+    Function(FunctionExpr),
+    EA(ValueExpr, ValueExpr),
 }
 
 #[derive(Debug, Clone)]
@@ -513,28 +521,122 @@ mod syntax {
     use super::*;
     use nom::*;
 
-    named!(integer(&[u8]) -> i64, map_res!(digit, |b| std::str::from_utf8(b).unwrap().parse::<i64>()));
+    named!(token(&[u8]) -> &[u8], alt!(
+        is_a!(" ") |
+        tag!("\n\n") |
+        tag!("\n") |
+        tag!("(") |
+        tag!(")") |
+        tag!(".") |
+        delimited!(char!('"'), take_until!("\""), char!('"')) | // TODO escaping
+        is_not!(".() \n")
+    ));
 
-    named!(boolean(&[u8]) -> bool, map!(alt!(tag!("true") | tag!("false")), |b| b == b"true"));
+    named!(tokens(&[u8]) -> Vec<&[u8]>, map!(
+        many0!(token),
+        |tokens| {
+            tokens.retain(|t| !t.starts_with(" ")); // drop whitespace tokens
+            tokens
+        }
+    ));
 
-    named!(bare_string(&[u8]) -> String, map_res!(is_not!(" \t\r\n"), |b| std::str::from_utf8(b).map(|s| s.to_owned())));
+    named!(code(&[u8]) -> Vec<Result<
+
+    named!(integer(&[u8]) -> i64, map_res!(
+        digit,
+        |b| std::str::from_utf8(b).unwrap().parse::<i64>()
+    ));
+
+    named!(boolean(&[u8]) -> bool, do_parse!(
+        b: alt!(tag!("true") | tag!("false")) >>
+        (b == b"true")
+    ));
 
     // TODO escaping
-    named!(delimited_string(&[u8]) -> String, map_res!(delimited!(char!('"'), take_until!("\""), char!('"')), |b| std::str::from_utf8(b).map(|s| s.to_owned())));
+    named!(string(&[u8]) -> String, map_res!(
+        delimited!(char!('"'), take_until!("\""), char!('"')),
+        |b| std::str::from_utf8(b).map(|s| s.to_owned())
+    ));
 
-    named!(value(&[u8]) -> Value, alt!(map!(integer, Value::Integer) | map!(boolean, Value::Boolean) | map!(delimited_string, Value::String) | map!(bare_string, Value::String)));
+    named!(value(&[u8]) -> Value, alt!(
+        map!(integer, Value::Integer) |
+        map!(boolean, Value::Boolean) |
+        map!(string, Value::String)
+    ));
 
-    named!(variable(&[u8]) -> String, map_res!(tuple!(char!('?'), is_not!(" \t\r\n")), |(_, b)| std::str::from_utf8(b).map(|s| format!("?{}", s))));
+    named!(name(&[u8]) -> String, map_res!(
+        is_not!("()? \t\r\n"),
+        |b| std::str::from_utf8(b).map(|s| s.to_owned())
+    ));
 
-    named!(value_expr(&[u8]) -> ValueExpr, dbg_dmp!(alt!(map!(variable, ValueExpr::Variable) | map!(value, ValueExpr::Constant))));
+    named!(variable(&[u8]) -> String, do_parse!(
+        tag!("?") >>
+        name: name >>
+        (format!("?{}", name))
+    ));
+
+    named!(attribute(&[u8]) -> ValueExpr, alt!(
+        map!(name, |s| ValueExpr::Constant(Value::String(s))) |
+        map!(variable, ValueExpr::Variable) |
+        paren_expr
+    ));
+
+    named!(infix_function_expr(&[u8]) -> FunctionExpr, do_parse!(
+        v1: value_expr >>
+        space >>
+        name: map_res!(
+            one_of!("=+"),
+            |b| std::str::from_utf8(b).map(|s| s.to_owned())
+        ) >>
+        space >>
+        v2: value_expr >>
+        (FunctionExpr{name, args: vec![v1, v2]})
+    ));
+
+    named!(prefix_function_expr(&[u8]) -> FunctionExpr, do_parse!(
+        name: variable >>
+        tag!("(") >>
+        args: separated_list_complete!(tuple!(tag!(","), opt!(space)), value_expr) >>
+        tag!(")") >>
+        (FunctionExpr{name, args})
+    ));
+
+    named!(function_expr(&[u8]) -> FunctionExpr, alt!(
+        infix_function_expr |
+        prefix_function_expr
+    ));
+
+    named!(ea_expr, do_parse!(
+        e: value_expr >>
+        tag!(".") >>
+        a: attribute >>
+        ((e, a))
+    ));
+
+    named!(value_expr(&[u8]) -> ValueExpr, alt!(
+        map!(ea_expr, |(e,a)| ValueExpr::EA(e,a)) |
+        map!(function_expr, ValueExpr::Function) |
+        map!(variable, ValueExpr::Variable) |
+        map!(value, ValueExpr::Constant) |
+        paren_expr
+    ));
+
+    named!(paren_expr(&[u8]) -> ValueExpr, do_parse!(
+        tag!("(") >>
+        opt!(space) >>
+        v: value_expr >>
+        opt!(space) >>
+        tag!(")") >>
+        (v)
+    ));
 
     named!(values_expr(&[u8]) -> [ValueExpr;3], dbg_dmp!(do_parse!(
-    v1: value_expr >>
-    space >>
-    v2: value_expr >>
-    space >>
-    v3: value_expr >>
-    ([v1,v2,v3])
+        v1: value_expr >>
+        space >>
+        v2: value_expr >>
+        space >>
+        v3: value_expr >>
+        ([v1,v2,v3])
     )));
 
     named!(row_expr(&[u8]) -> RowExpr, alt!(
@@ -542,21 +644,18 @@ mod syntax {
             tag!("+") >>
             space >>
             values: values_expr >>
-                (RowExpr::Pattern(PatternKind::Assert, values)))
-        |
+            (RowExpr::Pattern(PatternKind::Assert, values))
+        ) |
         do_parse!(
             values: values_expr >>
-                (RowExpr::Pattern(PatternKind::Match, values)))
-        
+            (RowExpr::Pattern(PatternKind::Match, values))
+        )
     ));
 
-    named!(pub query_expr(&[u8]) -> QueryExpr, dbg_dmp!(map!(separated_nonempty_list_complete!(tuple!(opt!(space), line_ending), row_expr), |rs| QueryExpr{rows:rs})));
-}
-
-#[derive(Debug)]
-enum ParseError<'a> {
-    NomError(nom::IError<&'a [u8]>),
-    Remaining(&'a [u8], QueryExpr)
+    named!(pub query_expr(&[u8]) -> QueryExpr, map!(
+        separated_nonempty_list_complete!(tuple!(opt!(space), line_ending), row_expr),
+        |rs| QueryExpr{rows:rs}
+    ));
 }
 
 fn parse(code: &str) -> Result<QueryExpr, ParseError> {

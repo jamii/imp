@@ -22,6 +22,7 @@ use std::collections::{HashMap, BTreeMap};
 use std::iter::Iterator;
 
 use std::borrow::Cow;
+use std::borrow::Borrow;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
 pub struct Entity {
@@ -211,6 +212,25 @@ pub fn gallop<'a, T, F: Fn(&T) -> bool>(slice: &'a [T], mut lo: usize, hi: usize
     lo
 }
 
+#[derive(Debug, Clone)]
+pub enum Function {
+    Add(usize, usize),
+}
+
+impl Function {
+    fn apply(&self, result_ix: usize, variables: &mut [Cow<Value>]) -> Result<(), String> {
+        let result = match self {
+            &Function::Add(a, b) =>
+                match (variables[a].borrow(), variables[b].borrow()) {
+                    (&Value::Integer(a), &Value::Integer(b)) => Value::Integer(a+b),
+                    (a, b) => return Err(format!("Type error: {} + {}", a, b)),
+                }
+        };
+        variables[result_ix] = Cow::Owned(result);
+        return Ok(())
+    }
+}        
+
 type LoHi = (usize, usize);
 type RowCol = (usize, usize);
 
@@ -218,22 +238,26 @@ type RowCol = (usize, usize);
 pub enum Constraint {
     Narrow(RowCol, usize),
     Join(Vec<RowCol>, usize),
+    Apply(usize, Function),
     Assert([usize; 3]),
 }
 
-pub fn constrain<'a>(constraints: &[Constraint], indexes: &'a [[Vec<Value>; 3]], ranges: &mut [LoHi], variables: &mut [&'a Value], asserts: &mut Vec<[Value; 3]>) -> () {
+pub fn constrain<'a>(constraints: &[Constraint], indexes: &'a [[Vec<Value>; 3]], ranges: &mut [LoHi], variables: &mut [Cow<'a, Value>], asserts: &mut Vec<[Value; 3]>) -> Result<(), String> {
     if constraints.len() > 0 {
         match &constraints[0] {
             &Constraint::Narrow((row_ix, col_ix), var_ix) => {
-                let value = variables[var_ix];
-                let column = &indexes[row_ix][col_ix];
                 let (old_lo, old_hi) = ranges[row_ix];
-                let lo = gallop(column, old_lo, old_hi, |v| v < value);
-                let hi = gallop(column, lo, old_hi, |v| v <= value);
+                let column = &indexes[row_ix][col_ix];
+                let (lo, hi) = {
+                    let value = variables[var_ix].borrow();
+                    let lo = gallop(column, old_lo, old_hi, |v| v < value);
+                    let hi = gallop(column, lo, old_hi, |v| v <= value);
+                    (lo, hi)
+                };
                 if lo < hi {
                     ranges[row_ix] = (lo, hi);
-                    variables[var_ix] = value;
-                    constrain(&constraints[1..], indexes, ranges, variables, asserts);
+                    variables[var_ix] = Cow::Borrowed(&column[lo]);
+                    constrain(&constraints[1..], indexes, ranges, variables, asserts)?;
                     ranges[row_ix] = (old_lo, old_hi);
                 }
             }
@@ -266,8 +290,8 @@ pub fn constrain<'a>(constraints: &[Constraint], indexes: &'a [[Vec<Value>; 3]],
                         }
                         // if all succeeded, continue with rest of constraints
                         if i == rowcols.len() {
-                            variables[var_ix] = &column[lo];
-                            constrain(&constraints[1..], indexes, ranges, variables, asserts);
+                            variables[var_ix] = Cow::Borrowed(&column[lo]);
+                            constrain(&constraints[1..], indexes, ranges, variables, asserts)?;
                         }
                         // restore state for rowcols[1..i]
                         while i > 1 {
@@ -281,12 +305,22 @@ pub fn constrain<'a>(constraints: &[Constraint], indexes: &'a [[Vec<Value>; 3]],
                 // restore state for rowcols[0]
                 ranges[row_ix] = (old_lo, old_hi);
             }
+            &Constraint::Apply(result_ix, ref function) => {
+                function.apply(result_ix, variables)?;
+                constrain(&constraints[1..], indexes, ranges, variables, asserts)?;
+            }
             &Constraint::Assert(var_ixes) => {
-                asserts.push([variables[var_ixes[0]].clone(), variables[var_ixes[1]].clone(), variables[var_ixes[2]].clone()]);
-                constrain(&constraints[1..], indexes, ranges, variables, asserts);
+                {
+                    let v0: &Value = variables[var_ixes[0]].borrow();
+                    let v1: &Value = variables[var_ixes[1]].borrow();
+                    let v2: &Value = variables[var_ixes[2]].borrow();
+                    asserts.push([v0.to_owned(), v1.to_owned(), v2.to_owned()]);
+                }
+                constrain(&constraints[1..], indexes, ranges, variables, asserts)?;
             }
         }
     }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -297,7 +331,7 @@ pub struct Query {
 }
 
 impl Query {
-    fn solve(&self, bag: &Bag) -> Vec<[Value; 3]> {
+    fn solve(&self, bag: &Bag) -> Result<Vec<[Value; 3]>, String> {
         // TODO strip out this compat layer
         let eavs: Vec<[Value; 3]> = bag.eavs
             .iter()
@@ -333,11 +367,11 @@ impl Query {
                 ]
             })
             .collect();
-        let mut variables: Vec<&Value> = self.variables.iter().collect();
+        let mut variables: Vec<Cow<Value>> = self.variables.iter().map(|v| Cow::Borrowed(v)).collect();
         let mut ranges: Vec<LoHi> = indexes.iter().map(|index| (0, index[0].len())).collect();
         let mut asserts = vec![];
-        constrain(&*self.constraints, &*indexes, &mut *ranges, &mut *variables, &mut asserts);
-        asserts
+        constrain(&*self.constraints, &*indexes, &mut *ranges, &mut *variables, &mut asserts)?;
+        Ok(asserts)
     }
 }
 
@@ -572,10 +606,15 @@ fn run_code(bag: &Bag, code: &str, cursor: i64) {
                         Err(error) => print!("{}\n\n", error),
                         Ok(query) => {
                             print!("{:?}\n\n", query);
-                            for row in query.solve(&bag).iter() {
-                                print!("{} {} {}\n", row[0], row[1], row[2]);
+                            match query.solve(&bag) {
+                                Err(error) => print!("{}\n\n", error),
+                                Ok(rows) => {
+                                    for row in rows.iter() {
+                                        print!("{} {} {}\n", row[0], row[1], row[2]);
+                                    }
+                                    print!("\n\n");
+                                }
                             }
-                            print!("\n\n");
                         }
                     }
                 }

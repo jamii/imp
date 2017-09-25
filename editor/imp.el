@@ -27,9 +27,6 @@
 (defun imp-send-code-buffer (buffer)
   (with-current-buffer imp-buffer
     (websocket-send-text imp-ws (json-encode
-                                 ;; (list
-                                  ;; (cons "code" (buffer-string))
-                                 ;; (cons "cursor" (point)))))))
                                  (list (cons "State" (list (buffer-string) (- (point) 1))))))))
   
 ;; (cancel-function-timers 'imp-send-code-buffer)

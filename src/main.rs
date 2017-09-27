@@ -557,10 +557,14 @@ enum StatementAst {
 fn simplify_errors<Output>(result: IResult<&[u8], Output>) -> Result<Output, String> {
     match result {
         IResult::Done(remaining, output) => {
-            if remaining.len() == 0 {
+            if remaining.len() <= 1 {
+                // because of the hacky \n on the end
                 Ok(output)
             } else {
-                Err(format!("Remaining: {:?}", std::str::from_utf8(remaining)))
+                Err(format!(
+                    "Remaining: {}",
+                    std::str::from_utf8(remaining).unwrap()
+                ))
             }
         }
         IResult::Error(error) => Err(format!("Nom error: {:?}", error)),
@@ -584,6 +588,7 @@ fn block_ast(text: &str) -> BlockAst {
     BlockAst {
         statements: text.split("\n")
             .map(|statement| {
+                let statement = format!("{}\n", statement); // hack to get nom to stop streaming
                 simplify_errors(statement_ast(statement.as_bytes()))
             })
             .collect::<Vec<_>>(),
@@ -595,7 +600,7 @@ named!(statement_ast(&[u8]) -> StatementAst, alt!(assert_ast | pattern_ast));
 named!(assert_ast(&[u8]) -> StatementAst, do_parse!(
     tag!("+") >>
     space >>
-    e: expr_ast >>
+    e: simple_expr_ast >>
     tag!(".") >>
     a: symbol_ast >>
     opt!(space) >>
@@ -628,8 +633,8 @@ named!(expr_ast(&[u8]) -> ExprAst, do_parse!(
 
 named!(simple_expr_ast(&[u8]) -> ExprAst, alt!(
         map!(prefix_function_ast, ExprAst::Function) |
-        map!(symbol_ast, ExprAst::Variable) |
         map!(value_ast, ExprAst::Constant) |
+        map!(symbol_ast, ExprAst::Variable) |
         paren_ast
 ));
 

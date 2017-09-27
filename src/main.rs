@@ -613,17 +613,21 @@ named!(pattern_ast(&[u8]) -> StatementAst, do_parse!(
 named!(expr_ast(&[u8]) -> ExprAst, do_parse!(
     e: simple_expr_ast >>
         ts: many0!(dot_ast) >>
+        f: opt!(infix_function_ast) >>
         ({
             let mut e = e;
             for t in ts {
-                e = ExprAst::Dot(Box::new(e), Box::new(ExprAst::Constant(Value::String(t))))
+                e = ExprAst::Dot(Box::new(e), Box::new(ExprAst::Constant(Value::String(t))));
+            }
+            if let Some((name, arg)) = f {
+                e = ExprAst::Function(FunctionAst{name, args: vec![e, arg]});
             }
             e
         })
 ));
 
 named!(simple_expr_ast(&[u8]) -> ExprAst, alt!(
-        map!(function_ast, ExprAst::Function) |
+        map!(prefix_function_ast, ExprAst::Function) |
         map!(symbol_ast, ExprAst::Variable) |
         map!(value_ast, ExprAst::Constant) |
         paren_ast
@@ -635,11 +639,6 @@ named!(dot_ast(&[u8]) -> String, do_parse!(
         (a)
         ));
 
-named!(function_ast(&[u8]) -> FunctionAst, alt!(
-        // infix_function_ast |
-        prefix_function_ast
-    ));
-
 named!(prefix_function_ast(&[u8]) -> FunctionAst, do_parse!(
         name: symbol_ast >>
         tag!("(") >>
@@ -648,16 +647,15 @@ named!(prefix_function_ast(&[u8]) -> FunctionAst, do_parse!(
         (FunctionAst{name, args})
     ));
 
-named!(infix_function_ast(&[u8]) -> FunctionAst, do_parse!(
-        v1: expr_ast >>
+named!(infix_function_ast(&[u8]) -> (String, ExprAst), do_parse!(
         opt!(space) >>
         name: map_res!(
             alt!(tag!("=") | tag!("+")),
             |b| std::str::from_utf8(b).map(|s| s.to_owned())
         ) >>
         opt!(space) >>
-        v2: expr_ast >>
-        (FunctionAst{name, args: vec![v1, v2]})
+        arg: expr_ast >>
+        (name, arg)
 ));
 
 named!(symbol_ast(&[u8]) -> String, map_res!(

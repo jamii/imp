@@ -14,4 +14,4 @@ regex = "*"
 
 [dependencies.nom]
 version = "*"
-features = ["verbose-errors"]
+features = ["verbose-errors", "nightly"]

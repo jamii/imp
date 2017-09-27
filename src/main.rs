@@ -24,15 +24,17 @@ use std::iter::Iterator;
 use std::borrow::Cow;
 use std::borrow::Borrow;
 
+use nom::*;
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
-pub struct Entity {
+struct Entity {
     avs: Vec<(Attribute, Value)>,
 }
 
-pub type Attribute = String;
+type Attribute = String;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
-pub enum Value {
+enum Value {
     Boolean(bool),
     Integer(i64),
     String(String),
@@ -71,7 +73,9 @@ impl std::fmt::Display for Value {
             &Value::String(ref string) => {
                 if string.find(char::is_whitespace).is_some() {
                     // TODO escaping
-                    '"'.fmt(f)?; string.fmt(f)?; '"'.fmt(f)
+                    '"'.fmt(f)?;
+                    string.fmt(f)?;
+                    '"'.fmt(f)
                 } else {
                     string.fmt(f)
                 }
@@ -141,7 +145,7 @@ impl PartialEq<Entity> for Value {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
-pub struct Bag {
+struct Bag {
     eavs: BTreeMap<(Entity, Attribute), Value>,
 }
 
@@ -191,7 +195,7 @@ fn save(bag: &Bag) {
 }
 
 // f should be |t| t < value or |t| t <= value
-pub fn gallop<'a, T, F: Fn(&T) -> bool>(slice: &'a [T], mut lo: usize, hi: usize, f: F) -> usize {
+fn gallop<'a, T, F: Fn(&T) -> bool>(slice: &'a [T], mut lo: usize, hi: usize, f: F) -> usize {
     if lo < hi && f(&slice[lo]) {
         let mut step = 1;
         while lo + step < hi && f(&slice[lo + step]) {
@@ -213,36 +217,43 @@ pub fn gallop<'a, T, F: Fn(&T) -> bool>(slice: &'a [T], mut lo: usize, hi: usize
 }
 
 #[derive(Debug, Clone)]
-pub enum Function {
+enum Function {
     Add(usize, usize),
 }
 
 impl Function {
     fn apply(&self, result_ix: usize, variables: &mut [Cow<Value>]) -> Result<(), String> {
         let result = match self {
-            &Function::Add(a, b) =>
+            &Function::Add(a, b) => {
                 match (variables[a].borrow(), variables[b].borrow()) {
-                    (&Value::Integer(a), &Value::Integer(b)) => Value::Integer(a+b),
+                    (&Value::Integer(a), &Value::Integer(b)) => Value::Integer(a + b),
                     (a, b) => return Err(format!("Type error: {} + {}", a, b)),
                 }
+            }
         };
         variables[result_ix] = Cow::Owned(result);
-        return Ok(())
+        return Ok(());
     }
-}        
+}
 
 type LoHi = (usize, usize);
 type RowCol = (usize, usize);
 
 #[derive(Debug, Clone)]
-pub enum Constraint {
+enum Constraint {
     Narrow(RowCol, usize),
     Join(Vec<RowCol>, usize),
     Apply(usize, Function),
     Assert([usize; 3]),
 }
 
-pub fn constrain<'a>(constraints: &[Constraint], indexes: &'a [[Vec<Value>; 3]], ranges: &mut [LoHi], variables: &mut [Cow<'a, Value>], asserts: &mut Vec<[Value; 3]>) -> Result<(), String> {
+fn constrain<'a>(
+    constraints: &[Constraint],
+    indexes: &'a [[Vec<Value>; 3]],
+    ranges: &mut [LoHi],
+    variables: &mut [Cow<'a, Value>],
+    asserts: &mut Vec<[Value; 3]>,
+) -> Result<(), String> {
     if constraints.len() > 0 {
         match &constraints[0] {
             &Constraint::Narrow((row_ix, col_ix), var_ix) => {
@@ -262,7 +273,7 @@ pub fn constrain<'a>(constraints: &[Constraint], indexes: &'a [[Vec<Value>; 3]],
                 }
             }
             &Constraint::Join(ref rowcols, var_ix) => {
-                let mut buffer = vec![(0,0); rowcols.len()]; // TODO pre-allocate
+                let mut buffer = vec![(0, 0); rowcols.len()]; // TODO pre-allocate
                 let (row_ix, col_ix) = rowcols[0]; // TODO pick smallest
                 let column = &indexes[row_ix][col_ix];
                 let (old_lo, old_hi) = ranges[row_ix];
@@ -324,7 +335,7 @@ pub fn constrain<'a>(constraints: &[Constraint], indexes: &'a [[Vec<Value>; 3]],
 }
 
 #[derive(Debug, Clone)]
-pub struct Query {
+struct Query {
     row_orderings: Vec<[usize; 3]>,
     variables: Vec<Value>,
     constraints: Vec<Constraint>,
@@ -361,374 +372,405 @@ impl Query {
                     reverse_ordering[row_ordering[i]] = i;
                 }
                 [
-                    ordered_eavs.iter().map(|eav| eav[reverse_ordering[0]].clone()).collect(),
-                    ordered_eavs.iter().map(|eav| eav[reverse_ordering[1]].clone()).collect(),
-                    ordered_eavs.iter().map(|eav| eav[reverse_ordering[2]].clone()).collect(),
+                    ordered_eavs
+                        .iter()
+                        .map(|eav| eav[reverse_ordering[0]].clone())
+                        .collect(),
+                    ordered_eavs
+                        .iter()
+                        .map(|eav| eav[reverse_ordering[1]].clone())
+                        .collect(),
+                    ordered_eavs
+                        .iter()
+                        .map(|eav| eav[reverse_ordering[2]].clone())
+                        .collect(),
                 ]
             })
             .collect();
-        let mut variables: Vec<Cow<Value>> = self.variables.iter().map(|v| Cow::Borrowed(v)).collect();
+        let mut variables: Vec<Cow<Value>> =
+            self.variables.iter().map(|v| Cow::Borrowed(v)).collect();
         let mut ranges: Vec<LoHi> = indexes.iter().map(|index| (0, index[0].len())).collect();
         let mut asserts = vec![];
-        constrain(&*self.constraints, &*indexes, &mut *ranges, &mut *variables, &mut asserts)?;
+        constrain(
+            &*self.constraints,
+            &*indexes,
+            &mut *ranges,
+            &mut *variables,
+            &mut asserts,
+        )?;
         Ok(asserts)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FunctionExpr {
-    name: String,
-    args: Vec<ValueExpr>,
+// fn compile(query_expr: &mut QueryExpr) -> Result<Query, String> {
+//     // variables, in execution order
+//     let mut variables: Vec<String> = vec![];
+//     let mut constants: Vec<Value> = vec![];
+//     let mut joins: HashMap<String, Vec<RowCol>> = HashMap::new();
+
+//     // pull out constants
+//     for (row, row_expr) in query_expr.rows.iter_mut().enumerate() {
+//         match row_expr {
+//             &mut RowExpr::Pattern(_, ref mut value_exprs) => {
+//                 for (col, value_expr) in value_exprs.iter_mut().enumerate() {
+//                     match value_expr.clone() { // TODO this clone is daft
+//                         ValueExpr::Constant(value) => {
+//                             let variable = format!("constant_{}_{}", row, col);
+//                             constants.push(value);
+//                             joins.insert(variable.clone(), vec![]);
+//                             variables.push(variable.clone());
+//                             *value_expr = ValueExpr::Variable(variable);
+//                         }
+//                         _ => (),
+//                     }
+//                 }
+//             }
+//         }
+//     }
+
+//     // collect joins
+//     for (row, row_expr) in query_expr.rows.iter().enumerate() {
+//         match row_expr {
+//             &RowExpr::Pattern(PatternKind::Match, ref value_exprs) => {
+//                 for (col, value_expr) in value_exprs.iter().enumerate() {
+//                     match value_expr {
+//                         &ValueExpr::Variable(ref variable) => {
+//                             if joins.contains_key(variable) {
+//                                 joins.get_mut(variable).unwrap().push((row, col));
+//                             } else {
+//                                 joins.insert(variable.clone(), vec![(row, col)]);
+//                                 variables.push(variable.clone());
+//                             }
+//                         }
+//                         _ => (),
+//                     }
+//                 }
+//             }
+//             _ => (),
+//         }
+//     }
+
+//     // turn constants/joins into constraints
+//     let mut constraints: Vec<Constraint> = vec![];
+//     for (var_ix, variable) in variables.iter().enumerate() {
+//         if var_ix < constants.len() {
+//             for &(row, col) in joins.get(variable).unwrap() {
+//                 constraints.push(Constraint::Narrow((row, col), var_ix));
+//             }
+//         } else {
+//             constraints.push(Constraint::Join(
+//                 joins.get(variable).unwrap().clone(),
+//                 var_ix,
+//             ));
+//         }
+//     }
+
+//     // turn asserts into constraints
+//     for (row, row_expr) in query_expr.rows.iter().enumerate() {
+//         match row_expr {
+//             &RowExpr::Pattern(PatternKind::Assert, ref value_exprs) => {
+//                 let mut var_ixes = [0, 0, 0];
+//                 for i in 0..3 {
+//                     var_ixes[i] = match value_exprs[i] {
+//                         ExprAst::Variable(ref variable) => {
+//                             match variables.iter().position(|v| v == variable) {
+//                                 Some(ix) => ix,
+//                                 None => {
+//                                     return Err(format!(
+//                                         "Unconstrained variable {:?} in row {:?}",
+//                                         variable,
+//                                         row
+//                                     ))
+//                                 }
+//                             }
+//                         }
+//                         _ => unreachable!(),
+//                     }
+//                 }
+//                 constraints.push(Constraint::Assert(var_ixes));
+//             }
+//             _ => (),
+//         }
+//     }
+
+//     // figure out which index to use
+//     let row_orderings:Vec<[usize; 3]> = query_expr
+//         .rows
+//         .iter()
+//         // TODO this messes up rowcol addressing if any matches come after an assert
+//         .filter(|r| match r { &&RowExpr::Pattern(PatternKind::Match, _) => true, _ => false})
+//         .map(|&RowExpr::Pattern(_, ref value_exprs)| {
+//             let var_ixes: Vec<usize> = value_exprs.iter().map(| value_expr| {
+//                 match value_expr {
+//                     &ValueExpr::Variable(ref variable) => variables.iter().position(|v| v == variable).unwrap(),
+//                     _ => unreachable!(),
+//                 }
+//             }).collect();
+//             let mut row_ordering = [0, 1, 2];
+//             row_ordering.sort_unstable_by(|&c1, &c2| var_ixes[c1].cmp(&var_ixes[c2]));
+//             row_ordering
+//         })
+//         .collect();
+
+//     // fill remaining constants with dummy values
+//     while constants.len() < variables.len() {
+//         constants.push(Value::Boolean(false));
+//     }
+
+//     Ok(Query {
+//         row_orderings,
+//         variables: constants,
+//         constraints,
+//     })
+// }
+
+#[derive(Debug, Clone)]
+struct CodeAst {
+    blocks: Vec<BlockAst>,
+}
+
+#[derive(Debug, Clone)]
+struct BlockAst {
+    statements: Vec<Result<StatementAst, String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ValueExpr {
+enum ExprAst {
     Constant(Value),
     Variable(String),
-    Function(FunctionExpr),
-    EA(ValueExpr, ValueExpr),
+    Function(FunctionAst),
+    Dot(Box<ExprAst>, Box<ExprAst>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct FunctionAst {
+    name: String,
+    args: Vec<ExprAst>,
 }
 
 #[derive(Debug, Clone)]
-pub enum PatternKind {
-    Match,
-    Assert,
+enum StatementAst {
+    Pattern(ExprAst),
+    Assert([ExprAst; 3]),
 }
 
-#[derive(Debug, Clone)]
-pub enum RowExpr {
-    Pattern(PatternKind, [ValueExpr; 3]),
+fn simplify_errors<Output>(result: IResult<&[u8], Output>) -> Result<Output, String> {
+    match result {
+        IResult::Done(remaining, output) => {
+            if remaining.len() == 0 {
+                Ok(output)
+            } else {
+                Err(format!("Remaining: {:?}", std::str::from_utf8(remaining)))
+            }
+        }
+        IResult::Error(error) => Err(format!("Nom error: {:?}", error)),
+        IResult::Incomplete(needed) => Err(format!("Nom incomplete: {:?}", needed)),
+    }
 }
 
-#[derive(Debug, Clone)]
-pub struct QueryExpr {
-    rows:Vec<RowExpr>,
+fn parse(code: &str) -> CodeAst {
+    code_ast(code)
 }
 
-fn compile(query_expr: &mut QueryExpr) -> Result<Query, String> {
-    // variables, in execution order
-    let mut variables: Vec<String> = vec![];
-    let mut constants: Vec<Value> = vec![];
-    let mut joins: HashMap<String, Vec<RowCol>> = HashMap::new();
-    
-    // pull out constants
-    for (row, row_expr) in query_expr.rows.iter_mut().enumerate() {
-        match row_expr {
-            &mut RowExpr::Pattern(_, ref mut value_exprs) => {
-                for (col, value_expr) in value_exprs.iter_mut().enumerate() {
-                    match value_expr.clone() { // TODO this clone is daft
-                        ValueExpr::Constant(value) => {
-                            let variable = format!("constant_{}_{}", row, col);
-                            constants.push(value);
-                            joins.insert(variable.clone(), vec![]);
-                            variables.push(variable.clone());
-                            *value_expr = ValueExpr::Variable(variable);
-                        }
-                        _ => ()
-                    }
-                }
-            }
-        }
+fn code_ast(text: &str) -> CodeAst {
+    CodeAst {
+        blocks: text.split("\n\n")
+            .map(|block| block_ast(block))
+            .collect::<Vec<_>>(),
     }
+}
 
-    // collect joins
-    for (row, row_expr) in query_expr.rows.iter().enumerate() {
-        match row_expr {
-            &RowExpr::Pattern(PatternKind::Match, ref value_exprs) => {
-                for (col, value_expr) in value_exprs.iter().enumerate() {
-                    match value_expr { 
-                        &ValueExpr::Variable(ref variable) => {
-                            if joins.contains_key(variable) {
-                                joins.get_mut(variable).unwrap().push((row, col));
-                            } else {
-                                joins.insert(variable.clone(), vec![(row, col)]);
-                                variables.push(variable.clone());
-                            }
-                        }
-                        _ => ()
-                    }
-                }
-            }
-            _ => ()
-        }
+fn block_ast(text: &str) -> BlockAst {
+    BlockAst {
+        statements: text.split("\n")
+            .map(|statement| {
+                simplify_errors(statement_ast(statement.as_bytes()))
+            })
+            .collect::<Vec<_>>(),
     }
+}
 
-    // turn constants/joins into constraints
-    let mut constraints: Vec<Constraint> = vec![];
-    for (var_ix, variable) in variables.iter().enumerate() {
-        if var_ix < constants.len() {
-            for &(row, col) in joins.get(variable).unwrap() {
-                constraints.push(Constraint::Narrow((row, col), var_ix));
-            }
-        } else {
-            constraints.push(Constraint::Join(joins.get(variable).unwrap().clone(), var_ix));
-        }
-    }
+named!(statement_ast(&[u8]) -> StatementAst, alt!(assert_ast | pattern_ast));
 
-    // turn asserts into constraints
-    for (row, row_expr) in query_expr.rows.iter().enumerate() {
-        match row_expr {
-            &RowExpr::Pattern(PatternKind::Assert, ref value_exprs) => {
-                let mut var_ixes = [0, 0, 0];
-                for i in 0..3 {
-                    var_ixes[i] = match value_exprs[i] {
-                        ValueExpr::Variable(ref variable) =>
-                            match variables.iter().position(|v| v == variable) {
-                                Some(ix) => ix,
-                                None => return Err(format!("Unconstrained variable {:?} in row {:?}", variable, row)), 
-                            }
-                        _ => unreachable!(),
-                    }
-                }
-                constraints.push(Constraint::Assert(var_ixes));
+named!(assert_ast(&[u8]) -> StatementAst, do_parse!(
+    tag!("+") >>
+    space >>
+    e: expr_ast >>
+    tag!(".") >>
+    a: symbol_ast >>
+    opt!(space) >>
+    tag!("=") >>
+    opt!(space) >>
+    v: expr_ast >>
+    (StatementAst::Assert([e, ExprAst::Constant(Value::String(a)), v]))
+));
+
+named!(pattern_ast(&[u8]) -> StatementAst, do_parse!(
+            e: expr_ast >>
+            (StatementAst::Pattern(e))
+));
+
+named!(expr_ast(&[u8]) -> ExprAst, do_parse!(
+    e: simple_expr_ast >>
+        ts: many0!(dot_ast) >>
+        ({
+            let mut e = e;
+            for t in ts {
+                e = ExprAst::Dot(Box::new(e), Box::new(ExprAst::Constant(Value::String(t))))
             }
-            _ => ()
-        }
-    }
-    
-    // figure out which index to use
-    let row_orderings:Vec<[usize; 3]> = query_expr
-        .rows
-        .iter()
-        // TODO this messes up rowcol addressing if any matches come after an assert
-        .filter(|r| match r { &&RowExpr::Pattern(PatternKind::Match, _) => true, _ => false})
-        .map(|&RowExpr::Pattern(_, ref value_exprs)| {
-            let var_ixes: Vec<usize> = value_exprs.iter().map(| value_expr| {
-                match value_expr {
-                    &ValueExpr::Variable(ref variable) => variables.iter().position(|v| v == variable).unwrap(),
-                    _ => unreachable!(),
-                }
-            }).collect();
-            let mut row_ordering = [0, 1, 2];
-            row_ordering.sort_unstable_by(|&c1, &c2| var_ixes[c1].cmp(&var_ixes[c2]));
-            row_ordering
+            e
         })
-        .collect();
+));
 
-    // fill remaining constants with dummy values
-    while constants.len() < variables.len() {
-        constants.push(Value::Boolean(false));
-    }
+named!(simple_expr_ast(&[u8]) -> ExprAst, alt!(
+        map!(function_ast, ExprAst::Function) |
+        map!(symbol_ast, ExprAst::Variable) |
+        map!(value_ast, ExprAst::Constant) |
+        paren_ast
+));
 
-    Ok(Query {
-        row_orderings,
-        variables: constants,
-        constraints,
-    })
-}
+named!(dot_ast(&[u8]) -> String, do_parse!(
+    tag!(".") >>
+    a: symbol_ast >>
+        (a)
+        ));
 
-mod syntax {
-    use super::*;
-    use nom::*;
-
-    named!(token(&[u8]) -> &[u8], alt!(
-        is_a!(" ") |
-        tag!("\n\n") |
-        tag!("\n") |
-        tag!("(") |
-        tag!(")") |
-        tag!(".") |
-        delimited!(char!('"'), take_until!("\""), char!('"')) | // TODO escaping
-        is_not!(".() \n")
+named!(function_ast(&[u8]) -> FunctionAst, alt!(
+        // infix_function_ast |
+        prefix_function_ast
     ));
 
-    named!(tokens(&[u8]) -> Vec<&[u8]>, map!(
-        many0!(token),
-        |tokens| {
-            tokens.retain(|t| !t.starts_with(" ")); // drop whitespace tokens
-            tokens
-        }
+named!(prefix_function_ast(&[u8]) -> FunctionAst, do_parse!(
+        name: symbol_ast >>
+        tag!("(") >>
+        args: separated_list_complete!(tuple!(tag!(","), opt!(space)), expr_ast) >>
+        tag!(")") >>
+        (FunctionAst{name, args})
     ));
 
-    named!(code(&[u8]) -> Vec<Result<
+named!(infix_function_ast(&[u8]) -> FunctionAst, do_parse!(
+        v1: expr_ast >>
+        opt!(space) >>
+        name: map_res!(
+            alt!(tag!("=") | tag!("+")),
+            |b| std::str::from_utf8(b).map(|s| s.to_owned())
+        ) >>
+        opt!(space) >>
+        v2: expr_ast >>
+        (FunctionAst{name, args: vec![v1, v2]})
+));
 
-    named!(integer(&[u8]) -> i64, map_res!(
+named!(symbol_ast(&[u8]) -> String, map_res!(
+    verify!(
+        take_while1_s!(|c| is_alphanumeric(c) || c == ('-' as u8)),
+        |b: &[u8]| is_alphabetic(b[0])
+    ),
+    |b| std::str::from_utf8(b).map(|s| s.to_owned())
+));
+
+named!(value_ast(&[u8]) -> Value, alt!(
+    map!(integer_ast, Value::Integer) |
+    map!(boolean_ast, Value::Boolean) |
+    map!(string_ast, Value::String)
+));
+
+named!(integer_ast(&[u8]) -> i64, map_res!(
         digit,
         |b| std::str::from_utf8(b).unwrap().parse::<i64>()
     ));
 
-    named!(boolean(&[u8]) -> bool, do_parse!(
+named!(boolean_ast(&[u8]) -> bool, do_parse!(
         b: alt!(tag!("true") | tag!("false")) >>
         (b == b"true")
     ));
 
-    // TODO escaping
-    named!(string(&[u8]) -> String, map_res!(
+// TODO escaping
+named!(string_ast(&[u8]) -> String, map_res!(
         delimited!(char!('"'), take_until!("\""), char!('"')),
         |b| std::str::from_utf8(b).map(|s| s.to_owned())
     ));
 
-    named!(value(&[u8]) -> Value, alt!(
-        map!(integer, Value::Integer) |
-        map!(boolean, Value::Boolean) |
-        map!(string, Value::String)
-    ));
-
-    named!(name(&[u8]) -> String, map_res!(
-        is_not!("()? \t\r\n"),
-        |b| std::str::from_utf8(b).map(|s| s.to_owned())
-    ));
-
-    named!(variable(&[u8]) -> String, do_parse!(
-        tag!("?") >>
-        name: name >>
-        (format!("?{}", name))
-    ));
-
-    named!(attribute(&[u8]) -> ValueExpr, alt!(
-        map!(name, |s| ValueExpr::Constant(Value::String(s))) |
-        map!(variable, ValueExpr::Variable) |
-        paren_expr
-    ));
-
-    named!(infix_function_expr(&[u8]) -> FunctionExpr, do_parse!(
-        v1: value_expr >>
-        space >>
-        name: map_res!(
-            one_of!("=+"),
-            |b| std::str::from_utf8(b).map(|s| s.to_owned())
-        ) >>
-        space >>
-        v2: value_expr >>
-        (FunctionExpr{name, args: vec![v1, v2]})
-    ));
-
-    named!(prefix_function_expr(&[u8]) -> FunctionExpr, do_parse!(
-        name: variable >>
-        tag!("(") >>
-        args: separated_list_complete!(tuple!(tag!(","), opt!(space)), value_expr) >>
-        tag!(")") >>
-        (FunctionExpr{name, args})
-    ));
-
-    named!(function_expr(&[u8]) -> FunctionExpr, alt!(
-        infix_function_expr |
-        prefix_function_expr
-    ));
-
-    named!(ea_expr, do_parse!(
-        e: value_expr >>
-        tag!(".") >>
-        a: attribute >>
-        ((e, a))
-    ));
-
-    named!(value_expr(&[u8]) -> ValueExpr, alt!(
-        map!(ea_expr, |(e,a)| ValueExpr::EA(e,a)) |
-        map!(function_expr, ValueExpr::Function) |
-        map!(variable, ValueExpr::Variable) |
-        map!(value, ValueExpr::Constant) |
-        paren_expr
-    ));
-
-    named!(paren_expr(&[u8]) -> ValueExpr, do_parse!(
+named!(paren_ast(&[u8]) -> ExprAst, do_parse!(
         tag!("(") >>
         opt!(space) >>
-        v: value_expr >>
+        e: expr_ast >>
         opt!(space) >>
         tag!(")") >>
-        (v)
+        (e)
     ));
 
-    named!(values_expr(&[u8]) -> [ValueExpr;3], dbg_dmp!(do_parse!(
-        v1: value_expr >>
-        space >>
-        v2: value_expr >>
-        space >>
-        v3: value_expr >>
-        ([v1,v2,v3])
-    )));
-
-    named!(row_expr(&[u8]) -> RowExpr, alt!(
-        do_parse!(
-            tag!("+") >>
-            space >>
-            values: values_expr >>
-            (RowExpr::Pattern(PatternKind::Assert, values))
-        ) |
-        do_parse!(
-            values: values_expr >>
-            (RowExpr::Pattern(PatternKind::Match, values))
-        )
-    ));
-
-    named!(pub query_expr(&[u8]) -> QueryExpr, map!(
-        separated_nonempty_list_complete!(tuple!(opt!(space), line_ending), row_expr),
-        |rs| QueryExpr{rows:rs}
-    ));
-}
-
-fn parse(code: &str) -> Result<QueryExpr, ParseError> {
-    match syntax::query_expr(code.as_bytes()) {
-        nom::IResult::Done(remaining, query_expr) => {
-            if remaining.len() == 0 {
-                Ok(query_expr)
-            } else {
-                Err(ParseError::Remaining(remaining, query_expr))
-            }
-        }
-        nom::IResult::Error(error) => Err(ParseError::NomError(nom::IError::Error(error))),
-        nom::IResult::Incomplete(needed) => Err(ParseError::NomError(nom::IError::Incomplete(needed))),
-    }
-}
+// fn parse(code: &str) -> Result<QueryAst, ParseError> {
+//     match syntax::query_ast(code.as_bytes()) {
+//         nom::IResult::Done(remaining, query_ast) => {
+//             if remaining.len() == 0 {
+//                 Ok(query_ast)
+//             } else {
+//                 Err(ParseError::Remaining(remaining, query_ast))
+//             }
+//         }
+//         nom::IResult::Error(error) => Err(ParseError::NomError(nom::IError::Error(error))),
+//         nom::IResult::Incomplete(needed) => Err(
+//             ParseError::NomError(nom::IError::Incomplete(needed)),
+//         ),
+//     }
+// }
 
 fn run_code(bag: &Bag, code: &str, cursor: i64) {
-    let codelets = code.split("\n\n").collect::<Vec<_>>();
-    let mut focused = None;
-    let mut remaining_cursor = cursor;
-    for codelet in codelets {
-        remaining_cursor -= codelet.len() as i64;
-        if remaining_cursor <= 0 {
-            focused = Some(codelet);
-            break;
-        }
-        remaining_cursor -= 2; // \n\n
-        if remaining_cursor < 0 {
-            focused = None;
-            break; 
-        }
-    }
-    match focused {
-        None => {
-            print!("Nothing\n\n{:?}", cursor)
-        }
-        Some(codelet) => {
-            print!("{}\n\n{}\n\n", codelet, cursor);
-            match parse(codelet) {
-                Err(error) => print!("{:?}\n\n", error),
-                Ok(query_expr) => {
-                    print!("{:?}\n\n", query_expr);
-                    let mut compiled_query_expr = query_expr.clone();
-                    let compiled = compile(&mut compiled_query_expr);
-                    print!("{:?}\n\n", compiled_query_expr);
-                    match compiled {
-                        Err(error) => print!("{}\n\n", error),
-                        Ok(query) => {
-                            print!("{:?}\n\n", query);
-                            match query.solve(&bag) {
-                                Err(error) => print!("{}\n\n", error),
-                                Ok(rows) => {
-                                    for row in rows.iter() {
-                                        print!("{} {} {}\n", row[0], row[1], row[2]);
-                                    }
-                                    print!("\n\n");
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    print!("{:?}\n\n", parse(code));
+    // let codelets = code.split("\n\n").collect::<Vec<_>>();
+    // let mut focused = None;
+    // let mut remaining_cursor = cursor;
+    // for codelet in codelets {
+    //     remaining_cursor -= codelet.len() as i64;
+    //     if remaining_cursor <= 0 {
+    //         focused = Some(codelet);
+    //         break;
+    //     }
+    //     remaining_cursor -= 2; // \n\n
+    //     if remaining_cursor < 0 {
+    //         focused = None;
+    //         break;
+    //     }
+    // }
+    // match focused {
+    //     None => print!("Nothing\n\n{:?}", cursor),
+    //     Some(codelet) => {
+    //         print!("{}\n\n{}\n\n", codelet, cursor);
+    //         match parse(codelet) {
+    //             Err(error) => print!("{:?}\n\n", error),
+    //             Ok(query_ast) => {
+    //                 print!("{:?}\n\n", query_ast);
+    //                 let mut compiled_query_ast = query_ast.clone();
+    //                 let compiled = compile(&mut compiled_query_ast);
+    //                 print!("{:?}\n\n", compiled_query_ast);
+    //                 match compiled {
+    //                     Err(error) => print!("{}\n\n", error),
+    //                     Ok(query) => {
+    //                         print!("{:?}\n\n", query);
+    //                         match query.solve(&bag) {
+    //                             Err(error) => print!("{}\n\n", error),
+    //                             Ok(rows) => {
+    //                                 for row in rows.iter() {
+    //                                     print!("{} {} {}\n", row[0], row[1], row[2]);
+    //                                 }
+    //                                 print!("\n\n");
+    //                             }
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 enum EditorEvent {
-    State(String, i64)
+    State(String, i64),
 }
 
 // #[derive(Debug, Serialize, Deserialize)]
-// pub enum Command {
+// enum Command {
 //     Render(String),
 // }
 

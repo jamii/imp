@@ -611,8 +611,15 @@ named!(assert_ast(&[u8]) -> StatementAst, do_parse!(
 ));
 
 named!(pattern_ast(&[u8]) -> StatementAst, do_parse!(
-            e: expr_ast >>
-            (StatementAst::Pattern(e))
+    e: map_res!(expr_ast, |e| if match &e {
+        &ExprAst::Function(FunctionAst{ref name, ..}) if name == "=" => true,
+        _ => false,
+    } {
+        Ok(e)
+    } else {
+        Err("Need an = at top level")
+    }) >>
+        (StatementAst::Pattern(e))
 ));
 
 named!(expr_ast(&[u8]) -> ExprAst, do_parse!(
@@ -702,24 +709,14 @@ named!(paren_ast(&[u8]) -> ExprAst, do_parse!(
         (e)
     ));
 
-// fn parse(code: &str) -> Result<QueryAst, ParseError> {
-//     match syntax::query_ast(code.as_bytes()) {
-//         nom::IResult::Done(remaining, query_ast) => {
-//             if remaining.len() == 0 {
-//                 Ok(query_ast)
-//             } else {
-//                 Err(ParseError::Remaining(remaining, query_ast))
-//             }
-//         }
-//         nom::IResult::Error(error) => Err(ParseError::NomError(nom::IError::Error(error))),
-//         nom::IResult::Incomplete(needed) => Err(
-//             ParseError::NomError(nom::IError::Incomplete(needed)),
-//         ),
-//     }
-// }
-
 fn run_code(bag: &Bag, code: &str, cursor: i64) {
-    print!("{:?}\n\n", parse(code));
+    let code_ast = parse(code);
+    for block_ast in code_ast.blocks {
+        for statement_ast in block_ast.statements {
+            print!("{:?}\n", statement_ast);
+        }
+        print!("\n");
+    }
     // let codelets = code.split("\n\n").collect::<Vec<_>>();
     // let mut focused = None;
     // let mut remaining_cursor = cursor;

@@ -527,6 +527,7 @@ impl Query {
 #[derive(Debug, Clone)]
 struct CodeAst {
     blocks: Vec<BlockAst>,
+    focused: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -572,16 +573,24 @@ fn simplify_errors<Output>(result: IResult<&[u8], Output>) -> Result<Output, Str
     }
 }
 
-fn parse(code: &str) -> CodeAst {
-    code_ast(code)
-}
-
-fn code_ast(text: &str) -> CodeAst {
-    CodeAst {
-        blocks: text.split("\n\n")
-            .map(|block| block_ast(block))
-            .collect::<Vec<_>>(),
+fn code_ast(text: &str, cursor: i64) -> CodeAst {
+    let blocks = text.split("\n\n")
+        .map(|block| block_ast(block))
+        .collect::<Vec<_>>();
+    let mut focused = None;
+    let mut remaining_cursor = cursor;
+    for (i, block_src) in text.split("\n\n").enumerate() {
+        remaining_cursor -= block_src.len() as i64;
+        if remaining_cursor <= 0 {
+            focused = Some(i);
+            break;
+        }
+        remaining_cursor -= 2; // \n\n
+        if remaining_cursor < 0 {
+            break;
+        }
     }
+    CodeAst { blocks, focused }
 }
 
 fn block_ast(text: &str) -> BlockAst {
@@ -710,13 +719,14 @@ named!(paren_ast(&[u8]) -> ExprAst, do_parse!(
     ));
 
 fn run_code(bag: &Bag, code: &str, cursor: i64) {
-    let code_ast = parse(code);
-    for block_ast in code_ast.blocks {
-        for statement_ast in block_ast.statements {
+    let code_ast = code_ast(code, cursor);
+    for block_ast in code_ast.blocks.iter() {
+        for statement_ast in block_ast.statements.iter() {
             print!("{:?}\n", statement_ast);
         }
         print!("\n");
     }
+    print!("{:?}\n", code_ast.focused);
     // let codelets = code.split("\n\n").collect::<Vec<_>>();
     // let mut focused = None;
     // let mut remaining_cursor = cursor;

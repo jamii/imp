@@ -434,7 +434,8 @@ fn translate(expr: &ExprAst, exprs: &mut Vec<ExprIr>) -> usize {
 }
 
 fn compile(block: &BlockAst) -> Result<Query, String> {
-    
+
+    // label exprs in pre-order and flatten tree
     let mut exprs: Vec<ExprIr> = vec![];
     let mut pattern_exprs: Vec<[usize; 2]> = vec![];
     let mut assert_exprs: Vec<[usize; 3]> = vec![];
@@ -459,15 +460,10 @@ fn compile(block: &BlockAst) -> Result<Query, String> {
         }
     }
 
-    let mut row_exprs: Vec<[usize; 3]> = vec![];
-    for (v, expr) in exprs.iter().enumerate() {
-        match expr {
-            &ExprIr::Dot(e, a) => row_exprs.push([e, a, v]),
-            _ => ()
-        }
-    }
-
+    // group exprs that must be equal
     let mut expr_group: Vec<usize> = (0..exprs.len()).collect();
+    
+    // all variables with same name must be equal
     let mut variable_group: HashMap<&str, usize> = HashMap::new();
     for (expr_ix, expr) in exprs.iter().enumerate() {
         match expr {
@@ -480,6 +476,8 @@ fn compile(block: &BlockAst) -> Result<Query, String> {
             _ => ()
         }
     }
+    
+    // both exprs in a top-level pattern (eg a = 2) must be equal
     for &[expr1, expr2] in pattern_exprs.iter() {
         let group1 = expr_group[expr1];
         let group2 = expr_group[expr2];
@@ -490,7 +488,26 @@ fn compile(block: &BlockAst) -> Result<Query, String> {
         }
     }
 
-    println!("{:?}\n{:?}\n{:?}\n{:?}\n{:?}", exprs, pattern_exprs, assert_exprs, row_exprs, expr_group);
+    // gather up groups
+    let mut group_exprs: HashMap<usize, Vec<usize>> = HashMap::new();
+    for (expr, group) in expr_group.iter().enumerate() {
+        group_exprs.entry(*group).or_insert_with(|| vec![]).push(expr);
+    }
+    
+    // sort groups by order of appearance in code
+    let mut group_exprs: Vec<Vec<usize>> = group_exprs.into_iter().map(|(_, mut exprs)| {exprs.sort_unstable(); exprs}).collect();
+    group_exprs.sort_unstable_by_key(|exprs| exprs[0]);
+
+    // collect exprs that directly query the database
+    let mut row_exprs: Vec<[usize; 3]> = vec![];
+    for (v, expr) in exprs.iter().enumerate() {
+        match expr {
+            &ExprIr::Dot(e, a) => row_exprs.push([e, a, v]),
+            _ => ()
+        }
+    }
+
+    println!("{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n", exprs, pattern_exprs, assert_exprs, expr_group, group_exprs, row_exprs);
 
     Err("incomplete".to_owned())
 }

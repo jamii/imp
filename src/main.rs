@@ -436,7 +436,7 @@ fn translate(expr: &ExprAst, exprs: &mut Vec<ExprIr>) -> usize {
 fn compile(block: &BlockAst) -> Result<Query, String> {
 
     // label exprs in pre-order and flatten tree
-    let mut exprs: Vec<ExprIr> = vec![];
+    let mut expr_irs: Vec<ExprIr> = vec![];
     let mut pattern_exprs: Vec<[usize; 2]> = vec![];
     let mut assert_exprs: Vec<[usize; 3]> = vec![];
     for statement_or_error in block.statements.iter() {
@@ -444,15 +444,15 @@ fn compile(block: &BlockAst) -> Result<Query, String> {
             &Ok(ref statement) => match statement {
                 &StatementAst::Pattern([ref e1, ref e2]) => {
                     pattern_exprs.push([
-                        translate(e1, &mut exprs),
-                        translate(e2, &mut exprs),
+                        translate(e1, &mut expr_irs),
+                        translate(e2, &mut expr_irs),
                     ]);
                 }
                 &StatementAst::Assert([ref e, ref a, ref v]) => {
                     assert_exprs.push([
-                        translate(e, &mut exprs),
-                        translate(a, &mut exprs),
-                        translate(v, &mut exprs),
+                        translate(e, &mut expr_irs),
+                        translate(a, &mut expr_irs),
+                        translate(v, &mut expr_irs),
                     ]);
                 }
             }
@@ -461,16 +461,16 @@ fn compile(block: &BlockAst) -> Result<Query, String> {
     }
 
     // group exprs that must be equal
-    let mut expr_group: Vec<usize> = (0..exprs.len()).collect();
+    let mut expr_group: Vec<usize> = (0..expr_irs.len()).collect();
     
     // all variables with same name must be equal
     let mut variable_group: HashMap<&str, usize> = HashMap::new();
-    for (expr_ix, expr) in exprs.iter().enumerate() {
-        match expr {
+    for (expr, ir) in expr_irs.iter().enumerate() {
+        match ir {
             &ExprIr::Variable(ref variable) => {
                 match variable_group.get(&**variable) {
-                    Some(&group) => expr_group[expr_ix] = group,
-                    None => {variable_group.insert(variable, expr_ix);}
+                    Some(&group) => expr_group[expr] = group,
+                    None => {variable_group.insert(variable, expr);}
                 }
             }
             _ => ()
@@ -493,21 +493,59 @@ fn compile(block: &BlockAst) -> Result<Query, String> {
     for (expr, group) in expr_group.iter().enumerate() {
         group_exprs.entry(*group).or_insert_with(|| vec![]).push(expr);
     }
-    
-    // sort groups by order of appearance in code
-    let mut group_exprs: Vec<Vec<usize>> = group_exprs.into_iter().map(|(_, mut exprs)| {exprs.sort_unstable(); exprs}).collect();
-    group_exprs.sort_unstable_by_key(|exprs| exprs[0]);
 
+    // sort by order of appearance in code
+    let mut slot_exprs: Vec<Vec<usize>> = group_exprs.iter().map(|(_, exprs)| {
+        let mut exprs = exprs.clone();
+        exprs.sort_unstable(); exprs
+    }).collect();
+    slot_exprs.sort_unstable_by_key(|exprs| exprs[0]);
+
+    // move slots that contain only constants to the start
+    for slot in 0..slot_exprs.len() {
+        let expr_irs: Vec<&ExprIr> = slot_exprs[slot].iter().map(|&expr| &expr_irs[expr]).collect();
+        let all_constants = expr_irs.iter().all(|expr_ir| {
+            match expr_ir {
+                &&ExprIr::Constant(_) => true,
+                _ => false,
+            }
+        });
+        if all_constants {
+            for expr in 1..expr_irs.len() {
+                if expr_irs[0] != expr_irs[expr] {
+                    return Err(format!("Impossible constraint: {:?} = {:?}", expr_irs[0], expr_irs[expr]))
+                }
+            }
+            let exprs = slot_exprs.remove(slot);
+            slot_exprs.insert(0, exprs);
+        }
+    }
+    
+    // index in the other direction
+    let mut expr_slot: Vec<usize> = (0..expr_irs.len()).collect();
+    for (slot, exprs) in slot_exprs.iter().enumerate() {
+        for expr in exprs.iter() {
+            expr_slot[*expr] = slot;
+        }
+    }
+    
     // collect exprs that directly query the database
     let mut row_exprs: Vec<[usize; 3]> = vec![];
-    for (v, expr) in exprs.iter().enumerate() {
-        match expr {
+    for (v, ir) in expr_irs.iter().enumerate() {
+        match ir {
             &ExprIr::Dot(e, a) => row_exprs.push([e, a, v]),
             _ => ()
         }
     }
 
-    println!("{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n", exprs, pattern_exprs, assert_exprs, expr_group, group_exprs, row_exprs);
+    // choose row indexes with columns in the order they appear in the slots
+    let row_orderings: Vec<[usize; 3]> = row_exprs.iter().map(|exprs| {
+        let mut ordering = [0, 1, 2];
+        ordering.sort_unstable_by_key(|&ix| expr_slot[exprs[ix]]);
+        ordering
+    }).collect();
+
+    println!("{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}", expr_irs, pattern_exprs, assert_exprs, expr_group, group_exprs, slot_exprs, expr_slot, row_exprs, row_orderings);
 
     Err("incomplete".to_owned())
 }

@@ -1,5 +1,6 @@
 #![feature(proc_macro)]
 #![feature(conservative_impl_trait)]
+#![feature(slice_patterns)]
 
 extern crate websocket;
 #[macro_use(json, json_internal)]
@@ -402,6 +403,62 @@ impl Query {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ExprIr {
+    Constant(Value),
+    Variable(String),
+    Function(FunctionIr),
+    Dot(usize, usize),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct FunctionIr {
+    name: String,
+    args: Vec<usize>,
+}
+
+fn translate(expr: &ExprAst, exprs: &mut Vec<ExprIr>) -> usize {
+    let expr = match expr {
+        &ExprAst::Constant(ref value) => ExprIr::Constant(value.clone()),
+        &ExprAst::Variable(ref variable) => ExprIr::Variable(variable.clone()),
+        &ExprAst::Function(FunctionAst { ref name, ref args }) => ExprIr::Function(FunctionIr {
+            name: name.clone(),
+            args: args.iter().map(|e| translate(e, exprs)).collect(),
+        }),
+        &ExprAst::Dot(ref expr1, ref expr2) => {
+            ExprIr::Dot(translate(expr1, exprs), translate(expr2, exprs))
+        }
+    };
+    exprs.push(expr);
+    exprs.len() - 1
+}
+
+fn compile(block: &BlockAst) -> Result<Query, String> {
+    let mut exprs: Vec<ExprIr> = vec![];
+    let mut assert_exprs: Vec<[usize; 3]> = vec![];
+    for statement_or_error in block.statements.iter() {
+        match statement_or_error {
+            &Ok(ref statement) => match statement {
+                &StatementAst::Pattern(ref expr) => {
+                    translate(expr, &mut exprs);
+                }
+                &StatementAst::Assert([ref e, ref a, ref v]) => {
+                    assert_exprs.push([
+                        translate(e, &mut exprs),
+                        translate(a, &mut exprs),
+                        translate(v, &mut exprs),
+                    ]);
+                }
+            }
+            &Err(_) => (),
+        }
+    }
+
+    println!("{:?}\n{:?}", exprs, assert_exprs);
+
+    Err("incomplete".to_owned())
+}
+
 // fn compile(query_expr: &mut QueryExpr) -> Result<Query, String> {
 //     // variables, in execution order
 //     let mut variables: Vec<String> = vec![];
@@ -720,13 +777,11 @@ named!(paren_ast(&[u8]) -> ExprAst, do_parse!(
 
 fn run_code(bag: &Bag, code: &str, cursor: i64) {
     let code_ast = code_ast(code, cursor);
-    for block_ast in code_ast.blocks.iter() {
-        for statement_ast in block_ast.statements.iter() {
-            print!("{:?}\n", statement_ast);
-        }
-        print!("\n");
+    if let Some(i) = code_ast.focused {
+        compile(&code_ast.blocks[i]);
+    } else {
+        println!("Nothing focused");
     }
-    print!("{:?}\n", code_ast.focused);
     // let codelets = code.split("\n\n").collect::<Vec<_>>();
     // let mut focused = None;
     // let mut remaining_cursor = cursor;

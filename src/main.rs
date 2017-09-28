@@ -223,17 +223,15 @@ enum Function {
 }
 
 impl Function {
-    fn apply(&self, result_ix: usize, variables: &mut [Cow<Value>]) -> Result<(), String> {
-        let result = match self {
+    fn apply(&self, variables: &mut [Cow<Value>]) -> Result<Value, String> {
+        match self {
             &Function::Add(a, b) => {
                 match (variables[a].borrow(), variables[b].borrow()) {
-                    (&Value::Integer(a), &Value::Integer(b)) => Value::Integer(a + b),
-                    (a, b) => return Err(format!("Type error: {} + {}", a, b)),
+                    (&Value::Integer(a), &Value::Integer(b)) => Ok(Value::Integer(a + b)),
+                    (a, b) => Err(format!("Type error: {} + {}", a, b)),
                 }
             }
-        };
-        variables[result_ix] = Cow::Owned(result);
-        return Ok(());
+        }
     }
 }
 
@@ -244,7 +242,7 @@ type RowCol = (usize, usize);
 enum Constraint {
     Narrow(RowCol, usize),
     Join(Vec<RowCol>, usize),
-    Apply(usize, Function),
+    Apply(usize, bool, Function),
     Assert([usize; 3]),
 }
 
@@ -317,9 +315,17 @@ fn constrain<'a>(
                 // restore state for rowcols[0]
                 ranges[row_ix] = (old_lo, old_hi);
             }
-            &Constraint::Apply(result_ix, ref function) => {
-                function.apply(result_ix, variables)?;
-                constrain(&constraints[1..], indexes, ranges, variables, asserts)?;
+            &Constraint::Apply(result_ix, result_already_fixed, ref function) => {
+                let result = Cow::Owned(function.apply(variables)?);
+                if result_already_fixed {
+                    if variables[result_ix] == result {
+                        constrain(&constraints[1..], indexes, ranges, variables, asserts)?;
+                    } else {
+                        // failed, backtrack
+                    }
+                } else {
+                    variables[result_ix] = result;
+                }
             }
             &Constraint::Assert(var_ixes) => {
                 {
@@ -336,14 +342,14 @@ fn constrain<'a>(
 }
 
 #[derive(Debug, Clone)]
-struct Query {
+struct Block {
     row_orderings: Vec<[usize; 3]>,
     variables: Vec<Value>,
     constraints: Vec<Constraint>,
 }
 
-impl Query {
-    fn solve(&self, bag: &Bag) -> Result<Vec<[Value; 3]>, String> {
+impl Block {
+    fn run(&self, bag: &Bag) -> Result<Vec<[Value; 3]>, String> {
         // TODO strip out this compat layer
         let eavs: Vec<[Value; 3]> = bag.eavs
             .iter()
@@ -417,6 +423,22 @@ struct FunctionIr {
     args: Vec<usize>,
 }
 
+impl ExprIr {
+    fn is_constant(&self) -> bool {
+        match self {
+            &ExprIr::Constant(_) => true,
+            _ => false,
+        }
+    }
+
+    fn is_function(&self) -> bool {
+        match self {
+            &ExprIr::Function(_) => true,
+            _ => false,
+        }
+    }
+}
+
 fn translate(expr: &ExprAst, exprs: &mut Vec<ExprIr>) -> usize {
     let expr = match expr {
         &ExprAst::Constant(ref value) => ExprIr::Constant(value.clone()),
@@ -433,7 +455,7 @@ fn translate(expr: &ExprAst, exprs: &mut Vec<ExprIr>) -> usize {
     exprs.len() - 1
 }
 
-fn compile(block: &BlockAst) -> Result<Query, String> {
+fn compile(block: &BlockAst) -> Result<Block, String> {
 
     // label exprs in pre-order and flatten tree
     let mut expr_irs: Vec<ExprIr> = vec![];
@@ -441,19 +463,25 @@ fn compile(block: &BlockAst) -> Result<Query, String> {
     let mut assert_exprs: Vec<[usize; 3]> = vec![];
     for statement_or_error in block.statements.iter() {
         match statement_or_error {
-            &Ok(ref statement) => match statement {
-                &StatementAst::Pattern([ref e1, ref e2]) => {
-                    pattern_exprs.push([
-                        translate(e1, &mut expr_irs),
-                        translate(e2, &mut expr_irs),
-                    ]);
-                }
-                &StatementAst::Assert([ref e, ref a, ref v]) => {
-                    assert_exprs.push([
-                        translate(e, &mut expr_irs),
-                        translate(a, &mut expr_irs),
-                        translate(v, &mut expr_irs),
-                    ]);
+            &Ok(ref statement) => {
+                match statement {
+                    &StatementAst::Pattern([ref e1, ref e2]) => {
+                        pattern_exprs.push(
+                            [
+                                translate(e1, &mut expr_irs),
+                                translate(e2, &mut expr_irs),
+                            ],
+                        );
+                    }
+                    &StatementAst::Assert([ref e, ref a, ref v]) => {
+                        assert_exprs.push(
+                            [
+                                translate(e, &mut expr_irs),
+                                translate(a, &mut expr_irs),
+                                translate(v, &mut expr_irs),
+                            ],
+                        );
+                    }
                 }
             }
             &Err(_) => (),
@@ -462,7 +490,7 @@ fn compile(block: &BlockAst) -> Result<Query, String> {
 
     // group exprs that must be equal
     let mut expr_group: Vec<usize> = (0..expr_irs.len()).collect();
-    
+
     // all variables with same name must be equal
     let mut variable_group: HashMap<&str, usize> = HashMap::new();
     for (expr, ir) in expr_irs.iter().enumerate() {
@@ -470,13 +498,15 @@ fn compile(block: &BlockAst) -> Result<Query, String> {
             &ExprIr::Variable(ref variable) => {
                 match variable_group.get(&**variable) {
                     Some(&group) => expr_group[expr] = group,
-                    None => {variable_group.insert(variable, expr);}
+                    None => {
+                        variable_group.insert(variable, expr);
+                    }
                 }
             }
-            _ => ()
+            _ => (),
         }
     }
-    
+
     // both exprs in a top-level pattern (eg a = 2) must be equal
     for &[expr1, expr2] in pattern_exprs.iter() {
         let group1 = expr_group[expr1];
@@ -491,36 +521,33 @@ fn compile(block: &BlockAst) -> Result<Query, String> {
     // gather up groups
     let mut group_exprs: HashMap<usize, Vec<usize>> = HashMap::new();
     for (expr, group) in expr_group.iter().enumerate() {
-        group_exprs.entry(*group).or_insert_with(|| vec![]).push(expr);
+        group_exprs.entry(*group).or_insert_with(|| vec![]).push(
+            expr,
+        );
     }
 
     // sort by order of appearance in code
-    let mut slot_exprs: Vec<Vec<usize>> = group_exprs.iter().map(|(_, exprs)| {
-        let mut exprs = exprs.clone();
-        exprs.sort_unstable(); exprs
-    }).collect();
+    let mut slot_exprs: Vec<Vec<usize>> = group_exprs
+        .iter()
+        .map(|(_, exprs)| {
+            let mut exprs = exprs.clone();
+            exprs.sort_unstable();
+            exprs
+        })
+        .collect();
     slot_exprs.sort_unstable_by_key(|exprs| exprs[0]);
 
     // move slots that contain only constants to the start
     for slot in 0..slot_exprs.len() {
-        let expr_irs: Vec<&ExprIr> = slot_exprs[slot].iter().map(|&expr| &expr_irs[expr]).collect();
-        let all_constants = expr_irs.iter().all(|expr_ir| {
-            match expr_ir {
-                &&ExprIr::Constant(_) => true,
-                _ => false,
-            }
-        });
-        if all_constants {
-            for expr in 1..expr_irs.len() {
-                if expr_irs[0] != expr_irs[expr] {
-                    return Err(format!("Impossible constraint: {:?} = {:?}", expr_irs[0], expr_irs[expr]))
-                }
-            }
+        if slot_exprs[slot].iter().all(
+            |&expr| expr_irs[expr].is_constant(),
+        )
+        {
             let exprs = slot_exprs.remove(slot);
             slot_exprs.insert(0, exprs);
         }
     }
-    
+
     // index in the other direction
     let mut expr_slot: Vec<usize> = (0..expr_irs.len()).collect();
     for (slot, exprs) in slot_exprs.iter().enumerate() {
@@ -528,149 +555,142 @@ fn compile(block: &BlockAst) -> Result<Query, String> {
             expr_slot[*expr] = slot;
         }
     }
-    
+
     // collect exprs that directly query the database
     let mut row_exprs: Vec<[usize; 3]> = vec![];
     for (v, ir) in expr_irs.iter().enumerate() {
         match ir {
             &ExprIr::Dot(e, a) => row_exprs.push([e, a, v]),
-            _ => ()
+            _ => (),
         }
     }
 
     // choose row indexes with columns in the order they appear in the slots
-    let row_orderings: Vec<[usize; 3]> = row_exprs.iter().map(|exprs| {
-        let mut ordering = [0, 1, 2];
-        ordering.sort_unstable_by_key(|&ix| expr_slot[exprs[ix]]);
-        ordering
-    }).collect();
+    let row_orderings: Vec<[usize; 3]> = row_exprs
+        .iter()
+        .map(|exprs| {
+            let mut ordering = [0, 1, 2];
+            ordering.sort_unstable_by_key(|&ix| expr_slot[exprs[ix]]);
+            ordering
+        })
+        .collect();
 
-    println!("{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}", expr_irs, pattern_exprs, assert_exprs, expr_group, group_exprs, slot_exprs, expr_slot, row_exprs, row_orderings);
+    // produce constraints
+    let mut values: Vec<Value> = (0..slot_exprs.len())
+        .map(|_| Value::Boolean(false))
+        .collect();
+    let mut constraints: Vec<Constraint> = vec![];
+    for (slot, exprs) in slot_exprs.iter().enumerate() {
+        // gather up everything that constrains this slot
+        let constants: Vec<&ExprIr> = exprs
+            .iter()
+            .map(|&expr| &expr_irs[expr])
+            .filter(|ir| ir.is_constant())
+            .collect();
+        let functions: Vec<&ExprIr> = exprs
+            .iter()
+            .map(|&expr| &expr_irs[expr])
+            .filter(|ir| ir.is_function())
+            .collect();
+        let mut rowcols: Vec<(usize, usize)> = vec![];
+        for expr in exprs.iter() {
+            for (row, cols) in row_exprs.iter().enumerate() {
+                for (col, rc_expr) in cols.iter().enumerate() {
+                    if expr == rc_expr {
+                        rowcols.push((row, col));
+                    }
+                }
+            }
+        }
 
-    Err("incomplete".to_owned())
+        // check constants are sane
+        for i in 1..constants.len() {
+            if constants[i] != constants[0] {
+                return Err(format!(
+                    "Impossible constraint: {:?} = {:?}",
+                    constants[i],
+                    constants[0]
+                ));
+            }
+        }
+
+        // after first constant or function, the rest just have to check their result is equal
+        let mut slot_fixed_yet = false;
+
+        // constants just get stuck in the values vec
+        if constants.len() > 0 {
+            values[slot] = match constants[0] {
+                &ExprIr::Constant(ref value) => value.clone(),
+                _ => unreachable!(),
+            };
+            slot_fixed_yet = true;
+        }
+
+        // functions get run next
+        for function in functions.iter() {
+            match function {
+                &&ExprIr::Function(FunctionIr { ref name, ref args }) => {
+                    let function = match (&**name, &**args) {
+                        ("+", &[a, b]) => Function::Add(a, b),
+                        _ => {
+                            return Err(format!(
+                                "I don't know any function called {:?} with {} arguments",
+                                name,
+                                args.len()
+                            ))
+                        }
+                    };
+                    constraints.push(Constraint::Apply(slot, slot_fixed_yet, function));
+                    slot_fixed_yet = true;
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        // if there is already a value just look it up in indexes
+        // otherwise join indexes
+        if slot_fixed_yet {
+            for &(row, col) in rowcols.iter() {
+                constraints.push(Constraint::Narrow((row, col), slot));
+            }
+        } else {
+            constraints.push(Constraint::Join(rowcols, slot));
+        }
+    }
+
+    // asserts are constraints too
+    // TODO constraints is the wrong name for anything that includes asserts
+    for exprs in assert_exprs.iter() {
+        constraints.push(Constraint::Assert(
+            [
+                expr_slot[exprs[0]],
+                expr_slot[exprs[1]],
+                expr_slot[exprs[2]],
+            ],
+        ));
+    }
+
+    println!(
+        "{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}",
+        expr_irs,
+        pattern_exprs,
+        assert_exprs,
+        expr_group,
+        group_exprs,
+        slot_exprs,
+        expr_slot,
+        row_exprs,
+        row_orderings,
+        values,
+        constraints,
+    );
+
+    Ok(Block {
+        row_orderings,
+        variables: values,
+        constraints,
+    })
 }
-
-// fn compile(query_expr: &mut QueryExpr) -> Result<Query, String> {
-//     // variables, in execution order
-//     let mut variables: Vec<String> = vec![];
-//     let mut constants: Vec<Value> = vec![];
-//     let mut joins: HashMap<String, Vec<RowCol>> = HashMap::new();
-
-//     // pull out constants
-//     for (row, row_expr) in query_expr.rows.iter_mut().enumerate() {
-//         match row_expr {
-//             &mut RowExpr::Pattern(_, ref mut value_exprs) => {
-//                 for (col, value_expr) in value_exprs.iter_mut().enumerate() {
-//                     match value_expr.clone() { // TODO this clone is daft
-//                         ValueExpr::Constant(value) => {
-//                             let variable = format!("constant_{}_{}", row, col);
-//                             constants.push(value);
-//                             joins.insert(variable.clone(), vec![]);
-//                             variables.push(variable.clone());
-//                             *value_expr = ValueExpr::Variable(variable);
-//                         }
-//                         _ => (),
-//                     }
-//                 }
-//             }
-//         }
-//     }
-
-//     // collect joins
-//     for (row, row_expr) in query_expr.rows.iter().enumerate() {
-//         match row_expr {
-//             &RowExpr::Pattern(PatternKind::Match, ref value_exprs) => {
-//                 for (col, value_expr) in value_exprs.iter().enumerate() {
-//                     match value_expr {
-//                         &ValueExpr::Variable(ref variable) => {
-//                             if joins.contains_key(variable) {
-//                                 joins.get_mut(variable).unwrap().push((row, col));
-//                             } else {
-//                                 joins.insert(variable.clone(), vec![(row, col)]);
-//                                 variables.push(variable.clone());
-//                             }
-//                         }
-//                         _ => (),
-//                     }
-//                 }
-//             }
-//             _ => (),
-//         }
-//     }
-
-//     // turn constants/joins into constraints
-//     let mut constraints: Vec<Constraint> = vec![];
-//     for (var_ix, variable) in variables.iter().enumerate() {
-//         if var_ix < constants.len() {
-//             for &(row, col) in joins.get(variable).unwrap() {
-//                 constraints.push(Constraint::Narrow((row, col), var_ix));
-//             }
-//         } else {
-//             constraints.push(Constraint::Join(
-//                 joins.get(variable).unwrap().clone(),
-//                 var_ix,
-//             ));
-//         }
-//     }
-
-//     // turn asserts into constraints
-//     for (row, row_expr) in query_expr.rows.iter().enumerate() {
-//         match row_expr {
-//             &RowExpr::Pattern(PatternKind::Assert, ref value_exprs) => {
-//                 let mut var_ixes = [0, 0, 0];
-//                 for i in 0..3 {
-//                     var_ixes[i] = match value_exprs[i] {
-//                         ExprAst::Variable(ref variable) => {
-//                             match variables.iter().position(|v| v == variable) {
-//                                 Some(ix) => ix,
-//                                 None => {
-//                                     return Err(format!(
-//                                         "Unconstrained variable {:?} in row {:?}",
-//                                         variable,
-//                                         row
-//                                     ))
-//                                 }
-//                             }
-//                         }
-//                         _ => unreachable!(),
-//                     }
-//                 }
-//                 constraints.push(Constraint::Assert(var_ixes));
-//             }
-//             _ => (),
-//         }
-//     }
-
-//     // figure out which index to use
-//     let row_orderings:Vec<[usize; 3]> = query_expr
-//         .rows
-//         .iter()
-//         // TODO this messes up rowcol addressing if any matches come after an assert
-//         .filter(|r| match r { &&RowExpr::Pattern(PatternKind::Match, _) => true, _ => false})
-//         .map(|&RowExpr::Pattern(_, ref value_exprs)| {
-//             let var_ixes: Vec<usize> = value_exprs.iter().map(| value_expr| {
-//                 match value_expr {
-//                     &ValueExpr::Variable(ref variable) => variables.iter().position(|v| v == variable).unwrap(),
-//                     _ => unreachable!(),
-//                 }
-//             }).collect();
-//             let mut row_ordering = [0, 1, 2];
-//             row_ordering.sort_unstable_by(|&c1, &c2| var_ixes[c1].cmp(&var_ixes[c2]));
-//             row_ordering
-//         })
-//         .collect();
-
-//     // fill remaining constants with dummy values
-//     while constants.len() < variables.len() {
-//         constants.push(Value::Boolean(false));
-//     }
-
-//     Ok(Query {
-//         row_orderings,
-//         variables: constants,
-//         constraints,
-//     })
-// }
 
 #[derive(Debug, Clone)]
 struct CodeAst {
@@ -866,7 +886,23 @@ named!(paren_ast(&[u8]) -> ExprAst, do_parse!(
 fn run_code(bag: &Bag, code: &str, cursor: i64) {
     let code_ast = code_ast(code, cursor);
     if let Some(i) = code_ast.focused {
-        compile(&code_ast.blocks[i]);
+        print!("{:?}\n\n", code_ast.blocks[i]);
+        let compiled_block = compile(&code_ast.blocks[i]);
+        match compiled_block {
+            Err(error) => print!("{}\n\n", error),
+            Ok(block) => {
+                print!("{:?}\n\n", block);
+                match block.run(&bag) {
+                    Err(error) => print!("{}\n\n", error),
+                    Ok(rows) => {
+                        for row in rows.iter() {
+                            print!("{} {} {}\n", row[0], row[1], row[2]);
+                        }
+                        print!("\n\n");
+                    }
+                }
+            }
+        }
     } else {
         println!("Nothing focused");
     }

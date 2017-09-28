@@ -325,6 +325,7 @@ fn constrain<'a>(
                     }
                 } else {
                     variables[result_ix] = result;
+                    constrain(&constraints[1..], indexes, ranges, variables, asserts)?;
                 }
             }
             &Constraint::Assert(var_ixes) => {
@@ -537,11 +538,14 @@ fn compile(block: &BlockAst) -> Result<Block, String> {
         .collect();
     slot_exprs.sort_unstable_by_key(|exprs| exprs[0]);
 
-    // move slots that contain only constants to the start
+    // move slots that contain constants and no functions to the start
     for slot in 0..slot_exprs.len() {
-        if slot_exprs[slot].iter().all(
+        if slot_exprs[slot].iter().any(
             |&expr| expr_irs[expr].is_constant(),
-        )
+        ) &&
+            slot_exprs[slot].iter().all(
+                |&expr| !expr_irs[expr].is_function(),
+            )
         {
             let exprs = slot_exprs.remove(slot);
             slot_exprs.insert(0, exprs);
@@ -614,6 +618,11 @@ fn compile(block: &BlockAst) -> Result<Block, String> {
             }
         }
 
+        // check that something constrains this slot
+        if (constants.len() == 0) && (functions.len() == 0) && (rowcols.len() == 0) {
+            return Err(format!("No constraints on slot")); // TODO how to identify?
+        }
+
         // after first constant or function, the rest just have to check their result is equal
         let mut slot_fixed_yet = false;
 
@@ -631,7 +640,7 @@ fn compile(block: &BlockAst) -> Result<Block, String> {
             match function {
                 &&ExprIr::Function(FunctionIr { ref name, ref args }) => {
                     let function = match (&**name, &**args) {
-                        ("+", &[a, b]) => Function::Add(a, b),
+                        ("+", &[a, b]) => Function::Add(expr_slot[a], expr_slot[b]),
                         _ => {
                             return Err(format!(
                                 "I don't know any function called {:?} with {} arguments",
@@ -906,51 +915,6 @@ fn run_code(bag: &Bag, code: &str, cursor: i64) {
     } else {
         println!("Nothing focused");
     }
-    // let codelets = code.split("\n\n").collect::<Vec<_>>();
-    // let mut focused = None;
-    // let mut remaining_cursor = cursor;
-    // for codelet in codelets {
-    //     remaining_cursor -= codelet.len() as i64;
-    //     if remaining_cursor <= 0 {
-    //         focused = Some(codelet);
-    //         break;
-    //     }
-    //     remaining_cursor -= 2; // \n\n
-    //     if remaining_cursor < 0 {
-    //         focused = None;
-    //         break;
-    //     }
-    // }
-    // match focused {
-    //     None => print!("Nothing\n\n{:?}", cursor),
-    //     Some(codelet) => {
-    //         print!("{}\n\n{}\n\n", codelet, cursor);
-    //         match parse(codelet) {
-    //             Err(error) => print!("{:?}\n\n", error),
-    //             Ok(query_ast) => {
-    //                 print!("{:?}\n\n", query_ast);
-    //                 let mut compiled_query_ast = query_ast.clone();
-    //                 let compiled = compile(&mut compiled_query_ast);
-    //                 print!("{:?}\n\n", compiled_query_ast);
-    //                 match compiled {
-    //                     Err(error) => print!("{}\n\n", error),
-    //                     Ok(query) => {
-    //                         print!("{:?}\n\n", query);
-    //                         match query.solve(&bag) {
-    //                             Err(error) => print!("{}\n\n", error),
-    //                             Ok(rows) => {
-    //                                 for row in rows.iter() {
-    //                                     print!("{} {} {}\n", row[0], row[1], row[2]);
-    //                                 }
-    //                                 print!("\n\n");
-    //                             }
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

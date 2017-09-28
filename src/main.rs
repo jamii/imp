@@ -454,7 +454,15 @@ fn compile(block: &BlockAst) -> Result<Query, String> {
         }
     }
 
-    println!("{:?}\n{:?}", exprs, assert_exprs);
+    let mut row_exprs: Vec<[usize; 3]> = vec![];
+    for (v, expr) in exprs.iter().enumerate() {
+        match expr {
+            &ExprIr::Dot(e, a) => row_exprs.push([e, a, v]),
+            _ => ()
+        }
+    }
+
+    println!("{:?}\n{:?}\n{:?}", exprs, assert_exprs, row_exprs);
 
     Err("incomplete".to_owned())
 }

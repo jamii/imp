@@ -434,13 +434,18 @@ fn translate(expr: &ExprAst, exprs: &mut Vec<ExprIr>) -> usize {
 }
 
 fn compile(block: &BlockAst) -> Result<Query, String> {
+    
     let mut exprs: Vec<ExprIr> = vec![];
+    let mut pattern_exprs: Vec<[usize; 2]> = vec![];
     let mut assert_exprs: Vec<[usize; 3]> = vec![];
     for statement_or_error in block.statements.iter() {
         match statement_or_error {
             &Ok(ref statement) => match statement {
-                &StatementAst::Pattern(ref expr) => {
-                    translate(expr, &mut exprs);
+                &StatementAst::Pattern([ref e1, ref e2]) => {
+                    pattern_exprs.push([
+                        translate(e1, &mut exprs),
+                        translate(e2, &mut exprs),
+                    ]);
                 }
                 &StatementAst::Assert([ref e, ref a, ref v]) => {
                     assert_exprs.push([
@@ -462,7 +467,30 @@ fn compile(block: &BlockAst) -> Result<Query, String> {
         }
     }
 
-    println!("{:?}\n{:?}\n{:?}", exprs, assert_exprs, row_exprs);
+    let mut expr_group: Vec<usize> = (0..exprs.len()).collect();
+    let mut variable_group: HashMap<&str, usize> = HashMap::new();
+    for (expr_ix, expr) in exprs.iter().enumerate() {
+        match expr {
+            &ExprIr::Variable(ref variable) => {
+                match variable_group.get(&**variable) {
+                    Some(&group) => expr_group[expr_ix] = group,
+                    None => {variable_group.insert(variable, expr_ix);}
+                }
+            }
+            _ => ()
+        }
+    }
+    for &[expr1, expr2] in pattern_exprs.iter() {
+        let group1 = expr_group[expr1];
+        let group2 = expr_group[expr2];
+        for group in expr_group.iter_mut() {
+            if *group == group2 {
+                *group = group1;
+            }
+        }
+    }
+
+    println!("{:?}\n{:?}\n{:?}\n{:?}\n{:?}", exprs, pattern_exprs, assert_exprs, row_exprs, expr_group);
 
     Err("incomplete".to_owned())
 }
@@ -616,7 +644,7 @@ struct FunctionAst {
 
 #[derive(Debug, Clone)]
 enum StatementAst {
-    Pattern(ExprAst),
+    Pattern([ExprAst; 2]),
     Assert([ExprAst; 3]),
 }
 
@@ -685,15 +713,12 @@ named!(assert_ast(&[u8]) -> StatementAst, do_parse!(
 ));
 
 named!(pattern_ast(&[u8]) -> StatementAst, do_parse!(
-    e: map_res!(expr_ast, |e| if match &e {
-        &ExprAst::Function(FunctionAst{ref name, ..}) if name == "=" => true,
-        _ => false,
-    } {
-        Ok(e)
-    } else {
-        Err("Need an = at top level")
-    }) >>
-        (StatementAst::Pattern(e))
+    e1: expr_ast >>
+    opt!(space) >>
+    tag!("=") >>
+    opt!(space) >>
+    e2: expr_ast >>
+    (StatementAst::Pattern([e1, e2]))
 ));
 
 named!(expr_ast(&[u8]) -> ExprAst, do_parse!(
@@ -736,7 +761,7 @@ named!(prefix_function_ast(&[u8]) -> FunctionAst, do_parse!(
 named!(infix_function_ast(&[u8]) -> (String, ExprAst), do_parse!(
         opt!(space) >>
         name: map_res!(
-            alt!(tag!("=") | tag!("+")),
+            alt!(tag!("+")),
             |b| std::str::from_utf8(b).map(|s| s.to_owned())
         ) >>
         opt!(space) >>

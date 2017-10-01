@@ -71,17 +71,18 @@ impl std::fmt::Display for Value {
         match self {
             &Value::Boolean(bool) => bool.fmt(f),
             &Value::Integer(integer) => integer.fmt(f),
-            &Value::String(ref string) => {
-                if string.find(char::is_whitespace).is_some() {
-                    // TODO escaping
-                    '"'.fmt(f)?;
-                    string.fmt(f)?;
-                    '"'.fmt(f)
-                } else {
-                    string.fmt(f)
+            &Value::String(ref string) => write!(f, "{:?}", string),
+            &Value::Entity(ref entity) => {
+                f.write_str("{")?;
+                let mut avs = entity.avs.iter().peekable();
+                while let Some(&(ref a, ref v)) = avs.next() {
+                    write!(f, "{}={}", a, v)?;
+                    if avs.peek().is_some() {
+                        write!(f, ", ")?;
+                    }
                 }
+                f.write_str("}")
             }
-            &Value::Entity(ref entity) => write!(f, "{:?}", entity),
         }
     }
 }
@@ -244,6 +245,7 @@ enum Constraint {
     Join(Vec<RowCol>, usize),
     Apply(usize, bool, Function),
     Assert([usize; 3]),
+    Debug(Vec<(String, usize)>),
 }
 
 fn constrain<'a>(
@@ -251,6 +253,7 @@ fn constrain<'a>(
     indexes: &'a [[Vec<Value>; 3]],
     ranges: &mut [LoHi],
     variables: &mut [Cow<'a, Value>],
+    results: &mut Vec<Value>,
     asserts: &mut Vec<[Value; 3]>,
 ) -> Result<(), String> {
     if constraints.len() > 0 {
@@ -267,7 +270,14 @@ fn constrain<'a>(
                 if lo < hi {
                     ranges[row_ix] = (lo, hi);
                     variables[var_ix] = Cow::Borrowed(&column[lo]);
-                    constrain(&constraints[1..], indexes, ranges, variables, asserts)?;
+                    constrain(
+                        &constraints[1..],
+                        indexes,
+                        ranges,
+                        variables,
+                        results,
+                        asserts,
+                    )?;
                     ranges[row_ix] = (old_lo, old_hi);
                 }
             }
@@ -301,7 +311,14 @@ fn constrain<'a>(
                         // if all succeeded, continue with rest of constraints
                         if i == rowcols.len() {
                             variables[var_ix] = Cow::Borrowed(&column[lo]);
-                            constrain(&constraints[1..], indexes, ranges, variables, asserts)?;
+                            constrain(
+                                &constraints[1..],
+                                indexes,
+                                ranges,
+                                variables,
+                                results,
+                                asserts,
+                            )?;
                         }
                         // restore state for rowcols[1..i]
                         while i > 1 {
@@ -319,13 +336,27 @@ fn constrain<'a>(
                 let result = Cow::Owned(function.apply(variables)?);
                 if result_already_fixed {
                     if variables[result_ix] == result {
-                        constrain(&constraints[1..], indexes, ranges, variables, asserts)?;
+                        constrain(
+                            &constraints[1..],
+                            indexes,
+                            ranges,
+                            variables,
+                            results,
+                            asserts,
+                        )?;
                     } else {
                         // failed, backtrack
                     }
                 } else {
                     variables[result_ix] = result;
-                    constrain(&constraints[1..], indexes, ranges, variables, asserts)?;
+                    constrain(
+                        &constraints[1..],
+                        indexes,
+                        ranges,
+                        variables,
+                        results,
+                        asserts,
+                    )?;
                 }
             }
             &Constraint::Assert(var_ixes) => {
@@ -335,7 +366,27 @@ fn constrain<'a>(
                     let v2: &Value = variables[var_ixes[2]].borrow();
                     asserts.push([v0.to_owned(), v1.to_owned(), v2.to_owned()]);
                 }
-                constrain(&constraints[1..], indexes, ranges, variables, asserts)?;
+                constrain(
+                    &constraints[1..],
+                    indexes,
+                    ranges,
+                    variables,
+                    results,
+                    asserts,
+                )?;
+            }
+            &Constraint::Debug(ref named_variables) => {
+                for &(_, var_ix) in named_variables.iter() {
+                    results.push(variables[var_ix].clone().into_owned());
+                }
+                constrain(
+                    &constraints[1..],
+                    indexes,
+                    ranges,
+                    variables,
+                    results,
+                    asserts,
+                )?;
             }
         }
     }
@@ -350,7 +401,7 @@ struct Block {
 }
 
 impl Block {
-    fn run(&self, bag: &Bag) -> Result<Vec<[Value; 3]>, String> {
+    fn run(&self, bag: &Bag) -> Result<(Vec<Value>, Vec<[Value; 3]>), String> {
         // TODO strip out this compat layer
         let eavs: Vec<[Value; 3]> = bag.eavs
             .iter()
@@ -398,15 +449,17 @@ impl Block {
         let mut variables: Vec<Cow<Value>> =
             self.variables.iter().map(|v| Cow::Borrowed(v)).collect();
         let mut ranges: Vec<LoHi> = indexes.iter().map(|index| (0, index[0].len())).collect();
+        let mut results = vec![];
         let mut asserts = vec![];
         constrain(
             &*self.constraints,
             &*indexes,
             &mut *ranges,
             &mut *variables,
+            &mut results,
             &mut asserts,
         )?;
-        Ok(asserts)
+        Ok((results, asserts))
     }
 }
 
@@ -428,6 +481,13 @@ impl ExprIr {
     fn is_constant(&self) -> bool {
         match self {
             &ExprIr::Constant(_) => true,
+            _ => false,
+        }
+    }
+
+    fn is_variable(&self) -> bool {
+        match self {
+            &ExprIr::Variable(_) => true,
             _ => false,
         }
     }
@@ -620,7 +680,7 @@ fn compile(block: &BlockAst) -> Result<Block, String> {
 
         // check that something constrains this slot
         if (constants.len() == 0) && (functions.len() == 0) && (rowcols.len() == 0) {
-            return Err(format!("No constraints on slot")); // TODO how to identify?
+            return Err(format!("No constraints on slot {}", slot)); // TODO how to identify?
         }
 
         // after first constant or function, the rest just have to check their result is equal
@@ -679,20 +739,34 @@ fn compile(block: &BlockAst) -> Result<Block, String> {
         ));
     }
 
-    println!(
-        "{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}",
-        expr_irs,
-        pattern_exprs,
-        assert_exprs,
-        expr_group,
-        group_exprs,
-        slot_exprs,
-        expr_slot,
-        row_exprs,
-        row_orderings,
-        values,
-        constraints,
-    );
+    let mut named_variables: Vec<(String, usize)> = vec![];
+    for (slot, exprs) in slot_exprs.iter().enumerate() {
+        if let Some(&ExprIr::Variable(ref name)) =
+            exprs
+                .iter()
+                .map(|&expr| &expr_irs[expr])
+                .filter(|ir| ir.is_variable())
+                .next()
+        {
+            named_variables.push((name.clone(), slot));
+        }
+    }
+    constraints.push(Constraint::Debug(named_variables));
+
+    // println!(
+    //     "{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}",
+    //     expr_irs,
+    //     pattern_exprs,
+    //     assert_exprs,
+    //     expr_group,
+    //     group_exprs,
+    //     slot_exprs,
+    //     expr_slot,
+    //     row_exprs,
+    //     row_orderings,
+    //     values,
+    //     constraints,
+    // );
 
     Ok(Block {
         row_orderings,
@@ -895,19 +969,40 @@ named!(paren_ast(&[u8]) -> ExprAst, do_parse!(
 fn run_code(bag: &Bag, code: &str, cursor: i64) {
     let code_ast = code_ast(code, cursor);
     if let Some(i) = code_ast.focused {
-        print!("{:?}\n\n", code_ast.blocks[i]);
+        // print!("{:?}\n\n", code_ast.blocks[i]);
         let compiled_block = compile(&code_ast.blocks[i]);
         match compiled_block {
             Err(error) => print!("{}\n\n", error),
             Ok(block) => {
-                print!("{:?}\n\n", block);
+                // print!("{:?}\n\n", block);
                 match block.run(&bag) {
                     Err(error) => print!("{}\n\n", error),
-                    Ok(rows) => {
-                        for row in rows.iter() {
-                            print!("{} {} {}\n", row[0], row[1], row[2]);
+                    Ok((results, asserts)) => {
+                        if let Some(&Constraint::Debug(ref named_variables)) =
+                            block.constraints.last()
+                        {
+                            if named_variables.len() > 0 {
+                                for row in results.chunks(named_variables.len()) {
+                                    for (&(ref name, _), value) in
+                                        named_variables.iter().zip(row.iter())
+                                    {
+                                        print!("{}={}\t", name, value);
+                                    }
+                                    print!("\n");
+                                }
+                                print!("\n");
+                            }
                         }
-                        print!("\n\n");
+
+                        for assert in asserts.iter() {
+                            print!(
+                                "+ {}.{} = {}\n",
+                                assert[0],
+                                assert[1].as_str().unwrap(),
+                                assert[2]
+                            );
+                        }
+                        print!("\n");
                     }
                 }
             }

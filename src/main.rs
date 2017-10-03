@@ -968,47 +968,60 @@ named!(paren_ast(&[u8]) -> ExprAst, do_parse!(
 
 fn run_code(bag: &Bag, code: &str, cursor: i64) {
     let code_ast = code_ast(code, cursor);
-    if let Some(i) = code_ast.focused {
-        // print!("{:?}\n\n", code_ast.blocks[i]);
-        let compiled_block = compile(&code_ast.blocks[i]);
-        match compiled_block {
-            Err(error) => print!("{}\n\n", error),
-            Ok(block) => {
-                // print!("{:?}\n\n", block);
-                match block.run(&bag) {
-                    Err(error) => print!("{}\n\n", error),
-                    Ok((results, asserts)) => {
-                        if let Some(&Constraint::Debug(ref named_variables)) =
-                            block.constraints.last()
-                        {
-                            if named_variables.len() > 0 {
-                                for row in results.chunks(named_variables.len()) {
-                                    for (&(ref name, _), value) in
-                                        named_variables.iter().zip(row.iter())
-                                    {
-                                        print!("{}={}\t", name, value);
-                                    }
-                                    print!("\n");
-                                }
-                                print!("\n");
-                            }
-                        }
-
-                        for assert in asserts.iter() {
-                            print!(
-                                "+ {}.{} = {}\n",
-                                assert[0],
-                                assert[1].as_str().unwrap(),
-                                assert[2]
-                            );
-                        }
-                        print!("\n");
+    let mut status: Vec<Result<(Block, Vec<Value>, Vec<[Value; 3]>), String>> = vec![];
+    for block in code_ast.blocks.iter() {
+        // print!("{:?}\n\n", block);
+        if let Some(&Err(ref error)) = block.statements.iter().find(|s| s.is_err()) {
+            status.push(Err(format!("Parse error: {}", error)));
+        } else {
+            match compile(block) {
+                Err(error) => status.push(Err(format!("Compile error: {}", error))),
+                Ok(block) => {
+                    // print!("{:?}\n\n", block);
+                    match block.run(&bag) {
+                        Err(error) => status.push(Err(format!("Run error: {}", error))),
+                        Ok((results, asserts)) => status.push(Ok((block, results, asserts))),
                     }
                 }
             }
         }
+    }
+
+    if let Some(ix) = code_ast.focused {
+        match &status[ix] {
+            &Err(ref error) => print!("{}\n\n", error),
+            &Ok((ref block, ref results, ref asserts)) => {
+                print!(
+                    "Ok: {} results, {} asserts\n\n",
+                    results.len(),
+                    asserts.len()
+                );
+                if let Some(&Constraint::Debug(ref named_variables)) = block.constraints.last() {
+                    if named_variables.len() > 0 {
+                        for row in results.chunks(named_variables.len()) {
+                            for (&(ref name, _), value) in named_variables.iter().zip(row.iter()) {
+                                print!("{}={}\t", name, value);
+                            }
+                            print!("\n");
+                        }
+                        print!("\n");
+                    }
+                }
+
+                for assert in asserts.iter() {
+                    print!(
+                        "+ {}.{} = {}\n",
+                        assert[0],
+                        assert[1].as_str().unwrap(),
+                        assert[2]
+                    );
+                }
+                print!("\n");
+            }
+        }
+
     } else {
-        println!("Nothing focused");
+        print!("Nothing focused\n\n");
     }
 }
 
@@ -1057,7 +1070,7 @@ fn serve_editor() {
                         sender.send_message(&message).unwrap();
                     }
                     OwnedMessage::Text(ref text) => {
-                        println!("Received: {}", text);
+                        // println!("Received: {}", text);
                         let event: EditorEvent = serde_json::from_str(text).unwrap();
                         let mut bag = bag.lock().unwrap();
                         match event {

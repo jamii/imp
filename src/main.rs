@@ -170,8 +170,9 @@ impl Bag {
         entity
     }
 
-    fn insert(&mut self, [e, a, v]: [Value; 3]) {
-        match (e, a, v) {
+    // this takes tuple instead of array because it was triggering some compiler bug
+    fn insert(&mut self, eav: (Value, Value, Value)) {
+        match eav {
             (Value::Entity(e), Value::String(a), v) => self.eavs.insert((e, a), v),
             other => panic!("Weird eav insert: {:?}", other),
         };
@@ -980,8 +981,8 @@ fn run_code(bag: &mut Bag, code: &str, cursor: i64) {
                     match block.run(&bag) {
                         Err(error) => status.push(Err(format!("Run error: {}", error))),
                         Ok((results, asserts)) => {
-                            for assert in asserts.iter() {
-                                bag.insert(assert.clone());
+                            for &[ref e, ref a, ref v] in asserts.iter() {
+                                bag.insert((e.clone(), a.clone(), v.clone()));
                             }
                             status.push(Ok((block, results, asserts)));
                         }
@@ -1076,7 +1077,7 @@ fn serve_editor() {
                     OwnedMessage::Text(ref text) => {
                         // println!("Received: {}", text);
                         let event: EditorEvent = serde_json::from_str(text).unwrap();
-                        let mut bag = bag.lock().unwrap();
+                        let bag = bag.lock().unwrap();
                         match event {
                             EditorEvent::State(code, cursor) => {
                                 print!("\x1b[2J\x1b[1;1H");

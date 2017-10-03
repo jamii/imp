@@ -296,6 +296,7 @@ fn constrain<'a>(
                         // loop over rowcols[1..]
                         let mut i = 1;
                         while i < rowcols.len() {
+                            let (row_ix, col_ix) = rowcols[i];
                             let column = &indexes[row_ix][col_ix];
                             let (old_lo, old_hi) = ranges[row_ix];
                             let lo = gallop(column, old_lo, old_hi, |v| v < value);

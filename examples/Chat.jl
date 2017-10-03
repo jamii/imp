@@ -112,13 +112,7 @@ begin
                       @query text(message) => text begin
                         [td style="width: 100%" "$text"]
                       end
-                      # @query sent_at(message) => sent_at begin
-                      #   [td "$sent_at"]
-                      # end
                       [td 
-                        # @query likes(_, message) begin
-                        #   [div "liked by:"]
-                        # end
                         @query likes(liker, message) begin
                           [div "$liker likes this!"]
                         end

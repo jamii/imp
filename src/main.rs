@@ -971,14 +971,12 @@ fn run_code(bag: &mut Bag, code: &str, cursor: i64) {
     let code_ast = code_ast(code, cursor);
     let mut status: Vec<Result<(Block, Vec<Value>, Vec<[Value; 3]>), String>> = vec![];
     for block in code_ast.blocks.iter() {
-        // print!("{:?}\n\n", block);
         if let Some(&Err(ref error)) = block.statements.iter().find(|s| s.is_err()) {
             status.push(Err(format!("Parse error: {}", error)));
         } else {
             match compile(block) {
                 Err(error) => status.push(Err(format!("Compile error: {}", error))),
                 Ok(block) => {
-                    // print!("{:?}\n\n", block);
                     match block.run(&bag) {
                         Err(error) => status.push(Err(format!("Run error: {}", error))),
                         Ok((results, asserts)) => {
@@ -1023,6 +1021,8 @@ fn run_code(bag: &mut Bag, code: &str, cursor: i64) {
                     );
                 }
                 print!("\n");
+
+                print!("{:?}\n\n{:?}\n\n", code_ast.blocks[ix], block);
             }
         }
 

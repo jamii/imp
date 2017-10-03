@@ -979,7 +979,12 @@ fn run_code(bag: &mut Bag, code: &str, cursor: i64) {
                     // print!("{:?}\n\n", block);
                     match block.run(&bag) {
                         Err(error) => status.push(Err(format!("Run error: {}", error))),
-                        Ok((results, asserts)) => status.push(Ok((block, results, asserts))),
+                        Ok((results, asserts)) => {
+                            for assert in asserts.iter() {
+                                bag.insert(assert.clone());
+                            }
+                            status.push(Ok((block, results, asserts)));
+                        }
                     }
                 }
             }

@@ -165,17 +165,16 @@ impl Bag {
             .collect::<Vec<_>>();
         let entity = Entity { avs: avs.clone() };
         for (attribute, value) in avs {
-            self.insert(entity.clone(), attribute, value);
+            self.eavs.insert((entity.clone(), attribute), value);
         }
         entity
     }
 
-    fn insert<A, V>(&mut self, entity: Entity, attribute: A, value: V)
-    where
-        A: Into<Attribute>,
-        V: Into<Value>,
-    {
-        self.eavs.insert((entity, attribute.into()), value.into());
+    fn insert(&mut self, [e, a, v]: [Value; 3]) {
+        match (e, a, v) {
+            (Value::Entity(e), Value::String(a), v) => self.eavs.insert((e, a), v),
+            other => panic!("Weird eav insert: {:?}", other),
+        };
     }
 }
 

@@ -965,7 +965,7 @@ named!(paren_ast(&[u8]) -> ExprAst, do_parse!(
         (e)
     ));
 
-fn run_code(bag: &Bag, code: &str, cursor: i64) {
+fn run_code(bag: &mut Bag, code: &str, cursor: i64) {
     let code_ast = code_ast(code, cursor);
     let mut status: Vec<Result<(Block, Vec<Value>, Vec<[Value; 3]>), String>> = vec![];
     for block in code_ast.blocks.iter() {
@@ -1075,7 +1075,7 @@ fn serve_editor() {
                         match event {
                             EditorEvent::State(code, cursor) => {
                                 print!("\x1b[2J\x1b[1;1H");
-                                run_code(&*bag, &*code, cursor);
+                                run_code(&mut bag.clone(), &*code, cursor);
                             }
                         }
                     }

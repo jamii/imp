@@ -29,8 +29,9 @@ use std::borrow::Borrow;
 use nom::*;
 
 use std::error::Error;
-use std::io;
-use std::process;
+
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
 struct Entity {
@@ -44,7 +45,7 @@ enum Value {
     Boolean(bool),
     Integer(i64),
     String(String),
-    Entity(Entity),
+    Entity(u64),
 }
 
 impl From<bool> for Value {
@@ -77,17 +78,7 @@ impl std::fmt::Display for Value {
             &Value::Boolean(bool) => bool.fmt(f),
             &Value::Integer(integer) => integer.fmt(f),
             &Value::String(ref string) => write!(f, "{:?}", string),
-            &Value::Entity(ref entity) => {
-                f.write_str("{")?;
-                let mut avs = entity.avs.iter().peekable();
-                while let Some(&(ref a, ref v)) = avs.next() {
-                    write!(f, "{}={}", a, v)?;
-                    if avs.peek().is_some() {
-                        write!(f, ", ")?;
-                    }
-                }
-                f.write_str("}")
-            }
+            &Value::Entity(ref entity) => write!(f, "#{}", entity),
         }
     }
 }
@@ -142,31 +133,30 @@ impl PartialEq<str> for Value {
     }
 }
 
-impl PartialEq<Entity> for Value {
-    fn eq(&self, other: &Entity) -> bool {
-        match self {
-            &Value::Entity(ref this) if this == other => true,
-            _ => false,
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 struct Bag {
-    eavs: BTreeMap<(Entity, Attribute), Value>,
+    entities: HashMap<u64, Entity>,
+    eavs: HashMap<(u64, Attribute), Value>,
 }
 
 impl Bag {
     fn new() -> Self {
-        Bag { eavs: BTreeMap::new() }
+        Bag {
+            entities: HashMap::new(),
+            eavs: HashMap::new(),
+        }
     }
 
-    fn create(&mut self, avs: Vec<(String, Value)>) -> Entity {
+    fn create(&mut self, avs: Vec<(String, Value)>) -> Value {
         let entity = Entity { avs: avs.clone() };
+        let mut hasher = DefaultHasher::new();
+        entity.hash(&mut hasher);
+        let hash = hasher.finish();
+        self.entities.insert(hash, entity);
         for (attribute, value) in avs {
-            self.eavs.insert((entity.clone(), attribute), value);
+            self.eavs.insert((hash, attribute), value);
         }
-        entity
+        Value::Entity(hash)
     }
 
     // this takes tuple instead of array because it was triggering some compiler bug
@@ -212,12 +202,7 @@ fn chinook() -> Result<Bag, Box<Error>> {
         let headers = reader.headers()?.clone();
         for record_or_error in reader.records() {
             let record = record_or_error?;
-            let entity = Value::Entity(bag.create(vec![
-                (
-                    headers[0].to_lowercase(),
-                    parse_chinook(&record[0])
-                ),
-            ]));
+            let entity = bag.create(vec![(headers[0].to_lowercase(), parse_chinook(&record[0]))]);
             for i in 1..record.len() {
                 bag.insert((
                     entity.clone(),
@@ -230,13 +215,13 @@ fn chinook() -> Result<Bag, Box<Error>> {
     Ok(bag)
 }
 
-fn load() -> Bag {
-    let mut file = File::open("/home/jamie/imp.db").unwrap();
-    let mut contents = String::new();
-    file.read_to_string(&mut contents).unwrap();
-    let eavs: Vec<((Entity, Attribute), Value)> = serde_json::from_str(&*contents).unwrap();
-    Bag { eavs: eavs.into_iter().collect() }
-}
+// fn load() -> Bag {
+//     let mut file = File::open("/home/jamie/imp.db").unwrap();
+//     let mut contents = String::new();
+//     file.read_to_string(&mut contents).unwrap();
+//     let eavs: Vec<((Entity, Attribute), Value)> = serde_json::from_str(&*contents).unwrap();
+//     Bag { eavs: eavs.into_iter().collect() }
+// }
 
 fn save(bag: &Bag) {
     let mut file = File::create("/home/jamie/imp.db").unwrap();

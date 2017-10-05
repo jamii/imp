@@ -11,6 +11,7 @@ serde_derive = "*"
 maud = "*"
 pulldown-cmark = "*"
 regex = "*"
+csv = "1.0.0-beta.4"
 
 [dependencies.nom]
 version = "*"

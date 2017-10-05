@@ -9,6 +9,7 @@ extern crate serde_json;
 extern crate serde_derive;
 #[macro_use]
 extern crate nom;
+extern crate csv;
 
 use std::thread;
 use std::sync::{Arc, Mutex};
@@ -26,6 +27,10 @@ use std::borrow::Cow;
 use std::borrow::Borrow;
 
 use nom::*;
+
+use std::error::Error;
+use std::io;
+use std::process;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
 struct Entity {
@@ -156,13 +161,7 @@ impl Bag {
         Bag { eavs: BTreeMap::new() }
     }
 
-    fn create<A>(&mut self, avs: Vec<(A, Value)>) -> Entity
-    where
-        A: Into<Attribute>,
-    {
-        let avs = avs.into_iter()
-            .map(|(a, v)| (a.into(), v))
-            .collect::<Vec<_>>();
+    fn create(&mut self, avs: Vec<(String, Value)>) -> Entity {
         let entity = Entity { avs: avs.clone() };
         for (attribute, value) in avs {
             self.eavs.insert((entity.clone(), attribute), value);
@@ -177,6 +176,58 @@ impl Bag {
             other => panic!("Weird eav insert: {:?}", other),
         };
     }
+}
+
+fn parse_chinook(field: &str) -> Value {
+    match field.parse::<i64>() {
+        Ok(i) => Value::Integer(i),
+        Err(_) => Value::String(field.to_owned()),
+    }
+}
+
+fn chinook() -> Result<Bag, Box<Error>> {
+    let mut bag = Bag::new();
+    for filename in vec![
+        "Album.csv",
+        "Customer.csv",
+        "Genre.csv",
+        "InvoiceLine.csv",
+        "MediaType.csv",
+        "PlaylistTrack.csv",
+        "Artist.csv",
+        "Employee.csv",
+        "Invoice.csv",
+        "Playlist.csv",
+        "Track.csv",
+    ]
+    {
+        let mut reader = csv::ReaderBuilder::new().delimiter(b'\t').from_reader(
+            File::open(
+                format!(
+                    "./data/{}",
+                    filename
+                ),
+            )?,
+        );
+        let headers = reader.headers()?.clone();
+        for record_or_error in reader.records() {
+            let record = record_or_error?;
+            let entity = Value::Entity(bag.create(vec![
+                (
+                    headers[0].to_lowercase(),
+                    parse_chinook(&record[0])
+                ),
+            ]));
+            for i in 1..record.len() {
+                bag.insert((
+                    entity.clone(),
+                    Value::String(headers[i].to_lowercase()),
+                    parse_chinook(&record[i]),
+                ));
+            }
+        }
+    }
+    Ok(bag)
 }
 
 fn load() -> Bag {
@@ -1048,7 +1099,8 @@ enum EditorEvent {
 // }
 
 fn serve_editor() {
-    let bag = Arc::new(Mutex::new(load()));
+    let bag = Arc::new(Mutex::new(chinook().unwrap()));
+    println!("Bag is {:?}", bag);
 
     let server = Server::bind("127.0.0.1:8081").unwrap();
 
@@ -1082,7 +1134,14 @@ fn serve_editor() {
                         match event {
                             EditorEvent::State(code, cursor) => {
                                 print!("\x1b[2J\x1b[1;1H");
+                                let start = ::std::time::Instant::now();
                                 run_code(&mut bag.clone(), &*code, cursor);
+                                let elapsed = start.elapsed();
+                                println!(
+                                    "In {} ms",
+                                    (elapsed.as_secs() * 1_000) +
+                                        (elapsed.subsec_nanos() / 1_000_000) as u64
+                                );
                             }
                         }
                     }

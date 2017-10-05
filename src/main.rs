@@ -1036,17 +1036,17 @@ fn run_code(bag: &mut Bag, code: &str, cursor: i64) {
                 );
                 if let Some(&Constraint::Debug(ref named_variables)) = block.constraints.last() {
                     if named_variables.len() > 0 {
-                        for row in (i, results.chunks(named_variables.len()).take(10)).enumerate() {
+                        for (i, row) in results.chunks(named_variables.len()).take(10).enumerate() {
                             for (&(ref name, _), value) in named_variables.iter().zip(row.iter()) {
                                 print!("{}={}\t", name, value);
                             }
-                            print!("\n");
+                            if i == 9 {
+                                print!("...\n");
+                            } else {
+                                print!("\n");
+                            }
                         }
-                        if i == 9 {
-                            print!("...\n");
-                        } else {
-                            print!("\n");
-                        }
+                        print!("\n");
                     }
                 }
 

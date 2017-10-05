@@ -1084,13 +1084,37 @@ enum EditorEvent {
 // }
 
 fn serve_editor() {
-    let bag = Arc::new(Mutex::new(chinook().unwrap()));
-    println!("Bag is {:?}", bag);
+    let state = Arc::new(Mutex::new(("".to_owned(), 0)));
 
     let server = Server::bind("127.0.0.1:8081").unwrap();
 
+    thread::spawn({
+        let state = state.clone();
+        move || {
+            let bag = chinook().unwrap();
+            println!("Bag is {:?}", bag);
+            let mut last_state = state.lock().unwrap().clone();
+            loop {
+                let state = &*state.lock().unwrap();
+                if *state != last_state {
+                    print!("\x1b[2J\x1b[1;1H");
+                    let &(ref code, cursor) = state;
+                    println!("{} {}", code, cursor);
+                    let start = ::std::time::Instant::now();
+                    run_code(&mut bag.clone(), &*code, cursor);
+                    let elapsed = start.elapsed();
+                    println!(
+                        "In {} ms",
+                        (elapsed.as_secs() * 1_000) + (elapsed.subsec_nanos() / 1_000_000) as u64
+                    );
+                    last_state = state.clone();
+                }
+            }
+        }
+    });
+
     for request in server.filter_map(Result::ok) {
-        let bag = bag.clone();
+        let state = state.clone();
         thread::spawn(move || {
             let client = request.accept().unwrap();
             let ip = client.peer_addr().unwrap();
@@ -1115,18 +1139,9 @@ fn serve_editor() {
                     OwnedMessage::Text(ref text) => {
                         // println!("Received: {}", text);
                         let event: EditorEvent = serde_json::from_str(text).unwrap();
-                        let bag = bag.lock().unwrap();
                         match event {
                             EditorEvent::State(code, cursor) => {
-                                print!("\x1b[2J\x1b[1;1H");
-                                let start = ::std::time::Instant::now();
-                                run_code(&mut bag.clone(), &*code, cursor);
-                                let elapsed = start.elapsed();
-                                println!(
-                                    "In {} ms",
-                                    (elapsed.as_secs() * 1_000) +
-                                        (elapsed.subsec_nanos() / 1_000_000) as u64
-                                );
+                                *state.lock().unwrap() = (code, cursor);
                             }
                         }
                     }

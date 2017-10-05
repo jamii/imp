@@ -202,14 +202,12 @@ fn chinook() -> Result<Bag, Box<Error>> {
         let headers = reader.headers()?.clone();
         for record_or_error in reader.records() {
             let record = record_or_error?;
-            let entity = bag.create(vec![(headers[0].to_lowercase(), parse_chinook(&record[0]))]);
-            for i in 1..record.len() {
-                bag.insert((
-                    entity.clone(),
-                    Value::String(headers[i].to_lowercase()),
-                    parse_chinook(&record[i]),
-                ));
-            }
+            let avs = headers
+                .iter()
+                .map(|s| s.to_lowercase())
+                .zip(record.iter().map(parse_chinook))
+                .collect();
+            bag.create(avs);
         }
     }
     Ok(bag)
@@ -1038,13 +1036,17 @@ fn run_code(bag: &mut Bag, code: &str, cursor: i64) {
                 );
                 if let Some(&Constraint::Debug(ref named_variables)) = block.constraints.last() {
                     if named_variables.len() > 0 {
-                        for row in results.chunks(named_variables.len()) {
+                        for row in (i, results.chunks(named_variables.len()).take(10)).enumerate() {
                             for (&(ref name, _), value) in named_variables.iter().zip(row.iter()) {
                                 print!("{}={}\t", name, value);
                             }
                             print!("\n");
                         }
-                        print!("\n");
+                        if i == 9 {
+                            print!("...\n");
+                        } else {
+                            print!("\n");
+                        }
                     }
                 }
 
@@ -1099,7 +1101,6 @@ fn serve_editor() {
                 if *state != last_state {
                     print!("\x1b[2J\x1b[1;1H");
                     let &(ref code, cursor) = state;
-                    println!("{} {}", code, cursor);
                     let start = ::std::time::Instant::now();
                     run_code(&mut bag.clone(), &*code, cursor);
                     let elapsed = start.elapsed();

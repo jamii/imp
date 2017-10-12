@@ -1029,12 +1029,14 @@ fn run_code(bag: &mut Bag, code: &str, cursor: i64) {
         match &status[ix] {
             &Err(ref error) => print!("{}\n\n", error),
             &Ok((ref block, ref results, ref asserts)) => {
-                print!(
-                    "Ok: {} results, {} asserts\n\n",
-                    results.len(),
-                    asserts.len()
-                );
                 if let Some(&Constraint::Debug(ref named_variables)) = block.constraints.last() {
+
+                    print!(
+                        "Ok: {} results, {} asserts\n\n",
+                        results.len() / named_variables.len(),
+                        asserts.len()
+                    );
+
                     if named_variables.len() > 0 {
                         for (i, row) in results.chunks(named_variables.len()).take(10).enumerate() {
                             for (&(ref name, _), value) in named_variables.iter().zip(row.iter()) {

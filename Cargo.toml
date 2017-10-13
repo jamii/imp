@@ -12,7 +12,15 @@ maud = "*"
 pulldown-cmark = "*"
 regex = "*"
 csv = "1.0.0-beta.4"
+timely = "*"
+abomonation = "*"
 
 [dependencies.nom]
 version = "*"
 features = ["verbose-errors", "nightly"]
+
+[dependencies.graph_map]
+git="https://github.com/frankmcsherry/graph-map.git"
+
+[dependencies.differential-dataflow]
+git="https://github.com/frankmcsherry/differential-dataflow.git"

@@ -11,6 +11,12 @@ extern crate serde_derive;
 extern crate nom;
 extern crate csv;
 
+extern crate timely;
+extern crate differential_dataflow;
+extern crate graph_map;
+#[macro_use]
+extern crate abomonation;
+
 use std::thread;
 use std::sync::{Arc, Mutex};
 
@@ -33,6 +39,20 @@ use std::error::Error;
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
 
+use timely::dataflow::*;
+use timely::dataflow::operators::*;
+
+use differential_dataflow::Collection;
+use differential_dataflow::lattice::Lattice;
+use differential_dataflow::operators::*;
+
+use differential_dataflow::operators::arrange::ArrangeBySelf;
+use differential_dataflow::operators::arrange::ArrangeByKey;
+
+use graph_map::GraphMMap;
+
+use abomonation::Abomonation;
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
 struct Entity {
     avs: Vec<(Attribute, Value)>,
@@ -46,6 +66,40 @@ enum Value {
     Integer(i64),
     String(String),
     Entity(u64),
+}
+
+unsafe_abomonate!(Entity: avs);
+
+impl Abomonation for Value {
+    #[inline]
+    unsafe fn embalm(&mut self) {
+        match self {
+            &mut Value::Boolean(ref mut inner) => inner.embalm(),
+            &mut Value::Integer(ref mut inner) => inner.embalm(),
+            &mut Value::String(ref mut inner) => inner.embalm(),
+            &mut Value::Entity(ref mut inner) => inner.embalm(),
+        }
+    }
+
+    #[inline]
+    unsafe fn entomb(&self, bytes: &mut Vec<u8>) {
+        match self {
+            &Value::Boolean(ref inner) => inner.entomb(bytes),
+            &Value::Integer(ref inner) => inner.entomb(bytes),
+            &Value::String(ref inner) => inner.entomb(bytes),
+            &Value::Entity(ref inner) => inner.entomb(bytes),
+        }
+    }
+
+    #[inline]
+    unsafe fn exhume<'a, 'b>(&'a mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+        match self {
+            &mut Value::Boolean(ref mut inner) => inner.exhume(bytes),
+            &mut Value::Integer(ref mut inner) => inner.exhume(bytes),
+            &mut Value::String(ref mut inner) => inner.exhume(bytes),
+            &mut Value::Entity(ref mut inner) => inner.exhume(bytes),
+        }
+    }
 }
 
 impl From<bool> for Value {
@@ -1157,8 +1211,50 @@ fn serve_editor() {
     }
 }
 
+fn serve_dataflow() {
+    timely::execute_from_args(std::env::args().skip(1), move |worker| {
+
+        let peers = worker.peers();
+        let index = worker.index();
+
+        println!("peers {:?} index {:?}", peers, index);
+
+        let eavs = chinook()
+            .unwrap()
+            .eavs
+            .into_iter()
+            .map(|((e, a), v)| {
+                (
+                    (Value::Entity(e), Value::String(a), v),
+                    Default::default(),
+                    1,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        // println!("loaded {:?} eavs", eavs);
+
+        worker.dataflow::<(), _, _>(move |scope| {
+            let eavs = Collection::new(eavs.to_stream(scope));
+            let e_av = eavs.map(|(e, a, v)| (e, (a, v)));
+            let reports_to = eavs.filter(|&(_, ref a, _)| a == "reportsto")
+                .map(|(e, a, v)| (v.clone(), e.clone()))
+                .arrange_by_key();
+            let by_employee_id = eavs.filter(|&(_, ref a, _)| a == "employeeid")
+                .map(|(e, a, v)| (v.clone(), e.clone()))
+                .arrange_by_key();
+            let reports = reports_to.join_core(&by_employee_id, |key, l, r| {
+                Some((key.clone(), l.clone(), r.clone()))
+            });
+            reports.inspect(|triple| println!("{:?}", triple));
+        });
+
+    }).unwrap();
+}
+
 fn main() {
-    serve_editor();
+    // serve_editor();
+    serve_dataflow();
 }
 
 #[cfg(test)]

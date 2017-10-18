@@ -963,6 +963,8 @@ fn serve_dataflow() {
                 Collection::new(
                     vec![(block.variables.clone(), Default::default(), 1)].to_stream(scope),
                 );
+            let mut asserts: Collection<_, Vec<Value>, _> = Collection::new(vec![].to_stream(scope));
+            let _ = vec![&variables, &asserts]; // hacky way to assert that they both have the same type, rather than filling in the _ on asserts
             for constraint in block.constraints.iter() {
                 match constraint {
                     &Constraint::Join(var, result_already_fixed, ref rcs) => {
@@ -1012,19 +1014,26 @@ fn serve_dataflow() {
                             });
                         }
                     }
-                    &Constraint::Assert(ref vars) => {}
+                    &Constraint::Assert(ref vars) => {
+                        let vars = vars.clone();
+                        asserts = asserts.concat(&variables.map(move |row| get_all(&*row, &vars)));
+                    }
                     &Constraint::Debug(ref names_and_vars) => {
                         let names_and_vars = names_and_vars.clone();
                         variables.inspect(move |&(ref row, _, _)| {
                             let mut output = String::new();
                             for &(ref name, var) in names_and_vars.iter() {
-                                output.push_str(&*format!("{}={:?}\t", name, row[var]));
+                                output.push_str(&*format!("{}={}\t", name, row[var]));
                             }
                             println!("{}", output);
                         });
                     }
                 }
             }
+
+            asserts.inspect(|&(ref row, _, _)| {
+                println!("+ {}.{} = {}", row[0], row[1].as_str().unwrap(), row[2]);
+            });
         });
 
     }).unwrap();

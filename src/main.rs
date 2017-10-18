@@ -312,10 +312,10 @@ enum Function {
 }
 
 impl Function {
-    fn apply(&self, variables: &mut [Cow<Value>]) -> Result<Value, String> {
+    fn apply(&self, variables: &[Value]) -> Result<Value, String> {
         match self {
             &Function::Add(a, b) => {
-                match (variables[a].borrow(), variables[b].borrow()) {
+                match (&variables[a], &variables[b]) {
                     (&Value::Integer(a), &Value::Integer(b)) => Ok(Value::Integer(a + b)),
                     (a, b) => Err(format!("Type error: {} + {}", a, b)),
                 }
@@ -991,6 +991,23 @@ fn serve_dataflow() {
                             rc_var.insert((r, c), var);
                         }
                     }
+                    &Constraint::Apply(var, result_already_fixed, ref function) => {
+                        let var = var.clone();
+                        let function = function.clone();
+                        if result_already_fixed {
+                            variables = variables.filter(move |row| {
+                                let result = function.apply(&*row).unwrap();
+                                row[var] == result
+                            });
+                        } else {
+                            variables = variables.map(move |mut row| {
+                                let result = function.apply(&*row).unwrap();
+                                row[var] = result;
+                                row
+                            });
+                        }
+                    }
+                    &Constraint::Assert(ref vars) => {}
                     &Constraint::Debug(ref names_and_vars) => {
                         let names_and_vars = names_and_vars.clone();
                         variables.inspect(move |&(ref row, _, _)| {
@@ -1001,7 +1018,6 @@ fn serve_dataflow() {
                             println!("{}", output);
                         });
                     }
-                    other => panic!("Unimplemented: {:?}", other),
                 }
             }
         });

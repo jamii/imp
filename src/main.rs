@@ -937,7 +937,7 @@ fn serve_dataflow() {
         let index = worker.index();
         println!("peers {:?} index {:?}", peers, index);
 
-        let eavs = chinook()
+        let mut eavs = chinook()
             .unwrap()
             .eavs
             .into_iter()
@@ -952,92 +952,96 @@ fn serve_dataflow() {
 
         let code = code.clone();
         worker.dataflow::<(), _, _>(move |scope| {
-            let eavs: Collection<_, Vec<Value>, _> = Collection::new(eavs.to_stream(scope));
-            let mut indexes: HashMap<Vec<usize>, _> = HashMap::new();
+            let mut eavs: Collection<_, Vec<Value>, _> = Collection::new(eavs.to_stream(scope));
 
-            let block = compile(&block_ast(&*code)).unwrap();
-            println!("{:?}", block);
+            let code_ast = code_ast(&*code, 0);
 
-            let mut rc_var: HashMap<RowCol, usize> = HashMap::new();
+            for block_ast in code_ast.blocks.iter() {
+                assert!(block_ast.statements.iter().all(|s| s.is_ok()));
+                let block = compile(block_ast).unwrap();
+                println!("{:?}", block);
 
-            let mut variables: Collection<_, Vec<Value>, _> =
-                Collection::new(
-                    vec![(block.variables.clone(), Default::default(), 1)].to_stream(scope),
-                );
-            let mut asserts: Collection<_, Vec<Value>, _> = Collection::new(vec![].to_stream(scope));
-            let _ = vec![&variables, &asserts]; // hacky way to assert that they both have the same type, rather than filling in the _ on asserts
-            for constraint in block.constraints.iter() {
-                match constraint {
-                    &Constraint::Join(var, result_already_fixed, ref rcs) => {
-                        let mut result_already_fixed = result_already_fixed;
-                        for &(r, c) in rcs.iter() {
-                            let r = r.clone();
-                            let c = c.clone();
-                            let mut variables_key = vec![];
-                            let mut eav_key = vec![];
-                            for c2 in 0..3 {
-                                if (c2 == c) && result_already_fixed {
-                                    variables_key.push(var);
-                                    eav_key.push(c);
+                let mut rc_var: HashMap<RowCol, usize> = HashMap::new();
+                
+                let mut variables: Collection<_, Vec<Value>, _> =
+                    Collection::new(
+                        vec![(block.variables.clone(), Default::default(), 1)].to_stream(scope),
+                    );
+                let mut asserts: Collection<_, Vec<Value>, _> = Collection::new(vec![].to_stream(scope));
+                let _ = vec![&variables, &asserts]; // hacky way to assert that they both have the same type, rather than filling in the _ on asserts
+                for constraint in block.constraints.iter() {
+                    match constraint {
+                        &Constraint::Join(var, result_already_fixed, ref rcs) => {
+                            let mut result_already_fixed = result_already_fixed;
+                            for &(r, c) in rcs.iter() {
+                                let r = r.clone();
+                                let c = c.clone();
+                                let mut variables_key = vec![];
+                                let mut eav_key = vec![];
+                                for c2 in 0..3 {
+                                    if (c2 == c) && result_already_fixed {
+                                        variables_key.push(var);
+                                        eav_key.push(c);
+                                    }
+                                    if let Some(&var2) = rc_var.get(&(r, c2)) {
+                                        variables_key.push(var2);
+                                        eav_key.push(c2);
+                                    }
                                 }
-                                if let Some(&var2) = rc_var.get(&(r, c2)) {
-                                    variables_key.push(var2);
-                                    eav_key.push(c2);
-                                }
-                            }
-                            let index = indexes.entry(eav_key.clone()).or_insert_with(|| {
-                                eavs
+                                let index = eavs
                                     .map(move |row| (get_all(&*row, &*eav_key), row))
+                                    .arrange_by_key();
+                                variables = variables
+                                    .map(move |row| (get_all(&*row, &*variables_key), row))
                                     .arrange_by_key()
-                            });
-                            variables = variables
-                                .map(move |row| (get_all(&*row, &*variables_key), row))
-                                .arrange_by_key()
-                                .join_core(index, move |_key, row, eav| {
-                                    let mut row = row.clone();
-                                    row[var] = eav[c].clone();
-                                    vec![row]
-                                });
-                            result_already_fixed = true;
-                            rc_var.insert((r, c), var);
-                        }
-                    }
-                    &Constraint::Apply(var, result_already_fixed, ref function) => {
-                        let var = var.clone();
-                        let function = function.clone();
-                        if result_already_fixed {
-                            variables = variables.filter(move |row| {
-                                let result = function.apply(&*row).unwrap();
-                                row[var] == result
-                            });
-                        } else {
-                            variables = variables.map(move |mut row| {
-                                let result = function.apply(&*row).unwrap();
-                                row[var] = result;
-                                row
-                            });
-                        }
-                    }
-                    &Constraint::Assert(ref vars) => {
-                        let vars = vars.clone();
-                        asserts = asserts.concat(&variables.map(move |row| get_all(&*row, &vars)));
-                    }
-                    &Constraint::Debug(ref names_and_vars) => {
-                        let names_and_vars = names_and_vars.clone();
-                        variables.inspect(move |&(ref row, _, _)| {
-                            let mut output = String::new();
-                            for &(ref name, var) in names_and_vars.iter() {
-                                output.push_str(&*format!("{}={}\t", name, row[var]));
+                                    .join_core(&index, move |_key, row, eav| {
+                                        let mut row = row.clone();
+                                        row[var] = eav[c].clone();
+                                        vec![row]
+                                    });
+                                result_already_fixed = true;
+                                rc_var.insert((r, c), var);
                             }
-                            println!("{}", output);
-                        });
+                        }
+                        &Constraint::Apply(var, result_already_fixed, ref function) => {
+                            let var = var.clone();
+                            let function = function.clone();
+                            if result_already_fixed {
+                                variables = variables.filter(move |row| {
+                                    let result = function.apply(&*row).unwrap();
+                                    row[var] == result
+                                });
+                            } else {
+                                variables = variables.map(move |mut row| {
+                                    let result = function.apply(&*row).unwrap();
+                                    row[var] = result;
+                                    row
+                                });
+                            }
+                        }
+                        &Constraint::Assert(ref vars) => {
+                            let vars = vars.clone();
+                            asserts = asserts.concat(&variables.map(move |row| get_all(&*row, &vars)));
+                        }
+                        &Constraint::Debug(ref names_and_vars) => {
+                            let names_and_vars = names_and_vars.clone();
+                            variables.inspect(move |&(ref row, _, _)| {
+                                let mut output = String::new();
+                                for &(ref name, var) in names_and_vars.iter() {
+                                    output.push_str(&*format!("{}={}\t", name, row[var]));
+                                }
+                                println!("{}", output);
+                            });
+                        }
                     }
                 }
-            }
 
-            asserts.inspect(|&(ref row, _, _)| {
-                println!("+ {}.{} = {}", row[0], row[1].as_str().unwrap(), row[2]);
-            });
+                asserts.inspect(|&(ref row, _, _)| {
+                    println!("+ {}.{} = {}", row[0], row[1].as_str().unwrap(), row[2]);
+                });
+
+                eavs = eavs.concat(&asserts);
+            }
         });
 
     }).unwrap();

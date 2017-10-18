@@ -953,6 +953,7 @@ fn serve_dataflow() {
         let code = code.clone();
         worker.dataflow::<(), _, _>(move |scope| {
             let eavs: Collection<_, Vec<Value>, _> = Collection::new(eavs.to_stream(scope));
+            let mut indexes: HashMap<Vec<usize>, _> = HashMap::new();
 
             let block = compile(&block_ast(&*code)).unwrap();
             println!("{:?}", block);
@@ -974,22 +975,25 @@ fn serve_dataflow() {
                             let c = c.clone();
                             let mut variables_key = vec![];
                             let mut eav_key = vec![];
-                            if result_already_fixed {
-                                variables_key.push(var);
-                                eav_key.push(c);
-                            }
                             for c2 in 0..3 {
+                                if (c2 == c) && result_already_fixed {
+                                    variables_key.push(var);
+                                    eav_key.push(c);
+                                }
                                 if let Some(&var2) = rc_var.get(&(r, c2)) {
                                     variables_key.push(var2);
                                     eav_key.push(c2);
                                 }
                             }
-                            let index = eavs.map(move |row| (get_all(&*row, &*eav_key), row))
-                                .arrange_by_key();
+                            let index = indexes.entry(eav_key.clone()).or_insert_with(|| {
+                                eavs
+                                    .map(move |row| (get_all(&*row, &*eav_key), row))
+                                    .arrange_by_key()
+                            });
                             variables = variables
                                 .map(move |row| (get_all(&*row, &*variables_key), row))
                                 .arrange_by_key()
-                                .join_core(&index, move |_key, row, eav| {
+                                .join_core(index, move |_key, row, eav| {
                                     let mut row = row.clone();
                                     row[var] = eav[c].clone();
                                     vec![row]

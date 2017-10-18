@@ -329,157 +329,10 @@ type RowCol = (usize, usize);
 
 #[derive(Debug, Clone)]
 enum Constraint {
-    Narrow(RowCol, usize),
-    Join(Vec<RowCol>, usize),
+    Join(usize, bool, Vec<RowCol>),
     Apply(usize, bool, Function),
     Assert([usize; 3]),
     Debug(Vec<(String, usize)>),
-}
-
-fn constrain<'a>(
-    constraints: &[Constraint],
-    indexes: &'a [[Vec<Value>; 3]],
-    ranges: &mut [LoHi],
-    variables: &mut [Cow<'a, Value>],
-    results: &mut Vec<Value>,
-    asserts: &mut Vec<[Value; 3]>,
-) -> Result<(), String> {
-    if constraints.len() > 0 {
-        match &constraints[0] {
-            &Constraint::Narrow((row_ix, col_ix), var_ix) => {
-                let (old_lo, old_hi) = ranges[row_ix];
-                let column = &indexes[row_ix][col_ix];
-                let (lo, hi) = {
-                    let value = variables[var_ix].borrow();
-                    let lo = gallop(column, old_lo, old_hi, |v| v < value);
-                    let hi = gallop(column, lo, old_hi, |v| v <= value);
-                    (lo, hi)
-                };
-                if lo < hi {
-                    ranges[row_ix] = (lo, hi);
-                    variables[var_ix] = Cow::Borrowed(&column[lo]);
-                    constrain(
-                        &constraints[1..],
-                        indexes,
-                        ranges,
-                        variables,
-                        results,
-                        asserts,
-                    )?;
-                    ranges[row_ix] = (old_lo, old_hi);
-                }
-            }
-            &Constraint::Join(ref rowcols, var_ix) => {
-                let mut buffer = vec![(0, 0); rowcols.len()]; // TODO pre-allocate
-                let (row_ix, col_ix) = rowcols[0]; // TODO pick smallest
-                let column = &indexes[row_ix][col_ix];
-                let (old_lo, old_hi) = ranges[row_ix];
-                let mut lo = old_lo;
-                // loop over rowcols[0]
-                while lo < old_hi {
-                    let value = &column[lo];
-                    let hi = gallop(column, lo + 1, old_hi, |v| v <= value);
-                    ranges[row_ix] = (lo, hi);
-                    {
-                        // loop over rowcols[1..]
-                        let mut i = 1;
-                        while i < rowcols.len() {
-                            let (row_ix, col_ix) = rowcols[i];
-                            let column = &indexes[row_ix][col_ix];
-                            let (old_lo, old_hi) = ranges[row_ix];
-                            let lo = gallop(column, old_lo, old_hi, |v| v < value);
-                            let hi = gallop(column, lo, old_hi, |v| v <= value);
-                            if lo < hi {
-                                ranges[row_ix] = (lo, hi);
-                                buffer[i] = (old_lo, old_hi);
-                                i += 1;
-                            } else {
-                                break;
-                            }
-                        }
-                        // if all succeeded, continue with rest of constraints
-                        if i == rowcols.len() {
-                            variables[var_ix] = Cow::Borrowed(&column[lo]);
-                            constrain(
-                                &constraints[1..],
-                                indexes,
-                                ranges,
-                                variables,
-                                results,
-                                asserts,
-                            )?;
-                        }
-                        // restore state for rowcols[1..i]
-                        while i > 1 {
-                            i -= 1;
-                            let (row_ix, _) = rowcols[i];
-                            ranges[row_ix] = buffer[i];
-                        }
-                    }
-                    lo = hi;
-                }
-                // restore state for rowcols[0]
-                ranges[row_ix] = (old_lo, old_hi);
-            }
-            &Constraint::Apply(result_ix, result_already_fixed, ref function) => {
-                let result = Cow::Owned(function.apply(variables)?);
-                if result_already_fixed {
-                    if variables[result_ix] == result {
-                        constrain(
-                            &constraints[1..],
-                            indexes,
-                            ranges,
-                            variables,
-                            results,
-                            asserts,
-                        )?;
-                    } else {
-                        // failed, backtrack
-                    }
-                } else {
-                    variables[result_ix] = result;
-                    constrain(
-                        &constraints[1..],
-                        indexes,
-                        ranges,
-                        variables,
-                        results,
-                        asserts,
-                    )?;
-                }
-            }
-            &Constraint::Assert(var_ixes) => {
-                {
-                    let v0: &Value = variables[var_ixes[0]].borrow();
-                    let v1: &Value = variables[var_ixes[1]].borrow();
-                    let v2: &Value = variables[var_ixes[2]].borrow();
-                    asserts.push([v0.to_owned(), v1.to_owned(), v2.to_owned()]);
-                }
-                constrain(
-                    &constraints[1..],
-                    indexes,
-                    ranges,
-                    variables,
-                    results,
-                    asserts,
-                )?;
-            }
-            &Constraint::Debug(ref named_variables) => {
-                for &(_, var_ix) in named_variables.iter() {
-                    results.push(variables[var_ix].clone().into_owned());
-                }
-                constrain(
-                    &constraints[1..],
-                    indexes,
-                    ranges,
-                    variables,
-                    results,
-                    asserts,
-                )?;
-            }
-        }
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -487,69 +340,6 @@ struct Block {
     row_orderings: Vec<[usize; 3]>,
     variables: Vec<Value>,
     constraints: Vec<Constraint>,
-}
-
-impl Block {
-    fn run(&self, bag: &Bag) -> Result<(Vec<Value>, Vec<[Value; 3]>), String> {
-        // TODO strip out this compat layer
-        let eavs: Vec<[Value; 3]> = bag.eavs
-            .iter()
-            .map(|(&(ref e, ref a), v)| {
-                [
-                    Value::Entity(e.clone()),
-                    Value::String(a.clone()),
-                    v.clone(),
-                ]
-            })
-            .collect();
-        let indexes: Vec<[Vec<Value>; 3]> = self.row_orderings
-            .iter()
-            .map(|row_ordering| {
-                let mut ordered_eavs: Vec<[Value; 3]> = eavs.iter()
-                    .map(|eav| {
-                        [
-                            eav[row_ordering[0]].clone(),
-                            eav[row_ordering[1]].clone(),
-                            eav[row_ordering[2]].clone(),
-                        ]
-                    })
-                    .collect();
-                ordered_eavs.sort_unstable();
-                let mut reverse_ordering = [0, 0, 0];
-                for i in 0..3 {
-                    reverse_ordering[row_ordering[i]] = i;
-                }
-                [
-                    ordered_eavs
-                        .iter()
-                        .map(|eav| eav[reverse_ordering[0]].clone())
-                        .collect(),
-                    ordered_eavs
-                        .iter()
-                        .map(|eav| eav[reverse_ordering[1]].clone())
-                        .collect(),
-                    ordered_eavs
-                        .iter()
-                        .map(|eav| eav[reverse_ordering[2]].clone())
-                        .collect(),
-                ]
-            })
-            .collect();
-        let mut variables: Vec<Cow<Value>> =
-            self.variables.iter().map(|v| Cow::Borrowed(v)).collect();
-        let mut ranges: Vec<LoHi> = indexes.iter().map(|index| (0, index[0].len())).collect();
-        let mut results = vec![];
-        let mut asserts = vec![];
-        constrain(
-            &*self.constraints,
-            &*indexes,
-            &mut *ranges,
-            &mut *variables,
-            &mut results,
-            &mut asserts,
-        )?;
-        Ok((results, asserts))
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -805,15 +595,8 @@ fn compile(block: &BlockAst) -> Result<Block, String> {
             }
         }
 
-        // if there is already a value just look it up in indexes
-        // otherwise join indexes
-        if slot_fixed_yet {
-            for &(row, col) in rowcols.iter() {
-                constraints.push(Constraint::Narrow((row, col), slot));
-            }
-        } else {
-            constraints.push(Constraint::Join(rowcols, slot));
-        }
+        // and then joins
+        constraints.push(Constraint::Join(slot, slot_fixed_yet, rowcols));
     }
 
     // asserts are constraints too
@@ -1055,76 +838,6 @@ named!(paren_ast(&[u8]) -> ExprAst, do_parse!(
         (e)
     ));
 
-fn run_code(bag: &mut Bag, code: &str, cursor: i64) {
-    let code_ast = code_ast(code, cursor);
-    let mut status: Vec<Result<(Block, Vec<Value>, Vec<[Value; 3]>), String>> = vec![];
-    for block in code_ast.blocks.iter() {
-        if let Some(&Err(ref error)) = block.statements.iter().find(|s| s.is_err()) {
-            status.push(Err(format!("Parse error: {}", error)));
-        } else {
-            match compile(block) {
-                Err(error) => status.push(Err(format!("Compile error: {}", error))),
-                Ok(block) => {
-                    match block.run(&bag) {
-                        Err(error) => status.push(Err(format!("Run error: {}", error))),
-                        Ok((results, asserts)) => {
-                            for &[ref e, ref a, ref v] in asserts.iter() {
-                                bag.insert((e.clone(), a.clone(), v.clone()));
-                            }
-                            status.push(Ok((block, results, asserts)));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some(ix) = code_ast.focused {
-        match &status[ix] {
-            &Err(ref error) => print!("{}\n\n", error),
-            &Ok((ref block, ref results, ref asserts)) => {
-                if let Some(&Constraint::Debug(ref named_variables)) = block.constraints.last() {
-
-                    print!(
-                        "Ok: {} results, {} asserts\n\n",
-                        results.len() / named_variables.len(),
-                        asserts.len()
-                    );
-
-                    if named_variables.len() > 0 {
-                        for (i, row) in results.chunks(named_variables.len()).take(10).enumerate() {
-                            for (&(ref name, _), value) in named_variables.iter().zip(row.iter()) {
-                                print!("{}={}\t", name, value);
-                            }
-                            if i == 9 {
-                                print!("...\n");
-                            } else {
-                                print!("\n");
-                            }
-                        }
-                        print!("\n");
-                    }
-                }
-
-                for assert in asserts.iter() {
-                    print!(
-                        "+ {}.{} = {}\n",
-                        assert[0],
-                        assert[1].as_str().unwrap(),
-                        assert[2]
-                    );
-                }
-                print!("\n");
-
-                print!("{:?}\n\n{:?}\n\n", code_ast.blocks[ix], block);
-            }
-        }
-
-    } else {
-        print!("Nothing focused\n\n");
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 enum EditorEvent {
     State(String, i64),
@@ -1158,7 +871,7 @@ fn serve_editor() {
                     print!("\x1b[2J\x1b[1;1H");
                     let &(ref code, cursor) = state;
                     let start = ::std::time::Instant::now();
-                    run_code(&mut bag.clone(), &*code, cursor);
+                    // run_code(&mut bag.clone(), &*code, cursor);
                     let elapsed = start.elapsed();
                     println!(
                         "In {} ms",
@@ -1211,12 +924,15 @@ fn serve_editor() {
     }
 }
 
+fn get_all(row: &[Value], key: &[usize]) -> Vec<Value> {
+    key.iter().map(|&ix| row[ix].clone()).collect()
+}
+
 fn serve_dataflow() {
     timely::execute_from_args(std::env::args().skip(1), move |worker| {
 
         let peers = worker.peers();
         let index = worker.index();
-
         println!("peers {:?} index {:?}", peers, index);
 
         let eavs = chinook()
@@ -1225,28 +941,69 @@ fn serve_dataflow() {
             .into_iter()
             .map(|((e, a), v)| {
                 (
-                    (Value::Entity(e), Value::String(a), v),
+                    vec![Value::Entity(e), Value::String(a), v],
                     Default::default(),
                     1,
                 )
             })
             .collect::<Vec<_>>();
 
-        // println!("loaded {:?} eavs", eavs);
-
         worker.dataflow::<(), _, _>(move |scope| {
-            let eavs = Collection::new(eavs.to_stream(scope));
-            let e_av = eavs.map(|(e, a, v)| (e, (a, v)));
-            let reports_to = eavs.filter(|&(_, ref a, _)| a == "reportsto")
-                .map(|(e, a, v)| (v.clone(), e.clone()))
-                .arrange_by_key();
-            let by_employee_id = eavs.filter(|&(_, ref a, _)| a == "employeeid")
-                .map(|(e, a, v)| (v.clone(), e.clone()))
-                .arrange_by_key();
-            let reports = reports_to.join_core(&by_employee_id, |key, l, r| {
-                Some((key.clone(), l.clone(), r.clone()))
-            });
-            reports.inspect(|triple| println!("{:?}", triple));
+            let eavs: Collection<_, Vec<Value>, _> = Collection::new(eavs.to_stream(scope));
+
+            let block = compile(&block_ast("b.employeeid = eid\ne.reportsto = eid")).unwrap();
+            let mut rc_var: HashMap<RowCol, usize> = HashMap::new();
+
+            let mut variables: Collection<_, Vec<Value>, _> =
+                Collection::new(
+                    vec![(block.variables.clone(), Default::default(), 1)].to_stream(scope),
+                );
+            for constraint in block.constraints.iter() {
+                match constraint {
+                    &Constraint::Join(var, result_already_fixed, ref rcs) => {
+                        let mut result_already_fixed = result_already_fixed;
+                        for &(r, c) in rcs.iter() {
+                            let r = r.clone();
+                            let c = c.clone();
+                            let mut variables_key = vec![];
+                            let mut eav_key = vec![];
+                            if result_already_fixed {
+                                variables_key.push(var);
+                                eav_key.push(c);
+                            }
+                            for c2 in 0..3 {
+                                if let Some(&var2) = rc_var.get(&(r, c2)) {
+                                    variables_key.push(var2);
+                                    eav_key.push(c2);
+                                }
+                            }
+                            let index = eavs.map(move |row| (get_all(&*row, &*eav_key), row))
+                                .arrange_by_key();
+                            variables = variables
+                                .map(move |row| (get_all(&*row, &*variables_key), row))
+                                .arrange_by_key()
+                                .join_core(&index, move |_key, row, eav| {
+                                    let mut row = row.clone();
+                                    row[var] = eav[c].clone();
+                                    vec![row]
+                                });
+                            result_already_fixed = true;
+                            rc_var.insert((r, c), var);
+                        }
+                    }
+                    &Constraint::Debug(ref names_and_vars) => {
+                        let names_and_vars = names_and_vars.clone();
+                        variables.inspect(move |&(ref row, _, _)| {
+                            let mut output = String::new();
+                            for &(ref name, var) in names_and_vars.iter() {
+                                output.push_str(&*format!("{}={:?}\t", name, row[var]));
+                            }
+                            println!("{}", output);
+                        });
+                    }
+                    other => panic!("Unimplemented: {:?}", other),
+                }
+            }
         });
 
     }).unwrap();

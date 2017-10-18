@@ -929,6 +929,8 @@ fn get_all(row: &[Value], key: &[usize]) -> Vec<Value> {
 }
 
 fn serve_dataflow() {
+    let code = std::env::args().skip(1).next().unwrap();
+    println!("Running:\n{}", code);
     timely::execute_from_args(std::env::args().skip(1), move |worker| {
 
         let peers = worker.peers();
@@ -948,10 +950,13 @@ fn serve_dataflow() {
             })
             .collect::<Vec<_>>();
 
+        let code = code.clone();
         worker.dataflow::<(), _, _>(move |scope| {
             let eavs: Collection<_, Vec<Value>, _> = Collection::new(eavs.to_stream(scope));
 
-            let block = compile(&block_ast("b.employeeid = eid\ne.reportsto = eid")).unwrap();
+            let block = compile(&block_ast(&*code)).unwrap();
+            println!("{:?}", block);
+
             let mut rc_var: HashMap<RowCol, usize> = HashMap::new();
 
             let mut variables: Collection<_, Vec<Value>, _> =

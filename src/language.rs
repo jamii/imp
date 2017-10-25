@@ -222,7 +222,7 @@ pub enum Constraint {
 
 #[derive(Debug, Clone)]
 pub struct Block {
-    pub row_orderings: Vec<[usize; 3]>,
+    pub row_orderings: Vec<Vec<usize>>,
     pub variables: Vec<Value>,
     pub constraints: Vec<Constraint>,
     pub result_vars: Vec<(String, usize)>,
@@ -398,10 +398,10 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
     }
 
     // choose row indexes with columns in the order they appear in the slots
-    let row_orderings: Vec<[usize; 3]> = row_exprs
+    let row_orderings: Vec<Vec<usize>> = row_exprs
         .iter()
         .map(|exprs| {
-            let mut ordering = [0, 1, 2];
+            let mut ordering = vec![0, 1, 2];
             ordering.sort_unstable_by_key(|&ix| expr_slot[exprs[ix]]);
             ordering
         })

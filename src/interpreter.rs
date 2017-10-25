@@ -37,7 +37,7 @@ type LoHi = (usize, usize);
 
 fn constrain<'a>(
     constraints: &[Constraint],
-    indexes: &'a [[Vec<Value>; 3]],
+    indexes: &'a [Vec<Vec<Value>>],
     ranges: &mut [LoHi],
     variables: &mut [Cow<'a, Value>],
     result_vars: &[(String, usize)],
@@ -185,37 +185,25 @@ impl Block {
                 ]
             })
             .collect();
-        let indexes: Vec<[Vec<Value>; 3]> = self.row_orderings
+        let indexes: Vec<Vec<Vec<Value>>> = self.row_orderings
             .iter()
             .map(|row_ordering| {
-                let mut ordered_eavs: Vec<[Value; 3]> = eavs.iter()
+                let mut ordered_eavs: Vec<Vec<Value>> = eavs.iter()
                     .map(|eav| {
-                        [
-                            eav[row_ordering[0]].clone(),
-                            eav[row_ordering[1]].clone(),
-                            eav[row_ordering[2]].clone(),
-                        ]
+                        row_ordering.iter().map(|&ix| eav[ix].clone()).collect()
                     })
                     .collect();
                 ordered_eavs.sort_unstable();
-                let mut reverse_ordering = [0, 0, 0];
-                for i in 0..3 {
-                    reverse_ordering[row_ordering[i]] = i;
+                let mut reverse_ordering = vec![0; row_ordering.len()];
+                for (i, &ix) in row_ordering.iter().enumerate() {
+                    reverse_ordering[ix] = i;
                 }
-                [
-                    ordered_eavs
-                        .iter()
-                        .map(|eav| eav[reverse_ordering[0]].clone())
-                        .collect(),
-                    ordered_eavs
-                        .iter()
-                        .map(|eav| eav[reverse_ordering[1]].clone())
-                        .collect(),
-                    ordered_eavs
-                        .iter()
-                        .map(|eav| eav[reverse_ordering[2]].clone())
-                        .collect(),
-                ]
+                reverse_ordering
+                    .iter()
+                    .map(|&ix| {
+                        ordered_eavs.iter().map(|eav| eav[ix].clone()).collect()
+                    })
+                    .collect()
             })
             .collect();
         let mut variables: Vec<Cow<Value>> =

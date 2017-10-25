@@ -39,7 +39,7 @@ fn constrain<'a>(
     constraints: &[Constraint],
     indexes: &'a [Vec<Vec<Value>>],
     ranges: &mut [LoHi],
-    variables: &mut [Cow<'a, Value>],
+    variables: &mut [Value<'a>],
     result_vars: &[(String, usize)],
     results: &mut Vec<Value>,
 ) -> Result<(), String> {
@@ -113,7 +113,7 @@ fn constrain<'a>(
                             }
                             // if all succeeded, continue with rest of constraints
                             if i == rowcols.len() {
-                                variables[var_ix] = Cow::Borrowed(&column[lo]);
+                                variables[var_ix] = column[lo].really_borrow();
                                 constrain(
                                     &constraints[1..],
                                     indexes,
@@ -137,7 +137,7 @@ fn constrain<'a>(
                 }
             }
             &Constraint::Apply(result_ix, result_already_fixed, ref function) => {
-                let result = Cow::Owned(function.apply(variables)?);
+                let result = function.apply(variables)?;
                 if result_already_fixed {
                     if variables[result_ix] == result {
                         constrain(
@@ -166,21 +166,21 @@ fn constrain<'a>(
         }
     } else {
         for &(_, var_ix) in result_vars.iter() {
-            results.push(variables[var_ix].clone().into_owned());
+            results.push(variables[var_ix].really_to_owned());
         }
     }
     Ok(())
 }
 
 impl Block {
-    fn run(&self, bag: &Bag) -> Result<Vec<Value>, String> {
+    fn run(&self, bag: &Bag) -> Result<Vec<Value<'static>>, String> {
         // TODO strip out this compat layer
         let eavs: Vec<[Value; 3]> = bag.eavs
             .iter()
             .map(|(&(ref e, ref a), v)| {
                 [
                     Value::Entity(e.clone()),
-                    Value::String(a.clone()),
+                    Value::String(Cow::Owned(a.clone())),
                     v.clone(),
                 ]
             })
@@ -206,8 +206,7 @@ impl Block {
                     .collect()
             })
             .collect();
-        let mut variables: Vec<Cow<Value>> =
-            self.variables.iter().map(|v| Cow::Borrowed(v)).collect();
+        let mut variables: Vec<Value> = self.variables.clone();
         let mut ranges: Vec<LoHi> = indexes.iter().map(|index| (0, index[0].len())).collect();
         let mut results = vec![];
         constrain(

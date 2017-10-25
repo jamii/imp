@@ -2,7 +2,7 @@ use std::fs::File;
 
 use std::collections::HashMap;
 use std::iter::Iterator;
-use std::borrow::Borrow;
+use std::borrow::{Cow, Borrow};
 
 use nom::*;
 
@@ -13,58 +13,78 @@ use std::collections::hash_map::DefaultHasher;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
 pub struct Entity {
-    pub avs: Vec<(Attribute, Value)>,
+    pub avs: Vec<(Attribute, Value<'static>)>,
 }
 
 pub type Attribute = String;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
-pub enum Value {
+pub enum Value<'a> {
     Boolean(bool),
     Integer(i64),
-    String(String),
+    String(Cow<'a, str>),
     Entity(u64),
 }
 
-impl From<bool> for Value {
-    fn from(bool: bool) -> Value {
+impl<'a> From<bool> for Value<'a> {
+    fn from(bool: bool) -> Value<'a> {
         Value::Boolean(bool)
     }
 }
 
-impl From<i64> for Value {
-    fn from(integer: i64) -> Value {
+impl<'a> From<i64> for Value<'a> {
+    fn from(integer: i64) -> Value<'a> {
         Value::Integer(integer)
     }
 }
 
-impl From<String> for Value {
-    fn from(string: String) -> Value {
-        Value::String(string)
+impl<'a> From<String> for Value<'a> {
+    fn from(string: String) -> Value<'a> {
+        Value::String(Cow::Owned(string))
     }
 }
 
-impl<'a> From<&'a str> for Value {
-    fn from(string: &'a str) -> Value {
-        Value::String(string.to_owned())
+impl<'a> From<&'a str> for Value<'a> {
+    fn from(string: &'a str) -> Value<'a> {
+        Value::String(Cow::Borrowed(string))
     }
 }
 
-impl ::std::fmt::Display for Value {
+impl<'a> ::std::fmt::Display for Value<'a> {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         match self {
             &Value::Boolean(bool) => bool.fmt(f),
             &Value::Integer(integer) => integer.fmt(f),
             &Value::String(ref string) => write!(f, "{:?}", string),
-            &Value::Entity(ref entity) => write!(f, "#{}", entity),
+            &Value::Entity(entity) => write!(f, "#{}", entity),
         }
     }
 }
 
-impl Value {
+impl<'a> Value<'a> {
+    // for various reasons, we can't implement Borrow, Clone or ToOwned usefully
+
+    pub fn really_borrow(&'a self) -> Self {
+        match self {
+            &Value::Boolean(bool) => Value::Boolean(bool),
+            &Value::Integer(integer) => Value::Integer(integer),
+            &Value::String(ref string) => Value::String(Cow::Borrowed(string.borrow())),
+            &Value::Entity(entity) => Value::Entity(entity),
+        }
+    }
+
+    pub fn really_to_owned(&self) -> Value<'static> {
+        match self {
+            &Value::Boolean(bool) => Value::Boolean(bool),
+            &Value::Integer(integer) => Value::Integer(integer),
+            &Value::String(ref string) => Value::String(Cow::Owned(string.as_ref().to_owned())),
+            &Value::Entity(entity) => Value::Entity(entity),
+        }
+    }
+
     pub fn as_str(&self) -> Option<&str> {
         match self {
-            &Value::String(ref this) => Some(this),
+            &Value::String(ref this) => Some(&*this),
             _ => None,
         }
     }
@@ -84,7 +104,7 @@ impl Value {
     }
 }
 
-impl PartialEq<bool> for Value {
+impl<'a> PartialEq<bool> for Value<'a> {
     fn eq(&self, other: &bool) -> bool {
         match self {
             &Value::Boolean(ref this) if this == other => true,
@@ -93,7 +113,7 @@ impl PartialEq<bool> for Value {
     }
 }
 
-impl PartialEq<i64> for Value {
+impl<'a> PartialEq<i64> for Value<'a> {
     fn eq(&self, other: &i64) -> bool {
         match self {
             &Value::Integer(ref this) if this == other => true,
@@ -102,7 +122,7 @@ impl PartialEq<i64> for Value {
     }
 }
 
-impl PartialEq<str> for Value {
+impl<'a> PartialEq<str> for Value<'a> {
     fn eq(&self, other: &str) -> bool {
         match self {
             &Value::String(ref this) if this == other => true,
@@ -114,7 +134,7 @@ impl PartialEq<str> for Value {
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct Bag {
     pub entities: HashMap<u64, Entity>,
-    pub eavs: HashMap<(u64, Attribute), Value>,
+    pub eavs: HashMap<(u64, Attribute), Value<'static>>,
 }
 
 impl Bag {
@@ -125,7 +145,7 @@ impl Bag {
         }
     }
 
-    pub fn create(&mut self, avs: Vec<(String, Value)>) -> Value {
+    pub fn create(&mut self, avs: Vec<(String, Value<'static>)>) -> Value<'static> {
         let entity = Entity { avs: avs.clone() };
         let mut hasher = DefaultHasher::new();
         entity.hash(&mut hasher);
@@ -138,18 +158,18 @@ impl Bag {
     }
 
     // this takes tuple instead of array because it was triggering some compiler bug
-    pub fn insert(&mut self, eav: (Value, Value, Value)) {
+    pub fn insert(&mut self, eav: (Value<'static>, Value<'static>, Value<'static>)) {
         match eav {
-            (Value::Entity(e), Value::String(a), v) => self.eavs.insert((e, a), v),
+            (Value::Entity(e), Value::String(a), v) => self.eavs.insert((e, a.into_owned()), v),
             other => panic!("Weird eav insert: {:?}", other),
         };
     }
 }
 
-fn parse_chinook(field: &str) -> Value {
+fn parse_chinook(field: &str) -> Value<'static> {
     match field.parse::<i64>() {
         Ok(i) => Value::Integer(i),
-        Err(_) => Value::String(field.to_owned()),
+        Err(_) => Value::String(Cow::Owned(field.to_owned())),
     }
 }
 
@@ -197,13 +217,10 @@ pub enum Function {
 }
 
 impl Function {
-    pub fn apply<V>(&self, variables: &[V]) -> Result<Value, String>
-    where
-        V: Borrow<Value>,
-    {
+    pub fn apply<'a>(&self, variables: &[Value<'a>]) -> Result<Value<'static>, String> {
         match self {
             &Function::Add(a, b) => {
-                match (variables[a].borrow(), variables[b].borrow()) {
+                match (&variables[a], &variables[b]) {
                     (&Value::Integer(a), &Value::Integer(b)) => Ok(Value::Integer(a + b)),
                     (a, b) => Err(format!("Type error: {} + {}", a, b)),
                 }
@@ -223,14 +240,14 @@ pub enum Constraint {
 #[derive(Debug, Clone)]
 pub struct Block {
     pub row_orderings: Vec<Vec<usize>>,
-    pub variables: Vec<Value>,
+    pub variables: Vec<Value<'static>>,
     pub constraints: Vec<Constraint>,
     pub result_vars: Vec<(String, usize)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum ExprIr {
-    Constant(Value),
+    Constant(Value<'static>),
     Variable(String),
     Function(FunctionIr),
     Dot(usize, usize),
@@ -523,7 +540,7 @@ pub struct BlockAst {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExprAst {
-    Constant(Value),
+    Constant(Value<'static>),
     Variable(String),
     Function(FunctionAst),
     Dot(Box<ExprAst>, Box<ExprAst>),
@@ -602,7 +619,7 @@ named!(assert_ast(&[u8]) -> StatementAst, do_parse!(
     tag!("=") >>
     opt!(space) >>
     v: expr_ast >>
-    (StatementAst::Assert([e, ExprAst::Constant(Value::String(a)), v]))
+    (StatementAst::Assert([e, ExprAst::Constant(Value::String(Cow::Owned(a))), v]))
 ));
 
 named!(pattern_ast(&[u8]) -> StatementAst, do_parse!(
@@ -621,7 +638,7 @@ named!(expr_ast(&[u8]) -> ExprAst, do_parse!(
         ({
             let mut e = e;
             for t in ts {
-                e = ExprAst::Dot(Box::new(e), Box::new(ExprAst::Constant(Value::String(t))));
+                e = ExprAst::Dot(Box::new(e), Box::new(ExprAst::Constant(Value::String(Cow::Owned(t)))));
             }
             if let Some((name, arg)) = f {
                 e = ExprAst::Function(FunctionAst{name, args: vec![e, arg]});
@@ -670,10 +687,10 @@ named!(symbol_ast(&[u8]) -> String, map_res!(
     |b| ::std::str::from_utf8(b).map(|s| s.to_owned())
 ));
 
-named!(value_ast(&[u8]) -> Value, alt!(
+named!(value_ast(&[u8]) -> Value<'static>, alt!(
     map!(integer_ast, Value::Integer) |
     map!(boolean_ast, Value::Boolean) |
-    map!(string_ast, Value::String)
+    map!(string_ast, |s| Value::String(Cow::Owned(s)))
 ));
 
 named!(integer_ast(&[u8]) -> i64, map_res!(

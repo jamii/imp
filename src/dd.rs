@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::iter::Iterator;
+use std::borrow::Cow;
 
 // use timely::dataflow::*;
 use timely::dataflow::operators::*;
@@ -15,13 +16,13 @@ use language::*;
 
 unsafe_abomonate!(Entity: avs);
 
-impl Abomonation for Value {
+impl<'a> Abomonation for Value<'a> {
     #[inline]
     unsafe fn embalm(&mut self) {
         match self {
             &mut Value::Boolean(ref mut inner) => inner.embalm(),
             &mut Value::Integer(ref mut inner) => inner.embalm(),
-            &mut Value::String(ref mut inner) => inner.embalm(),
+            &mut Value::String(ref mut inner) => inner.to_mut().embalm(),
             &mut Value::Entity(ref mut inner) => inner.embalm(),
         }
     }
@@ -31,23 +32,24 @@ impl Abomonation for Value {
         match self {
             &Value::Boolean(ref inner) => inner.entomb(bytes),
             &Value::Integer(ref inner) => inner.entomb(bytes),
-            &Value::String(ref inner) => inner.entomb(bytes),
+            // TODO why isn't entomb implemented for &str?
+            &Value::String(ref inner) => inner.as_ref().to_owned().entomb(bytes),
             &Value::Entity(ref inner) => inner.entomb(bytes),
         }
     }
 
     #[inline]
-    unsafe fn exhume<'a, 'b>(&'a mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+    unsafe fn exhume<'b>(&mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
         match self {
             &mut Value::Boolean(ref mut inner) => inner.exhume(bytes),
             &mut Value::Integer(ref mut inner) => inner.exhume(bytes),
-            &mut Value::String(ref mut inner) => inner.exhume(bytes),
+            &mut Value::String(ref mut inner) => inner.to_mut().exhume(bytes),
             &mut Value::Entity(ref mut inner) => inner.exhume(bytes),
         }
     }
 }
 
-fn get_all(row: &[Value], key: &[usize]) -> Vec<Value> {
+fn get_all<'a>(row: &[Value<'a>], key: &[usize]) -> Vec<Value<'a>> {
     key.iter().map(|&ix| row[ix].clone()).collect()
 }
 
@@ -66,7 +68,7 @@ pub fn serve_dataflow() {
             .into_iter()
             .map(|((e, a), v)| {
                 (
-                    vec![Value::Entity(e), Value::String(a), v],
+                    vec![Value::Entity(e), Value::String(Cow::Owned(a)), v],
                     Default::default(),
                     1,
                 )
@@ -75,7 +77,8 @@ pub fn serve_dataflow() {
 
         let code = code.clone();
         worker.dataflow::<(), _, _>(move |scope| {
-            let eavs: Collection<_, Vec<Value>, _> = Collection::new(eavs.to_stream(scope));
+            let eavs: Collection<_, Vec<Value<'static>>, _> =
+                Collection::new(eavs.to_stream(scope));
 
             let code_ast = code_ast(&*code, 0);
 
@@ -86,7 +89,7 @@ pub fn serve_dataflow() {
 
                 let mut rc_var: HashMap<RowCol, usize> = HashMap::new();
 
-                let mut variables: Collection<_, Vec<Value>, _> =
+                let mut variables: Collection<_, Vec<Value<'static>>, _> =
                     Collection::new(
                         vec![(block.variables.clone(), Default::default(), 1)].to_stream(scope),
                     );

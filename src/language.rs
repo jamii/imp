@@ -218,8 +218,6 @@ pub type RowCol = (usize, usize);
 pub enum Constraint {
     Join(usize, bool, Vec<RowCol>),
     Apply(usize, bool, Function),
-    Assert([usize; 3]),
-    Debug(Vec<(String, usize)>),
 }
 
 #[derive(Debug, Clone)]
@@ -227,6 +225,7 @@ pub struct Block {
     pub row_orderings: Vec<[usize; 3]>,
     pub variables: Vec<Value>,
     pub constraints: Vec<Constraint>,
+    pub result_vars: Vec<(String, usize)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -489,19 +488,8 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
         constraints.push(Constraint::Join(slot, slot_fixed_yet, rowcols));
     }
 
-    // asserts are constraints too
-    // TODO constraints is the wrong name for anything that includes asserts
-    for exprs in assert_exprs.iter() {
-        constraints.push(Constraint::Assert(
-            [
-                expr_slot[exprs[0]],
-                expr_slot[exprs[1]],
-                expr_slot[exprs[2]],
-            ],
-        ));
-    }
-
-    let mut named_variables: Vec<(String, usize)> = vec![];
+    // for now, just output any named variable
+    let mut result_vars: Vec<(String, usize)> = vec![];
     for (slot, exprs) in slot_exprs.iter().enumerate() {
         if let Some(&ExprIr::Variable(ref name)) =
             exprs
@@ -510,15 +498,15 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
                 .filter(|ir| ir.is_variable())
                 .next()
         {
-            named_variables.push((name.clone(), slot));
+            result_vars.push((name.clone(), slot));
         }
     }
-    constraints.push(Constraint::Debug(named_variables));
 
     Ok(Block {
         row_orderings,
         variables: values,
         constraints,
+        result_vars,
     })
 }
 

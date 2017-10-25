@@ -40,8 +40,8 @@ fn constrain<'a>(
     indexes: &'a [[Vec<Value>; 3]],
     ranges: &mut [LoHi],
     variables: &mut [Cow<'a, Value>],
+    result_vars: &[(String, usize)],
     results: &mut Vec<Value>,
-    asserts: &mut Vec<[Value; 3]>,
 ) -> Result<(), String> {
     if constraints.len() > 0 {
         match &constraints[0] {
@@ -74,8 +74,8 @@ fn constrain<'a>(
                             indexes,
                             ranges,
                             variables,
+                            result_vars,
                             results,
-                            asserts,
                         )?;
                     }
                     // restore state for rowcols[0..i]
@@ -119,8 +119,8 @@ fn constrain<'a>(
                                     indexes,
                                     ranges,
                                     variables,
+                                    result_vars,
                                     results,
-                                    asserts,
                                 )?;
                             }
                             // restore state for rowcols[1..i]
@@ -145,8 +145,8 @@ fn constrain<'a>(
                             indexes,
                             ranges,
                             variables,
+                            result_vars,
                             results,
-                            asserts,
                         )?;
                     } else {
                         // failed, backtrack
@@ -158,47 +158,22 @@ fn constrain<'a>(
                         indexes,
                         ranges,
                         variables,
+                        result_vars,
                         results,
-                        asserts,
                     )?;
                 }
             }
-            &Constraint::Assert(var_ixes) => {
-                {
-                    let v0: &Value = variables[var_ixes[0]].borrow();
-                    let v1: &Value = variables[var_ixes[1]].borrow();
-                    let v2: &Value = variables[var_ixes[2]].borrow();
-                    asserts.push([v0.to_owned(), v1.to_owned(), v2.to_owned()]);
-                }
-                constrain(
-                    &constraints[1..],
-                    indexes,
-                    ranges,
-                    variables,
-                    results,
-                    asserts,
-                )?;
-            }
-            &Constraint::Debug(ref named_variables) => {
-                for &(_, var_ix) in named_variables.iter() {
-                    results.push(variables[var_ix].clone().into_owned());
-                }
-                constrain(
-                    &constraints[1..],
-                    indexes,
-                    ranges,
-                    variables,
-                    results,
-                    asserts,
-                )?;
-            }
+        }
+    } else {
+        for &(_, var_ix) in result_vars.iter() {
+            results.push(variables[var_ix].clone().into_owned());
         }
     }
     Ok(())
 }
 
 impl Block {
-    fn run(&self, bag: &Bag) -> Result<(Vec<Value>, Vec<[Value; 3]>), String> {
+    fn run(&self, bag: &Bag) -> Result<Vec<Value>, String> {
         // TODO strip out this compat layer
         let eavs: Vec<[Value; 3]> = bag.eavs
             .iter()
@@ -247,22 +222,21 @@ impl Block {
             self.variables.iter().map(|v| Cow::Borrowed(v)).collect();
         let mut ranges: Vec<LoHi> = indexes.iter().map(|index| (0, index[0].len())).collect();
         let mut results = vec![];
-        let mut asserts = vec![];
         constrain(
             &*self.constraints,
             &*indexes,
             &mut *ranges,
             &mut *variables,
+            &*self.result_vars,
             &mut results,
-            &mut asserts,
         )?;
-        Ok((results, asserts))
+        Ok(results)
     }
 }
 
 pub fn run_code(bag: &mut Bag, code: &str, cursor: i64) {
     let code_ast = code_ast(code, cursor);
-    let mut status: Vec<Result<(Block, Vec<Value>, Vec<[Value; 3]>), String>> = vec![];
+    let mut status: Vec<Result<(Block, Vec<Value>), String>> = vec![];
     for block in code_ast.blocks.iter() {
         if let Some(&Err(ref error)) = block.statements.iter().find(|s| s.is_err()) {
             status.push(Err(format!("Parse error: {}", error)));
@@ -272,11 +246,8 @@ pub fn run_code(bag: &mut Bag, code: &str, cursor: i64) {
                 Ok(block) => {
                     match block.run(&bag) {
                         Err(error) => status.push(Err(format!("Run error: {}", error))),
-                        Ok((results, asserts)) => {
-                            for &[ref e, ref a, ref v] in asserts.iter() {
-                                bag.insert((e.clone(), a.clone(), v.clone()));
-                            }
-                            status.push(Ok((block, results, asserts)));
+                        Ok(results) => {
+                            status.push(Ok((block, results)));
                         }
                     }
                 }
@@ -287,39 +258,24 @@ pub fn run_code(bag: &mut Bag, code: &str, cursor: i64) {
     if let Some(ix) = code_ast.focused {
         match &status[ix] {
             &Err(ref error) => print!("{}\n\n", error),
-            &Ok((ref block, ref results, ref asserts)) => {
-                if let Some(&Constraint::Debug(ref named_variables)) = block.constraints.last() {
+            &Ok((ref block, ref results)) => {
+                let result_vars = &block.result_vars;
 
-                    print!(
-                        "Ok: {} results, {} asserts\n\n",
-                        results.len() / named_variables.len(),
-                        asserts.len()
-                    );
+                print!("Ok: {} results\n\n", results.len() / result_vars.len());
 
-                    if named_variables.len() > 0 {
-                        for (i, row) in results.chunks(named_variables.len()).take(10).enumerate() {
-                            for (&(ref name, _), value) in named_variables.iter().zip(row.iter()) {
-                                print!("{}={}\t", name, value);
-                            }
-                            if i == 9 {
-                                print!("...\n");
-                            } else {
-                                print!("\n");
-                            }
+                if result_vars.len() > 0 {
+                    for (i, row) in results.chunks(result_vars.len()).take(10).enumerate() {
+                        for (&(ref name, _), value) in result_vars.iter().zip(row.iter()) {
+                            print!("{}={}\t", name, value);
                         }
-                        print!("\n");
+                        if i == 9 {
+                            print!("...\n");
+                        } else {
+                            print!("\n");
+                        }
                     }
+                    print!("\n");
                 }
-
-                for assert in asserts.iter() {
-                    print!(
-                        "+ {}.{} = {}\n",
-                        assert[0],
-                        assert[1].as_str().unwrap(),
-                        assert[2]
-                    );
-                }
-                print!("\n");
 
                 print!("{:?}\n\n{:?}\n\n", code_ast.blocks[ix], block);
             }

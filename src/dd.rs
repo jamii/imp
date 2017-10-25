@@ -75,7 +75,7 @@ pub fn serve_dataflow() {
 
         let code = code.clone();
         worker.dataflow::<(), _, _>(move |scope| {
-            let mut eavs: Collection<_, Vec<Value>, _> = Collection::new(eavs.to_stream(scope));
+            let eavs: Collection<_, Vec<Value>, _> = Collection::new(eavs.to_stream(scope));
 
             let code_ast = code_ast(&*code, 0);
 
@@ -85,13 +85,11 @@ pub fn serve_dataflow() {
                 println!("{:?}", block);
 
                 let mut rc_var: HashMap<RowCol, usize> = HashMap::new();
-                
+
                 let mut variables: Collection<_, Vec<Value>, _> =
                     Collection::new(
                         vec![(block.variables.clone(), Default::default(), 1)].to_stream(scope),
                     );
-                let mut asserts: Collection<_, Vec<Value>, _> = Collection::new(vec![].to_stream(scope));
-                let _ = vec![&variables, &asserts]; // hacky way to assert that they both have the same type, rather than filling in the _ on asserts
                 for constraint in block.constraints.iter() {
                     match constraint {
                         &Constraint::Join(var, result_already_fixed, ref rcs) => {
@@ -111,8 +109,7 @@ pub fn serve_dataflow() {
                                         eav_key.push(c2);
                                     }
                                 }
-                                let index = eavs
-                                    .map(move |row| (get_all(&*row, &*eav_key), row))
+                                let index = eavs.map(move |row| (get_all(&*row, &*eav_key), row))
                                     .arrange_by_key();
                                 variables = variables
                                     .map(move |row| (get_all(&*row, &*variables_key), row))
@@ -142,28 +139,17 @@ pub fn serve_dataflow() {
                                 });
                             }
                         }
-                        &Constraint::Assert(ref vars) => {
-                            let vars = vars.clone();
-                            asserts = asserts.concat(&variables.map(move |row| get_all(&*row, &vars)));
-                        }
-                        &Constraint::Debug(ref names_and_vars) => {
-                            let names_and_vars = names_and_vars.clone();
-                            variables.inspect(move |&(ref row, _, _)| {
-                                let mut output = String::new();
-                                for &(ref name, var) in names_and_vars.iter() {
-                                    output.push_str(&*format!("{}={}\t", name, row[var]));
-                                }
-                                println!("{}", output);
-                            });
-                        }
                     }
                 }
 
-                asserts.inspect(|&(ref row, _, _)| {
-                    println!("+ {}.{} = {}", row[0], row[1].as_str().unwrap(), row[2]);
+                let result_vars = block.result_vars.clone();
+                variables.inspect(move |&(ref row, _, _)| {
+                    let mut output = String::new();
+                    for &(ref name, var) in result_vars.iter() {
+                        output.push_str(&*format!("{}={}\t", name, row[var]));
+                    }
+                    println!("{}", output);
                 });
-
-                eavs = eavs.concat(&asserts);
             }
         });
 

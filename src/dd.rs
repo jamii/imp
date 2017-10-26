@@ -83,8 +83,7 @@ pub fn serve_dataflow() {
             let code_ast = code_ast(&*code, 0);
 
             for block_ast in code_ast.blocks.iter() {
-                assert!(block_ast.statements.iter().all(|s| s.is_ok()));
-                let block = plan(block_ast).unwrap();
+                let block = plan(&block_ast.as_ref().unwrap()).unwrap();
                 println!("{:?}", block);
 
                 let mut rc_var: HashMap<RowCol, usize> = HashMap::new();

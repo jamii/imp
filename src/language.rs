@@ -1,6 +1,6 @@
 use std::fs::File;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::iter::Iterator;
 use std::borrow::{Cow, Borrow};
 
@@ -79,27 +79,6 @@ impl<'a> Value<'a> {
             &Value::Integer(integer) => Value::Integer(integer),
             &Value::String(ref string) => Value::String(Cow::Owned(string.as_ref().to_owned())),
             &Value::Entity(entity) => Value::Entity(entity),
-        }
-    }
-
-    pub fn as_str(&self) -> Option<&str> {
-        match self {
-            &Value::String(ref this) => Some(&*this),
-            _ => None,
-        }
-    }
-
-    pub fn as_i64(&self) -> Option<i64> {
-        match self {
-            &Value::Integer(this) => Some(this),
-            _ => None,
-        }
-    }
-
-    pub fn as_bool(&self) -> Option<bool> {
-        match self {
-            &Value::Boolean(this) => Some(this),
-            _ => None,
         }
     }
 }
@@ -239,125 +218,88 @@ pub enum Constraint {
 
 #[derive(Debug, Clone)]
 pub struct Block {
+    pub row_names: Vec<String>,
     pub row_orderings: Vec<Vec<usize>>,
     pub variables: Vec<Value<'static>>,
     pub constraints: Vec<Constraint>,
     pub result_vars: Vec<(String, usize)>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum ExprIr {
-    Constant(Value<'static>),
-    Variable(String),
-    Function(FunctionIr),
-    Dot(usize, usize),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct FunctionIr {
-    name: String,
-    args: Vec<usize>,
-}
-
-impl ExprIr {
+impl ExprAst {
     fn is_constant(&self) -> bool {
         match self {
-            &ExprIr::Constant(_) => true,
+            &ExprAst::Constant(_) => true,
             _ => false,
         }
     }
 
     fn is_variable(&self) -> bool {
         match self {
-            &ExprIr::Variable(_) => true,
+            &ExprAst::Variable(_) => true,
             _ => false,
         }
     }
 
     fn is_function(&self) -> bool {
         match self {
-            &ExprIr::Function(_) => true,
+            &ExprAst::Relation(ref name, _) => {
+                match &**name {
+                    "+" => true,
+                    _ => false,
+                }
+            }
             _ => false,
         }
     }
 }
 
-fn translate(expr: &ExprAst, output_expr_irs: &mut Vec<ExprIr>) -> usize {
-    let expr = match expr {
-        &ExprAst::Constant(ref value) => ExprIr::Constant(value.clone()),
-        &ExprAst::Variable(ref variable) => ExprIr::Variable(variable.clone()),
-        &ExprAst::Function(FunctionAst { ref name, ref args }) => ExprIr::Function(FunctionIr {
-            name: name.clone(),
-            args: args.iter().map(|e| translate(e, output_expr_irs)).collect(),
-        }),
-        &ExprAst::Dot(ref expr1, ref expr2) => {
-            ExprIr::Dot(
-                translate(expr1, output_expr_irs),
-                translate(expr2, output_expr_irs),
-            )
-        }
-    };
-    output_expr_irs.push(expr);
-    output_expr_irs.len() - 1
+pub fn upsert<'a, T: Eq + Hash>(
+    t_ix: &mut HashMap<&'a T, usize>,
+    ts: &mut Vec<&'a T>,
+    t: &'a T,
+) -> usize {
+    if let Some(&ix) = t_ix.get(&t) {
+        ix
+    } else {
+        let ix = ts.len();
+        ts.push(t);
+        t_ix.insert(t, ix);
+        ix
+    }
 }
 
 pub fn plan(block: &BlockAst) -> Result<Block, String> {
 
-    // label exprs in pre-order and flatten tree
-    let mut expr_irs: Vec<ExprIr> = vec![];
-    let mut pattern_exprs: Vec<[usize; 2]> = vec![];
-    let mut assert_exprs: Vec<[usize; 3]> = vec![];
-    for statement_or_error in block.statements.iter() {
-        match statement_or_error {
-            &Ok(ref statement) => {
-                match statement {
-                    &StatementAst::Pattern([ref e1, ref e2]) => {
-                        pattern_exprs.push(
-                            [
-                                translate(e1, &mut expr_irs),
-                                translate(e2, &mut expr_irs),
-                            ],
-                        );
-                    }
-                    &StatementAst::Assert([ref e, ref a, ref v]) => {
-                        assert_exprs.push(
-                            [
-                                translate(e, &mut expr_irs),
-                                translate(a, &mut expr_irs),
-                                translate(v, &mut expr_irs),
-                            ],
-                        );
-                    }
+    // flatten tree
+    let mut expr_ix: HashMap<&ExprAst, usize> = HashMap::new();
+    let mut exprs: Vec<&ExprAst> = Vec::new();
+    let mut eq_exprs: HashSet<(&ExprAst, &ExprAst)> = HashSet::new();
+    let mut remaining_statements = vec![&block.body];
+    while let Some(statement) = remaining_statements.pop() {
+        match statement {
+            &StatementAst::Expr(ref expr) => {
+                upsert(&mut expr_ix, &mut exprs, expr);
+            }
+            &StatementAst::Equals(ref expr1, ref expr2) => {
+                upsert(&mut expr_ix, &mut exprs, expr1);
+                upsert(&mut expr_ix, &mut exprs, expr2);
+                eq_exprs.insert((expr1, expr2));
+            }
+            &StatementAst::Conjunction(ref statements) => {
+                for statement in statements.iter() {
+                    remaining_statements.push(statement);
                 }
             }
-            &Err(_) => (),
         }
     }
 
     // group exprs that must be equal
-    let mut expr_group: Vec<usize> = (0..expr_irs.len()).collect();
-
-    // all variables with same name must be equal
-    let mut variable_group: HashMap<&str, usize> = HashMap::new();
-    for (expr, ir) in expr_irs.iter().enumerate() {
-        match ir {
-            &ExprIr::Variable(ref variable) => {
-                match variable_group.get(&**variable) {
-                    Some(&group) => expr_group[expr] = group,
-                    None => {
-                        variable_group.insert(variable, expr);
-                    }
-                }
-            }
-            _ => (),
-        }
-    }
-
-    // both exprs in a top-level pattern (eg a = 2) must be equal
-    for &[expr1, expr2] in pattern_exprs.iter() {
-        let group1 = expr_group[expr1];
-        let group2 = expr_group[expr2];
-        for group in expr_group.iter_mut() {
+    let mut expr_group: HashMap<&ExprAst, usize> =
+        exprs.iter().enumerate().map(|(i, &e)| (e, i)).collect();
+    for &(expr1, expr2) in eq_exprs.iter() {
+        let group1 = *expr_group.get(expr1).unwrap();
+        let group2 = *expr_group.get(expr2).unwrap();
+        for (_, group) in expr_group.iter_mut() {
             if *group == group2 {
                 *group = group1;
             }
@@ -365,32 +307,28 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
     }
 
     // gather up groups
-    let mut group_exprs: HashMap<usize, Vec<usize>> = HashMap::new();
-    for (expr, group) in expr_group.iter().enumerate() {
+    let mut group_exprs: HashMap<usize, Vec<&ExprAst>> = HashMap::new();
+    for (expr, group) in expr_group.iter() {
         group_exprs.entry(*group).or_insert_with(|| vec![]).push(
             expr,
         );
     }
 
     // sort by order of appearance in code
-    let mut slot_exprs: Vec<Vec<usize>> = group_exprs
+    let mut slot_exprs: Vec<Vec<&ExprAst>> = group_exprs
         .iter()
         .map(|(_, exprs)| {
             let mut exprs = exprs.clone();
-            exprs.sort_unstable();
+            exprs.sort_unstable_by_key(|e| expr_ix.get(e));
             exprs
         })
         .collect();
-    slot_exprs.sort_unstable_by_key(|exprs| exprs[0]);
+    slot_exprs.sort_unstable_by_key(|exprs| expr_ix.get(exprs[0]));
 
     // move slots that contain constants and no functions to the start
     for slot in 0..slot_exprs.len() {
-        if slot_exprs[slot].iter().any(
-            |&expr| expr_irs[expr].is_constant(),
-        ) &&
-            slot_exprs[slot].iter().all(
-                |&expr| !expr_irs[expr].is_function(),
-            )
+        if slot_exprs[slot].iter().any(|e| e.is_constant()) &&
+            slot_exprs[slot].iter().all(|e| !e.is_function())
         {
             let exprs = slot_exprs.remove(slot);
             slot_exprs.insert(0, exprs);
@@ -398,18 +336,24 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
     }
 
     // index in the other direction
-    let mut expr_slot: Vec<usize> = (0..expr_irs.len()).collect();
+    let mut expr_slot: HashMap<&ExprAst, usize> = HashMap::new();
     for (slot, exprs) in slot_exprs.iter().enumerate() {
         for expr in exprs.iter() {
-            expr_slot[*expr] = slot;
+            expr_slot.insert(expr, slot);
         }
     }
 
     // collect exprs that directly query the database
-    let mut row_exprs: Vec<[usize; 3]> = vec![];
-    for (v, ir) in expr_irs.iter().enumerate() {
-        match ir {
-            &ExprIr::Dot(e, a) => row_exprs.push([e, a, v]),
+    let mut row_names: Vec<String> = vec![];
+    let mut row_exprs: Vec<Vec<&ExprAst>> = vec![];
+    for &expr in exprs.iter() {
+        match expr {
+            &ExprAst::Relation(ref name, ref args) if !expr.is_function() => {
+                let mut args: Vec<&ExprAst> = args.iter().collect();
+                args.push(expr); // the value attached to the row
+                row_names.push(name.clone());
+                row_exprs.push(args);
+            }
             _ => (),
         }
     }
@@ -418,8 +362,8 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
     let row_orderings: Vec<Vec<usize>> = row_exprs
         .iter()
         .map(|exprs| {
-            let mut ordering = vec![0, 1, 2];
-            ordering.sort_unstable_by_key(|&ix| expr_slot[exprs[ix]]);
+            let mut ordering: Vec<usize> = (0..exprs.len()).collect();
+            ordering.sort_unstable_by_key(|&ix| expr_slot.get(exprs[ix]));
             ordering
         })
         .collect();
@@ -431,15 +375,15 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
     let mut constraints: Vec<Constraint> = vec![];
     for (slot, exprs) in slot_exprs.iter().enumerate() {
         // gather up everything that constrains this slot
-        let constants: Vec<&ExprIr> = exprs
+        let constants: Vec<&ExprAst> = exprs
             .iter()
-            .map(|&expr| &expr_irs[expr])
-            .filter(|ir| ir.is_constant())
+            .map(|&e| e)
+            .filter(|e| e.is_constant())
             .collect();
-        let functions: Vec<&ExprIr> = exprs
+        let functions: Vec<&ExprAst> = exprs
             .iter()
-            .map(|&expr| &expr_irs[expr])
-            .filter(|ir| ir.is_function())
+            .map(|&e| e)
+            .filter(|e| e.is_function())
             .collect();
         let mut rowcols: Vec<(usize, usize)> = vec![];
         for expr in exprs.iter() {
@@ -465,16 +409,16 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
 
         // check that something constrains this slot
         if (constants.len() == 0) && (functions.len() == 0) && (rowcols.len() == 0) {
-            return Err(format!("No constraints on slot {}", slot)); // TODO how to identify?
+            return Err(format!("No constraints on slot {}", slot)); // TODO how to report?
         }
 
         // after first constant or function, the rest just have to check their result is equal
         let mut slot_fixed_yet = false;
 
-        // constants just get stuck in the values vec
+        // constants just go in the values vec
         if constants.len() > 0 {
             values[slot] = match constants[0] {
-                &ExprIr::Constant(ref value) => value.clone(),
+                &ExprAst::Constant(ref value) => value.clone(),
                 _ => unreachable!(),
             };
             slot_fixed_yet = true;
@@ -483,9 +427,11 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
         // functions get run next
         for function in functions.iter() {
             match function {
-                &&ExprIr::Function(FunctionIr { ref name, ref args }) => {
+                &&ExprAst::Relation(ref name, ref args) => {
                     let function = match (&**name, &**args) {
-                        ("+", &[a, b]) => Function::Add(expr_slot[a], expr_slot[b]),
+                        ("+", &[ref a, ref b]) => {
+                            Function::Add(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
+                        }
                         _ => {
                             return Err(format!(
                                 "I don't know any function called {:?} with {} arguments",
@@ -508,11 +454,11 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
     // for now, just output any named variable
     let mut result_vars: Vec<(String, usize)> = vec![];
     for (slot, exprs) in slot_exprs.iter().enumerate() {
-        if let Some(&ExprIr::Variable(ref name)) =
+        if let Some(&ExprAst::Variable(ref name)) =
             exprs
                 .iter()
-                .map(|&expr| &expr_irs[expr])
-                .filter(|ir| ir.is_variable())
+                .map(|&expr| expr)
+                .filter(|expr| expr.is_variable())
                 .next()
         {
             result_vars.push((name.clone(), slot));
@@ -520,6 +466,7 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
     }
 
     Ok(Block {
+        row_names,
         row_orderings,
         variables: values,
         constraints,
@@ -529,36 +476,30 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
 
 #[derive(Debug, Clone)]
 pub struct CodeAst {
-    pub blocks: Vec<BlockAst>,
+    pub blocks: Vec<Result<BlockAst, String>>,
     pub focused: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
 pub struct BlockAst {
-    pub statements: Vec<Result<StatementAst, String>>,
+    pub body: StatementAst,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ExprAst {
     Constant(Value<'static>),
     Variable(String),
-    Function(FunctionAst),
-    Dot(Box<ExprAst>, Box<ExprAst>),
+    Relation(String, Vec<ExprAst>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FunctionAst {
-    name: String,
-    args: Vec<ExprAst>,
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum StatementAst {
-    Pattern([ExprAst; 2]),
-    Assert([ExprAst; 3]),
+    Expr(ExprAst),
+    Equals(ExprAst, ExprAst),
+    Conjunction(Vec<StatementAst>),
 }
 
-fn simplify_errors<Output>(result: IResult<&[u8], Output>) -> Result<Output, String> {
+pub fn simplify_errors<Output>(result: IResult<&[u8], Output>) -> Result<Output, String> {
     match result {
         IResult::Done(remaining, output) => {
             if remaining.len() <= 1 {
@@ -578,7 +519,7 @@ fn simplify_errors<Output>(result: IResult<&[u8], Output>) -> Result<Output, Str
 
 pub fn code_ast(text: &str, cursor: i64) -> CodeAst {
     let blocks = text.split("\n\n")
-        .map(|block| block_ast(block))
+        .map(|block| simplify_errors(block_ast(block.as_bytes())))
         .collect::<Vec<_>>();
     let mut focused = None;
     let mut remaining_cursor = cursor;
@@ -596,77 +537,44 @@ pub fn code_ast(text: &str, cursor: i64) -> CodeAst {
     CodeAst { blocks, focused }
 }
 
-pub fn block_ast(text: &str) -> BlockAst {
-    BlockAst {
-        statements: text.split("\n")
-            .map(|statement| {
-                let statement = format!("{}\n", statement); // hack to get nom to stop streaming
-                simplify_errors(statement_ast(statement.as_bytes()))
-            })
-            .collect::<Vec<_>>(),
-    }
-}
+named!(block_ast(&[u8]) -> BlockAst, map!(statement_ast, |e| BlockAst{body: e}));
 
-named!(statement_ast(&[u8]) -> StatementAst, alt!(assert_ast | pattern_ast));
-
-named!(assert_ast(&[u8]) -> StatementAst, do_parse!(
-    tag!("+") >>
-    space >>
-    e: simple_expr_ast >>
-    tag!(".") >>
-    a: symbol_ast >>
-    opt!(space) >>
-    tag!("=") >>
-    opt!(space) >>
-    v: expr_ast >>
-    (StatementAst::Assert([e, ExprAst::Constant(Value::String(Cow::Owned(a))), v]))
+named!(statement_ast(&[u8]) -> StatementAst, map!(
+    separated_list!(tuple!(opt!(space), tag!("\n")), simple_statement_ast),
+    StatementAst::Conjunction
 ));
 
-named!(pattern_ast(&[u8]) -> StatementAst, do_parse!(
-    e1: expr_ast >>
+named!(simple_statement_ast(&[u8]) -> StatementAst, do_parse!(
+    e: expr_ast >>
+        equals: opt!(equals_ast) >>
+        ({
+            if let Some(e2) = equals {
+                StatementAst::Equals(e, e2)
+            } else {
+                StatementAst::Expr(e)
+            }
+        })
+));
+
+named!(equals_ast(&[u8]) -> ExprAst, do_parse!(
     opt!(space) >>
     tag!("=") >>
     opt!(space) >>
-    e2: expr_ast >>
-    (StatementAst::Pattern([e1, e2]))
+    e: expr_ast >>
+    (e)
 ));
 
 named!(expr_ast(&[u8]) -> ExprAst, do_parse!(
     e: simple_expr_ast >>
-        ts: many0!(dot_ast) >>
         f: opt!(infix_function_ast) >>
         ({
-            let mut e = e;
-            for t in ts {
-                e = ExprAst::Dot(Box::new(e), Box::new(ExprAst::Constant(Value::String(Cow::Owned(t)))));
-            }
             if let Some((name, arg)) = f {
-                e = ExprAst::Function(FunctionAst{name, args: vec![e, arg]});
+                ExprAst::Relation(name, vec![e, arg])
+            } else {
+                e
             }
-            e
         })
 ));
-
-named!(simple_expr_ast(&[u8]) -> ExprAst, alt!(
-        map!(prefix_function_ast, ExprAst::Function) |
-        map!(value_ast, ExprAst::Constant) |
-        map!(symbol_ast, ExprAst::Variable) |
-        paren_ast
-));
-
-named!(dot_ast(&[u8]) -> String, do_parse!(
-    tag!(".") >>
-    a: symbol_ast >>
-        (a)
-        ));
-
-named!(prefix_function_ast(&[u8]) -> FunctionAst, do_parse!(
-        name: symbol_ast >>
-        tag!("(") >>
-        args: separated_list_complete!(tuple!(tag!(","), opt!(space)), expr_ast) >>
-        tag!(")") >>
-        (FunctionAst{name, args})
-    ));
 
 named!(infix_function_ast(&[u8]) -> (String, ExprAst), do_parse!(
         opt!(space) >>
@@ -679,12 +587,19 @@ named!(infix_function_ast(&[u8]) -> (String, ExprAst), do_parse!(
         (name, arg)
 ));
 
-named!(symbol_ast(&[u8]) -> String, map_res!(
-    verify!(
-        take_while1_s!(|c| is_alphanumeric(c) || c == ('-' as u8)),
-        |b: &[u8]| is_alphabetic(b[0])
-    ),
-    |b| ::std::str::from_utf8(b).map(|s| s.to_owned())
+named!(simple_expr_ast(&[u8]) -> ExprAst, alt!(
+        map!(relation_ast, |(name, args)| ExprAst::Relation(name, args)) |
+        map!(value_ast, ExprAst::Constant) |
+        map!(symbol_ast, ExprAst::Variable) |
+        paren_ast
+));
+
+named!(relation_ast(&[u8]) -> (String, Vec<ExprAst>), do_parse!(
+        name: symbol_ast >>
+        tag!("(") >>
+        args: separated_list_complete!(tuple!(tag!(","), opt!(space)), expr_ast) >>
+        tag!(")") >>
+        (name, args)
 ));
 
 named!(value_ast(&[u8]) -> Value<'static>, alt!(
@@ -708,6 +623,14 @@ named!(string_ast(&[u8]) -> String, map_res!(
         delimited!(char!('"'), take_until!("\""), char!('"')),
         |b| ::std::str::from_utf8(b).map(|s| s.to_owned())
     ));
+
+named!(symbol_ast(&[u8]) -> String, map_res!(
+    verify!(
+        take_while1_s!(|c| is_alphanumeric(c) || c == ('-' as u8)),
+        |b: &[u8]| is_alphabetic(b[0])
+    ),
+    |b| ::std::str::from_utf8(b).map(|s| s.to_owned())
+));
 
 named!(paren_ast(&[u8]) -> ExprAst, do_parse!(
         tag!("(") >>

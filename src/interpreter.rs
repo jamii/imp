@@ -225,16 +225,17 @@ pub fn run_code(bag: &mut Bag, code: &str, cursor: i64) {
     let code_ast = code_ast(code, cursor);
     let mut status: Vec<Result<(Block, Vec<Value>), String>> = vec![];
     for block in code_ast.blocks.iter() {
-        if let Some(&Err(ref error)) = block.statements.iter().find(|s| s.is_err()) {
-            status.push(Err(format!("Parse error: {}", error)));
-        } else {
-            match plan(block) {
-                Err(error) => status.push(Err(format!("Compile error: {}", error))),
-                Ok(block) => {
-                    match block.run(&bag) {
-                        Err(error) => status.push(Err(format!("Run error: {}", error))),
-                        Ok(results) => {
-                            status.push(Ok((block, results)));
+        match block {
+            &Err(ref error) => status.push(Err(format!("Parse error: {}", error))),
+            &Ok(ref block) => {
+                match plan(block) {
+                    Err(error) => status.push(Err(format!("Compile error: {}", error))),
+                    Ok(block) => {
+                        match block.run(&bag) {
+                            Err(error) => status.push(Err(format!("Run error: {}", error))),
+                            Ok(results) => {
+                                status.push(Ok((block, results)));
+                            }
                         }
                     }
                 }

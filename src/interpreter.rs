@@ -228,9 +228,11 @@ pub fn run_code(bag: &mut Bag, code: &str, cursor: i64) {
         match block {
             &Err(ref error) => status.push(Err(format!("Parse error: {}", error))),
             &Ok(ref block) => {
+                print!("{:?}\n\n", block);
                 match plan(block) {
                     Err(error) => status.push(Err(format!("Compile error: {}", error))),
                     Ok(block) => {
+                        print!("{:?}\n\n", block);
                         match block.run(&bag) {
                             Err(error) => status.push(Err(format!("Run error: {}", error))),
                             Ok(results) => {
@@ -249,7 +251,14 @@ pub fn run_code(bag: &mut Bag, code: &str, cursor: i64) {
             &Ok((ref block, ref results)) => {
                 let result_vars = &block.result_vars;
 
-                print!("Ok: {} results\n\n", results.len() / result_vars.len());
+                print!(
+                    "Ok: {} results\n\n",
+                    if result_vars.len() > 0 {
+                        results.len() / result_vars.len()
+                    } else {
+                        0
+                    }
+                );
 
                 if result_vars.len() > 0 {
                     for (i, row) in results.chunks(result_vars.len()).take(10).enumerate() {
@@ -302,10 +311,10 @@ pub fn serve_editor() {
             println!("Bag is {:?}", bag);
             let mut last_state = state.lock().unwrap().clone();
             loop {
-                let state = &*state.lock().unwrap();
-                if *state != last_state {
+                let state: (String, i64) = state.lock().unwrap().clone();
+                if state != last_state {
                     print!("\x1b[2J\x1b[1;1H");
-                    let &(ref code, cursor) = state;
+                    let (ref code, cursor) = state;
                     let start = ::std::time::Instant::now();
                     run_code(&mut bag.clone(), &*code, cursor);
                     let elapsed = start.elapsed();

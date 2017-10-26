@@ -135,14 +135,6 @@ impl Bag {
         }
         Value::Entity(hash)
     }
-
-    // this takes tuple instead of array because it was triggering some compiler bug
-    pub fn insert(&mut self, eav: (Value<'static>, Value<'static>, Value<'static>)) {
-        match eav {
-            (Value::Entity(e), Value::String(a), v) => self.eavs.insert((e, a.into_owned()), v),
-            other => panic!("Weird eav insert: {:?}", other),
-        };
-    }
 }
 
 fn parse_chinook(field: &str) -> Value<'static> {
@@ -268,34 +260,55 @@ pub fn upsert<'a, T: Eq + Hash>(
     }
 }
 
+enum Node<'a> {
+    Statement(&'a StatementAst),
+    Expr(&'a ExprAst),
+}
+
 pub fn plan(block: &BlockAst) -> Result<Block, String> {
 
     // flatten tree
     let mut expr_ix: HashMap<&ExprAst, usize> = HashMap::new();
     let mut exprs: Vec<&ExprAst> = Vec::new();
     let mut eq_exprs: HashSet<(&ExprAst, &ExprAst)> = HashSet::new();
-    let mut remaining_statements = vec![&block.body];
-    while let Some(statement) = remaining_statements.pop() {
-        match statement {
-            &StatementAst::Expr(ref expr) => {
+    let mut top_level_exprs: HashSet<&ExprAst> = HashSet::new();
+    let mut remaining_nodes = vec![Node::Statement(&block.body)];
+    while let Some(node) = remaining_nodes.pop() {
+        match node {
+            Node::Statement(&StatementAst::Expr(ref expr)) => {
+                top_level_exprs.insert(expr);
                 upsert(&mut expr_ix, &mut exprs, expr);
+                remaining_nodes.push(Node::Expr(expr));
             }
-            &StatementAst::Equals(ref expr1, ref expr2) => {
+            Node::Statement(&StatementAst::Equals(ref expr1, ref expr2)) => {
                 upsert(&mut expr_ix, &mut exprs, expr1);
                 upsert(&mut expr_ix, &mut exprs, expr2);
+                remaining_nodes.push(Node::Expr(expr1));
+                remaining_nodes.push(Node::Expr(expr2));
                 eq_exprs.insert((expr1, expr2));
             }
-            &StatementAst::Conjunction(ref statements) => {
+            Node::Statement(&StatementAst::Conjunction(ref statements)) => {
                 for statement in statements.iter() {
-                    remaining_statements.push(statement);
+                    remaining_nodes.push(Node::Statement(statement));
+                }
+            }
+            Node::Expr(&ExprAst::Constant(_)) => (),
+            Node::Expr(&ExprAst::Variable(_)) => (),
+            Node::Expr(&ExprAst::Relation(_, ref args)) => {
+                for arg in args.iter() {
+                    upsert(&mut expr_ix, &mut exprs, arg);
+                    remaining_nodes.push(Node::Expr(arg));
                 }
             }
         }
     }
 
     // group exprs that must be equal
-    let mut expr_group: HashMap<&ExprAst, usize> =
-        exprs.iter().enumerate().map(|(i, &e)| (e, i)).collect();
+    let mut expr_group: HashMap<&ExprAst, usize> = expr_ix
+        .iter()
+        .filter(|&(e, _)| !top_level_exprs.contains(e))
+        .map(|(&e, &i)| (e, i))
+        .collect();
     for &(expr1, expr2) in eq_exprs.iter() {
         let group1 = *expr_group.get(expr1).unwrap();
         let group2 = *expr_group.get(expr2).unwrap();
@@ -350,7 +363,9 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
         match expr {
             &ExprAst::Relation(ref name, ref args) if !expr.is_function() => {
                 let mut args: Vec<&ExprAst> = args.iter().collect();
-                args.push(expr); // the value attached to the row
+                if !top_level_exprs.contains(expr) {
+                    args.push(expr); // the value attached to the row
+                }
                 row_names.push(name.clone());
                 row_exprs.push(args);
             }
@@ -367,6 +382,8 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
             ordering
         })
         .collect();
+
+    println!("{:?}\n", slot_exprs);
 
     // produce constraints
     let mut values: Vec<Value> = (0..slot_exprs.len())
@@ -499,27 +516,33 @@ pub enum StatementAst {
     Conjunction(Vec<StatementAst>),
 }
 
-pub fn simplify_errors<Output>(result: IResult<&[u8], Output>) -> Result<Output, String> {
+pub fn simplify_errors<Output>(
+    result: IResult<&[u8], Output>,
+    input: &str,
+) -> Result<Output, String> {
     match result {
         IResult::Done(remaining, output) => {
-            if remaining.len() <= 1 {
-                // because of the hacky \n on the end
+            if remaining.len() == 0 {
                 Ok(output)
             } else {
                 Err(format!(
-                    "Remaining: {}",
-                    ::std::str::from_utf8(remaining).unwrap()
+                    "Remaining: {}\n\n{:?}",
+                    ::std::str::from_utf8(remaining).unwrap(),
+                    input
                 ))
             }
         }
-        IResult::Error(error) => Err(format!("Nom error: {:?}", error)),
-        IResult::Incomplete(needed) => Err(format!("Nom incomplete: {:?}", needed)),
+        IResult::Error(error) => Err(format!("Nom error: {:?}\n\n{:?}", error, input)),
+        IResult::Incomplete(needed) => Err(format!("Nom incomplete: {:?}\n\n{:?}", needed, input)),
     }
 }
 
 pub fn code_ast(text: &str, cursor: i64) -> CodeAst {
     let blocks = text.split("\n\n")
-        .map(|block| simplify_errors(block_ast(block.as_bytes())))
+        .map(|block| {
+            let block = format!("{}\n", block); // hacky way to get nom to stop streaming
+            simplify_errors(block_ast(block.as_bytes()), &*block)
+        })
         .collect::<Vec<_>>();
     let mut focused = None;
     let mut remaining_cursor = cursor;
@@ -540,7 +563,11 @@ pub fn code_ast(text: &str, cursor: i64) -> CodeAst {
 named!(block_ast(&[u8]) -> BlockAst, map!(statement_ast, |e| BlockAst{body: e}));
 
 named!(statement_ast(&[u8]) -> StatementAst, map!(
-    separated_list!(tuple!(opt!(space), tag!("\n")), simple_statement_ast),
+    many0!(do_parse!(
+        s: simple_statement_ast >>
+            opt!(space) >>
+            tag!("\n") >>
+    (s))),
     StatementAst::Conjunction
 ));
 
@@ -597,7 +624,7 @@ named!(simple_expr_ast(&[u8]) -> ExprAst, alt!(
 named!(relation_ast(&[u8]) -> (String, Vec<ExprAst>), do_parse!(
         name: symbol_ast >>
         tag!("(") >>
-        args: separated_list_complete!(tuple!(tag!(","), opt!(space)), expr_ast) >>
+        args: separated_list_complete!(tuple!(opt!(space), tag!(","), opt!(space)), expr_ast) >>
         tag!(")") >>
         (name, args)
 ));

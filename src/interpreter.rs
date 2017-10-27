@@ -45,6 +45,8 @@ impl Relation {
     }
 }
 
+// TODO can dispatch on (Values, Value) to specialize gallop
+
 fn gallop_le(values: &Values, mut lo: usize, hi: usize, value: &Value) -> usize {
     if lo < hi && values.get(lo) < *value {
         let mut step = 1;

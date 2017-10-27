@@ -10,6 +10,26 @@ use std::error::Error;
 
 use std::hash::Hash;
 
+pub enum Kind {
+    Boolean,
+    Integer,
+    String,
+}
+
+impl Kind {
+    pub fn parse(&self, string: &str) -> Result<Value<'static>, String> {
+        match self {
+            &Kind::Boolean => match string {
+                "true" => Ok(Value::Boolean(true)),
+                "false" => Ok(Value::Boolean(false)),
+                _ => Err(format!("Not a boolean: {:?}", string)),
+            }
+            &Kind::Integer => string.parse::<i64>().map(|i| Value::Integer(i)).map_err(|_| format!("Not an integer: {:?}", string)),
+            &Kind::String => Ok(Value::String(Cow::Owned(string.to_owned()))),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
 pub enum Value<'a> {
     Boolean(bool),
@@ -107,6 +127,14 @@ pub enum Values {
 }
 
 impl Values {
+    pub fn new(kind: &Kind) -> Self {
+        match kind {
+            &Kind::Boolean => Values::Boolean(vec![]),
+            &Kind::Integer => Values::Integer(vec![]),
+            &Kind::String => Values::String(vec![]),
+        }
+    }
+    
     pub fn len(&self) -> usize {
         match self {
             &Values::Boolean(ref booleans) => booleans.len(),
@@ -158,27 +186,20 @@ pub struct DB {
     pub relations: HashMap<String, Relation>,
 }
 
-fn parse_chinook_field(field: &str) -> Value<'static> {
-    match field.parse::<i64>() {
-        Ok(i) => Value::Integer(i),
-        Err(_) => Value::String(Cow::Owned(field.to_owned())),
-    }
-}
-
 pub fn load_chinook() -> Result<DB, Box<Error>> {
     let mut relations: HashMap<String, Relation> = HashMap::new();
-    for name in vec![
-        "Album",
-        "Customer",
-        "Genre",
-        "InvoiceLine",
-        "MediaType",
-        "PlaylistTrack",
-        "Artist",
-        "Employee",
-        "Invoice",
-        "Playlist",
-        "Track",
+    for (name, kinds) in vec![
+        ("Album", vec![Kind::Integer, Kind::String, Kind::Integer]),
+        // "Customer",
+        // "Genre",
+        // "InvoiceLine",
+        // "MediaType",
+        // "PlaylistTrack",
+        ("Artist", vec![Kind::Integer, Kind::String]),
+        // "Employee",
+        // "Invoice",
+        // "Playlist",
+        // "Track",
     ]
     {
         let mut reader = ::csv::ReaderBuilder::new().delimiter(b'\t').from_reader(
@@ -189,15 +210,14 @@ pub fn load_chinook() -> Result<DB, Box<Error>> {
                 ),
             )?,
         );
-        let mut columns: Vec<Values> = reader
-            .headers()?
+        let mut columns: Vec<Values> = kinds
             .iter()
-            .map(|_| Values::Any(vec![]))
+            .map(|kind| Values::new(kind))
             .collect();
         for record_or_error in reader.records() {
             let record = record_or_error?;
-            for (c, field) in record.iter().enumerate() {
-                columns[c].push(parse_chinook_field(field));
+            for (c, (field, kind)) in record.iter().zip(kinds.iter()).enumerate() {
+                columns[c].push(kind.parse(field)?);
             }
         }
         relations.insert(name.to_lowercase(), Relation { columns });

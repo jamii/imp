@@ -6,10 +6,29 @@ use websocket::sync::Server;
 
 use std::iter::Iterator;
 
-use std::borrow::Cow;
 use std::borrow::Borrow;
 
 use language::*;
+
+impl Relation {
+    fn sorted(&self, ordering: &[usize]) -> Relation {
+        let len = if self.columns.len() > 0 {
+            self.columns[0].len()
+        } else {
+            0
+        };
+        let mut ixes = (0..len).collect::<Vec<_>>();
+        for &c in ordering.iter().rev() {
+            // stable sort
+            ixes.sort_by(|&r1, &r2| self.columns[c][r1].cmp(&self.columns[c][r2]));
+        }
+        let sorted_columns = self.columns
+            .iter()
+            .map(|column| ixes.iter().map(|&ix| column[ix].clone()).collect())
+            .collect();
+        Relation { columns: sorted_columns }
+    }
+}
 
 // f should be `|t| t < value` or `|t| t <= value`
 fn gallop<'a, T, F: Fn(&T) -> bool>(slice: &'a [T], mut lo: usize, hi: usize, f: F) -> usize {
@@ -37,7 +56,7 @@ type LoHi = (usize, usize);
 
 fn constrain<'a>(
     constraints: &[Constraint],
-    indexes: &'a [Vec<Vec<Value>>],
+    indexes: &'a [Relation],
     ranges: &mut [LoHi],
     variables: &mut [Value<'a>],
     result_vars: &[(String, usize)],
@@ -54,7 +73,7 @@ fn constrain<'a>(
                         let value = variables[var_ix].borrow();
                         while i < rowcols.len() {
                             let (row_ix, col_ix) = rowcols[i];
-                            let column = &indexes[row_ix][col_ix];
+                            let column = &indexes[row_ix].columns[col_ix];
                             let (old_lo, old_hi) = ranges[row_ix];
                             let lo = gallop(column, old_lo, old_hi, |v| v < value);
                             let hi = gallop(column, lo, old_hi, |v| v <= value);
@@ -86,7 +105,7 @@ fn constrain<'a>(
                     }
                 } else {
                     let (row_ix, col_ix) = rowcols[0]; // TODO pick smallest
-                    let column = &indexes[row_ix][col_ix];
+                    let column = &indexes[row_ix].columns[col_ix];
                     let (old_lo, old_hi) = ranges[row_ix];
                     let mut lo = old_lo;
                     // loop over rowcols[0]
@@ -99,7 +118,7 @@ fn constrain<'a>(
                             let mut i = 1;
                             while i < rowcols.len() {
                                 let (row_ix, col_ix) = rowcols[i];
-                                let column = &indexes[row_ix][col_ix];
+                                let column = &indexes[row_ix].columns[col_ix];
                                 let (old_lo, old_hi) = ranges[row_ix];
                                 let lo = gallop(column, old_lo, old_hi, |v| v < value);
                                 let hi = gallop(column, lo, old_hi, |v| v <= value);
@@ -173,41 +192,21 @@ fn constrain<'a>(
 }
 
 impl Block {
-    fn run(&self, bag: &Bag) -> Result<Vec<Value<'static>>, String> {
-        // TODO strip out this compat layer
-        let eavs: Vec<[Value; 3]> = bag.eavs
-            .iter()
-            .map(|(&(ref e, ref a), v)| {
-                [
-                    Value::Entity(e.clone()),
-                    Value::String(Cow::Owned(a.clone())),
-                    v.clone(),
-                ]
-            })
-            .collect();
-        let indexes: Vec<Vec<Vec<Value>>> = self.row_orderings
-            .iter()
-            .map(|row_ordering| {
-                let mut ordered_eavs: Vec<Vec<Value>> = eavs.iter()
-                    .map(|eav| {
-                        row_ordering.iter().map(|&ix| eav[ix].clone()).collect()
-                    })
-                    .collect();
-                ordered_eavs.sort_unstable();
-                let mut reverse_ordering = vec![0; row_ordering.len()];
-                for (i, &ix) in row_ordering.iter().enumerate() {
-                    reverse_ordering[ix] = i;
-                }
-                reverse_ordering
-                    .iter()
-                    .map(|&ix| {
-                        ordered_eavs.iter().map(|eav| eav[ix].clone()).collect()
-                    })
-                    .collect()
-            })
-            .collect();
+    fn run(&self, db: &DB) -> Result<Vec<Value<'static>>, String> {
+        let mut indexes: Vec<Relation> = vec![];
+        for (name, ordering) in self.row_names.iter().zip(self.row_orderings.iter()) {
+            indexes.push(
+                db.relations
+                    .get(name)
+                    .ok_or_else(|| format!("Couldn't find relation: {}", name))?
+                    .sorted(ordering),
+            )
+        }
         let mut variables: Vec<Value> = self.variables.clone();
-        let mut ranges: Vec<LoHi> = indexes.iter().map(|index| (0, index[0].len())).collect();
+        let mut ranges: Vec<LoHi> = indexes
+            .iter()
+            .map(|index| (0, index.columns[0].len()))
+            .collect();
         let mut results = vec![];
         constrain(
             &*self.constraints,
@@ -221,8 +220,9 @@ impl Block {
     }
 }
 
-pub fn run_code(bag: &mut Bag, code: &str, cursor: i64) {
+pub fn run_code(db: &DB, code: &str, cursor: i64) {
     let code_ast = code_ast(code, cursor);
+
     let mut status: Vec<Result<(Block, Vec<Value>), String>> = vec![];
     for block in code_ast.blocks.iter() {
         match block {
@@ -233,7 +233,7 @@ pub fn run_code(bag: &mut Bag, code: &str, cursor: i64) {
                     Err(error) => status.push(Err(format!("Compile error: {}", error))),
                     Ok(block) => {
                         print!("{:?}\n\n", block);
-                        match block.run(&bag) {
+                        match block.run(db) {
                             Err(error) => status.push(Err(format!("Run error: {}", error))),
                             Ok(results) => {
                                 status.push(Ok((block, results)));
@@ -307,8 +307,8 @@ pub fn serve_editor() {
     thread::spawn({
         let state = state.clone();
         move || {
-            let bag = chinook().unwrap();
-            println!("Bag is {:?}", bag);
+            let db = load_chinook().unwrap();
+            println!("DB is {:?}", db);
             let mut last_state = state.lock().unwrap().clone();
             loop {
                 let state: (String, i64) = state.lock().unwrap().clone();
@@ -316,7 +316,7 @@ pub fn serve_editor() {
                     print!("\x1b[2J\x1b[1;1H");
                     let (ref code, cursor) = state;
                     let start = ::std::time::Instant::now();
-                    run_code(&mut bag.clone(), &*code, cursor);
+                    run_code(&mut db.clone(), &*code, cursor);
                     let elapsed = start.elapsed();
                     println!(
                         "In {} ms",

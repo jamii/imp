@@ -8,8 +8,7 @@ use nom::*;
 
 use std::error::Error;
 
-use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
+use std::hash::Hash;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
 pub struct Entity {
@@ -111,75 +110,56 @@ impl<'a> PartialEq<str> for Value<'a> {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
-pub struct Bag {
-    pub entities: HashMap<u64, Entity>,
-    pub eavs: HashMap<(u64, Attribute), Value<'static>>,
+pub struct Relation {
+    pub columns: Vec<Vec<Value<'static>>>,
 }
 
-impl Bag {
-    pub fn new() -> Self {
-        Bag {
-            entities: HashMap::new(),
-            eavs: HashMap::new(),
-        }
-    }
-
-    pub fn create(&mut self, avs: Vec<(String, Value<'static>)>) -> Value<'static> {
-        let entity = Entity { avs: avs.clone() };
-        let mut hasher = DefaultHasher::new();
-        entity.hash(&mut hasher);
-        let hash = hasher.finish();
-        self.entities.insert(hash, entity);
-        for (attribute, value) in avs {
-            self.eavs.insert((hash, attribute), value);
-        }
-        Value::Entity(hash)
-    }
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
+pub struct DB {
+    pub relations: HashMap<String, Relation>,
 }
 
-fn parse_chinook(field: &str) -> Value<'static> {
+fn parse_chinook_field(field: &str) -> Value<'static> {
     match field.parse::<i64>() {
         Ok(i) => Value::Integer(i),
         Err(_) => Value::String(Cow::Owned(field.to_owned())),
     }
 }
 
-pub fn chinook() -> Result<Bag, Box<Error>> {
-    let mut bag = Bag::new();
-    for filename in vec![
-        "Album.csv",
-        "Customer.csv",
-        "Genre.csv",
-        "InvoiceLine.csv",
-        "MediaType.csv",
-        "PlaylistTrack.csv",
-        "Artist.csv",
-        "Employee.csv",
-        "Invoice.csv",
-        "Playlist.csv",
-        "Track.csv",
+pub fn load_chinook() -> Result<DB, Box<Error>> {
+    let mut relations: HashMap<String, Relation> = HashMap::new();
+    for name in vec![
+        "Album",
+        "Customer",
+        "Genre",
+        "InvoiceLine",
+        "MediaType",
+        "PlaylistTrack",
+        "Artist",
+        "Employee",
+        "Invoice",
+        "Playlist",
+        "Track",
     ]
     {
         let mut reader = ::csv::ReaderBuilder::new().delimiter(b'\t').from_reader(
             File::open(
                 format!(
-                    "./data/{}",
-                    filename
+                    "./data/{}.csv",
+                    name
                 ),
             )?,
         );
-        let headers = reader.headers()?.clone();
+        let mut columns: Vec<Vec<Value>> = reader.headers()?.iter().map(|_| vec![]).collect();
         for record_or_error in reader.records() {
             let record = record_or_error?;
-            let avs = headers
-                .iter()
-                .map(|s| s.to_lowercase())
-                .zip(record.iter().map(parse_chinook))
-                .collect();
-            bag.create(avs);
+            for (c, field) in record.iter().enumerate() {
+                columns[c].push(parse_chinook_field(field));
+            }
         }
+        relations.insert(name.to_lowercase(), Relation { columns });
     }
-    Ok(bag)
+    Ok(DB { relations })
 }
 
 #[derive(Debug, Clone)]

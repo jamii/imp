@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::iter::Iterator;
-use std::borrow::Cow;
 
 // use timely::dataflow::*;
 use timely::dataflow::operators::*;
@@ -62,23 +61,32 @@ pub fn serve_dataflow() {
         let index = worker.index();
         println!("peers {:?} index {:?}", peers, index);
 
-        let eavs = chinook()
-            .unwrap()
-            .eavs
-            .into_iter()
-            .map(|((e, a), v)| {
-                (
-                    vec![Value::Entity(e), Value::String(Cow::Owned(a)), v],
-                    Default::default(),
-                    1,
-                )
-            })
-            .collect::<Vec<_>>();
-
         let code = code.clone();
         worker.dataflow::<(), _, _>(move |scope| {
-            let eavs: Collection<_, Vec<Value<'static>>, _> =
-                Collection::new(eavs.to_stream(scope));
+            let relations: HashMap<String, Collection<_, Vec<Value<'static>>, _>> = load_chinook()
+                .unwrap()
+                .relations
+                .into_iter()
+                .map(|(name, relation)| {
+                    let len = if relation.columns.len() > 0 {
+                        relation.columns[0].len()
+                    } else {
+                        0
+                    };
+                    let rows: Vec<_> = (0..len)
+                        .map(|r| {
+                            let row = relation
+                                .columns
+                                .iter()
+                                .map(|column| column[r].clone())
+                                .collect();
+                            (row, Default::default(), 1)
+                        })
+                        .collect();
+                    let collection = Collection::new(rows.to_stream(scope));
+                    (name, collection)
+                })
+                .collect();
 
             let code_ast = code_ast(&*code, 0);
 
@@ -111,7 +119,9 @@ pub fn serve_dataflow() {
                                         eav_key.push(c2);
                                     }
                                 }
-                                let index = eavs.map(move |row| (get_all(&*row, &*eav_key), row))
+                                let relation = relations.get(&block.row_names[r]).unwrap();
+                                let index = relation
+                                    .map(move |row| (get_all(&*row, &*eav_key), row))
                                     .arrange_by_key();
                                 variables = variables
                                     .map(move |row| (get_all(&*row, &*variables_key), row))

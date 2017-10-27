@@ -13,7 +13,6 @@ extern crate csv;
 
 extern crate timely;
 extern crate differential_dataflow;
-#[macro_use]
 extern crate abomonation;
 
 mod language;

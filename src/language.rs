@@ -11,18 +11,10 @@ use std::error::Error;
 use std::hash::Hash;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
-pub struct Entity {
-    pub avs: Vec<(Attribute, Value<'static>)>,
-}
-
-pub type Attribute = String;
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
 pub enum Value<'a> {
     Boolean(bool),
     Integer(i64),
     String(Cow<'a, str>),
-    Entity(u64),
 }
 
 impl<'a> From<bool> for Value<'a> {
@@ -55,7 +47,6 @@ impl<'a> ::std::fmt::Display for Value<'a> {
             &Value::Boolean(bool) => bool.fmt(f),
             &Value::Integer(integer) => integer.fmt(f),
             &Value::String(ref string) => write!(f, "{:?}", string),
-            &Value::Entity(entity) => write!(f, "#{}", entity),
         }
     }
 }
@@ -68,7 +59,6 @@ impl<'a> Value<'a> {
             &Value::Boolean(bool) => Value::Boolean(bool),
             &Value::Integer(integer) => Value::Integer(integer),
             &Value::String(ref string) => Value::String(Cow::Borrowed(string.borrow())),
-            &Value::Entity(entity) => Value::Entity(entity),
         }
     }
 
@@ -77,7 +67,6 @@ impl<'a> Value<'a> {
             &Value::Boolean(bool) => Value::Boolean(bool),
             &Value::Integer(integer) => Value::Integer(integer),
             &Value::String(ref string) => Value::String(Cow::Owned(string.as_ref().to_owned())),
-            &Value::Entity(entity) => Value::Entity(entity),
         }
     }
 }
@@ -109,9 +98,59 @@ impl<'a> PartialEq<str> for Value<'a> {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Clone)]
+pub enum Values {
+    Boolean(Vec<bool>),
+    Integer(Vec<i64>),
+    String(Vec<String>), // TODO (String, Vec<usize>)
+    Any(Vec<Value<'static>>),
+}
+
+impl Values {
+    pub fn len(&self) -> usize {
+        match self {
+            &Values::Boolean(ref booleans) => booleans.len(),
+            &Values::Integer(ref integers) => integers.len(),
+            &Values::String(ref strings) => strings.len(),
+            &Values::Any(ref values) => values.len(),
+        }
+    }
+
+    // can't implement Index :(
+    pub fn get<'a>(&'a self, ix: usize) -> Value<'a> {
+        match self {
+            &Values::Boolean(ref booleans) => Value::Boolean(booleans[ix]),
+            &Values::Integer(ref integers) => Value::Integer(integers[ix]),
+            &Values::String(ref strings) => Value::String(Cow::Borrowed(&*strings[ix])),
+            &Values::Any(ref values) => values[ix].really_borrow(),
+        }
+    }
+
+    pub fn push(&mut self, mut value: Value<'static>) {
+        // TODO this is full of gross hacks to avoid binding by-ref and by-move in same pattern
+        match (self, &mut value) {
+            (&mut Values::Boolean(ref mut booleans), &mut Value::Boolean(boolean)) => {
+                booleans.push(boolean)
+            }
+            (&mut Values::Integer(ref mut integers), &mut Value::Integer(integer)) => {
+                integers.push(integer)
+            }
+            (&mut Values::String(ref mut strings), &mut Value::String(ref mut string)) => {
+                let string = ::std::mem::replace(string, Cow::Borrowed(""));
+                strings.push(string.into_owned())
+            }
+            (&mut Values::Any(ref mut values), &mut ref mut value) => {
+                let val = ::std::mem::replace(value, Value::Boolean(false));
+                values.push(val)
+            }
+            (values, value) => panic!("Type mismatch between {:?} and {:?}", values, value),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct Relation {
-    pub columns: Vec<Vec<Value<'static>>>,
+    pub columns: Vec<Values>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
@@ -150,7 +189,11 @@ pub fn load_chinook() -> Result<DB, Box<Error>> {
                 ),
             )?,
         );
-        let mut columns: Vec<Vec<Value>> = reader.headers()?.iter().map(|_| vec![]).collect();
+        let mut columns: Vec<Values> = reader
+            .headers()?
+            .iter()
+            .map(|_| Values::Any(vec![]))
+            .collect();
         for record_or_error in reader.records() {
             let record = record_or_error?;
             for (c, field) in record.iter().enumerate() {

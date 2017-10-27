@@ -13,8 +13,6 @@ use abomonation::Abomonation;
 
 use language::*;
 
-unsafe_abomonate!(Entity: avs);
-
 impl<'a> Abomonation for Value<'a> {
     #[inline]
     unsafe fn embalm(&mut self) {
@@ -22,7 +20,6 @@ impl<'a> Abomonation for Value<'a> {
             &mut Value::Boolean(ref mut inner) => inner.embalm(),
             &mut Value::Integer(ref mut inner) => inner.embalm(),
             &mut Value::String(ref mut inner) => inner.to_mut().embalm(),
-            &mut Value::Entity(ref mut inner) => inner.embalm(),
         }
     }
 
@@ -33,7 +30,6 @@ impl<'a> Abomonation for Value<'a> {
             &Value::Integer(ref inner) => inner.entomb(bytes),
             // TODO why isn't entomb implemented for &str?
             &Value::String(ref inner) => inner.as_ref().to_owned().entomb(bytes),
-            &Value::Entity(ref inner) => inner.entomb(bytes),
         }
     }
 
@@ -43,7 +39,6 @@ impl<'a> Abomonation for Value<'a> {
             &mut Value::Boolean(ref mut inner) => inner.exhume(bytes),
             &mut Value::Integer(ref mut inner) => inner.exhume(bytes),
             &mut Value::String(ref mut inner) => inner.to_mut().exhume(bytes),
-            &mut Value::Entity(ref mut inner) => inner.exhume(bytes),
         }
     }
 }
@@ -78,7 +73,7 @@ pub fn serve_dataflow() {
                             let row = relation
                                 .columns
                                 .iter()
-                                .map(|column| column[r].clone())
+                                .map(|column| column.get(r).really_to_owned())
                                 .collect();
                             (row, Default::default(), 1)
                         })

@@ -6,9 +6,22 @@ use websocket::sync::Server;
 
 use std::iter::Iterator;
 
-use std::borrow::Borrow;
-
 use language::*;
+
+fn permuted<T: Clone>(values: &[T], ordering: &[usize]) -> Vec<T> {
+    ordering.iter().map(|&ix| values[ix].clone()).collect()
+}
+
+impl Values {
+    fn permuted(&self, ordering: &[usize]) -> Self {
+        match self {
+            &Values::Boolean(ref booleans) => Values::Boolean(permuted(booleans, ordering)),
+            &Values::Integer(ref integers) => Values::Integer(permuted(integers, ordering)),
+            &Values::String(ref strings) => Values::String(permuted(strings, ordering)),
+            &Values::Any(ref values) => Values::Any(permuted(values, ordering)),
+        }
+    }
+}
 
 impl Relation {
     fn sorted(&self, ordering: &[usize]) -> Relation {
@@ -20,28 +33,50 @@ impl Relation {
         let mut ixes = (0..len).collect::<Vec<_>>();
         for &c in ordering.iter().rev() {
             // stable sort
-            ixes.sort_by(|&r1, &r2| self.columns[c][r1].cmp(&self.columns[c][r2]));
+            ixes.sort_by(|&r1, &r2| {
+                self.columns[c].get(r1).cmp(&self.columns[c].get(r2))
+            });
         }
         let sorted_columns = self.columns
             .iter()
-            .map(|column| ixes.iter().map(|&ix| column[ix].clone()).collect())
+            .map(|column| column.permuted(&*ixes))
             .collect();
         Relation { columns: sorted_columns }
     }
 }
 
-// f should be `|t| t < value` or `|t| t <= value`
-fn gallop<'a, T, F: Fn(&T) -> bool>(slice: &'a [T], mut lo: usize, hi: usize, f: F) -> usize {
-    if lo < hi && f(&slice[lo]) {
+fn gallop_le(values: &Values, mut lo: usize, hi: usize, value: &Value) -> usize {
+    if lo < hi && values.get(lo) < *value {
         let mut step = 1;
-        while lo + step < hi && f(&slice[lo + step]) {
+        while lo + step < hi && values.get(lo + step) < *value {
             lo = lo + step;
             step = step << 1;
         }
 
         step = step >> 1;
         while step > 0 {
-            if lo + step < hi && f(&slice[lo + step]) {
+            if lo + step < hi && values.get(lo + step) < *value {
+                lo = lo + step;
+            }
+            step = step >> 1;
+        }
+
+        lo += 1
+    }
+    lo
+}
+
+fn gallop_leq(values: &Values, mut lo: usize, hi: usize, value: &Value) -> usize {
+    if lo < hi && values.get(lo) <= *value {
+        let mut step = 1;
+        while lo + step < hi && values.get(lo + step) <= *value {
+            lo = lo + step;
+            step = step << 1;
+        }
+
+        step = step >> 1;
+        while step > 0 {
+            if lo + step < hi && values.get(lo + step) <= *value {
                 lo = lo + step;
             }
             step = step >> 1;
@@ -70,13 +105,13 @@ fn constrain<'a>(
                     // loop over rowcols[0..]
                     let mut i = 0;
                     {
-                        let value = variables[var_ix].borrow();
+                        let value = &variables[var_ix];
                         while i < rowcols.len() {
                             let (row_ix, col_ix) = rowcols[i];
                             let column = &indexes[row_ix].columns[col_ix];
                             let (old_lo, old_hi) = ranges[row_ix];
-                            let lo = gallop(column, old_lo, old_hi, |v| v < value);
-                            let hi = gallop(column, lo, old_hi, |v| v <= value);
+                            let lo = gallop_le(column, old_lo, old_hi, value);
+                            let hi = gallop_leq(column, lo, old_hi, value);
                             if lo < hi {
                                 ranges[row_ix] = (lo, hi);
                                 buffer[i] = (old_lo, old_hi);
@@ -110,8 +145,8 @@ fn constrain<'a>(
                     let mut lo = old_lo;
                     // loop over rowcols[0]
                     while lo < old_hi {
-                        let value = &column[lo];
-                        let hi = gallop(column, lo + 1, old_hi, |v| v <= value);
+                        let value = &column.get(lo);
+                        let hi = gallop_leq(column, lo + 1, old_hi, value);
                         ranges[row_ix] = (lo, hi);
                         {
                             // loop over rowcols[1..]
@@ -120,8 +155,8 @@ fn constrain<'a>(
                                 let (row_ix, col_ix) = rowcols[i];
                                 let column = &indexes[row_ix].columns[col_ix];
                                 let (old_lo, old_hi) = ranges[row_ix];
-                                let lo = gallop(column, old_lo, old_hi, |v| v < value);
-                                let hi = gallop(column, lo, old_hi, |v| v <= value);
+                                let lo = gallop_le(column, old_lo, old_hi, value);
+                                let hi = gallop_leq(column, lo, old_hi, value);
                                 if lo < hi {
                                     ranges[row_ix] = (lo, hi);
                                     buffer[i] = (old_lo, old_hi);
@@ -132,7 +167,7 @@ fn constrain<'a>(
                             }
                             // if all succeeded, continue with rest of constraints
                             if i == rowcols.len() {
-                                variables[var_ix] = column[lo].really_borrow();
+                                variables[var_ix] = column.get(lo);
                                 constrain(
                                     &constraints[1..],
                                     indexes,
@@ -375,17 +410,23 @@ mod tests {
 
     #[test]
     fn test() {
-        let col = (0..1000).collect::<Vec<_>>();
+        let col = Values::Integer((0..1000).collect());
         for i in 0..1000 {
-            assert_eq!(col[gallop(&*col, 0, 1000, |&x| x < i)], i);
+            assert_eq!(
+                col.get(gallop_le(&col, 0, 1000, &Value::Integer(i))),
+                Value::Integer(i)
+            );
         }
-        assert_eq!(gallop(&*col, 0, col.len(), |&x| x < -1), 0);
-        assert_eq!(gallop(&*col, 0, col.len(), |&x| x < 1000), 1000);
+        assert_eq!(gallop_le(&col, 0, col.len(), &Value::Integer(-1)), 0);
+        assert_eq!(gallop_le(&col, 0, col.len(), &Value::Integer(1000)), 1000);
 
         for i in 0..999 {
-            assert_eq!(col[gallop(&*col, 0, col.len(), |&x| x <= i)], i + 1);
+            assert_eq!(
+                col.get(gallop_leq(&col, 0, col.len(), &Value::Integer(i))),
+                Value::Integer(i + 1)
+            );
         }
-        assert_eq!(gallop(&*col, 0, col.len(), |&x| x <= -1), 0);
-        assert_eq!(gallop(&*col, 0, col.len(), |&x| x <= 999), 1000);
+        assert_eq!(gallop_leq(&col, 0, col.len(), &Value::Integer(-1)), 0);
+        assert_eq!(gallop_leq(&col, 0, col.len(), &Value::Integer(999)), 1000);
     }
 }

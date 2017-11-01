@@ -41,6 +41,8 @@ fn main() {
     }
 }
 
+// To run benchmarks:
+// RUST_BACKTRACE=1 cargo run --release -- bench
 mod bench {
     use test::*;
     use super::language::*;
@@ -50,7 +52,7 @@ mod bench {
         F: Fn() -> T,
     {
         let samples = ::test::bench::benchmark(|b: &mut Bencher| b.iter(&f));
-        println!("test {} ... {}", name, ::test::fmt_bench_samples(&samples));
+        println!("{} ... {}", name, ::test::fmt_bench_samples(&samples));
     }
 
     lazy_static! {
@@ -64,8 +66,11 @@ mod bench {
             let block_ast = block_ast_or_error.as_ref().unwrap();
             let block = plan(block_ast).unwrap();
             let db = &*CHINOOK;
-            bench(format!("compile {}", i), || plan(block_ast).unwrap());
-            bench(format!("run {}", i), || block.run(db));
+            bench(
+                format!("compile\tchinook_{}", i),
+                || plan(block_ast).unwrap(),
+            );
+            bench(format!("run\tchinook_{}", i), || block.run(db));
         }
     }
 }

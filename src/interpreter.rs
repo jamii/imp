@@ -229,7 +229,7 @@ fn constrain<'a>(
 }
 
 impl Block {
-    fn run(&self, db: &DB) -> Result<Vec<Value<'static>>, String> {
+    pub fn run(&self, db: &DB) -> Result<Vec<Value<'static>>, String> {
         let mut indexes: Vec<Relation> = vec![];
         for (name, ordering) in self.row_names.iter().zip(self.row_orderings.iter()) {
             indexes.push(

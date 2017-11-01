@@ -426,8 +426,6 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
         })
         .collect();
 
-    println!("{:?}\n", slot_exprs);
-
     // produce constraints
     let mut values: Vec<Value> = (0..slot_exprs.len())
         .map(|_| Value::Boolean(false))
@@ -581,7 +579,7 @@ pub fn simplify_errors<Output>(
 }
 
 pub fn code_ast(text: &str, cursor: i64) -> CodeAst {
-    let blocks = text.split("\n\n")
+    let blocks = text.trim().split("\n\n")
         .map(|block| {
             let block = format!("{}\n", block); // hacky way to get nom to stop streaming
             simplify_errors(block_ast(block.as_bytes()), &*block)

@@ -22,22 +22,24 @@ extern crate differential_dataflow;
 extern crate abomonation;
 
 mod language;
+mod data;
 mod interpreter;
 mod dd;
 
+use data::*;
+
 fn main() {
     let args: Vec<String> = ::std::env::args().into_iter().collect();
+    let args: Vec<&str> = args.iter().map(|s| &**s).collect();
     match *args {
         [] => unreachable!(),
         [_] => println!("Commands: bench editor dataflow"),
-        [_, ref command, _..] => {
-            match &**command {
-                "bench" => bench::run(),
-                "editor" => interpreter::serve_editor(),
-                "dataflow" => dd::serve_dataflow(),
-                other => println!("Unknown command: {}", other),
-            }
-        }
+        [_, "bench"] => bench::bench_all(),
+        [_, "editor"] => interpreter::serve_editor(load_chinook().unwrap()),
+        [_, "editor", "chinook"] => interpreter::serve_editor(load_chinook().unwrap()),
+        [_, "editor", "imdb"] => interpreter::serve_editor(load_imdb().unwrap()),
+        [_, "dataflow"] => dd::serve_dataflow(),
+        [_, ref other..] => println!("Unknown command: {}", other.join(" ")),
     }
 }
 
@@ -46,6 +48,9 @@ fn main() {
 mod bench {
     use test::*;
     use super::language::*;
+    use super::data::*;
+    use std::fs::File;
+    use std::io::prelude::*;
 
     fn bench<F, T>(name: String, f: F)
     where
@@ -55,22 +60,23 @@ mod bench {
         println!("{} ... {}", name, ::test::fmt_bench_samples(&samples));
     }
 
-    lazy_static! {
-        static ref CHINOOK: DB = load_chinook().unwrap();
-    }
-
-    pub fn run() {
-        let code = include_str!("bench.imp");
-        let code_ast = code_ast(code, 0);
+    pub fn bench_code(name: &str, db: &DB) {
+        let mut file = File::open(format!("./{}.imp", name)).unwrap();
+        let mut code = String::new();
+        file.read_to_string(&mut code).unwrap();
+        let code_ast = code_ast(&code, 0);
         for (i, block_ast_or_error) in code_ast.blocks.iter().enumerate() {
             let block_ast = block_ast_or_error.as_ref().unwrap();
             let block = plan(block_ast).unwrap();
-            let db = &*CHINOOK;
-            bench(
-                format!("compile\tchinook_{}", i),
-                || plan(block_ast).unwrap(),
-            );
-            bench(format!("run\tchinook_{}", i), || block.run(db));
+            bench(format!("compile\t{}_{}", name, i), || {
+                plan(block_ast).unwrap()
+            });
+            bench(format!("run\t{}_{}", name, i), || block.run(db));
         }
+    }
+
+    pub fn bench_all() {
+        // bench_code("chinook", &load_chinook().unwrap());
+        bench_code("imdb", &load_imdb().unwrap());
     }
 }

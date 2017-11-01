@@ -12,6 +12,7 @@ use differential_dataflow::operators::arrange::ArrangeByKey;
 use abomonation::Abomonation;
 
 use language::*;
+use data::*;
 
 impl<'a> Abomonation for Value<'a> {
     #[inline]

@@ -7,6 +7,7 @@ use websocket::sync::Server;
 use std::iter::Iterator;
 
 use language::*;
+use data::*;
 
 fn permuted<T: Clone>(values: &[T], ordering: &[usize]) -> Vec<T> {
     ordering.iter().map(|&ix| values[ix].clone()).collect()
@@ -336,7 +337,7 @@ enum EditorEvent {
 //         .unwrap()
 // }
 
-pub fn serve_editor() {
+pub fn serve_editor(db: DB) {
     let state = Arc::new(Mutex::new(("".to_owned(), 0)));
 
     let server = Server::bind("127.0.0.1:8081").unwrap();
@@ -344,7 +345,6 @@ pub fn serve_editor() {
     thread::spawn({
         let state = state.clone();
         move || {
-            let db = load_chinook().unwrap();
             println!("DB is {:?}", db);
             let mut last_state = state.lock().unwrap().clone();
             loop {

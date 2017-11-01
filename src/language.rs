@@ -1,12 +1,8 @@
-use std::fs::File;
-
 use std::collections::{HashMap, HashSet};
 use std::iter::Iterator;
 use std::borrow::{Cow, Borrow};
 
 use nom::*;
-
-use std::error::Error;
 
 use std::hash::Hash;
 
@@ -184,45 +180,6 @@ pub struct Relation {
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct DB {
     pub relations: HashMap<String, Relation>,
-}
-
-pub fn load_chinook() -> Result<DB, Box<Error>> {
-    let mut relations: HashMap<String, Relation> = HashMap::new();
-    for (name, kinds) in vec![
-        ("Album", vec![Kind::Integer, Kind::String, Kind::Integer]),
-        // "Customer",
-        // "Genre",
-        // "InvoiceLine",
-        // "MediaType",
-        // "PlaylistTrack",
-        ("Artist", vec![Kind::Integer, Kind::String]),
-        // "Employee",
-        // "Invoice",
-        // "Playlist",
-        // "Track",
-    ]
-    {
-        let mut reader = ::csv::ReaderBuilder::new().delimiter(b'\t').from_reader(
-            File::open(
-                format!(
-                    "./data/{}.csv",
-                    name
-                ),
-            )?,
-        );
-        let mut columns: Vec<Values> = kinds
-            .iter()
-            .map(|kind| Values::new(kind))
-            .collect();
-        for record_or_error in reader.records() {
-            let record = record_or_error?;
-            for (c, (field, kind)) in record.iter().zip(kinds.iter()).enumerate() {
-                columns[c].push(kind.parse(field)?);
-            }
-        }
-        relations.insert(name.to_lowercase(), Relation { columns });
-    }
-    Ok(DB { relations })
 }
 
 #[derive(Debug, Clone)]
@@ -694,7 +651,7 @@ named!(string_ast(&[u8]) -> String, map_res!(
 
 named!(symbol_ast(&[u8]) -> String, map_res!(
     verify!(
-        take_while1_s!(|c| is_alphanumeric(c) || c == ('-' as u8)),
+        take_while1_s!(|c| is_alphanumeric(c) || c == ('-' as u8) || c == ('.' as u8)),
         |b: &[u8]| is_alphabetic(b[0])
     ),
     |b| ::std::str::from_utf8(b).map(|s| s.to_owned())

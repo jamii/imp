@@ -7,7 +7,6 @@ use websocket::sync::Server;
 use std::iter::Iterator;
 
 use language::*;
-use data::*;
 
 fn permuted<T: Clone>(values: &[T], ordering: &[usize]) -> Vec<T> {
     ordering.iter().map(|&ix| values[ix].clone()).collect()

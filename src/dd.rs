@@ -60,7 +60,6 @@ pub fn serve_dataflow() {
         let code = code.clone();
         worker.dataflow::<(), _, _>(move |scope| {
             let relations: HashMap<String, Collection<_, Vec<Value<'static>>, _>> = load_chinook()
-                .unwrap()
                 .relations
                 .into_iter()
                 .map(|(name, relation)| {

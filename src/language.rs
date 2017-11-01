@@ -536,7 +536,7 @@ pub fn simplify_errors<Output>(
 }
 
 pub fn code_ast(text: &str, cursor: i64) -> CodeAst {
-    let blocks = text.trim().split("\n\n")
+    let blocks = text.trim().split("\n\n").filter(|s| *s != "")
         .map(|block| {
             let block = format!("{}\n", block); // hacky way to get nom to stop streaming
             simplify_errors(block_ast(block.as_bytes()), &*block)

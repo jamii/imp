@@ -5,14 +5,13 @@
 #![feature(box_syntax)]
 
 extern crate test;
-#[macro_use]
-extern crate lazy_static;
 
 extern crate websocket;
 // #[macro_use(json, json_internal)]
 extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
+extern crate bincode;
 #[macro_use]
 extern crate nom;
 extern crate csv;
@@ -34,10 +33,11 @@ fn main() {
     match *args {
         [] => unreachable!(),
         [_] => println!("Commands: bench editor dataflow"),
+        [_, "import"] => data::import(),
         [_, "bench"] => bench::bench_all(),
-        [_, "editor"] => interpreter::serve_editor(load_chinook().unwrap()),
-        [_, "editor", "chinook"] => interpreter::serve_editor(load_chinook().unwrap()),
-        [_, "editor", "imdb"] => interpreter::serve_editor(load_imdb().unwrap()),
+        [_, "editor"] => interpreter::serve_editor(load_chinook()),
+        [_, "editor", "chinook"] => interpreter::serve_editor(load_chinook()),
+        [_, "editor", "imdb"] => interpreter::serve_editor(load_imdb()),
         [_, "dataflow"] => dd::serve_dataflow(),
         [_, ref other..] => println!("Unknown command: {}", other.join(" ")),
     }
@@ -64,6 +64,7 @@ mod bench {
         let mut file = File::open(format!("./{}.imp", name)).unwrap();
         let mut code = String::new();
         file.read_to_string(&mut code).unwrap();
+        println!("Code is {:?}", code);
         let code_ast = code_ast(&code, 0);
         for (i, block_ast_or_error) in code_ast.blocks.iter().enumerate() {
             let block_ast = block_ast_or_error.as_ref().unwrap();
@@ -76,7 +77,7 @@ mod bench {
     }
 
     pub fn bench_all() {
-        // bench_code("chinook", &load_chinook().unwrap());
-        bench_code("imdb", &load_imdb().unwrap());
+        // bench_code("chinook", &load_chinook());
+        bench_code("imdb", &load_imdb());
     }
 }

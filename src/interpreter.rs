@@ -261,7 +261,10 @@ pub fn run_code(db: &DB, code: &str, cursor: i64) {
     let code_ast = code_ast(code, cursor);
 
     let mut status: Vec<Result<(Block, Vec<Value>), String>> = vec![];
-    for block in code_ast.blocks.iter() {
+
+    // TODO bring back when output works
+    // for block in code_ast.blocks.iter() {
+    for block in vec![&code_ast.blocks[code_ast.focused]].into_iter() {
         match block {
             &Err(ref error) => status.push(Err(format!("Parse error: {}", error))),
             &Ok(ref block) => {
@@ -283,7 +286,9 @@ pub fn run_code(db: &DB, code: &str, cursor: i64) {
     }
 
     if let Some(ix) = code_ast.focused {
-        match &status[ix] {
+        // TODO bring back when output works
+        // match &status[ix] {
+        match &status[0] {
             &Err(ref error) => print!("{}\n\n", error),
             &Ok((ref block, ref results)) => {
                 let result_vars = &block.result_vars;

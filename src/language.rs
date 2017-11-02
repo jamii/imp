@@ -4,8 +4,6 @@ use std::borrow::{Cow, Borrow};
 
 use nom::*;
 
-use std::hash::Hash;
-
 pub enum Kind {
     Boolean,
     Integer,
@@ -327,63 +325,52 @@ impl ExprAst {
     }
 }
 
-pub fn upsert<'a, T: Eq + Hash>(
-    t_ix: &mut HashMap<&'a T, usize>,
-    ts: &mut Vec<&'a T>,
-    t: &'a T,
-) -> usize {
-    if let Some(&ix) = t_ix.get(&t) {
-        ix
-    } else {
-        let ix = ts.len();
-        ts.push(t);
-        t_ix.insert(t, ix);
-        ix
+fn walk_expr<'a>(expr: &'a ExprAst, walked_exprs: &mut Vec<&'a ExprAst>) {
+    match expr {
+        &ExprAst::Constant(_) => (),
+        &ExprAst::Variable(_) => (),
+        &ExprAst::Relation(_, ref args) => {
+            for arg in args.iter() {
+                walk_expr(arg, walked_exprs);
+            }
+        }
     }
+    walked_exprs.push(expr);
 }
 
-enum Node<'a> {
-    Statement(&'a StatementAst),
-    Expr(&'a ExprAst),
+fn walk_statement<'a>(statement: &'a StatementAst, walked_statements: &mut Vec<&'a StatementAst>, walked_exprs: &mut Vec<&'a ExprAst>) {
+    match statement {
+        &StatementAst::Expr(ref expr) => {
+            walk_expr(expr, walked_exprs);
+        }
+        &StatementAst::Equals(ref expr1, ref expr2) => {
+            walk_expr(expr1, walked_exprs);
+            walk_expr(expr2, walked_exprs);
+        }
+        &StatementAst::Conjunction(ref statements) => {
+            for child in statements.iter() {
+                walk_statement(child, walked_statements, walked_exprs);
+            }
+        }
+    }
+    walked_statements.push(statement);
 }
 
 pub fn plan(block: &BlockAst) -> Result<Block, String> {
 
     // flatten tree
-    let mut expr_ix: HashMap<&ExprAst, usize> = HashMap::new();
+    let mut statements: Vec<&StatementAst> = Vec::new();
     let mut exprs: Vec<&ExprAst> = Vec::new();
-    let mut eq_exprs: HashSet<(&ExprAst, &ExprAst)> = HashSet::new();
-    let mut top_level_exprs: HashSet<&ExprAst> = HashSet::new();
-    let mut remaining_nodes = vec![Node::Statement(&block.body)];
-    while let Some(node) = remaining_nodes.pop() {
-        match node {
-            Node::Statement(&StatementAst::Expr(ref expr)) => {
-                top_level_exprs.insert(expr);
-                upsert(&mut expr_ix, &mut exprs, expr);
-                remaining_nodes.push(Node::Expr(expr));
-            }
-            Node::Statement(&StatementAst::Equals(ref expr1, ref expr2)) => {
-                upsert(&mut expr_ix, &mut exprs, expr1);
-                upsert(&mut expr_ix, &mut exprs, expr2);
-                remaining_nodes.push(Node::Expr(expr1));
-                remaining_nodes.push(Node::Expr(expr2));
-                eq_exprs.insert((expr1, expr2));
-            }
-            Node::Statement(&StatementAst::Conjunction(ref statements)) => {
-                for statement in statements.iter() {
-                    remaining_nodes.push(Node::Statement(statement));
-                }
-            }
-            Node::Expr(&ExprAst::Constant(_)) => (),
-            Node::Expr(&ExprAst::Variable(_)) => (),
-            Node::Expr(&ExprAst::Relation(_, ref args)) => {
-                for arg in args.iter() {
-                    upsert(&mut expr_ix, &mut exprs, arg);
-                    remaining_nodes.push(Node::Expr(arg));
-                }
-            }
-        }
-    }
+    walk_statement(&block.body, &mut statements, &mut exprs);
+    let expr_ix: HashMap<&ExprAst, usize> = exprs.iter().enumerate().map(|(i, &e)| (e, i)).rev().collect();
+    let eq_exprs: Vec<(&ExprAst, &ExprAst)> = statements.iter().filter_map(|&statement| match statement {
+        &StatementAst::Equals(ref expr1, ref expr2) => Some((expr1, expr2)),
+        _ => None
+    }).collect();
+    let top_level_exprs: HashSet<&ExprAst> = statements.iter().filter_map(|&statement| match statement {
+        &StatementAst::Expr(ref expr) => Some(expr),
+        _ => None
+    }).collect();
 
     // group exprs that must be equal
     let mut expr_group: HashMap<&ExprAst, usize> = expr_ix
@@ -428,6 +415,15 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
             let exprs = slot_exprs.remove(slot);
             slot_exprs.insert(0, exprs);
         }
+    }
+
+    println!("Exprs:");
+    for expr in exprs.iter() {
+        println!("{:?}", expr);
+    }  
+    println!("Slot exprs:");
+    for (slot, exprs) in slot_exprs.iter().enumerate() {
+        println!("{}: {:?}", slot, exprs);
     }
 
     // index in the other direction
@@ -525,37 +521,21 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
         for function in functions.iter() {
             match function {
                 &&ExprAst::Relation(ref name, ref args) => {
-                    let function = match (&**name, &**args) {
-                        ("+", &[ref a, ref b]) => {
-                            Function::Add(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
-                        }
-                        ("contains", &[ref a, ref b]) => {
-                            Function::Contains(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
-                        }
-                        ("&&", &[ref a, ref b]) => {
-                            Function::And(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
-                        }
-                        ("||", &[ref a, ref b]) => {
-                            Function::Or(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
-                        }
-                        ("!", &[ref a]) => {
-                            Function::Not(*expr_slot.get(a).unwrap())
-                        }
-                        ("<=", &[ref a, ref b]) => {
-                            Function::Leq(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
-                        }
-                        ("<", &[ref a, ref b]) => {
-                            Function::Le(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
-                        }
-                        (">=", &[ref a, ref b]) => {
-                            Function::Geq(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
-                        }
-                        (">", &[ref a, ref b]) => {
-                            Function::Ge(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
-                        }
-                        ("=", &[ref a, ref b]) => {
-                            Function::Eq(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
-                        }
+                    let slots: Vec<usize> = args.iter().map(|arg| *expr_slot.get(arg).unwrap()).collect();
+                    if slots.iter().any(|&s| s >= slot) {
+                        return Err(format!("Function called before arguments bound: {:?}", function));
+                    }
+                    let function = match (&**name, &*slots) {
+                        ("+", &[a, b]) => Function::Add(a, b),
+                        ("contains", &[a, b]) => Function::Contains(a, b),
+                        ("&&", &[a, b]) => Function::And(a, b),
+                        ("||", &[a, b]) => Function::Or(a, b),
+                        ("!", &[a]) => Function::Not(a),
+                        ("<=", &[a, b]) => Function::Leq(a, b),
+                        ("<", &[a, b]) => Function::Le(a, b),
+                        (">=", &[a, b]) => Function::Geq(a, b),
+                        (">", &[a, b]) => Function::Ge(a, b),
+                        ("=", &[a, b]) => Function::Eq(a, b),
                         _ => {
                             return Err(format!(
                                 "I don't know any function called {:?} with {} arguments",
@@ -572,7 +552,9 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
         }
 
         // and then joins
-        constraints.push(Constraint::Join(slot, slot_fixed_yet, rowcols));
+        if rowcols.len() > 0 {
+            constraints.push(Constraint::Join(slot, slot_fixed_yet, rowcols));
+        }
     }
 
     // for now, just output any named variable
@@ -685,6 +667,7 @@ pub fn block_ast(text: &str) -> Result<BlockAst, String> {
 named!(statement_ast(&[u8]) -> StatementAst, do_parse!(
     e: expr_ast >>
         equals: opt!(equals_ast) >>
+        opt!(space) >>
         ({
             if let Some(e2) = equals {
                 StatementAst::Equals(e, e2)

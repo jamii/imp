@@ -332,16 +332,13 @@ fn walk_expr<'a>(expr: &'a ExprAst, walked_exprs: &mut Vec<&'a ExprAst>) {
         &ExprAst::Relation(_, ref args) => {
             for arg in args.iter() {
                 walk_expr(arg, walked_exprs);
+                walked_exprs.push(arg);
             }
         }
     }
-    walked_exprs.push(expr);
 }
 
 pub fn plan(block: &BlockAst) -> Result<Block, String> {
-    // TODO everywhere that we check block.contains(expr)
-    // we actually want to check that expr does not occur nested
-    // which is not the same thing in the presence of duplicate expressions
 
     // flatten tree
     let mut exprs: Vec<&ExprAst> = Vec::new();
@@ -353,7 +350,6 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
     // group exprs that must be equal
     let mut expr_group: HashMap<&ExprAst, usize> = expr_ix
         .iter()
-        .filter(|&(e, _)| !block.body.contains(e))
         .map(|(&e, &i)| (e, i))
         .collect();
     for expr in block.body.iter() {
@@ -420,13 +416,21 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
     // collect exprs that directly query the database
     let mut row_names: Vec<String> = vec![];
     let mut row_exprs: Vec<Vec<&ExprAst>> = vec![];
+    for expr in block.body.iter() {
+        match expr {
+            &ExprAst::Relation(ref name, ref args) if !expr.is_function() => {
+                let mut args: Vec<&ExprAst> = args.iter().collect();
+                row_names.push(name.clone());
+                row_exprs.push(args);
+            }
+            _ => (),
+        }
+    }
     for &expr in exprs.iter() {
         match expr {
             &ExprAst::Relation(ref name, ref args) if !expr.is_function() => {
                 let mut args: Vec<&ExprAst> = args.iter().collect();
-                if !block.body.contains(expr) {
-                    args.push(expr); // the value attached to the row
-                }
+                args.push(expr); // the value attached to the row
                 row_names.push(name.clone());
                 row_exprs.push(args);
             }
@@ -504,33 +508,31 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
         for function in functions.iter() {
             match function {
                 &&ExprAst::Relation(ref name, ref args) => {
-                    if !block.body.contains(function) {
-                        let slots: Vec<usize> = args.iter().map(|arg| *expr_slot.get(arg).unwrap()).collect();
-                        if slots.iter().any(|&s| s >= slot) {
-                            return Err(format!("Function called before arguments bound: {:?}", function));
-                        }
-                        let function = match (&**name, &*slots) {
-                            ("+", &[a, b]) => Function::Add(a, b),
-                            ("contains", &[a, b]) => Function::Contains(a, b),
-                            ("&&", &[a, b]) => Function::And(a, b),
-                            ("||", &[a, b]) => Function::Or(a, b),
-                            ("!", &[a]) => Function::Not(a),
-                            ("<=", &[a, b]) => Function::Leq(a, b),
-                            ("<", &[a, b]) => Function::Le(a, b),
-                            (">=", &[a, b]) => Function::Geq(a, b),
-                            (">", &[a, b]) => Function::Ge(a, b),
-                            ("=", &[a, b]) => Function::Eq(a, b),
-                            _ => {
-                                return Err(format!(
-                                    "I don't know any function called {:?} with {} arguments",
-                                    name,
-                                    args.len()
-                                ))
-                            }
-                        };
-                        constraints.push(Constraint::Apply(slot, slot_fixed_yet, function));
-                        slot_fixed_yet = true;
+                    let slots: Vec<usize> = args.iter().map(|arg| *expr_slot.get(arg).unwrap()).collect();
+                    if slots.iter().any(|&s| s >= slot) {
+                        return Err(format!("Function called before arguments bound: {:?}", function));
                     }
+                    let function = match (&**name, &*slots) {
+                        ("+", &[a, b]) => Function::Add(a, b),
+                        ("contains", &[a, b]) => Function::Contains(a, b),
+                        ("&&", &[a, b]) => Function::And(a, b),
+                        ("||", &[a, b]) => Function::Or(a, b),
+                        ("!", &[a]) => Function::Not(a),
+                        ("<=", &[a, b]) => Function::Leq(a, b),
+                        ("<", &[a, b]) => Function::Le(a, b),
+                        (">=", &[a, b]) => Function::Geq(a, b),
+                        (">", &[a, b]) => Function::Ge(a, b),
+                        ("=", &[a, b]) => Function::Eq(a, b),
+                        _ => {
+                            return Err(format!(
+                                "I don't know any function called {:?} with {} arguments",
+                                name,
+                                args.len()
+                            ))
+                        }
+                    };
+                    constraints.push(Constraint::Apply(slot, slot_fixed_yet, function));
+                    slot_fixed_yet = true;
                 }
                 _ => unreachable!(),
             }

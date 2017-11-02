@@ -264,7 +264,7 @@ pub fn run_code(db: &DB, code: &str, cursor: i64) {
 
     // TODO bring back when output works
     // for block in code_ast.blocks.iter() {
-    for block in vec![&code_ast.blocks[code_ast.focused]].into_iter() {
+    for block in code_ast.focused.iter().map(|ix| &code_ast.blocks[*ix]) {
         match block {
             &Err(ref error) => status.push(Err(format!("Parse error: {}", error))),
             &Ok(ref block) => {

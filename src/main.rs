@@ -67,12 +67,18 @@ mod bench {
         println!("Code is {:?}", code);
         let code_ast = code_ast(&code, 0);
         for (i, block_ast_or_error) in code_ast.blocks.iter().enumerate() {
-            let block_ast = block_ast_or_error.as_ref().unwrap();
-            let block = plan(block_ast).unwrap();
-            bench(format!("compile\t{}_{}", name, i), || {
-                plan(block_ast).unwrap()
-            });
-            bench(format!("run\t{}_{}", name, i), || block.run(db));
+            match block_ast_or_error {
+                &Ok(ref block_ast) => {
+                    let block = plan(block_ast).unwrap();
+                    bench(format!("compile\t{}_{}", name, i), || {
+                        plan(block_ast).unwrap()
+                    });
+                    bench(format!("run\t{}_{}", name, i), || block.run(db));
+                }
+                &Err(ref error) => {
+                    println!("error\t{}_{}\t{}", name, i, error);
+                }
+            }
         }
     }
 

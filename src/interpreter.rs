@@ -344,7 +344,6 @@ pub fn serve_editor(db: DB) {
     thread::spawn({
         let state = state.clone();
         move || {
-            println!("DB is {:?}", db);
             let mut last_state = state.lock().unwrap().clone();
             loop {
                 let state: (String, i64) = state.lock().unwrap().clone();
@@ -352,7 +351,7 @@ pub fn serve_editor(db: DB) {
                     print!("\x1b[2J\x1b[1;1H");
                     let (ref code, cursor) = state;
                     let start = ::std::time::Instant::now();
-                    run_code(&mut db.clone(), &*code, cursor);
+                    run_code(&db, &*code, cursor);
                     let elapsed = start.elapsed();
                     println!(
                         "In {} ms",

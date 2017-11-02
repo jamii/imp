@@ -185,6 +185,15 @@ pub struct DB {
 #[derive(Debug, Clone)]
 pub enum Function {
     Add(usize, usize),
+    Contains(usize, usize),
+    And(usize, usize),
+    Or(usize, usize),
+    Not(usize),
+    Leq(usize, usize),
+    Le(usize, usize),
+    Geq(usize, usize),
+    Ge(usize, usize),
+    Eq(usize, usize),
 }
 
 impl Function {
@@ -194,6 +203,70 @@ impl Function {
                 match (&variables[a], &variables[b]) {
                     (&Value::Integer(a), &Value::Integer(b)) => Ok(Value::Integer(a + b)),
                     (a, b) => Err(format!("Type error: {} + {}", a, b)),
+                }
+            }
+            &Function::Contains(a, b) => {
+                match (&variables[a], &variables[b]) {
+                    (&Value::String(ref a), &Value::String(ref b)) => Ok(Value::Boolean(a.contains(b.as_ref()))),
+                    (a, b) => Err(format!("Type error: contains({}, {})", a, b)),
+                }
+            }
+            &Function::And(a, b) => {
+                match (&variables[a], &variables[b]) {
+                    (&Value::Boolean(a), &Value::Boolean(b)) => Ok(Value::Boolean(a && b)),
+                    (a, b) => Err(format!("Type error: {} && {}", a, b)),
+                }
+            }
+            &Function::Or(a, b) => {
+                match (&variables[a], &variables[b]) {
+                    (&Value::Boolean(a), &Value::Boolean(b)) => Ok(Value::Boolean(a || b)),
+                    (a, b) => Err(format!("Type error: {} || {}", a, b)),
+                }
+            }
+            &Function::Not(a) => {
+                match &variables[a] {
+                    &Value::Boolean(a) => Ok(Value::Boolean(!a)),
+                    a => Err(format!("Type error: !{}", a)),
+                }
+            }
+            &Function::Leq(a, b) => {
+                match (&variables[a], &variables[b]) {
+                    (&Value::Boolean(a), &Value::Boolean(b)) => Ok(Value::Boolean(a <= b)),
+                    (&Value::Integer(a), &Value::Integer(b)) => Ok(Value::Boolean(a <= b)),
+                    (&Value::String(ref a), &Value::String(ref b)) => Ok(Value::Boolean(a <= b)),
+                    (a, b) => Err(format!("Type error: {} <= {}", a, b)),
+                }
+            }
+            &Function::Le(a, b) => {
+                match (&variables[a], &variables[b]) {
+                    (&Value::Boolean(a), &Value::Boolean(b)) => Ok(Value::Boolean(a < b)),
+                    (&Value::Integer(a), &Value::Integer(b)) => Ok(Value::Boolean(a < b)),
+                    (&Value::String(ref a), &Value::String(ref b)) => Ok(Value::Boolean(a < b)),
+                    (a, b) => Err(format!("Type error: {} < {}", a, b)),
+                }
+            }
+            &Function::Geq(a, b) => {
+                match (&variables[a], &variables[b]) {
+                    (&Value::Boolean(a), &Value::Boolean(b)) => Ok(Value::Boolean(a >= b)),
+                    (&Value::Integer(a), &Value::Integer(b)) => Ok(Value::Boolean(a >= b)),
+                    (&Value::String(ref a), &Value::String(ref b)) => Ok(Value::Boolean(a >= b)),
+                    (a, b) => Err(format!("Type error: {} >= {}", a, b)),
+                }
+            }
+            &Function::Ge(a, b) => {
+                match (&variables[a], &variables[b]) {
+                    (&Value::Boolean(a), &Value::Boolean(b)) => Ok(Value::Boolean(a >= b)),
+                    (&Value::Integer(a), &Value::Integer(b)) => Ok(Value::Boolean(a >= b)),
+                    (&Value::String(ref a), &Value::String(ref b)) => Ok(Value::Boolean(a >= b)),
+                    (a, b) => Err(format!("Type error: {} >= {}", a, b)),
+                }
+            }
+            &Function::Eq(a, b) => {
+                match (&variables[a], &variables[b]) {
+                    (&Value::Boolean(a), &Value::Boolean(b)) => Ok(Value::Boolean(a == b)),
+                    (&Value::Integer(a), &Value::Integer(b)) => Ok(Value::Boolean(a == b)),
+                    (&Value::String(ref a), &Value::String(ref b)) => Ok(Value::Boolean(a == b)),
+                    (a, b) => Err(format!("Type error: {} == {}", a, b)),
                 }
             }
         }
@@ -237,6 +310,15 @@ impl ExprAst {
             &ExprAst::Relation(ref name, _) => {
                 match &**name {
                     "+" => true,
+                    "contains" => true,
+                    "&&" => true,
+                    "||" => true,
+                    "!" => true,
+                    "<=" => true,
+                    ">=" => true,
+                    "<" => true,
+                    ">" => true,
+                    "=" => true,
                     _ => false,
                 }
             }
@@ -447,6 +529,33 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
                         ("+", &[ref a, ref b]) => {
                             Function::Add(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
                         }
+                        ("contains", &[ref a, ref b]) => {
+                            Function::Contains(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
+                        }
+                        ("&&", &[ref a, ref b]) => {
+                            Function::And(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
+                        }
+                        ("||", &[ref a, ref b]) => {
+                            Function::Or(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
+                        }
+                        ("!", &[ref a]) => {
+                            Function::Not(*expr_slot.get(a).unwrap())
+                        }
+                        ("<=", &[ref a, ref b]) => {
+                            Function::Leq(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
+                        }
+                        ("<", &[ref a, ref b]) => {
+                            Function::Le(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
+                        }
+                        (">=", &[ref a, ref b]) => {
+                            Function::Geq(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
+                        }
+                        (">", &[ref a, ref b]) => {
+                            Function::Ge(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
+                        }
+                        ("=", &[ref a, ref b]) => {
+                            Function::Eq(*expr_slot.get(a).unwrap(), *expr_slot.get(b).unwrap())
+                        }
                         _ => {
                             return Err(format!(
                                 "I don't know any function called {:?} with {} arguments",
@@ -520,7 +629,8 @@ pub fn simplify_errors<Output>(
 ) -> Result<Output, String> {
     match result {
         IResult::Done(remaining, output) => {
-            if remaining.len() == 0 {
+            if remaining.len() <= 1 {
+                // hacky remaining \n used to stop streaming
                 Ok(output)
             } else {
                 Err(format!(
@@ -536,12 +646,7 @@ pub fn simplify_errors<Output>(
 }
 
 pub fn code_ast(text: &str, cursor: i64) -> CodeAst {
-    let blocks = text.trim().split("\n\n").filter(|s| *s != "")
-        .map(|block| {
-            let block = format!("{}\n", block); // hacky way to get nom to stop streaming
-            simplify_errors(block_ast(block.as_bytes()), &*block)
-        })
-        .collect::<Vec<_>>();
+    let blocks = text.trim().split("\n\n").filter(|s| *s != "").map(block_ast).collect::<Vec<_>>();
     let mut focused = None;
     let mut remaining_cursor = cursor;
     for (i, block_src) in text.split("\n\n").enumerate() {
@@ -558,18 +663,26 @@ pub fn code_ast(text: &str, cursor: i64) -> CodeAst {
     CodeAst { blocks, focused }
 }
 
-named!(block_ast(&[u8]) -> BlockAst, map!(statement_ast, |e| BlockAst{body: e}));
+pub fn block_ast(text: &str) -> Result<BlockAst, String> {
+    let mut statements = vec![];
+    let mut errors = vec![];
+    for (i, line) in text.trim().split("\n").enumerate() {
+        if !line.starts_with("#") {
+            let line = format!("{}\n", line); // hacky way to get nom to stop streaming
+            match simplify_errors(statement_ast(line.as_bytes()), &*line) {
+                Ok(statement) => statements.push(statement),
+                Err(error) => errors.push(format!("Line {}: {}", i, error)),
+            }
+        }
+    }
+    if errors.len() == 0 {
+        Ok(BlockAst{body: StatementAst::Conjunction(statements)})
+    } else {
+        Err(errors.join("\n"))
+    }
+}
 
-named!(statement_ast(&[u8]) -> StatementAst, map!(
-    many0!(do_parse!(
-        s: simple_statement_ast >>
-            opt!(space) >>
-            tag!("\n") >>
-    (s))),
-    StatementAst::Conjunction
-));
-
-named!(simple_statement_ast(&[u8]) -> StatementAst, do_parse!(
+named!(statement_ast(&[u8]) -> StatementAst, do_parse!(
     e: expr_ast >>
         equals: opt!(equals_ast) >>
         ({
@@ -604,7 +717,7 @@ named!(expr_ast(&[u8]) -> ExprAst, do_parse!(
 named!(infix_function_ast(&[u8]) -> (String, ExprAst), do_parse!(
         opt!(space) >>
         name: map_res!(
-            alt!(tag!("+")),
+            alt!(tag!("+") | tag!("||") | tag!("&&") | tag!(">=") | tag!(">") | tag!("<=") | tag!("<") | tag!("=")),
             |b| ::std::str::from_utf8(b).map(|s| s.to_owned())
         ) >>
         opt!(space) >>
@@ -613,10 +726,17 @@ named!(infix_function_ast(&[u8]) -> (String, ExprAst), do_parse!(
 ));
 
 named!(simple_expr_ast(&[u8]) -> ExprAst, alt!(
+        map!(prefix_function_ast, |(name, arg)| ExprAst::Relation(name, vec![arg])) |
         map!(relation_ast, |(name, args)| ExprAst::Relation(name, args)) |
         map!(value_ast, ExprAst::Constant) |
         map!(symbol_ast, ExprAst::Variable) |
         paren_ast
+));
+
+named!(prefix_function_ast(&[u8]) -> (String, ExprAst), do_parse!(
+    name: map_res!(tag!("!"), |b| ::std::str::from_utf8(b).map(|s| s.to_owned())) >>
+        e: simple_expr_ast >>
+        ((name, e))
 ));
 
 named!(relation_ast(&[u8]) -> (String, Vec<ExprAst>), do_parse!(
@@ -651,8 +771,8 @@ named!(string_ast(&[u8]) -> String, map_res!(
 
 named!(symbol_ast(&[u8]) -> String, map_res!(
     verify!(
-        take_while1_s!(|c| is_alphanumeric(c) || c == ('-' as u8) || c == ('.' as u8)),
-        |b: &[u8]| is_alphabetic(b[0])
+        take_while1_s!(|c| is_alphanumeric(c) || c == ('-' as u8) || c == ('.' as u8) || c == ('_' as u8)),
+        |b: &[u8]| is_alphabetic(b[0]) 
     ),
     |b| ::std::str::from_utf8(b).map(|s| s.to_owned())
 ));

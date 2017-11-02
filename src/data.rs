@@ -64,7 +64,7 @@ fn parse_imdb() -> Result<DB, String> {
         match File::open(format!("../imdb/pg_{}.csv", table_name)) {
             Err(_) => (), // don't have data for this file
             Ok(file) => {
-                let name = format!("{}.{}", table_name, column_name);
+                let name = format!("{}.{}", table_name, column_name.replace("_id", ""));
                 println!("Parsing imdb: {}", name);
                 let mut data_reader = ::csv::ReaderBuilder::new().delimiter(b',').from_reader(
                     file,

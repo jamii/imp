@@ -337,6 +337,8 @@ enum EditorEvent {
 // }
 
 pub fn serve_editor(db: DB) {
+    println!("Tables: {:?}", db.relations.keys().collect::<Vec<_>>());
+
     let state = Arc::new(Mutex::new(("".to_owned(), 0)));
 
     let server = Server::bind("127.0.0.1:8081").unwrap();

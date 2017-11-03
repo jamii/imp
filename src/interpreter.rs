@@ -105,7 +105,7 @@ fn constrain<'a>(
         match &constraints[0] {
             &Constraint::Join(var_ix, result_already_fixed, ref rowcols) => {
                 if result_already_fixed {
-                    // loop over rowcols[0..]
+                    // loop over rowcols
                     let mut i = 0;
                     {
                         let value = &variables[var_ix];
@@ -143,31 +143,41 @@ fn constrain<'a>(
                         ranges[row_ix] = buffer[i];
                     }
                 } else {
-                    let (row_ix, col_ix) = rowcols[0]; // TODO pick smallest
+                    let (min_ix, &(row_ix, col_ix)) = rowcols
+                        .iter()
+                        .enumerate()
+                        .min_by_key(|&(_, &(row_ix, _))| {
+                            let (lo, hi) = ranges[row_ix];
+                            hi - lo
+                        })
+                        .unwrap();
+
                     let column = &indexes[row_ix].columns[col_ix];
                     let (old_lo, old_hi) = ranges[row_ix];
                     let mut lo = old_lo;
-                    // loop over rowcols[0]
+                    // loop over rowcols[ix]
                     while lo < old_hi {
                         let value = &column.get(lo);
                         let hi = gallop_leq(column, lo + 1, old_hi, value);
                         ranges[row_ix] = (lo, hi);
                         {
-                            // loop over rowcols[1..]
-                            let mut i = 1;
+                            // loop over rowcols[-ix]
+                            let mut i = 0;
                             while i < rowcols.len() {
-                                let (row_ix, col_ix) = rowcols[i];
-                                let column = &indexes[row_ix].columns[col_ix];
-                                let (old_lo, old_hi) = ranges[row_ix];
-                                let lo = gallop_le(column, old_lo, old_hi, value);
-                                let hi = gallop_leq(column, lo, old_hi, value);
-                                if lo < hi {
-                                    ranges[row_ix] = (lo, hi);
-                                    buffer[i] = (old_lo, old_hi);
-                                    i += 1;
-                                } else {
-                                    break;
+                                if i != min_ix {
+                                    let (row_ix, col_ix) = rowcols[i];
+                                    let column = &indexes[row_ix].columns[col_ix];
+                                    let (old_lo, old_hi) = ranges[row_ix];
+                                    let lo = gallop_le(column, old_lo, old_hi, value);
+                                    let hi = gallop_leq(column, lo, old_hi, value);
+                                    if lo < hi {
+                                        ranges[row_ix] = (lo, hi);
+                                        buffer[i] = (old_lo, old_hi);
+                                    } else {
+                                        break;
+                                    }
                                 }
+                                i += 1;
                             }
                             // if all succeeded, continue with rest of constraints
                             if i == rowcols.len() {
@@ -182,11 +192,13 @@ fn constrain<'a>(
                                     results,
                                 )?;
                             }
-                            // restore state for rowcols[1..i]
-                            while i > 1 {
+                            // restore state for rowcols[-ix]
+                            while i > 0 {
                                 i -= 1;
-                                let (row_ix, _) = rowcols[i];
-                                ranges[row_ix] = buffer[i];
+                                if i != min_ix {
+                                    let (row_ix, _) = rowcols[i];
+                                    ranges[row_ix] = buffer[i];
+                                }
                             }
                         }
                         lo = hi;

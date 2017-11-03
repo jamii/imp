@@ -248,6 +248,7 @@ fn constrain<'a>(
 impl Block {
     pub fn run(&self, db: &DB) -> Result<Vec<Value<'static>>, String> {
         let mut indexes: Vec<Relation> = vec![];
+        let start = ::std::time::Instant::now();
         for (name, ordering) in self.row_names.iter().zip(self.row_orderings.iter()) {
             indexes.push(
                 db.relations
@@ -256,6 +257,11 @@ impl Block {
                     .sorted(ordering),
             )
         }
+        let elapsed = start.elapsed();
+        println!(
+            "Index in {} ms",
+            (elapsed.as_secs() * 1_000) + (elapsed.subsec_nanos() / 1_000_000) as u64
+        );
         let mut variables: Vec<Value> = self.variables.clone();
         let mut ranges: Vec<LoHi> = indexes
             .iter()
@@ -264,6 +270,7 @@ impl Block {
         let mut buffers: Vec<LoHi> = vec![(0, 0); indexes.len() * self.constraints.len()];
         let mut buffers: Vec<&mut [LoHi]> = buffers.chunks_mut(indexes.len()).collect();
         let mut results = vec![];
+        let start = ::std::time::Instant::now();
         constrain(
             &*self.constraints,
             &*indexes,
@@ -273,6 +280,11 @@ impl Block {
             &*self.result_vars,
             &mut results,
         )?;
+        let elapsed = start.elapsed();
+        println!(
+            "Run in {} ms",
+            (elapsed.as_secs() * 1_000) + (elapsed.subsec_nanos() / 1_000_000) as u64
+        );
         Ok(results)
     }
 }

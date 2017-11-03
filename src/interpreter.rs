@@ -287,11 +287,18 @@ fn constrain<'a>(
     Ok(())
 }
 
-impl Block {
-    pub fn run(&self, db: &DB) -> Result<Vec<Value<'static>>, String> {
-        let mut indexes: Vec<Relation> = vec![];
-        let start = ::std::time::Instant::now();
-        for (name, ordering) in self.row_names.iter().zip(self.row_orderings.iter()) {
+pub struct Prepared {
+    indexes: Vec<Relation>,
+    ranges: Vec<LoHi>,
+    locals: Vec<LoHi>,
+    buffers: Vec<LoHi>,
+}
+
+pub fn prepare_block(block: &Block, db: &DB) -> Result<Prepared, String> {
+    let mut indexes: Vec<Relation> = vec![];
+    time!(
+        "indexing",
+        for (name, ordering) in block.row_names.iter().zip(block.row_orderings.iter()) {
             indexes.push(
                 db.relations
                     .get(name)
@@ -299,39 +306,45 @@ impl Block {
                     .sorted(ordering),
             )
         }
-        let elapsed = start.elapsed();
-        println!(
-            "Index in {} ms",
-            ((elapsed.as_secs() as f64) * 1_000.0) + ((elapsed.subsec_nanos() as f64) / 1_000_000.0)
-        );
-        let mut variables: Vec<Value> = self.variables.clone();
-        let mut ranges: Vec<LoHi> = indexes
-            .iter()
-            .map(|index| (0, index.columns[0].len()))
-            .collect();
-        let mut buffers: Vec<LoHi> = vec![(0, 0); indexes.len() * self.constraints.len()];
-        let mut locals = buffers.clone();
-        let mut buffers: Vec<&mut [LoHi]> = buffers.chunks_mut(indexes.len()).collect();
-        let mut locals: Vec<&mut [LoHi]> = locals.chunks_mut(indexes.len()).collect();
-        let mut results = vec![];
-        let start = ::std::time::Instant::now();
+    );
+    let ranges: Vec<LoHi> = indexes
+        .iter()
+        .map(|index| (0, index.columns[0].len()))
+        .collect();
+    let buffers: Vec<LoHi> = vec![(0, 0); indexes.len() * block.constraints.len()];
+    let locals = buffers.clone();
+    Ok(Prepared {
+        indexes,
+        ranges,
+        locals,
+        buffers,
+    })
+}
+
+pub fn run_block(block: &Block, prepared: &mut Prepared) -> Result<Vec<Value<'static>>, String> {
+    let &mut Prepared {
+        ref indexes,
+        ref mut ranges,
+        ref mut locals,
+        ref mut buffers,
+    } = prepared;
+    let mut buffers: Vec<&mut [LoHi]> = buffers.chunks_mut(indexes.len()).collect();
+    let mut locals: Vec<&mut [LoHi]> = locals.chunks_mut(indexes.len()).collect();
+    let mut results = vec![];
+    time!(
+        "query",
         constrain(
-            &*self.constraints,
+            &*block.constraints,
             &*indexes,
             &mut *ranges,
             &mut *locals,
             &mut *buffers,
-            &mut *variables,
-            &*self.result_vars,
+            &mut block.variables.clone(),
+            &*block.result_vars,
             &mut results,
-        )?;
-        let elapsed = start.elapsed();
-        println!(
-            "Run in {} ms",
-            ((elapsed.as_secs() as f64) * 1_000.0) + ((elapsed.subsec_nanos() as f64) / 1_000_000.0)
-        );
-        Ok(results)
-    }
+        )?
+    );
+    Ok(results)
 }
 
 pub fn run_code(db: &DB, code: &str, cursor: i64) {
@@ -350,10 +363,16 @@ pub fn run_code(db: &DB, code: &str, cursor: i64) {
                     Err(error) => status.push(Err(format!("Compile error: {}", error))),
                     Ok(block) => {
                         print!("{:?}\n\n", block);
-                        match block.run(db) {
-                            Err(error) => status.push(Err(format!("Run error: {}", error))),
-                            Ok(results) => {
-                                status.push(Ok((block, results)));
+                        let prepared = prepare_block(&block, db);
+                        match prepared {
+                            Err(error) => status.push(Err(format!("Prepare error: {}", error))),
+                            Ok(mut prepared) => {
+                                match run_block(&block, &mut prepared) {
+                                    Err(error) => status.push(Err(format!("Run error: {}", error))),
+                                    Ok(results) => {
+                                        status.push(Ok((block, results)));
+                                    }
+                                }
                             }
                         }
                     }
@@ -434,13 +453,9 @@ pub fn serve_editor(db: DB) {
                 if state != last_state {
                     print!("\x1b[2J\x1b[1;1H");
                     let (ref code, cursor) = state;
-                    let start = ::std::time::Instant::now();
-                    run_code(&db, &*code, cursor);
-                    let elapsed = start.elapsed();
-                    println!(
-                        "In {} ms",
-                        (elapsed.as_secs() * 1_000) + (elapsed.subsec_nanos() / 1_000_000) as u64
-                    );
+                    time!("full run", {
+                        run_code(&db, &*code, cursor)
+                    });
                     last_state = state.clone();
                 }
             }

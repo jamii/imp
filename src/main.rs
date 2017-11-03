@@ -53,16 +53,17 @@ fn main() {
 // RUST_BACKTRACE=1 cargo run --release -- bench
 mod bench {
     use test::*;
-    use super::language::*;
     use super::data::*;
+    use super::language::*;
+    use super::interpreter::*;
     use std::fs::File;
     use std::io::prelude::*;
 
-    fn bench<F, T>(name: String, f: F)
+    fn bench<F, T>(name: String, mut f: F)
     where
-        F: Fn() -> T,
+        F: FnMut() -> T,
     {
-        let samples = ::test::bench::benchmark(|b: &mut Bencher| b.iter(&f));
+        let samples = ::test::bench::benchmark(|b: &mut Bencher| b.iter(&mut f));
         println!("{} ... {}", name, ::test::fmt_bench_samples(&samples));
     }
 
@@ -75,11 +76,14 @@ mod bench {
         for (i, block_ast_or_error) in code_ast.blocks.iter().enumerate() {
             match block_ast_or_error {
                 &Ok(ref block_ast) => {
-                    let block = plan(block_ast).unwrap();
                     bench(format!("compile\t{}_{}", name, i), || {
                         plan(block_ast).unwrap()
                     });
-                    bench(format!("run\t{}_{}", name, i), || block.run(db));
+                    let block = plan(block_ast).unwrap();
+                    let mut prepared = time!("prepare", prepare_block(&block, db).unwrap());
+                    bench(format!("run\t{}_{}", name, i), move || {
+                        run_block(&block, &mut prepared)
+                    });
                 }
                 &Err(ref error) => {
                     println!("error\t{}_{}\t{}", name, i, error);

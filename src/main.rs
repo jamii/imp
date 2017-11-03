@@ -33,14 +33,14 @@ mod dd;
 use data::*;
 
 // To run the editor server:
-// RUST_BACKTRACE=1 RUST_LOG=debug:imp cargo run --release -- editor imdb
+// RUST_BACKTRACE=1 RUST_LOG='imp=debug' cargo run --release -- editor imdb
 
 // To run benchmarks:
 // RUST_BACKTRACE=1 cargo run --release -- bench
 
 // To profile:
 // cargo build --release
-// RUST_BACKTRACE=1 valgrind --tool=callgrind -collect-atstart=no "--toggle-collect=" target/release/imp profile
+// RUST_BACKTRACE=1 valgrind --tool=callgrind --callgrind-out-file=callgrind.out target/release/imp profile
 
 fn main() {
     env_logger::init().unwrap();
@@ -85,13 +85,20 @@ mod bench {
         for (i, block_ast_or_error) in code_ast.blocks.iter().enumerate() {
             match block_ast_or_error {
                 &Ok(ref block_ast) => {
-                    bench(format!("compile\t{}_{}", name, i), || {
-                        plan(block_ast).unwrap()
-                    });
-                    let block = plan(block_ast).unwrap();
-                    let mut prepared = time!("prepare", prepare_block(&block, db).unwrap());
-                    let results = run_block(&block, &mut prepared).unwrap();
-                    println!("{} results", results.len());
+                    match plan(block_ast) {
+                        Ok(block) => {
+                            bench(format!("compile\t{}_{}", name, i), || {
+                                plan(block_ast).unwrap()
+                            });
+                            let mut prepared = time!("prepare", prepare_block(&block, db).unwrap());
+                            bench(format!("run\t{}_{}", name, i), move || {
+                                run_block(&block, &mut prepared)
+                            });
+                        }
+                        Err(ref error) => {
+                            println!("error\t{}_{}\t{}", name, i, error);
+                        }
+                    }
                 }
                 &Err(ref error) => {
                     println!("error\t{}_{}\t{}", name, i, error);

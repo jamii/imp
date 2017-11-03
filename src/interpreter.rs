@@ -302,7 +302,7 @@ impl Block {
         let elapsed = start.elapsed();
         println!(
             "Index in {} ms",
-            (elapsed.as_secs() * 1_000) + (elapsed.subsec_nanos() / 1_000_000) as u64
+            ((elapsed.as_secs() as f64) * 1_000.0) + ((elapsed.subsec_nanos() as f64) / 1_000_000.0)
         );
         let mut variables: Vec<Value> = self.variables.clone();
         let mut ranges: Vec<LoHi> = indexes
@@ -328,7 +328,7 @@ impl Block {
         let elapsed = start.elapsed();
         println!(
             "Run in {} ms",
-            (elapsed.as_secs() * 1_000) + (elapsed.subsec_nanos() / 1_000_000) as u64
+            ((elapsed.as_secs() as f64) * 1_000.0) + ((elapsed.subsec_nanos() as f64) / 1_000_000.0)
         );
         Ok(results)
     }

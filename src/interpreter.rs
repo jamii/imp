@@ -95,6 +95,7 @@ fn constrain<'a>(
     constraints: &[Constraint],
     indexes: &'a [Relation],
     ranges: &mut [LoHi],
+    locals: &mut [&mut [LoHi]],
     buffers: &mut [&mut [LoHi]],
     variables: &mut [Value<'a>],
     result_vars: &[(String, usize)],
@@ -102,10 +103,15 @@ fn constrain<'a>(
 ) -> Result<(), String> {
     if constraints.len() > 0 {
         let (buffer, other_buffers) = buffers.split_first_mut().unwrap();
+        let (local, other_locals) = locals.split_first_mut().unwrap();
         match &constraints[0] {
             &Constraint::Join(var_ix, result_already_fixed, ref rowcols) => {
                 if result_already_fixed {
-                    // loop over rowcols
+                    // copy previous state
+                    for (i, &(row_ix, _)) in rowcols.iter().enumerate() {
+                        buffer[i] = ranges[row_ix];
+                    }
+                    // search in each of rowcols
                     let mut i = 0;
                     {
                         let value = &variables[var_ix];
@@ -117,7 +123,6 @@ fn constrain<'a>(
                             let hi = gallop_leq(column, lo, old_hi, value);
                             if lo < hi {
                                 ranges[row_ix] = (lo, hi);
-                                buffer[i] = (old_lo, old_hi);
                                 i += 1;
                             } else {
                                 break;
@@ -130,19 +135,21 @@ fn constrain<'a>(
                             &constraints[1..],
                             indexes,
                             ranges,
+                            other_locals,
                             other_buffers,
                             variables,
                             result_vars,
                             results,
                         )?;
                     }
-                    // restore state for rowcols[0..i]
-                    while i > 0 {
-                        i -= 1;
-                        let (row_ix, _) = rowcols[i];
-                        ranges[row_ix] = buffer[i];
-                    }
                 } else {
+                    // copy previous state
+                    for (i, &(row_ix, _)) in rowcols.iter().enumerate() {
+                        buffer[i] = ranges[row_ix];
+                        local[i] = ranges[row_ix];
+                    }
+
+                    // find smallest range
                     let (min_ix, &(row_ix, col_ix)) = rowcols
                         .iter()
                         .enumerate()
@@ -151,28 +158,28 @@ fn constrain<'a>(
                             hi - lo
                         })
                         .unwrap();
-
                     let column = &indexes[row_ix].columns[col_ix];
-                    let (old_lo, old_hi) = ranges[row_ix];
+                    let (old_lo, old_hi) = local[min_ix];
                     let mut lo = old_lo;
-                    // loop over rowcols[ix]
+
+                    // loop over rowcols[min_ix]
                     while lo < old_hi {
                         let value = &column.get(lo);
                         let hi = gallop_leq(column, lo + 1, old_hi, value);
                         ranges[row_ix] = (lo, hi);
                         {
-                            // loop over rowcols[-ix]
+                            // search in each of rowcols[-min_ix]
                             let mut i = 0;
                             while i < rowcols.len() {
                                 if i != min_ix {
                                     let (row_ix, col_ix) = rowcols[i];
                                     let column = &indexes[row_ix].columns[col_ix];
-                                    let (old_lo, old_hi) = ranges[row_ix];
+                                    let (old_lo, old_hi) = local[i];
                                     let lo = gallop_le(column, old_lo, old_hi, value);
                                     let hi = gallop_leq(column, lo, old_hi, value);
                                     if lo < hi {
                                         ranges[row_ix] = (lo, hi);
-                                        buffer[i] = (old_lo, old_hi);
+                                        local[i] = (hi, old_hi);
                                     } else {
                                         break;
                                     }
@@ -186,25 +193,20 @@ fn constrain<'a>(
                                     &constraints[1..],
                                     indexes,
                                     ranges,
+                                    other_locals,
                                     other_buffers,
                                     variables,
                                     result_vars,
                                     results,
                                 )?;
                             }
-                            // restore state for rowcols[-ix]
-                            while i > 0 {
-                                i -= 1;
-                                if i != min_ix {
-                                    let (row_ix, _) = rowcols[i];
-                                    ranges[row_ix] = buffer[i];
-                                }
-                            }
                         }
                         lo = hi;
                     }
-                    // restore state for rowcols[0]
-                    ranges[row_ix] = (old_lo, old_hi);
+                }
+                // restore previous state
+                for (i, &(row_ix, _)) in rowcols.iter().enumerate() {
+                    ranges[row_ix] = buffer[i];
                 }
             }
             &Constraint::Apply(result_ix, result_already_fixed, ref function) => {
@@ -215,6 +217,7 @@ fn constrain<'a>(
                             &constraints[1..],
                             indexes,
                             ranges,
+                            other_locals,
                             other_buffers,
                             variables,
                             result_vars,
@@ -229,6 +232,7 @@ fn constrain<'a>(
                         &constraints[1..],
                         indexes,
                         ranges,
+                        other_locals,
                         other_buffers,
                         variables,
                         result_vars,
@@ -268,13 +272,16 @@ impl Block {
             .map(|index| (0, index.columns[0].len()))
             .collect();
         let mut buffers: Vec<LoHi> = vec![(0, 0); indexes.len() * self.constraints.len()];
+        let mut locals = buffers.clone();
         let mut buffers: Vec<&mut [LoHi]> = buffers.chunks_mut(indexes.len()).collect();
+        let mut locals: Vec<&mut [LoHi]> = locals.chunks_mut(indexes.len()).collect();
         let mut results = vec![];
         let start = ::std::time::Instant::now();
         constrain(
             &*self.constraints,
             &*indexes,
             &mut *ranges,
+            &mut *locals,
             &mut *buffers,
             &mut *variables,
             &*self.result_vars,

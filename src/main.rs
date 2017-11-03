@@ -5,6 +5,9 @@
 #![feature(box_syntax)]
 
 extern crate test;
+#[macro_use]
+extern crate log;
+extern crate env_logger;
 
 extern crate websocket;
 // #[macro_use(json, json_internal)]
@@ -20,6 +23,8 @@ extern crate timely;
 extern crate differential_dataflow;
 extern crate abomonation;
 
+#[macro_use]
+mod util;
 mod language;
 mod data;
 mod interpreter;
@@ -28,6 +33,7 @@ mod dd;
 use data::*;
 
 fn main() {
+    env_logger::init().unwrap();
     let args: Vec<String> = ::std::env::args().into_iter().collect();
     let args: Vec<&str> = args.iter().map(|s| &**s).collect();
     match *args {

@@ -16,6 +16,8 @@ csv = "1.0.0-beta.4"
 timely = "*"
 abomonation = "*"
 lazy_static = "0.2"
+log = "*"
+env_logger = "*"
 
 [dependencies.nom]
 version = "*"

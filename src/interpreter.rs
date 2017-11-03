@@ -45,19 +45,22 @@ impl Relation {
     }
 }
 
-// TODO can dispatch on (Values, Value) to specialize gallop
-
-fn gallop_le(values: &Values, mut lo: usize, hi: usize, value: &Value) -> usize {
-    if lo < hi && values.get(lo) < *value {
+fn gallop_le_inner<T1: ::std::borrow::Borrow<T2>, T2: Ord + ?Sized>(
+    values: &[T1],
+    mut lo: usize,
+    hi: usize,
+    value: &T2,
+) -> usize {
+    if lo < hi && values[lo].borrow() < value {
         let mut step = 1;
-        while lo + step < hi && values.get(lo + step) < *value {
+        while lo + step < hi && values[lo + step].borrow() < value {
             lo = lo + step;
             step = step << 1;
         }
 
         step = step >> 1;
         while step > 0 {
-            if lo + step < hi && values.get(lo + step) < *value {
+            if lo + step < hi && values[lo + step].borrow() < value {
                 lo = lo + step;
             }
             step = step >> 1;
@@ -68,17 +71,22 @@ fn gallop_le(values: &Values, mut lo: usize, hi: usize, value: &Value) -> usize 
     lo
 }
 
-fn gallop_leq(values: &Values, mut lo: usize, hi: usize, value: &Value) -> usize {
-    if lo < hi && values.get(lo) <= *value {
+fn gallop_leq_inner<T1: ::std::borrow::Borrow<T2>, T2: Ord + ?Sized>(
+    values: &[T1],
+    mut lo: usize,
+    hi: usize,
+    value: &T2,
+) -> usize {
+    if lo < hi && values[lo].borrow() <= value {
         let mut step = 1;
-        while lo + step < hi && values.get(lo + step) <= *value {
+        while lo + step < hi && values[lo + step].borrow() <= value {
             lo = lo + step;
             step = step << 1;
         }
 
         step = step >> 1;
         while step > 0 {
-            if lo + step < hi && values.get(lo + step) <= *value {
+            if lo + step < hi && values[lo + step].borrow() <= value {
                 lo = lo + step;
             }
             step = step >> 1;
@@ -87,6 +95,36 @@ fn gallop_leq(values: &Values, mut lo: usize, hi: usize, value: &Value) -> usize
         lo += 1
     }
     lo
+}
+
+fn gallop_le(values: &Values, lo: usize, hi: usize, value: &Value) -> usize {
+    match (values, value) {
+        (&Values::Boolean(ref bools), &Value::Boolean(ref bool)) => {
+            gallop_le_inner(bools, lo, hi, bool)
+        }
+        (&Values::Integer(ref integers), &Value::Integer(ref integer)) => {
+            gallop_le_inner(integers, lo, hi, integer)
+        }
+        (&Values::String(ref strings), &Value::String(ref string)) => {
+            gallop_le_inner(strings, lo, hi, string.as_ref())
+        }
+        _ => panic!("Type error: gallop {} in {:?}", value, values),
+    }
+}
+
+fn gallop_leq(values: &Values, lo: usize, hi: usize, value: &Value) -> usize {
+    match (values, value) {
+        (&Values::Boolean(ref bools), &Value::Boolean(ref bool)) => {
+            gallop_leq_inner(bools, lo, hi, bool)
+        }
+        (&Values::Integer(ref integers), &Value::Integer(ref integer)) => {
+            gallop_leq_inner(integers, lo, hi, integer)
+        }
+        (&Values::String(ref strings), &Value::String(ref string)) => {
+            gallop_leq_inner(strings, lo, hi, string.as_ref())
+        }
+        _ => panic!("Type error: gallop {} in {:?}", value, values),
+    }
 }
 
 type LoHi = (usize, usize);

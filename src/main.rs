@@ -32,6 +32,16 @@ mod dd;
 
 use data::*;
 
+// To run the editor server:
+// RUST_BACKTRACE=1 RUST_LOG=debug:imp cargo run --release -- editor imdb
+
+// To run benchmarks:
+// RUST_BACKTRACE=1 cargo run --release -- bench
+
+// To profile:
+// cargo build --release
+// RUST_BACKTRACE=1 valgrind --tool=callgrind -collect-atstart=no "--toggle-collect=" target/release/imp profile
+
 fn main() {
     env_logger::init().unwrap();
     let args: Vec<String> = ::std::env::args().into_iter().collect();
@@ -41,6 +51,7 @@ fn main() {
         [_] => println!("Commands: bench editor dataflow"),
         [_, "import"] => data::import(),
         [_, "bench"] => bench::bench_all(),
+        [_, "profile"] => profile::profile("imdb", &load_imdb(), 0),
         [_, "editor"] => interpreter::serve_editor(load_chinook()),
         [_, "editor", "chinook"] => interpreter::serve_editor(load_chinook()),
         [_, "editor", "imdb"] => interpreter::serve_editor(load_imdb()),
@@ -49,8 +60,6 @@ fn main() {
     }
 }
 
-// To run benchmarks:
-// RUST_BACKTRACE=1 cargo run --release -- bench
 mod bench {
     use test::*;
     use super::data::*;
@@ -59,7 +68,7 @@ mod bench {
     use std::fs::File;
     use std::io::prelude::*;
 
-    fn bench<F, T>(name: String, mut f: F)
+    pub fn bench<F, T>(name: String, mut f: F)
     where
         F: FnMut() -> T,
     {
@@ -81,9 +90,8 @@ mod bench {
                     });
                     let block = plan(block_ast).unwrap();
                     let mut prepared = time!("prepare", prepare_block(&block, db).unwrap());
-                    bench(format!("run\t{}_{}", name, i), move || {
-                        run_block(&block, &mut prepared)
-                    });
+                    let results = run_block(&block, &mut prepared).unwrap();
+                    println!("{} results", results.len());
                 }
                 &Err(ref error) => {
                     println!("error\t{}_{}\t{}", name, i, error);
@@ -95,5 +103,26 @@ mod bench {
     pub fn bench_all() {
         // bench_code("chinook", &load_chinook());
         bench_code("imdb", &load_imdb());
+    }
+}
+
+mod profile {
+    use super::language::*;
+    use super::interpreter::*;
+    use std::fs::File;
+    use std::io::prelude::*;
+
+    pub fn profile(name: &str, db: &DB, block_ix: usize) {
+        let mut file = File::open(format!("./{}.imp", name)).unwrap();
+        let mut code = String::new();
+        file.read_to_string(&mut code).unwrap();
+        println!("Code is {:?}", code);
+        let code_ast = code_ast(&code, 0);
+        let block_ast = code_ast.blocks[block_ix].as_ref().unwrap();
+        let block = plan(&block_ast).unwrap();
+        let mut prepared = time!("prepare", prepare_block(&block, db).unwrap());
+        super::bench::bench(format!("run\t{}", name), move || {
+            run_block(&block, &mut prepared)
+        });
     }
 }

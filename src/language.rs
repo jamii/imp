@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::iter::Iterator;
 use std::borrow::{Cow, Borrow};
 
@@ -396,14 +396,14 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
         }
     }
 
-    // println!("Exprs:");
-    // for expr in exprs.iter() {
-    //     println!("{:?}", expr);
-    // }  
-    // println!("Slot exprs:");
-    // for (slot, exprs) in slot_exprs.iter().enumerate() {
-    //     println!("{}: {:?}", slot, exprs);
-    // }
+    debug!("Exprs:");
+    for expr in exprs.iter() {
+        debug!("{:?}", expr);
+    }  
+    debug!("Slot exprs:");
+    for (slot, exprs) in slot_exprs.iter().enumerate() {
+        debug!("{}: {:?}", slot, exprs);
+    }
 
     // index in the other direction
     let mut expr_slot: HashMap<&ExprAst, usize> = HashMap::new();

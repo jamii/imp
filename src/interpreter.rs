@@ -95,14 +95,15 @@ fn constrain<'a>(
     constraints: &[Constraint],
     indexes: &'a [Relation],
     ranges: &mut [LoHi],
+    buffers: &mut [&mut [LoHi]],
     variables: &mut [Value<'a>],
     result_vars: &[(String, usize)],
     results: &mut Vec<Value>,
 ) -> Result<(), String> {
     if constraints.len() > 0 {
+        let (buffer, other_buffers) = buffers.split_first_mut().unwrap();
         match &constraints[0] {
             &Constraint::Join(var_ix, result_already_fixed, ref rowcols) => {
-                let mut buffer = vec![(0, 0); rowcols.len()]; // TODO pre-allocate
                 if result_already_fixed {
                     // loop over rowcols[0..]
                     let mut i = 0;
@@ -129,6 +130,7 @@ fn constrain<'a>(
                             &constraints[1..],
                             indexes,
                             ranges,
+                            other_buffers,
                             variables,
                             result_vars,
                             results,
@@ -174,6 +176,7 @@ fn constrain<'a>(
                                     &constraints[1..],
                                     indexes,
                                     ranges,
+                                    other_buffers,
                                     variables,
                                     result_vars,
                                     results,
@@ -200,6 +203,7 @@ fn constrain<'a>(
                             &constraints[1..],
                             indexes,
                             ranges,
+                            other_buffers,
                             variables,
                             result_vars,
                             results,
@@ -213,6 +217,7 @@ fn constrain<'a>(
                         &constraints[1..],
                         indexes,
                         ranges,
+                        other_buffers,
                         variables,
                         result_vars,
                         results,
@@ -244,11 +249,14 @@ impl Block {
             .iter()
             .map(|index| (0, index.columns[0].len()))
             .collect();
+        let mut buffers: Vec<LoHi> = vec![(0, 0); indexes.len() * self.constraints.len()];
+        let mut buffers: Vec<&mut [LoHi]> = buffers.chunks_mut(indexes.len()).collect();
         let mut results = vec![];
         constrain(
             &*self.constraints,
             &*indexes,
             &mut *ranges,
+            &mut *buffers,
             &mut *variables,
             &*self.result_vars,
             &mut results,

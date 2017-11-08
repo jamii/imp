@@ -9,3 +9,4 @@ lb/demo/*.logic
 /target/
 **/*.rs.bk
 .vscode
+callgrind.out

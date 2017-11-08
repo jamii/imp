@@ -204,6 +204,7 @@ pub struct DB {
 #[derive(Debug, Clone)]
 pub enum Function {
     Add(usize, usize),
+    Mul(usize, usize),
     Contains(usize, usize),
     And(usize, usize),
     Or(usize, usize),
@@ -221,6 +222,12 @@ impl Function {
             &Function::Add(a, b) => {
                 match (&variables[a], &variables[b]) {
                     (&Value::Integer(a), &Value::Integer(b)) => Ok(Value::Integer(a + b)),
+                    (a, b) => Err(format!("Type error: {} + {}", a, b)),
+                }
+            }
+            &Function::Mul(a, b) => {
+                match (&variables[a], &variables[b]) {
+                    (&Value::Integer(a), &Value::Integer(b)) => Ok(Value::Integer(a * b)),
                     (a, b) => Err(format!("Type error: {} + {}", a, b)),
                 }
             }
@@ -329,6 +336,7 @@ impl ExprAst {
             &ExprAst::Relation(ref name, _) => {
                 match &**name {
                     "+" => true,
+                    "*" => true,
                     "contains" => true,
                     "&&" => true,
                     "||" => true,
@@ -535,6 +543,7 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
                     }
                     let function = match (&**name, &*slots) {
                         ("+", &[a, b]) => Function::Add(a, b),
+                        ("*", &[a, b]) => Function::Mul(a, b),
                         ("contains", &[a, b]) => Function::Contains(a, b),
                         ("&&", &[a, b]) => Function::And(a, b),
                         ("||", &[a, b]) => Function::Or(a, b),
@@ -680,7 +689,7 @@ named!(expr_ast(&[u8]) -> ExprAst, do_parse!(
 named!(infix_function_ast(&[u8]) -> (String, ExprAst), do_parse!(
         opt!(space) >>
         name: map_res!(
-            alt!(tag!("+") | tag!("||") | tag!("&&") | tag!(">=") | tag!(">") | tag!("<=") | tag!("<") | tag!("=")),
+            alt!(tag!("+") | tag!("*") | tag!("||") | tag!("&&") | tag!(">=") | tag!(">") | tag!("<=") | tag!("<") | tag!("=")),
             |b| ::std::str::from_utf8(b).map(|s| s.to_owned())
         ) >>
         opt!(space) >>

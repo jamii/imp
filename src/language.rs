@@ -168,6 +168,27 @@ impl Values {
             (values, value) => panic!("Type mismatch between {:?} and {:?}", values, value),
         }
     }
+
+    pub fn as_booleans(&self) -> &[bool] {
+        match self {
+            &Values::Boolean(ref data) => data,
+            _ => panic!("Not booleans: {:?}", self),
+        }
+    }
+
+    pub fn as_integers(&self) -> &[i64] {
+        match self {
+            &Values::Integer(ref data) => data,
+            _ => panic!("Not integers: {:?}", self),
+        }
+    }
+
+    pub fn as_strings(&self) -> &[String] {
+        match self {
+            &Values::String(ref data) => data,
+            _ => panic!("Not strings: {:?}", self),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]

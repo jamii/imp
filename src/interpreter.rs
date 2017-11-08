@@ -45,7 +45,7 @@ impl Relation {
     }
 }
 
-fn gallop_le_inner<T1: ::std::borrow::Borrow<T2>, T2: Ord + ?Sized>(
+pub fn gallop_le_inner<T1: ::std::borrow::Borrow<T2>, T2: Ord + ?Sized>(
     values: &[T1],
     mut lo: usize,
     hi: usize,
@@ -71,7 +71,7 @@ fn gallop_le_inner<T1: ::std::borrow::Borrow<T2>, T2: Ord + ?Sized>(
     lo
 }
 
-fn gallop_leq_inner<T1: ::std::borrow::Borrow<T2>, T2: Ord + ?Sized>(
+pub fn gallop_leq_inner<T1: ::std::borrow::Borrow<T2>, T2: Ord + ?Sized>(
     values: &[T1],
     mut lo: usize,
     hi: usize,
@@ -288,10 +288,10 @@ fn constrain<'a>(
 }
 
 pub struct Prepared {
-    indexes: Vec<Relation>,
-    ranges: Vec<LoHi>,
-    locals: Vec<LoHi>,
-    buffers: Vec<LoHi>,
+    pub indexes: Vec<Relation>,
+    pub ranges: Vec<LoHi>,
+    pub locals: Vec<LoHi>,
+    pub buffers: Vec<LoHi>,
 }
 
 pub fn prepare_block(block: &Block, db: &DB) -> Result<Prepared, String> {

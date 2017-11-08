@@ -28,6 +28,7 @@ mod util;
 mod language;
 mod data;
 mod interpreter;
+mod compiled;
 mod dd;
 
 use data::*;
@@ -65,6 +66,7 @@ mod bench {
     use super::data::*;
     use super::language::*;
     use super::interpreter::*;
+    use super::compiled;
     use std::fs::File;
     use std::io::prelude::*;
 
@@ -91,7 +93,18 @@ mod bench {
                                 plan(block_ast).unwrap()
                             });
                             let mut prepared = time!("prepare", prepare_block(&block, db).unwrap());
-                            bench(format!("run\t{}_{}", name, i), move || {
+
+                            match (name, i) {
+                                ("imdb", 0) => {
+                                    println!("{} results", compiled::q1a(&prepared).0.len());
+                                    bench(format!("compiled\t{}_{}", name, i), || {
+                                        compiled::q1a(&prepared);
+                                    });
+                                }
+                                _ => (),
+                            }
+
+                            bench(format!("interpreted\t{}_{}", name, i), move || {
                                 run_block(&block, &mut prepared)
                             });
                         }

@@ -89,9 +89,7 @@ mod bench {
                 &Ok(ref block_ast) => {
                     match plan(block_ast) {
                         Ok(block) => {
-                            bench(format!("compile\t{}_{}", name, i), || {
-                                plan(block_ast).unwrap()
-                            });
+                            bench(format!("plan\t{}_{}", name, i), || plan(block_ast).unwrap());
                             let mut prepared = time!("prepare", prepare_block(&block, db).unwrap());
 
                             match (name, i) {
@@ -99,6 +97,12 @@ mod bench {
                                     println!("{} results", compiled::q1a(&prepared).0.len());
                                     bench(format!("compiled\t{}_{}", name, i), || {
                                         compiled::q1a(&prepared);
+                                    });
+                                }
+                                ("imdb", 6) => {
+                                    println!("{} results", compiled::q2c(&prepared).0.len());
+                                    bench(format!("compiled\t{}_{}", name, i), || {
+                                        compiled::q2c(&prepared);
                                     });
                                 }
                                 _ => (),

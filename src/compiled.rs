@@ -1,4 +1,3 @@
-use language::*;
 use interpreter::*;
 
 fn smaller((a_lo, a_hi): (usize, usize), (b_lo, b_hi): (usize, usize)) -> bool {
@@ -275,5 +274,78 @@ pub fn q1a(
         results_mc,
         results_ct,
         results_note,
+    )
+}
+
+pub fn q2c(
+    prepared: &Prepared,
+) -> (Vec<i64>, Vec<i64>, Vec<i64>, Vec<String>, Vec<i64>, Vec<i64>) {
+
+    let mut results_k = vec![];
+    let mut results_mk = vec![];
+    let mut results_t = vec![];
+    let mut results_title = vec![];
+    let mut results_mc = vec![];
+    let mut results_cn = vec![];
+
+    let keyword_keyword0 = &prepared.indexes[0].columns[0].as_integers();
+    let keyword_keyword1 = &prepared.indexes[0].columns[1].as_strings();
+    let movie_keyword_keyword0 = &prepared.indexes[1].columns[0].as_integers();
+    let movie_keyword_keyword1 = &prepared.indexes[1].columns[1].as_integers();
+    let movie_keyword_movie0 = &prepared.indexes[2].columns[0].as_integers();
+    let movie_keyword_movie1 = &prepared.indexes[2].columns[1].as_integers();
+    let title_title0 = &prepared.indexes[3].columns[0].as_integers();
+    let title_title1 = &prepared.indexes[3].columns[1].as_strings();
+    let movie_companies_movie0 = &prepared.indexes[4].columns[0].as_integers();
+    let movie_companies_movie1 = &prepared.indexes[4].columns[1].as_integers();
+    let movie_companies_company0 = &prepared.indexes[5].columns[0].as_integers();
+    let movie_companies_company1 = &prepared.indexes[5].columns[1].as_integers();
+    let company_name_country_code0 = &prepared.indexes[6].columns[0].as_integers();
+    let company_name_country_code1 = &prepared.indexes[6].columns[1].as_strings();
+
+    let keyword_keyword_range = (0, keyword_keyword0.len());
+    let movie_keyword_keyword_range = (0, movie_keyword_keyword0.len());
+    let movie_keyword_movie_range = (0, movie_keyword_movie0.len());
+    let title_title_range = (0, title_title0.len());
+    let movie_companies_movie_range = (0, movie_companies_movie0.len());
+    let movie_companies_company_range = (0, movie_companies_company0.len());
+    let company_name_country_code_range = (0, company_name_country_code0.len());
+
+    narrow(company_name_country_code1, company_name_country_code_range, "[sm]", |company_name_country_code_range| {
+        narrow(keyword_keyword1, keyword_keyword_range, "character-name-in-title", |keyword_keyword_range| {
+            // k
+            join2(keyword_keyword0, movie_keyword_keyword1, keyword_keyword_range, movie_keyword_keyword_range, |keyword_keyword_range, movie_keyword_keyword_range| {
+                // mk
+                join2(movie_keyword_keyword0, movie_keyword_movie0, movie_keyword_keyword_range, movie_keyword_movie_range, |movie_keyword_keyword_range, movie_keyword_movie_range| {
+                    // t
+                    join3(movie_keyword_movie1, title_title0, movie_companies_movie1, movie_keyword_movie_range, title_title_range, movie_companies_movie_range, |movie_keyword_movie_range, title_title_range, movie_companies_movie_range| {
+                        // title
+                        join1(title_title1, title_title_range, |title_title_range| {
+                            // mc
+                            join2(movie_companies_movie0, movie_companies_company0, movie_companies_movie_range, movie_companies_company_range, |movie_companies_movie_range, movie_companies_company_range| {
+                                // cn
+                                join2(movie_companies_company1, company_name_country_code0, movie_companies_company_range, company_name_country_code_range, |movie_companies_company_range, _company_name_country_code_range| {
+                                    results_k.push(keyword_keyword0[keyword_keyword_range.0]);
+                                    results_mk.push(movie_keyword_keyword0[movie_keyword_keyword_range.0]);
+                                    results_t.push(movie_keyword_movie1[movie_keyword_movie_range.0]);
+                                    results_title.push(title_title1[title_title_range.0].clone());
+                                    results_mc.push(movie_companies_movie0[movie_companies_movie_range.0]);
+                                    results_cn.push(movie_companies_company1[movie_companies_company_range.0]);
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        });
+    });
+
+    (
+        results_k,
+        results_mk,
+        results_t,
+        results_title,
+        results_mc,
+        results_cn,
     )
 }

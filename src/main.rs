@@ -134,8 +134,22 @@ mod bench {
         bench(format!("compiled\tpolynomial"), || {
             compiled::polynomial(&prepared);
         });
+        bench(format!("compiled\tpolynomial_intermediate"), || {
+            compiled::polynomial_intermediate(&prepared);
+        });
         bench(format!("interpreted\tpolynomial"), || {
             run_block(&block, &mut prepared).unwrap();
+        });
+        let magic_block = plan(&block_ast(compiled::POLYNOMIAL_MAGIC).unwrap()).unwrap();
+        let mut prepared = time!("prepare", prepare_block(&block, &db).unwrap());
+        bench(format!("compiled\tpolynomial_boxfn"), || {
+            compiled::polynomial_boxfn(&magic_block, &prepared);
+        });
+        bench(format!("compiled\tpolynomial_fn"), || {
+            compiled::polynomial_fn(&magic_block, &prepared);
+        });
+        bench(format!("interpreted\tpolynomial_magic"), || {
+            run_block(&magic_block, &mut prepared).unwrap();
         });
     }
 

@@ -205,6 +205,7 @@ pub struct DB {
 pub enum Function {
     Add(usize, usize),
     Mul(usize, usize),
+    Magic(usize, usize),
     Contains(usize, usize),
     And(usize, usize),
     Or(usize, usize),
@@ -228,6 +229,12 @@ impl Function {
             &Function::Mul(a, b) => {
                 match (&variables[a], &variables[b]) {
                     (&Value::Integer(a), &Value::Integer(b)) => Ok(Value::Integer(a * b)),
+                    (a, b) => Err(format!("Type error: {} + {}", a, b)),
+                }
+            }
+            &Function::Magic(a, b) => {
+                match (&variables[a], &variables[b]) {
+                    (&Value::Integer(a), &Value::Integer(b)) => Ok(Value::Integer((a * a) + (b * b) + (3 * a * b))),
                     (a, b) => Err(format!("Type error: {} + {}", a, b)),
                 }
             }
@@ -297,6 +304,18 @@ impl Function {
             }
         }
     }
+
+    pub fn compile<'a>(&self) -> Box<Fn(&[Value<'a>]) -> Result<Value<'static>, String>> {
+        match self.clone() {
+            Function::Magic(a, b) => box move |variables| {
+                match (&variables[a], &variables[b]) {
+                    (&Value::Integer(a), &Value::Integer(b)) => Ok(Value::Integer((a * a) + (b * b) + (3 * a * b))),
+                    (a, b) => Err(format!("Type error: {} + {}", a, b)),
+                }
+            },
+            _ => panic!("Unimplemented"),
+        }
+    }
 }
 
 pub type RowCol = (usize, usize);
@@ -337,6 +356,7 @@ impl ExprAst {
                 match &**name {
                     "+" => true,
                     "*" => true,
+                    "magic" => true,
                     "contains" => true,
                     "&&" => true,
                     "||" => true,
@@ -544,6 +564,7 @@ pub fn plan(block: &BlockAst) -> Result<Block, String> {
                     let function = match (&**name, &*slots) {
                         ("+", &[a, b]) => Function::Add(a, b),
                         ("*", &[a, b]) => Function::Mul(a, b),
+                        ("magic", &[a, b]) => Function::Magic(a, b),
                         ("contains", &[a, b]) => Function::Contains(a, b),
                         ("&&", &[a, b]) => Function::And(a, b),
                         ("||", &[a, b]) => Function::Or(a, b),

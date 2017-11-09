@@ -28,6 +28,3 @@ git="https://github.com/frankmcsherry/graph-map.git"
 
 [dependencies.differential-dataflow]
 git="https://github.com/frankmcsherry/differential-dataflow.git"
-
-[profile.release]
-debug = true

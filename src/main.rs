@@ -90,26 +90,31 @@ mod bench {
                     match plan(block_ast) {
                         Ok(block) => {
                             bench(format!("plan\t{}_{}", name, i), || plan(block_ast).unwrap());
-                            let mut prepared = time!("prepare", prepare_block(&block, db).unwrap());
+                            let block = &block;
+                            let mut prepared =
+                                &mut time!("prepare", prepare_block(&block, db).unwrap());
 
                             match (name, i) {
                                 ("imdb", 0) => {
-                                    println!("{} results", compiled::q1a(&prepared).0.len());
+                                    println!("{} results", compiled::q1a(prepared).0.len());
                                     bench(format!("compiled\t{}_{}", name, i), || {
-                                        compiled::q1a(&prepared);
+                                        compiled::q1a(prepared);
                                     });
                                 }
                                 ("imdb", 6) => {
-                                    println!("{} results", compiled::q2c(&prepared).0.len());
+                                    println!("{} results", compiled::q2c(prepared).0.len());
                                     bench(format!("compiled\t{}_{}", name, i), || {
-                                        compiled::q2c(&prepared);
+                                        compiled::q2c(prepared);
                                     });
                                 }
                                 _ => (),
                             }
 
-                            bench(format!("interpreted\t{}_{}", name, i), move || {
-                                run_block(&block, &mut prepared)
+                            bench(format!("interpreted\t{}_{}", name, i), || {
+                                run_staged_block(block, prepared)
+                            });
+                            bench(format!("interpreted\t{}_{}", name, i), || {
+                                run_block(block, prepared)
                             });
                         }
                         Err(ref error) => {

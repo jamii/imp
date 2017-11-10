@@ -97,6 +97,8 @@ pub fn gallop_leq_inner<T1: ::std::borrow::Borrow<T2>, T2: Ord + ?Sized>(
     lo
 }
 
+
+
 fn gallop_le(values: &Values, lo: usize, hi: usize, value: &Value) -> usize {
     match (values, value) {
         (&Values::Boolean(ref bools), &Value::Boolean(ref bool)) => {
@@ -124,6 +126,157 @@ fn gallop_leq(values: &Values, lo: usize, hi: usize, value: &Value) -> usize {
             gallop_leq_inner(strings, lo, hi, string.as_ref())
         }
         _ => panic!("Type error: gallop {} in {:?}", value, values),
+    }
+}
+
+struct Stack<'a> {
+    ranges: Vec<LoHi>,
+    variables: Vec<Value<'a>>,
+    result_vars: Vec<(String, usize)>,
+    results: Vec<Value<'static>>,
+}
+
+fn stage<'a>(
+    constraints: &[Constraint],
+    indexes: &'a [Relation],
+) -> Box<FnMut(&mut Stack<'a>) -> Result<(), String> + 'a> {
+    if constraints.len() > 0 {
+        let mut tail = stage(&constraints[1..], indexes);
+        let mut buffer = vec![(0, 0); indexes.len()];
+        let mut local = vec![(0, 0); indexes.len()];
+        match constraints[0].clone() {
+            Constraint::Join(var_ix, result_already_fixed, rowcols) => {
+                if result_already_fixed {
+                    box move |stack| {
+
+                        // copy previous state
+                        for (i, &(row_ix, _)) in rowcols.iter().enumerate() {
+                            buffer[i] = stack.ranges[row_ix];
+                        }
+
+                        // search in each of rowcols
+                        let mut i = 0;
+                        {
+                            let value = &stack.variables[var_ix];
+                            while i < rowcols.len() {
+                                let (row_ix, col_ix) = rowcols[i];
+                                let column = &indexes[row_ix].columns[col_ix];
+                                let (old_lo, old_hi) = stack.ranges[row_ix];
+                                let lo = gallop_le(column, old_lo, old_hi, value);
+                                let hi = gallop_leq(column, lo, old_hi, value);
+                                if lo < hi {
+                                    stack.ranges[row_ix] = (lo, hi);
+                                    i += 1;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+
+                        // if all succeeded, continue with rest of constraints
+                        if i == rowcols.len() {
+                            tail(stack)?;
+                        }
+
+                        // restore previous state
+                        for (i, &(row_ix, _)) in rowcols.iter().enumerate() {
+                            stack.ranges[row_ix] = buffer[i];
+                        }
+
+                        Ok(())
+                    }
+                } else {
+                    box move |stack| {
+
+                        // copy previous state
+                        for (i, &(row_ix, _)) in rowcols.iter().enumerate() {
+                            buffer[i] = stack.ranges[row_ix];
+                            local[i] = stack.ranges[row_ix];
+                        }
+
+                        // find smallest range
+                        let (min_ix, &(row_ix, col_ix)) = rowcols
+                            .iter()
+                            .enumerate()
+                            .min_by_key(|&(_, &(row_ix, _))| {
+                                let (lo, hi) = stack.ranges[row_ix];
+                                hi - lo
+                            })
+                            .unwrap();
+                        let column = &indexes[row_ix].columns[col_ix];
+                        let (old_lo, old_hi) = local[min_ix];
+                        let mut lo = old_lo;
+
+                        // loop over rowcols[min_ix]
+                        while lo < old_hi {
+                            let value = &column.get(lo);
+                            let hi = gallop_leq(column, lo + 1, old_hi, value);
+                            stack.ranges[row_ix] = (lo, hi);
+                            {
+                                // search in each of rowcols[-min_ix]
+                                let mut i = 0;
+                                while i < rowcols.len() {
+                                    if i != min_ix {
+                                        let (row_ix, col_ix) = rowcols[i];
+                                        let column = &indexes[row_ix].columns[col_ix];
+                                        let (old_lo, old_hi) = local[i];
+                                        let lo = gallop_le(column, old_lo, old_hi, value);
+                                        let hi = gallop_leq(column, lo, old_hi, value);
+                                        if lo < hi {
+                                            stack.ranges[row_ix] = (lo, hi);
+                                            local[i] = (hi, old_hi);
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                    i += 1;
+                                }
+                                // if all succeeded, continue with rest of constraints
+                                if i == rowcols.len() {
+                                    stack.variables[var_ix] = column.get(lo);
+                                    tail(stack)?;
+                                }
+                            }
+                            lo = hi;
+                        }
+
+                        // restore previous state
+                        for (i, &(row_ix, _)) in rowcols.iter().enumerate() {
+                            stack.ranges[row_ix] = buffer[i];
+                        }
+
+                        Ok(())
+                    }
+                }
+            }
+            Constraint::Apply(result_ix, result_already_fixed, function) => {
+                if result_already_fixed {
+                    box move |stack| {
+                        let result = function.apply(&*stack.variables)?;
+                        if stack.variables[result_ix] == result {
+                            tail(stack)
+                        } else {
+                            Ok(())
+                        }
+                    }
+                } else {
+                    box move |stack| {
+                        let result = function.apply(&*stack.variables)?;
+                        stack.variables[result_ix] = result;
+                        tail(stack)
+                    }
+                }
+            }
+        }
+    } else {
+        box move |stack| {
+            for &(_, var_ix) in stack.result_vars.iter() {
+                stack.results.push(
+                    stack.variables[var_ix].really_to_owned(),
+                );
+            }
+            Ok(())
+        }
     }
 }
 
@@ -347,6 +500,18 @@ pub fn run_block(block: &Block, prepared: &mut Prepared) -> Result<Vec<Value<'st
     Ok(results)
 }
 
+pub fn run_staged_block(block: &Block, prepared: &Prepared) -> Result<Vec<Value<'static>>, String> {
+    let mut stack = Stack {
+        ranges: prepared.ranges.clone(),
+        variables: block.variables.clone(),
+        result_vars: block.result_vars.clone(),
+        results: vec![],
+    };
+    let mut staged = time!("stage", stage(&*block.constraints, &*prepared.indexes));
+    time!("query", staged(&mut stack)?);
+    Ok(stack.results)
+}
+
 pub fn run_code(db: &DB, code: &str, cursor: i64) {
     let code_ast = code_ast(code, cursor);
 
@@ -367,7 +532,8 @@ pub fn run_code(db: &DB, code: &str, cursor: i64) {
                         match prepared {
                             Err(error) => status.push(Err(format!("Prepare error: {}", error))),
                             Ok(mut prepared) => {
-                                match run_block(&block, &mut prepared) {
+                                match run_staged_block(&block, &mut prepared) {
+                                    // match run_block(&block, &mut prepared) {
                                     Err(error) => status.push(Err(format!("Run error: {}", error))),
                                     Ok(results) => {
                                         status.push(Ok((block, results)));

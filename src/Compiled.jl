@@ -2,156 +2,164 @@ module Compiled
 
 using Base.Cartesian
 
-function gallop{T}(column::AbstractArray{T}, lo::Int, hi::Int, value::T, threshold) 
+function gallop{T}(column::AbstractArray{T}, lo::UInt64, hi::UInt64, value::T, threshold::Int64)::Tuple{UInt64, Int64}
   c = -1
   @inbounds if (lo < hi) && (c2 = cmp(column[lo], value); c *= c2; c2 < threshold)
-    step = 1
+    step = UInt64(1)
     while (lo + step < hi) && (c2 = cmp(column[lo + step], value); c *= c2; c2 < threshold)
-      lo = lo + step 
-      step = step << 1
+      lo = lo + step
+      step = step << UInt64(1)
     end
-    
-    step = step >> 1
-    while step > 0
-      if (lo + step < hi) && (c2 = cmp(column[lo + step], value); c *= c2; c2 < threshold)
-        lo = lo + step 
-      end
-      step = step >> 1
-    end
-    
-    lo += 1
-  end
-  (lo, c) 
-end 
 
-mutable struct Range 
-  lo::Int64
-  hi::Int64
+    step = step >> UInt64(1)
+    while step > UInt64(1)
+      if (lo + step < hi) && (c2 = cmp(column[lo + step], value); c *= c2; c2 < threshold)
+        lo = lo + step
+      end
+      step = step >> UInt64(1)
+    end
+
+    lo += UInt64(1)
+  end
+  (lo, c)
 end
 
-function narrow{T}(values::AbstractArray{T}, old_range::Range, new_range::Range, value::T)::Bool
+# why inexacterror?
+@code_llvm gallop([1,2,3], UInt64(0), UInt64(1), 2, 1)
+
+mutable struct Range
+  lo::UInt64
+  hi::UInt64
+end
+
+@inline function narrow{T}(values::AbstractArray{T}, old_range::Range, new_range::Range, value::T)::Bool
   # start from end of last range
-  new_range.lo, _ = gallop(values, new_range.hi, old_range.hi, value, 0)
-  new_range.hi, _ = gallop(values, new_range.lo, old_range.hi, value, 1)
-  new_range.lo < new_range.hi
+  new_range.lo, c = gallop(values, new_range.hi, old_range.hi, value, 0)
+  if c == 0
+    new_range.hi, _ = gallop(values, new_range.lo+1, old_range.hi, value, 1)
+    new_range.lo < new_range.hi
+  else
+    new_range.hi = new_range.lo
+    false
+  end
+end
+
+abstract type AbstractJoin end
+
+function _Join(n::Int64)
+  Join = Symbol("Join_$n")
+  column = [:($(Symbol("column_$i"))::T) for i in 1:n]
+  old_range = [:($(Symbol("old_range_$i"))::Range) for i in 1:n]
+  new_range = [:($(Symbol("new_range_$i"))::Range) for i in 1:n]
+  quote
+    mutable struct $Join{T} <: AbstractJoin
+      $(column...)
+      $(old_range...)
+      $(new_range...)
+    end
+  end
+end
+
+const _Joins = Dict{Int64, Type}()
+
+function Join(n::Int64)
+  if !haskey(_Joins, n)
+    eval(_Join(n))
+    _Joins[n] = eval(Symbol("Join_$n"))
+  end
+  _Joins[n]
 end
 
 function _join_init(n::Int64)
-  join_init = Symbol("join_init_$n")
-  column = [Symbol("column_$i") for i in 1:n] 
-  old_range = [Symbol("old_range_$i") for i in 1:n] 
-  new_range = [Symbol("new_range_$i") for i in 1:n] 
-  
-  quote 
-    function $join_init($(column...), $(old_range...), $(new_range...))
-      @nexprs $n (i) -> new_range_i.hi = old_range_i.lo
+  quote
+    $(Expr(:meta, :inline))
+
+    # calculate size of each range
+    @nexprs $n (i) -> size_i = join.old_range_i.hi - join.new_range_i.hi
+
+    # pick smallest size
+    min_size = @ncall $n min (i) -> size_i
+
+    # swap smallest range to 1st
+    @nif $n (i) -> size_i == min_size (i) -> begin
+      join.column_i, join.column_1 = join.column_1, join.column_i
+      join.old_range_i, join.old_range_1 = join.old_range_1, join.old_range_i
+      join.new_range_i, join.new_range_1 = join.new_range_1, join.new_range_i
     end
+
+    # init new_ranges
+    @nexprs $n (i) -> join.new_range_i.hi = join.old_range_i.lo
   end
 end
 
-function _join_next_inner(n::Int64)
-  join_next_inner = Symbol("join_next_inner_$n")
-  column = [Symbol("column_$i") for i in 1:n] 
-  old_range = [Symbol("old_range_$i") for i in 1:n]
-  new_range = [Symbol("new_range_$i") for i in 1:n]
-  
-  quote 
-    function $join_next_inner($(column...), $(old_range...), $(new_range...))
-      # start from the end of the previous range
-      new_range_1.lo = new_range_1.hi
-      
-      # bail if column_1 has no more values
-      new_range_1.lo < old_range_1.hi || return false
-      
-      # figure out range of current value
-      value = column_1[new_range_1.lo]
-      new_range_1.hi, _ = gallop(column_1, new_range_1.lo, old_range_1.hi, value, 1)
-    
-      # check if other columns have a matching value
-      return @nall $(n-1) (i) -> narrow(column_{i+1}, old_range_{i+1}, new_range_{i+1}, value)
-    end
-  end
-end
-
-function swapped(values, i) 
-  values = copy(values)
-  values[i], values[1] = values[1], values[i]
-  values
+@generated function join_init(join::AbstractJoin)
+  _join_init(Int64(length(fieldnames(join)) / 3))
 end
 
 function _join_next(n::Int64)
-  join_next = Symbol("join_next_$n")
-  join_next_inner = Symbol("join_next_inner_$n")
-  column = [Symbol("column_$i") for i in 1:n]
-  old_range = [Symbol("old_range_$i") for i in 1:n]
-  new_range = [Symbol("new_range_$i") for i in 1:n]
-  size = [:($(old_range[i]).hi - $(new_range[i]).hi) for i in 1:n]
-    
-  # last case, never called
-  code = quote
-    throw("Impossible!")
-  end
-  
-  # check each size against min_size
-  for i in 1:n
-    code = quote
-      if $(size[i]) == min_size
-        $join_next_inner($(swapped(column, i)...), $(swapped(old_range, i)...), $(swapped(new_range, i)...))
-      else 
-        $code
-      end
+  quote
+    $(Expr(:meta, :inline))
+
+    # start from the end of the previous range
+    join.new_range_1.lo = join.new_range_1.hi
+
+    # bail if column_1 has no more values
+    if join.new_range_1.lo >= join.old_range_1.hi
+      return false
     end
-  end
-  
-  quote 
-    function $join_next($(column...), $(old_range...), $(new_range...))
-      min_size = min($(size...))
-      $code
-    end
+
+    # figure out range of current value
+    @inbounds value = join.column_1[join.new_range_1.lo]
+    join.new_range_1.hi, _ = gallop(join.column_1, join.new_range_1.lo, join.old_range_1.hi, value, 1)
+
+    # check if other columns have a matching value
+    return @nall $n (i) -> (i == 1 || narrow(join.column_i, join.old_range_i, join.new_range_i, value))
   end
 end
 
-macro join(f, args...)
-  args = map(esc, args)
-  n = Int64(length(args) / 3)
+@generated function join_next(join::AbstractJoin)
+  _join_next(Int64(length(fieldnames(join)) / 3))
+end
+
+macro join(f, join)
   @assert(f.head == :->)
   @assert(length(f.args[1].args) == 0)
   body = f.args[2]
   quote
-    $(Symbol("join_init_$n"))($(args...))
-    while true == $(Symbol("join_next_$n"))($(args...))
+    const join = $(esc(join))
+    join_init(join)
+    while true == join_next(join)
       $(esc(body))
     end
   end
 end
 
-for n in 1:10
-  eval(_join_init(n))
-  eval(_join_next_inner(n))
-  eval(_join_next(n))
-end
-
 using BenchmarkTools
 
+Join(1)
+Join(2)
+
 function polynomial(x_1, x_2, y_1, y_2)
-  x_range_0 = Range(1, length(x_1) + 1)
-  x_range_1 = Range(1, length(x_1) + 1)
-  x_range_2 = Range(1, length(x_1) + 1)
-  y_range_0 = Range(1, length(y_1) + 1)
-  y_range_1 = Range(1, length(y_1) + 1)
-  y_range_2 = Range(1, length(y_1) + 1)
-  results_x = Int64[]
-  results_y = Int64[]
-  results_z = Int64[]
-  # println(0, x_range_0, x_range_1, x_range_2, y_range_0, y_range_1, y_range_2)
-  @join(x_1, y_1, x_range_0, y_range_0, x_range_1, y_range_1) do
-    # println(1, x_range_0, x_range_1, x_range_2, y_range_0, y_range_1, y_range_2)
-    @join(x_2, x_range_1, x_range_2) do
+  const x_range_0 = Range(1, length(x_1) + 1)
+  const x_range_1 = Range(1, length(x_1) + 1)
+  const x_range_2 = Range(1, length(x_1) + 1)
+  const y_range_0 = Range(1, length(y_1) + 1)
+  const y_range_1 = Range(1, length(y_1) + 1)
+  const y_range_2 = Range(1, length(y_1) + 1)
+  const results_x = Int64[]
+  const results_y = Int64[]
+  const results_z = Int64[]
+  const j1 = Join_2(x_1, y_1, x_range_0, y_range_0, x_range_1, y_range_1)
+  const j2 = Join_1(x_2, x_range_1, x_range_2)
+  const j3 = Join_1(y_2, y_range_1, y_range_2)
+  @join(j1) do
+    # println(1, x_range_1, y_range_1)
+    @join(j2) do
       # println(2, x_range_0, x_range_1, x_range_2, y_range_0, y_range_1, y_range_2)
-      @join(y_2, y_range_1, y_range_2) do
+      @join(j3) do
         # println(4, x_range_0, x_range_1, x_range_2, y_range_0, y_range_1, y_range_2)
-        x = x_2[x_range_2.lo]
-        y = y_2[y_range_2.lo]
+        @inbounds x = x_2[x_range_2.lo]
+        @inbounds y = y_2[y_range_2.lo]
         push!(results_x, x)
         push!(results_y, y)
         push!(results_z, (x * x) + (y * y) + (3 * x * y))
@@ -162,19 +170,27 @@ function polynomial(x_1, x_2, y_1, y_2)
 end
 
 # @code_warntype polynomial([1,2],[1,4],[1,2],[1,-4])
+# @code_llvm polynomial([1,2],[1,4],[1,2],[1,-4])
 
 @time polynomial(
-collect(0:1000000), 
-collect(0:1000000), 
-collect(0:1000000), 
-collect(reverse(0:1000000))
+collect(0:10),
+collect(0:10),
+collect(0:10),
+collect(reverse(0:10))
 )
 
+# @time polynomial(
+# collect(0:1000000),
+# collect(0:1000000),
+# collect(0:1000000),
+# collect(reverse(0:1000000))
+# )
+
 @show @benchmark polynomial(
-$(collect(0:1000000)), 
-$(collect(0:1000000)), 
-$(collect(0:1000000)), 
+$(collect(0:1000000)),
+$(collect(0:1000000)),
+$(collect(0:1000000)),
 $(collect(reverse(0:1000000)))
 )
-  
+
 end

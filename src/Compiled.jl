@@ -100,20 +100,24 @@ function _join_next(n::Int64)
   quote
     $(Expr(:meta, :inline))
 
-    # start from the end of the previous range
-    join.new_range_1.lo = join.new_range_1.hi
+    while true
+      # start from the end of the previous range
+      join.new_range_1.lo = join.new_range_1.hi
+      
+      # bail if column_1 is out of values
+      if join.new_range_1.lo >= join.old_range_1.hi
+        return false
+      end
+      
+      # figure out range of current value
+      @inbounds value = join.column_1[join.new_range_1.lo]
+      join.new_range_1.hi, _ = gallop(join.column_1, join.new_range_1.lo, join.old_range_1.hi, value, 1)
 
-    # bail if column_1 has no more values
-    if join.new_range_1.lo >= join.old_range_1.hi
-      return false
+      # check if other columns have a matching value
+      if @nall $n (i) -> (i == 1 || narrow(join.column_i, join.old_range_i, join.new_range_i, value))
+        return true
+      end
     end
-
-    # figure out range of current value
-    @inbounds value = join.column_1[join.new_range_1.lo]
-    join.new_range_1.hi, _ = gallop(join.column_1, join.new_range_1.lo, join.old_range_1.hi, value, 1)
-
-    # check if other columns have a matching value
-    return @nall $n (i) -> (i == 1 || narrow(join.column_i, join.old_range_i, join.new_range_i, value))
   end
 end
 
@@ -172,7 +176,7 @@ end
 # @code_warntype polynomial([1,2],[1,4],[1,2],[1,-4])
 # @code_llvm polynomial([1,2],[1,4],[1,2],[1,-4])
 
-@time polynomial(
+@show @time polynomial(
 collect(0:10),
 collect(0:10),
 collect(0:10),

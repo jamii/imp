@@ -98,13 +98,13 @@ mod bench {
                                 ("imdb", 0) => {
                                     println!("{} results", compiled::q1a(prepared).0.len());
                                     bench(format!("compiled\t{}_{}", name, i), || {
-                                        compiled::q1a(prepared);
+                                        compiled::q1a(prepared)
                                     });
                                 }
                                 ("imdb", 6) => {
                                     println!("{} results", compiled::q2c(prepared).0.len());
                                     bench(format!("compiled\t{}_{}", name, i), || {
-                                        compiled::q2c(prepared);
+                                        compiled::q2c(prepared)
                                     });
                                 }
                                 _ => (),
@@ -134,27 +134,28 @@ mod bench {
         let block = plan(&block_ast(compiled::POLYNOMIAL).unwrap()).unwrap();
         let mut prepared = time!("prepare", prepare_block(&block, &db).unwrap());
         bench(format!("baseline\tpolynomial"), || {
-            compiled::polynomial_baseline(&prepared);
+            compiled::polynomial_baseline(&prepared)
         });
+        println!("{:?} results", compiled::polynomial(&prepared).2.len());
         bench(format!("compiled\tpolynomial"), || {
-            compiled::polynomial(&prepared);
+            compiled::polynomial(&prepared)
         });
         bench(format!("compiled\tpolynomial_intermediate"), || {
-            compiled::polynomial_intermediate(&prepared);
+            compiled::polynomial_intermediate(&prepared)
         });
         bench(format!("interpreted\tpolynomial"), || {
-            run_block(&block, &mut prepared).unwrap();
+            run_block(&block, &mut prepared).unwrap()
         });
         let magic_block = plan(&block_ast(compiled::POLYNOMIAL_MAGIC).unwrap()).unwrap();
         let mut prepared = time!("prepare", prepare_block(&block, &db).unwrap());
         bench(format!("compiled\tpolynomial_boxfn"), || {
-            compiled::polynomial_boxfn(&magic_block, &prepared);
+            compiled::polynomial_boxfn(&magic_block, &prepared)
         });
         bench(format!("compiled\tpolynomial_fn"), || {
-            compiled::polynomial_fn(&magic_block, &prepared);
+            compiled::polynomial_fn(&magic_block, &prepared)
         });
         bench(format!("interpreted\tpolynomial_magic"), || {
-            run_block(&magic_block, &mut prepared).unwrap();
+            run_block(&magic_block, &mut prepared).unwrap()
         });
     }
 

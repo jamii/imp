@@ -1,11 +1,11 @@
 use language::*;
 use interpreter::*;
 
-fn smaller((a_lo, a_hi): (usize, usize), (b_lo, b_hi): (usize, usize)) -> bool {
+pub fn smaller((a_lo, a_hi): (usize, usize), (b_lo, b_hi): (usize, usize)) -> bool {
     (a_hi - a_lo) < (b_hi - b_lo)
 }
 
-fn narrow<T1, T2, F>(
+pub fn narrow<T1, T2, F>(
     values: &[T1],
     (lo, hi): (usize, usize),
     value: &T2,
@@ -21,7 +21,7 @@ fn narrow<T1, T2, F>(
     }
 }
 
-fn join1<T, F>(
+pub fn join1<T, F>(
     a: &[T],
     (mut a_lo, a_hi): (usize, usize),
     mut f: F
@@ -37,7 +37,7 @@ fn join1<T, F>(
     }
 }
 
-fn join_inner2<T, F>(
+pub fn join_inner2<T, F>(
     a: &[T],
     b: &[T],
     a_range: (usize, usize),
@@ -57,7 +57,7 @@ fn join_inner2<T, F>(
     });
 }
 
-fn join_inner3<T, F>(
+pub fn join_inner3<T, F>(
     a: &[T],
     b: &[T],
     c: &[T],
@@ -79,7 +79,7 @@ fn join_inner3<T, F>(
     });
 }
 
-fn join_inner4<T, F>(
+pub fn join_inner4<T, F>(
     a: &[T],
     b: &[T],
     c: &[T],
@@ -103,7 +103,7 @@ fn join_inner4<T, F>(
     });
 }
 
-fn join2<T, F>(
+pub fn join2<T, F>(
     a: &[T],
     b: &[T],
     a_range: (usize, usize),
@@ -124,7 +124,7 @@ fn join2<T, F>(
     }
 }
 
-fn join3<T, F>(
+pub fn join3<T, F>(
     a: &[T],
     b: &[T],
     c: &[T],
@@ -151,7 +151,7 @@ fn join3<T, F>(
     }
 }
 
-fn join4<T, F>(
+pub fn join4<T, F>(
     a: &[T],
     b: &[T],
     c: &[T],

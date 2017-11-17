@@ -3,6 +3,10 @@ name = "imp"
 version = "0.1.0"
 authors = ["Jamie Brandon <jamie@scattered-thoughts.net>"]
 
+[lib]
+name = "imp"
+path = "src/lib.rs"
+
 [dependencies]
 websocket = "*"
 serde = "*"

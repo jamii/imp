@@ -2,18 +2,48 @@ module Compiled
 
 using Base.Cartesian
 
-function gallop{T}(column::AbstractArray{T}, lo::UInt64, hi::UInt64, value::T, threshold::Int64)::Tuple{UInt64, Int64}
-  c = -1
-  @inbounds if (lo < hi) && (c2 = cmp(column[lo], value); c *= c2; c2 < threshold)
+# interface for all functions
+
+function is_function(fun_type)
+  false
+end 
+# function call(fun, args...) end 
+# function permute(fun, columns) end 
+
+# interface for finite functions
+
+function is_finite(fun_type) 
+  false
+end 
+# function finger(fun) end 
+# function count(fun, finger) end 
+# function first(fun, outer_finger) end
+# function next(fun, outer_finger, inner_finger) end
+# function seek(fun, finger, value) end
+# function get(fun, finger) end
+
+# implementation for tuple of column vectors
+
+struct Relation{T <: Tuple} 
+  columns::T
+end
+
+struct RelationFinger{Column}
+  lo::UInt64 # inclusive
+  hi::UInt64 # exclusive
+end
+
+function gallop{T}(column::AbstractArray{T}, lo::UInt64, hi::UInt64, value::T, threshold::Int64)::UInt64
+  @inbounds if (lo < hi) && cmp(column[lo], value) < threshold
     step = UInt64(1)
-    while (lo + step < hi) && (c2 = cmp(column[lo + step], value); c *= c2; c2 < threshold)
+    while (lo + step < hi) && cmp(column[lo + step], value) < threshold
       lo = lo + step
       step = step << UInt64(1)
     end
 
     step = step >> UInt64(1)
     while step > UInt64(1)
-      if (lo + step < hi) && (c2 = cmp(column[lo + step], value); c *= c2; c2 < threshold)
+      if (lo + step < hi) && cmp(column[lo + step], value) < threshold
         lo = lo + step
       end
       step = step >> UInt64(1)
@@ -21,180 +51,141 @@ function gallop{T}(column::AbstractArray{T}, lo::UInt64, hi::UInt64, value::T, t
 
     lo += UInt64(1)
   end
-  (lo, c)
+  lo
 end
 
-# why inexacterror?
-@code_llvm gallop([1,2,3], UInt64(0), UInt64(1), 2, 1)
-
-mutable struct Range
-  lo::UInt64
-  hi::UInt64
+function is_finite(::Type{Relation}) 
+  true
+end
+  
+function finger(fun::Relation)
+  RelationFinger{0}(1, length(fun.columns[1]) + 1)
 end
 
-@inline function narrow{T}(values::AbstractArray{T}, old_range::Range, new_range::Range, value::T)::Bool
-  # start from end of last range
-  new_range.lo, c = gallop(values, new_range.hi, old_range.hi, value, 0)
-  if c == 0
-    new_range.hi, _ = gallop(values, new_range.lo+1, old_range.hi, value, 1)
-    new_range.lo < new_range.hi
-  else
-    new_range.hi = new_range.lo
-    false
+function count(fun::Relation, finger::RelationFinger) 
+  # not actually correct, but will do for now
+  finger.hi - finger.lo
+end
+
+@generated function first(fun::Relation, outer_finger::RelationFinger{C}) where {C}
+  C2 = C + 1
+  quote
+    column = fun.columns[$C2]
+    lo = outer_finger.lo
+    value = column[lo]
+    hi = gallop(column, lo, outer_finger.hi, value, 1)
+    RelationFinger{$C2}(lo, hi)
   end
 end
 
-abstract type AbstractJoin end
-
-function _Join(n::Int64)
-  Join = Symbol("Join_$n")
-  column = [:($(Symbol("column_$i"))::T) for i in 1:n]
-  old_range = [:($(Symbol("old_range_$i"))::Range) for i in 1:n]
-  new_range = [:($(Symbol("new_range_$i"))::Range) for i in 1:n]
+@generated function next(fun::Relation, outer_finger::RelationFinger{C}, inner_finger::RelationFinger{C2}) where {C, C2}
+  @assert C2 == C + 1
   quote
-    mutable struct $Join{T} <: AbstractJoin
-      $(column...)
-      $(old_range...)
-      $(new_range...)
+    column = fun.columns[C2]
+    lo = inner_finger.hi
+    if lo < outer_finger.hi
+      value = column[lo]
+      hi = gallop(column, lo, outer_finger.hi, value, 1)
+      RelationFinger{C2}(lo, hi)
+    else 
+      RelationFinger{C2}(lo, outer_finger.hi)
     end
   end
 end
 
-const _Joins = Dict{Int64, Type}()
-
-function Join(n::Int64)
-  if !haskey(_Joins, n)
-    eval(_Join(n))
-    _Joins[n] = eval(Symbol("Join_$n"))
-  end
-  _Joins[n]
-end
-
-function _join_init(n::Int64)
-  quote
-    $(Expr(:meta, :inline))
-
-    # calculate size of each range
-    @nexprs $n (i) -> size_i = join.old_range_i.hi - join.new_range_i.hi
-
-    # pick smallest size
-    min_size = @ncall $n min (i) -> size_i
-
-    # swap smallest range to 1st
-    @nif $n (i) -> size_i == min_size (i) -> begin
-      join.column_i, join.column_1 = join.column_1, join.column_i
-      join.old_range_i, join.old_range_1 = join.old_range_1, join.old_range_i
-      join.new_range_i, join.new_range_1 = join.new_range_1, join.new_range_i
-    end
-
-    # init new_ranges
-    @nexprs $n (i) -> join.new_range_i.hi = join.old_range_i.lo
+# TODO can push this into gallop, to search lo and hi at same time
+#      or maybe use searchsorted if we can remove the cost of the subarray
+@generated function seek(fun::Relation, finger::RelationFinger{C}, value) where {C}
+  C2 = C + 1
+  quote 
+    column = fun.columns[$C2]
+    lo = gallop(column, finger.lo, finger.hi, value, 0)
+    hi = gallop(column, lo+1, finger.hi, value, 1)
+    RelationFinger{$C2}(lo, hi)
   end
 end
 
-@generated function join_init(join::AbstractJoin)
-  _join_init(Int64(length(fieldnames(join)) / 3))
+function get(fun::Relation, finger::RelationFinger{C}) where {C}
+  fun.columns[C][finger.lo]
 end
 
-function _join_next(n::Int64)
-  quote
-    $(Expr(:meta, :inline))
-
-    while true
-      # start from the end of the previous range
-      join.new_range_1.lo = join.new_range_1.hi
-      
-      # bail if column_1 is out of values
-      if join.new_range_1.lo >= join.old_range_1.hi
-        return false
-      end
-      
-      # figure out range of current value
-      @inbounds value = join.column_1[join.new_range_1.lo]
-      join.new_range_1.hi, _ = gallop(join.column_1, join.new_range_1.lo, join.old_range_1.hi, value, 1)
-
-      # check if other columns have a matching value
-      if @nall $n (i) -> (i == 1 || narrow(join.column_i, join.old_range_i, join.new_range_i, value))
-        return true
+function _join(num_funs, ixes, num_results, f)
+  n = length(ixes)
+  funs = [Symbol("ignored_fun_$i") for i in 1:num_funs]
+  outer_fingers = [Symbol("ignored_outer_finger_$i") for i in 1:num_funs]
+  result_fingers = [Symbol("ignored_outer_finger_$i") for i in 1:num_funs]
+  for i in 1:length(ixes)
+    funs[ixes[i]] = Symbol("fun_$i")
+    outer_fingers[ixes[i]] = Symbol("outer_finger_$i")
+    result_fingers[ixes[i]] = Symbol("inner_finger_$i")
+  end
+  inner_fingers = [Symbol("inner_finger_$i") for i in 1:length(ixes)]
+  results = [Symbol("result_$i") for i in 1:num_results]
+  quote 
+    function($(funs...), $(outer_fingers...), $(results...))
+      @nexprs $n (i) -> count_i = count(fun_i, outer_finger_i)
+      min_count = @ncall $n min (i) -> count_i
+      @nif $n (min) -> count_min == min_count (min) -> begin
+        inner_finger_min = first(fun_min, outer_finger_min)
+        while count(fun_min, inner_finger_min) > 0
+          let value = get(fun_min, inner_finger_min)
+            if (@nall $n (i) -> ((i == min) || begin
+                inner_finger_i = seek(fun_i, outer_finger_i, value)
+                count(fun_i, inner_finger_i) > 0
+              end))
+              $f($(funs...), $(result_fingers...), $(results...))
+            end
+            inner_finger_min = next(fun_min, outer_finger_min, inner_finger_min)
+          end
+        end
       end
     end
   end
 end
 
-@generated function join_next(join::AbstractJoin)
-  _join_next(Int64(length(fieldnames(join)) / 3))
-end
+macroexpand(_join(2, [1,2], 0, :f))
 
-macro join(f, join)
-  @assert(f.head == :->)
-  @assert(length(f.args[1].args) == 0)
-  body = f.args[2]
-  quote
-    const join = $(esc(join))
-    join_init(join)
-    while true == join_next(join)
-      $(esc(body))
-    end
-  end
+function join(num_funs, ixes, num_results, f)
+  eval(_join(num_funs, ixes, num_results, f))
 end
 
 using BenchmarkTools
 
-Join(1)
-Join(2)
-
-function polynomial(x_1, x_2, y_1, y_2)
-  const x_range_0 = Range(1, length(x_1) + 1)
-  const x_range_1 = Range(1, length(x_1) + 1)
-  const x_range_2 = Range(1, length(x_1) + 1)
-  const y_range_0 = Range(1, length(y_1) + 1)
-  const y_range_1 = Range(1, length(y_1) + 1)
-  const y_range_2 = Range(1, length(y_1) + 1)
-  const results_x = Int64[]
-  const results_y = Int64[]
-  const results_z = Int64[]
-  const j1 = Join_2(x_1, y_1, x_range_0, y_range_0, x_range_1, y_range_1)
-  const j2 = Join_1(x_2, x_range_1, x_range_2)
-  const j3 = Join_1(y_2, y_range_1, y_range_2)
-  @join(j1) do
-    # println(1, x_range_1, y_range_1)
-    @join(j2) do
-      # println(2, x_range_0, x_range_1, x_range_2, y_range_0, y_range_1, y_range_2)
-      @join(j3) do
-        # println(4, x_range_0, x_range_1, x_range_2, y_range_0, y_range_1, y_range_2)
-        @inbounds x = x_2[x_range_2.lo]
-        @inbounds y = y_2[y_range_2.lo]
-        push!(results_x, x)
-        push!(results_y, y)
-        push!(results_z, (x * x) + (y * y) + (3 * x * y))
-      end
-    end
+function make_polynomial()
+  j0(xx, yy, xx_finger, yy_finger, results_x, results_y, results_z) = begin
+    x = get(xx, xx_finger)
+    y = get(yy, yy_finger)
+    push!(results_x, x)
+    push!(results_y, y)
+    push!(results_z, (x * x) + (y * y) + (3 * x * y))
   end
-  results_z
+  j1 = join(2, [2], 3, j0)
+  j2 = join(2, [1], 3, j1)
+  j3 = join(2, [1,2], 3, j2)
+  j4(xx, yy, results_x, results_y, results_z) = begin 
+    j3(xx, yy, finger(xx), finger(yy), results_x, results_y, results_z)
+    results_z
+  end
+  (j0, j1, j2, j3, j4)
 end
 
-# @code_warntype polynomial([1,2],[1,4],[1,2],[1,-4])
-# @code_llvm polynomial([1,2],[1,4],[1,2],[1,-4])
+(j0, j1, j2, j3, j4) = make_polynomial()
+xx = Relation((collect(0:100),collect(0:100)))
+yy = Relation((collect(0:100), collect(reverse(0:100))))
 
-@show @time polynomial(
-collect(0:10),
-collect(0:10),
-collect(0:10),
-collect(reverse(0:10))
-)
+@show @time j4(xx, yy, Int64[], Int64[], Int64[])
 
-# @time polynomial(
-# collect(0:1000000),
-# collect(0:1000000),
-# collect(0:1000000),
-# collect(reverse(0:1000000))
-# )
+@code_warntype j0(xx, yy, RelationFinger{2}(1,1), RelationFinger{2}(1,1), Int64[], Int64[], Int64[])
+@code_warntype j1(xx, yy, RelationFinger{2}(1,1), RelationFinger{1}(1,1), Int64[], Int64[], Int64[])
+@code_warntype j2(xx, yy, RelationFinger{1}(1,1), RelationFinger{1}(1,1), Int64[], Int64[], Int64[])
+@code_warntype j3(xx, yy, RelationFinger{0}(1,1), RelationFinger{0}(1,1), Int64[], Int64[], Int64[])
 
-@show @benchmark polynomial(
-$(collect(0:1000000)),
-$(collect(0:1000000)),
-$(collect(0:1000000)),
-$(collect(reverse(0:1000000)))
-)
+@code_warntype first(xx, RelationFinger{0}(1,1))
+
+const big_xx = Relation((collect(0:1000000),collect(0:1000000)))
+const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
+const polynomial = j4
+
+@show @benchmark polynomial(big_xx, big_yy, Int64[], Int64[], Int64[])
 
 end

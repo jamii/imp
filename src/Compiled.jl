@@ -1,6 +1,7 @@
 module Compiled
 
-using Base.Cartesian
+using Base.Cartesian 
+using Match
 
 # interface for all functions
 
@@ -8,7 +9,11 @@ function is_function(fun_type)
   false
 end 
 # function call(fun, args...) end 
-# function permute(fun, columns) end 
+
+@generated function index(fun, ::Type{Val{order}}) where {order}
+  @assert order == Vector(1:length(order))
+  :fun
+end
 
 # interface for finite functions
 
@@ -140,6 +145,117 @@ for i in 1:3
   eval(_join_fingers(i))
 end
 
+struct Ring{T}
+  add::Function
+  mult::Function
+  one::T
+  zero::T
+end
+
+struct Call
+  fun # function, or anything which implements finite function interface
+  args::Vector{Symbol}
+end
+
+struct Lambda
+  ring::Ring
+  args::Vector{Symbol}
+  domain::Vector{Call}
+  value::Vector{Symbol}
+end
+  
+function find_var(var::Symbol, calls::Vector{Call})
+  for (call_num, call) in enumerate(calls)
+    for (arg_num, arg) in enumerate(call.args)
+      if arg == var
+        return (call_num, arg_num)
+      end
+    end
+  end
+  error("Not found")
+end
+
+function compile(lambda::Lambda)
+  reduced_vars = setdiff(union((call.args for call in lambda.domain)...), lambda.args)
+  
+  sort_orders = Vector{Int64}[]
+  calls = Call[]
+  for call in lambda.domain
+    sort_order = Vector(1:length(call.args))
+    sort!(sort_order, by=(ix) -> findfirst(reduced_vars, call.args[ix]))
+    push!(sort_orders, sort_order)
+    push!(calls, Call(call.fun, call.args[sort_order]))
+  end 
+  
+  code = []
+  
+  for result_num in 1:(1+length(lambda.args))
+    result_name = Symbol("results_$(result_num)") 
+    push!(code, :(const $result_name = [])) # TODO type
+  end
+  
+  for (call_num, (sort_order, call)) in enumerate(zip(sort_orders, calls))
+    sort_order_val = Val{tuple(sort_order...)}
+    fingers = [Symbol("finger_$(call_num)_$(finger_num)") for finger_num in 1:(1+length(call.args))]
+    push!(code, :(const ($(fingers...)) = fingers(index($(call.fun), $sort_order_val))))
+  end
+  
+  for (var_num, var) in enumerate(reduced_vars)
+    call_and_finger_nums = []
+    for (call_num, call) in enumerate(calls)
+      finger_num = findfirst(call.args, var)
+      if finger_num != 0
+        push!(call_and_finger_nums, (call_num, finger_num))
+      end
+    end
+    outer_fingers = [Symbol("finger_$(call_num)_$(finger_num)") for (call_num, finger_num) in call_and_finger_nums]
+    inner_fingers = [Symbol("finger_$(call_num)_$(finger_num+1)") for (call_num, finger_num) in call_and_finger_nums]
+    this_step = Symbol("step_$(var_num)")
+    next_step = Symbol("step_$(var_num+1)")
+    push!(code, :(const $this_step = () -> join_fingers($(outer_fingers...), $(inner_fingers...), $next_step)))
+  end
+  
+  num_steps = length(reduced_vars)+1
+  last_step = Symbol("step_$(num_steps)")
+  get_vars = []
+  for var in union(lambda.value, lambda.args)
+    (call_num, finger_num) = find_var(var, calls)
+    outer_finger = Symbol("finger_$(call_num)_$(finger_num)")
+    inner_finger = Symbol("finger_$(call_num)_$(finger_num+1)")
+    push!(get_vars, :(const $var = get($outer_finger, $inner_finger)))
+  end
+  push_vars = []
+  for (var_num, var) in enumerate(lambda.args)
+    result = Symbol("results_$(var_num)")
+    push!(push_vars, :(push!($result, $var)))
+  end
+  num_results = length(lambda.args)+1
+  last_result = Symbol("results_$(num_results)")
+  push_value = :(push!($last_result, $(lambda.ring.mult)($(lambda.value...))))
+  push!(code, :(const $last_step = () -> begin
+    $(get_vars...)
+    $(push_vars...)
+    $push_value
+  end))
+  
+  quote
+    $(code...)
+  end
+end
+
+# polynomial_ast = Lambda(
+#   Ring{Int64}(+,*,1,0),
+#   [:i],
+#   [
+#     Call(:xx, [:i, :x]), 
+#     Call(:yy, [:i, :y]), 
+#     Call((x,y) -> (x * x) + (y * y) + (3 * x * y), [:x, :y, :z]), 
+#   ],
+#   [:z]
+#   )
+# 
+# compile(polynomial_ast)
+
 using BenchmarkTools
 
 function polynomial(xx, yy)
@@ -171,16 +287,16 @@ function polynomial(xx, yy)
   results_z
 end
 
-xx = Relation((collect(1:100),collect(1:100)))
-yy = Relation((collect(1:100), collect(reverse(1:100))))
+# xx = Relation((collect(1:100),collect(1:100)))
+# yy = Relation((collect(1:100), collect(reverse(1:100))))
+# 
+# @show @time polynomial(xx, yy)
+# @code_warntype polynomial(xx, yy)
+# 
+# 
+# const big_xx = Relation((collect(0:1000000),collect(0:1000000)))
+# const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 
-@show @time polynomial(xx, yy)
-@code_warntype polynomial(xx, yy)
-
-
-const big_xx = Relation((collect(0:1000000),collect(0:1000000)))
-const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
-
-@show @benchmark polynomial(big_xx, big_yy)
+# @show @benchmark polynomial(big_xx, big_yy)
 
 end

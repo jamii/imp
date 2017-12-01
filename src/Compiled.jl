@@ -40,7 +40,7 @@ struct RelationIndex{T <: Tuple}
 end
 
 function gallop{T}(column::AbstractArray{T}, lo::Int64, hi::Int64, value::T, threshold::Int64) ::Int64
-  @inbounds if (lo < hi) && cmp(column[lo], value) < threshold
+  if (lo < hi) && cmp(column[lo], value) < threshold
     step = 1
     while (lo + step < hi) && cmp(column[lo + step], value) < threshold
       lo = lo + step
@@ -99,7 +99,7 @@ function seek(index::RelationIndex, ::Type{Val{C}}, value) where {C}
   prev_hi = index.his[C]
   lo = index.his[C+1]
   if lo < prev_hi
-    lo = gallop(column, lo+1, prev_hi, value, 0)
+    lo = gallop(column, lo, prev_hi, value, 0)
     hi = gallop(column, lo+1, prev_hi, value, 1)
     index.los[C+1] = lo
     index.his[C+1] = hi
@@ -264,7 +264,8 @@ function make_polynomial()
   j1 = eval(make_join([(2,2)], j0))
   j2 = eval(make_join([(1,2)], j1))
   j3 = eval(make_join([(1,1),(2,1)], j2))
-  j4(xx, yy, results) = begin 
+  j4(xx, yy) = begin 
+    results = (Int64[], Int64[], Int64[])
     indexes = (index(xx, Val{(1,2)}), index(yy, Val{(1,2)}))
     j3(indexes, results)
     results[3]
@@ -288,12 +289,12 @@ const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 # @code_warntype j3(xx, yy, RelationFinger{0}(1,1), RelationFinger{0}(1,1), (Int64[], Int64[], Int64[]))
 
 # @show @time p((little_xx, little_yy))
-@show @time polynomial(little_xx, little_yy, (Int64[], Int64[], Int64[]))
+@show @time polynomial(little_xx, little_yy)
 
 index(little_xx, Val{(1,2)})
  
 using BenchmarkTools
-# @show @benchmark polynomial(little_xx, little_yy, (Int64[], Int64[], Int64[]))
-# @show @benchmark polynomial(big_xx, big_yy, (Int64[], Int64[], Int64[]))
+# @show @benchmark polynomial(little_xx, little_yy)
+@show @benchmark polynomial(big_xx, big_yy)
 
 end

@@ -185,7 +185,7 @@ function make_join(index_and_column_nums, tail)
 end
 
 function make_return(num_funs, index_and_column_nums)
-  pushes = [:(push!(returns[$index_num], get_earlier(indexes[$index_num], $(Val{column_num})))) for (index_num, column_num) in index_and_column_nums]
+  pushes = [:(push!(returns[$i], get_earlier(indexes[$index_num], $(Val{column_num})))) for (i, (index_num, column_num)) in enumerate(index_and_column_nums)]
   quote
     (indexes, returns) -> begin
       $(pushes...)
@@ -222,7 +222,7 @@ function compile(lambda::Lambda, inferred_type::Function)
   # make join functions
   # TODO assume everything is finite for now, figure out functions later
   # TODO assume no args passed for now ie all finitely supported
-  for var in vcat(lambda.args, reduced_vars)
+  for var in reverse(vcat(lambda.args, reduced_vars))
     call_and_column_nums = []
     for (call_num, call) in enumerate(calls)
       for (column_num, arg) in enumerate(call.args)
@@ -288,13 +288,13 @@ const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 # @code_warntype j2(xx, yy, RelationFinger{1}(1,1), RelationFinger{1}(1,1), (Int64[], Int64[], Int64[]))
 # @code_warntype j3(xx, yy, RelationFinger{0}(1,1), RelationFinger{0}(1,1), (Int64[], Int64[], Int64[]))
 
-# @show @time p((little_xx, little_yy))
-@show @time polynomial(little_xx, little_yy)
+# @time p((little_xx, little_yy))
+@time polynomial(little_xx, little_yy)
 
 index(little_xx, Val{(1,2)})
  
 using BenchmarkTools
 # @show @benchmark polynomial(little_xx, little_yy)
-@show @benchmark polynomial(big_xx, big_yy)
+# @show @benchmark polynomial(big_xx, big_yy)
 
 end

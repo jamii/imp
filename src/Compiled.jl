@@ -16,27 +16,27 @@ function is_finite(fun_type)
   false
 end 
 
-@generated function index(fun, ::Type{Val{order}}) where {order}
-  @assert order == tuple(1:length(order)...) "Can't permute $order yet"
-  :fun
-end
-
-# function first(fun) end 
-# function first(fun, finger) end
-# function count(fun, finger) end 
-# function next(fun, outer_finger, inner_finger) end
-# function seek(fun, outer_finger, inner_finger, value) end
-# function get(fun, finger) end
+# index(fun)
+# count(index, column)
+# first(index, column)
+# next(index, column)
+# seek(index, column)
+# get(index, column)
 
 # implementation for tuple of column vectors
 
-struct Relation{T <: Tuple} 
+struct Relation{T <: Tuple}
   columns::T
 end
 
-struct RelationFinger{Column}
-  lo::Int64 # inclusive
-  hi::Int64 # exclusive
+function is_finite(::Type{Relation}) 
+  true
+end
+
+struct RelationIndex{T <: Tuple}
+  columns::T
+  los::Vector{Int64} # inclusive
+  his::Vector{Int64} # exclusive
 end
 
 function gallop{T}(column::AbstractArray{T}, lo::Int64, hi::Int64, value::T, threshold::Int64) ::Int64
@@ -60,65 +60,62 @@ function gallop{T}(column::AbstractArray{T}, lo::Int64, hi::Int64, value::T, thr
   lo
 end
 
-function is_finite(::Type{Relation}) 
-  true
-end
-
-function first(fun::Relation)
-  RelationFinger{0}(1, length(fun.columns[1]) + 1)
-end
- 
-@generated function first(fun::Relation, finger::RelationFinger{C}) where {C}
-  C2 = C + 1
+@generated function index(fun::Relation{T}, ::Type{Val{order}}) where {T, order}
+  @assert order == tuple(1:length(order)...) "Can't permute $order yet"
+  n = length(T.parameters)
   quote
-    RelationFinger{$C2}(0, finger.lo)
+    RelationIndex(fun.columns, fill(1, $(n+1)), fill(length(fun.columns[1])+1, $(n+1)))
   end
 end
+ 
+function first(index::RelationIndex, ::Type{Val{C}}) where {C}
+  index.his[C+1] = index.los[C]
+end
 
-function count(fun::Relation, finger::RelationFinger)
+function count(index::RelationIndex, ::Type{Val{C}}) where {C}
   # not actually correct, but will do for now
-  finger.hi - finger.lo
+  index.his[C+1] - index.los[C+1]
 end
  
-@generated function next(fun::Relation, outer_finger::RelationFinger{C}, inner_finger::RelationFinger{C2}) where {C, C2}
-  @assert C2 == C + 1
-  quote
-    column = fun.columns[C2]
-    lo = inner_finger.hi
-    if lo < outer_finger.hi
-      value = column[lo]
-      hi = gallop(column, lo, outer_finger.hi, value, 1)
-      RelationFinger{C2}(lo, hi)
-    else 
-      RelationFinger{C2}(lo, outer_finger.hi)
-    end
+function next(index::RelationIndex, ::Type{Val{C}}) where {C}
+  column = index.columns[C]
+  prev_hi = index.his[C]
+  lo = index.his[C+1]
+  if lo < prev_hi
+    value = column[lo]
+    hi = gallop(column, lo+1, prev_hi, value, 1)
+    index.los[C+1] = lo
+    index.his[C+1] = hi
+    lo < hi
+  else 
+    false
   end
-end
- 
- # TODO can push this into gallop, to search lo and hi at same time
- #      or maybe use searchsorted if we can remove the cost of the subarray
-@generated function seek(fun::Relation, outer_finger::RelationFinger{C}, inner_finger::RelationFinger{C2}, value) where {C, C2}
-  @assert C2 == C + 1
-  quote
-    column = fun.columns[C2]
-    lo = inner_finger.hi
-    if lo < outer_finger.hi
-      lo = gallop(column, lo, outer_finger.hi, value, 0)
-      hi = gallop(column, lo+1, outer_finger.hi, value, 1)
-      RelationFinger{C2}(lo, hi)
-    else
-      RelationFinger{C2}(lo, outer_finger.hi)
-    end
-  end
-end
- 
-function get(fun::Relation, finger::RelationFinger{C}) where {C}
-  fun.columns[C][finger.lo]
 end
 
+# TODO can push this into gallop, to search lo and hi at same time
+#      or maybe use searchsorted if we can remove the cost of the subarray
+function seek(index::RelationIndex, ::Type{Val{C}}, value) where {C}
+  column = index.columns[C]
+  prev_hi = index.his[C]
+  lo = index.his[C+1]
+  if lo < prev_hi
+    lo = gallop(column, lo+1, prev_hi, value, 0)
+    hi = gallop(column, lo+1, prev_hi, value, 1)
+    index.los[C+1] = lo
+    index.his[C+1] = hi
+    lo < hi
+  else 
+    false
+  end
+end
+
+function get(index::RelationIndex, ::Type{Val{C}}) where {C}
+  index.columns[C][index.los[C+1]]
+end
+ 
 # TODO eventually we will just pass variables down the call stack, so we won't need this
-function get(fun::Relation, finger::RelationFinger{C}, ::Type{Val{C2}}) where {C, C2}
-  fun.columns[C2][finger.lo]
+function get_earlier(index::RelationIndex, ::Type{Val{C}}) where {C}
+  index.columns[C][index.los[end]]
 end
 
 struct Ring{T}
@@ -152,49 +149,33 @@ function find_var(var::Symbol, calls::Vector{Call})
 end
 
 function make_setup(sort_orders, return_vars, tail)
-  funs = [Symbol("fun_$i") for i in 1:length(sort_orders)]
-  indexes = [:(index($fun, $(Val{tuple(sort_order...)}))) for (fun, sort_order) in zip(funs, sort_orders)]
-  fingers = [:(first($fun)) for fun in funs]
+  indexes = [:(index(funs[$i], $(Val{tuple(sort_order...)}))) for (i, sort_order) in enumerate(sort_orders)]
   # TODO use inferred types to create Vector
   returns = [:([]) for _ in 1:(length(return_vars))]
   quote
-    ($(funs...),) -> begin
+    (funs) -> begin
       returns = tuple($(returns...))
-      $tail($(indexes...), $(fingers...), returns)
+      $tail(tuple($(indexes...)), returns)
       returns
     end
   end
 end
 
 # TODO handle repeated call_nums
-function make_join(num_funs, call_nums, tail)
-  n = length(call_nums)
-  funs = [Symbol("ignored_fun_$i") for i in 1:num_funs]
-  outer_fingers = [Symbol("ignored_outer_finger_$i") for i in 1:num_funs]
-  result_fingers = [Symbol("ignored_outer_finger_$i") for i in 1:num_funs]
-  for i in 1:length(call_nums)
-    funs[call_nums[i]] = Symbol("fun_$i")
-    outer_fingers[call_nums[i]] = Symbol("outer_finger_$i")
-    result_fingers[call_nums[i]] = Symbol("inner_finger_$i")
-  end
-  inner_fingers = [Symbol("inner_finger_$i") for i in 1:length(call_nums)]
+function make_join(index_and_column_nums, tail)
+  n = length(index_and_column_nums)
+  index_nums = map((c) -> c[1], index_and_column_nums)
+  column_nums = map((c) -> c[2], index_and_column_nums)
   quote 
-    ($(funs...), $(outer_fingers...), returns) -> begin
-      @nexprs $n (i) -> count_i = count(fun_i, outer_finger_i)
+    (indexes, returns) -> begin
+      @nexprs $n (i) -> count_i = count(indexes[$index_nums[i]], Val{$column_nums[i]})
       min_count = @ncall $n min (i) -> count_i
-      @nexprs $n (i) -> inner_finger_i = first(fun_i, outer_finger_i)
+      @nexprs $n (i) -> first(indexes[$index_nums[i]], Val{$column_nums[i]})
       @nif $n (min) -> count_min == min_count (min) -> begin
-        while true
-          inner_finger_min = next(fun_min, outer_finger_min, inner_finger_min)
-          if count(fun_min, inner_finger_min) == 0
-            break
-          end
-          let value = get(fun_min, inner_finger_min)
-            if (@nall $n (i) -> ((i == min) || begin
-              inner_finger_i = seek(fun_i, outer_finger_i, inner_finger_i, value)
-              count(fun_i, inner_finger_i) > 0
-            end))
-              $tail($(funs...), $(result_fingers...), returns)
+        while next(indexes[$index_nums[min]], Val{$column_nums[min]})
+          let value = get(indexes[$index_nums[min]], Val{$column_nums[min]})
+            if @nall $n (i) -> ((i == min) || seek(indexes[$index_nums[i]], Val{$column_nums[i]}, value))
+              $tail(indexes, returns)
             end
           end
         end
@@ -203,12 +184,10 @@ function make_join(num_funs, call_nums, tail)
   end
 end
 
-function make_return(num_funs, call_and_finger_nums)
-  funs = [Symbol("fun_$i") for i in 1:num_funs]
-  fingers = [Symbol("finger_$i") for i in 1:num_funs]
-  pushes = [:(push!(returns[$call_num], get($(funs[call_num]), $(fingers[call_num]), $(Val{finger_num})))) for (call_num, finger_num) in call_and_finger_nums]
+function make_return(num_funs, index_and_column_nums)
+  pushes = [:(push!(returns[$index_num], get_earlier(indexes[$index_num], $(Val{column_num})))) for (index_num, column_num) in index_and_column_nums]
   quote
-    ($(funs...), $(fingers...), returns) -> begin
+    (indexes, returns) -> begin
       $(pushes...)
     end
   end
@@ -235,22 +214,25 @@ function compile(lambda::Lambda, inferred_type::Function)
   
   # make return function
   # TODO just return everything for now, figure out reduce later
-  call_and_finger_nums = map(returned_vars) do var
+  call_and_column_nums = map(returned_vars) do var
     find_var(var, calls)
   end
-  @show tail = eval(make_return(length(calls), call_and_finger_nums))
+  @show tail = eval(make_return(length(calls), call_and_column_nums))
   
   # make join functions
   # TODO assume everything is finite for now, figure out functions later
   # TODO assume no args passed for now ie all finitely supported
   for var in vcat(lambda.args, reduced_vars)
-    call_nums = find(calls) do call
-      any(call.args) do arg
-        arg == var
+    call_and_column_nums = []
+    for (call_num, call) in enumerate(calls)
+      for (column_num, arg) in enumerate(call.args)
+        if arg == var 
+          push!(call_and_column_nums, (call_num, column_num))
+        end
       end
     end
-    @show var call_nums
-    @show tail = eval(make_join(length(calls), call_nums, tail))
+    @show call_and_column_nums
+    @show tail = eval(make_join(call_and_column_nums, tail))
   end    
   
   @show tail = eval(make_setup(sort_orders, lambda.args, tail))
@@ -272,18 +254,19 @@ polynomial_ast = Lambda(
 p = compile(polynomial_ast, (sym) -> typeof(eval(sym)))
 
 function make_polynomial()
-  j0(xx, yy, xx_finger, yy_finger, results) = begin
-    x = get(xx, xx_finger)
-    y = get(yy, yy_finger)
+  j0(indexes, results) = begin
+    x = get(indexes[1], Val{2})
+    y = get(indexes[2], Val{2})
     push!(results[1], x)
     push!(results[2], y)
     push!(results[3], (x * x) + (y * y) + (3 * x * y))
   end
-  j1 = eval(make_join(2, [2], j0))
-  j2 = eval(make_join(2, [1], j1))
-  j3 = eval(make_join(2, [1,2], j2))
+  j1 = eval(make_join([(2,2)], j0))
+  j2 = eval(make_join([(1,2)], j1))
+  j3 = eval(make_join([(1,1),(2,1)], j2))
   j4(xx, yy, results) = begin 
-    j3(xx, yy, first(xx), first(yy), results)
+    indexes = (index(xx, Val{(1,2)}), index(yy, Val{(1,2)}))
+    j3(indexes, results)
     results[3]
   end
   (j0, j1, j2, j3, j4)
@@ -304,7 +287,10 @@ const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 # @code_warntype j2(xx, yy, RelationFinger{1}(1,1), RelationFinger{1}(1,1), (Int64[], Int64[], Int64[]))
 # @code_warntype j3(xx, yy, RelationFinger{0}(1,1), RelationFinger{0}(1,1), (Int64[], Int64[], Int64[]))
 
-@show @time p(little_xx, little_yy)
+# @show @time p((little_xx, little_yy))
+@show @time polynomial(little_xx, little_yy, (Int64[], Int64[], Int64[]))
+
+index(little_xx, Val{(1,2)})
  
 using BenchmarkTools
 # @show @benchmark polynomial(little_xx, little_yy, (Int64[], Int64[], Int64[]))

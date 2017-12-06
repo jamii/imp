@@ -172,7 +172,7 @@ function parse_query(query)
   end
   
   # collect relation names
-  input_names = Set{Symbol}()
+  input_names = Set()
   for clause in clauses
     if typeof(clause) == Row 
       push!(input_names, clause.name)

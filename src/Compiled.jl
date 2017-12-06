@@ -148,10 +148,9 @@ function find_var(var::Symbol, calls::Vector{Call})
   error("Not found")
 end
 
-function make_setup(sort_orders, return_vars, tail)
+function make_setup(sort_orders, return_var_types, tail)
   indexes = [:(index(funs[$i], $(Val{tuple(sort_order...)}))) for (i, sort_order) in enumerate(sort_orders)]
-  # TODO use inferred types to create Vector
-  returns = [:([]) for _ in 1:(length(return_vars))]
+  returns = [:($typ[]) for typ in return_var_types]
   quote
     (funs) -> begin
       returns = tuple($(returns...))
@@ -186,16 +185,16 @@ function make_join(index_and_column_nums, num_vars, tail)
 end
 
 function make_return(num_funs, num_vars, return_var_nums)
-vars = [Symbol("var_$i") for i in 1:num_vars]
-  pushes = [:(push!(returns[$i], $(Symbol("var_$i")))) for i in return_var_nums]
-  quote
-    (indexes, returns, $(vars...)) -> begin
-      $(pushes...)
+    vars = [Symbol("var_$i") for i in 1:num_vars]
+    pushes = [:(push!(returns[$i], $(Symbol("var_$i")))) for i in return_var_nums]
+    quote
+        (indexes, returns, $(vars...)) -> begin
+          $(pushes...)
+        end
     end
-  end
 end
 
-function compile(lambda::Lambda, inferred_type::Function)
+function compile(lambda::Lambda, fun_types::Dict{Symbol, Type}, var_types::Dict{Symbol, Type})
   # TODO handle reduce variable too
   returned_vars = lambda.args
   
@@ -215,9 +214,7 @@ function compile(lambda::Lambda, inferred_type::Function)
   
   # make return function
   # TODO just return everything for now, figure out reduce later
-  returned_var_nums = map(returned_vars) do var
-    findfirst(vars, var)
-  end
+  returned_var_nums = map((var) -> findfirst(vars, var), returned_vars)
   @show tail = eval(@show make_return(length(calls), length(vars), returned_var_nums))
   
   # make join functions
@@ -236,7 +233,8 @@ function compile(lambda::Lambda, inferred_type::Function)
     @show tail = eval(@show make_join(call_and_column_nums, var_num - 1, tail))
   end    
   
-  @show tail = eval(@show make_setup(sort_orders, lambda.args, tail))
+  returned_var_types = map((var) -> var_types[var], returned_vars)
+  @show tail = eval(@show make_setup(sort_orders, returned_var_types, tail))
 
   tail
 end
@@ -252,7 +250,7 @@ polynomial_ast = Lambda(
   [:z]
   )
 
-p = compile(polynomial_ast, (sym) -> typeof(eval(sym)))
+const p = compile(polynomial_ast, Dict{Symbol, Type}(), Dict{Symbol, Type}(:i => Int64, :x => Int64, :y => Int64))
 
 function make_polynomial()
   j0(indexes, results, i, x, y) = begin
@@ -287,13 +285,12 @@ const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 # @code_warntype j2(xx, yy, RelationFinger{1}(1,1), RelationFinger{1}(1,1), (Int64[], Int64[], Int64[]))
 # @code_warntype j3(xx, yy, RelationFinger{0}(1,1), RelationFinger{0}(1,1), (Int64[], Int64[], Int64[]))
 
-@time p((little_xx, little_yy))
 @time polynomial(little_xx, little_yy)
-
-index(little_xx, Val{(1,2)})
+@time p((little_xx, little_yy))
  
 using BenchmarkTools
 # @show @benchmark polynomial(little_xx, little_yy)
 # @show @benchmark polynomial(big_xx, big_yy)
+# @show @benchmark p((big_xx, big_yy))
 
 end

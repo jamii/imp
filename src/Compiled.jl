@@ -29,7 +29,7 @@ struct Relation{T <: Tuple}
   columns::T
 end
 
-function is_finite(::Type{Relation}) 
+function is_finite(::Type{Relation{T}}) where {T}
   true
 end
 
@@ -149,13 +149,45 @@ function find_var(var::Symbol, calls::Vector{Call})
 end
 
 function make_setup(sort_orders, return_var_types, tail)
-  indexes = [:(index(funs[$i], $(Val{tuple(sort_order...)}))) for (i, sort_order) in enumerate(sort_orders)]
+  indexes = map(enumerate(sort_orders)) do i_sort_order
+    i, sort_order = i_sort_order
+    if sort_order != nothing
+      sort_order_val = Val{tuple(sort_order...)}
+      :(index(funs[$i], $sort_order_val))
+    else
+      :(funs[$i])
+    end
+  end
   returns = [:($typ[]) for typ in return_var_types]
   quote
     (funs) -> begin
       returns = tuple($(returns...))
       $tail(tuple($(indexes...)), returns)
       returns
+    end
+  end
+end
+
+macro all(args...)
+  reduce((acc, arg) -> :($arg && $acc), true, reverse(map(esc, args)))
+end
+
+# TODO handle repeated call_nums
+function make_seek(fun_and_var_nums, index_and_column_nums, num_vars, tail)
+  n = length(index_and_column_nums)
+  index_nums = map((c) -> c[1], index_and_column_nums)
+  column_nums = map((c) -> c[2], index_and_column_nums)
+  vars = [Symbol("var_$i") for i in 1:num_vars]
+  calls = [:(indexes[$fun_num]($(vars[var_nums]...))) for (fun_num, var_nums) in fun_and_var_nums]
+  tests = [:(value == $call) for call in calls]
+  quote 
+    (indexes, returns, $(vars...)) -> begin
+      value = $(calls[1])
+      if @all($(tests[2:end]...))
+        if @nall $n (i) -> ((i == min) || seek(indexes[$index_nums[i]], Val{$column_nums[i]}, value))
+          $tail(indexes, returns, $(vars...), value)
+        end
+      end
     end
   end
 end
@@ -186,7 +218,7 @@ end
 
 function make_return(num_funs, num_vars, return_var_nums)
     vars = [Symbol("var_$i") for i in 1:num_vars]
-    pushes = [:(push!(returns[$i], $(Symbol("var_$i")))) for i in return_var_nums]
+    pushes = [:(push!(returns[$i], $(Symbol("var_$return_var_num")))) for (i, return_var_num) in enumerate(return_var_nums)]
     quote
         (indexes, returns, $(vars...)) -> begin
           $(pushes...)
@@ -196,20 +228,25 @@ end
 
 function compile(lambda::Lambda, fun_types::Dict{Symbol, Type}, var_types::Dict{Symbol, Type})
   # TODO handle reduce variable too
-  returned_vars = lambda.args
+  returned_vars = vcat(lambda.args, lambda.value)
   
-  # pick a variable order
-  reduced_vars = setdiff(union((call.args for call in lambda.domain)...), lambda.args)
-  vars = vcat(lambda.args, reduced_vars)
+  # order variables by order of appearance in ast
+  vars = union((call.args for call in lambda.domain)...)
+  @show vars
   
-  # permute all finite funs accordingly
-  sort_orders = Vector{Int64}[]
+  # permute all finite funs according to variable order
+  sort_orders = Union{Vector{Int64}, Void}[]
   calls = Call[]
   for call in lambda.domain
-    sort_order = Vector(1:length(call.args))
-    sort!(sort_order, by=(ix) -> findfirst(reduced_vars, call.args[ix]))
-    push!(sort_orders, sort_order)
-    push!(calls, Call(call.fun, call.args[sort_order]))
+      if is_finite(fun_types[call.fun])
+        sort_order = Vector(1:length(call.args))
+        sort!(sort_order, by=(ix) -> findfirst(vars, call.args[ix]))
+        push!(sort_orders, sort_order)
+        push!(calls, Call(call.fun, call.args[sort_order]))
+      else
+        push!(sort_orders, nothing)
+        push!(calls, call)
+      end
   end 
   
   # make return function
@@ -221,16 +258,28 @@ function compile(lambda::Lambda, fun_types::Dict{Symbol, Type}, var_types::Dict{
   # TODO assume everything is finite for now, figure out functions later
   # TODO assume no args passed for now ie all finitely supported
   for (var_num, var) in reverse(collect(enumerate(vars)))
-    call_and_column_nums = []
+    index_and_column_nums = []
+    fun_and_var_nums = []
     for (call_num, call) in enumerate(calls)
       for (column_num, arg) in enumerate(call.args)
         if arg == var 
-          push!(call_and_column_nums, (call_num, column_num))
+          if is_finite(fun_types[call.fun])
+            # use all finite funs
+            push!(index_and_column_nums, (call_num, column_num))
+          elseif column_num == length(call.args)
+            # only use infinite funs if this is the return variable
+            var_nums = map((arg) -> findfirst(vars, arg), call.args[1:end-1])
+            push!(fun_and_var_nums, (call_num, var_nums))
+          end
         end
       end
     end
-    @show call_and_column_nums
-    @show tail = eval(@show make_join(call_and_column_nums, var_num - 1, tail))
+    @show fun_and_var_nums
+    if isempty(fun_and_var_nums)
+      @show tail = eval(@show make_join(index_and_column_nums, var_num - 1, tail))
+    else
+      @show tail = eval(@show make_seek(fun_and_var_nums, index_and_column_nums, var_num - 1, tail))
+    end
   end    
   
   returned_var_types = map((var) -> var_types[var], returned_vars)
@@ -239,58 +288,31 @@ function compile(lambda::Lambda, fun_types::Dict{Symbol, Type}, var_types::Dict{
   tail
 end
 
+zz(x, y) = (x * x) + (y * y) + (3 * x * y)
+
 polynomial_ast = Lambda(
   Ring{Int64}(+,*,1,0),
-  [:i],
+  [:x, :y],
   [
     Call(:xx, [:i, :x]), 
     Call(:yy, [:i, :y]), 
-    # Call((x,y) -> (x * x) + (y * y) + (3 * x * y), [:x, :y, :z]), 
+    Call(:zz, [:x, :y, :z]), 
   ],
   [:z]
   )
 
-const p = compile(polynomial_ast, Dict{Symbol, Type}(), Dict{Symbol, Type}(:i => Int64, :x => Int64, :y => Int64))
-
-function make_polynomial()
-  j0(indexes, results, i, x, y) = begin
-    push!(results[1], x)
-    push!(results[2], y)
-    push!(results[3], (x * x) + (y * y) + (3 * x * y))
-  end
-  j1 = eval(make_join([(2,2)], 2, j0))
-  j2 = eval(make_join([(1,2)], 1, j1))
-  j3 = eval(make_join([(1,1),(2,1)], 0, j2))
-  j4(xx, yy) = begin 
-    results = (Int64[], Int64[], Int64[])
-    indexes = (index(xx, Val{(1,2)}), index(yy, Val{(1,2)}))
-    j3(indexes, results)
-    results[3]
-  end
-  (j0, j1, j2, j3, j4)
-end
-
-(j0, j1, j2, j3, j4) = make_polynomial()
-xx = Relation((collect(0:100), collect(0:100)))
-yy = Relation((collect(0:100), collect(reverse(0:100))))
-const polynomial = j4
-
-const little_xx = Relation((collect(0:1000),collect(0:1000)))
-const little_yy = Relation((collect(0:1000), collect(reverse(0:1000))))
+const xx = Relation((collect(0:1000),collect(0:1000)))
+const yy = Relation((collect(0:1000), collect(reverse(0:1000))))
 const big_xx = Relation((collect(0:1000000),collect(0:1000000)))
 const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 
-# @code_warntype j0(xx, yy, RelationFinger{2}(1,1), RelationFinger{2}(1,1), (Int64[], Int64[], Int64[]))
-# @code_warntype j1(xx, yy, RelationFinger{2}(1,1), RelationFinger{1}(1,1), (Int64[], Int64[], Int64[]))
-# @code_warntype j2(xx, yy, RelationFinger{1}(1,1), RelationFinger{1}(1,1), (Int64[], Int64[], Int64[]))
-# @code_warntype j3(xx, yy, RelationFinger{0}(1,1), RelationFinger{0}(1,1), (Int64[], Int64[], Int64[]))
+fun_types = Dict{Symbol, Type}(:xx => typeof(xx), :yy => typeof(yy), :zz => typeof(zz))
+var_types = Dict{Symbol, Type}(:i => Int64, :x => Int64, :y => Int64, :z => Int64)
+const p = compile(polynomial_ast, fun_types, var_types)
 
-@time polynomial(little_xx, little_yy)
-@time p((little_xx, little_yy))
+@time p((xx, yy, zz))
  
 using BenchmarkTools
-# @show @benchmark polynomial(little_xx, little_yy)
-# @show @benchmark polynomial(big_xx, big_yy)
-# @show @benchmark p((big_xx, big_yy))
+# @show @benchmark p((big_xx, big_yy, zz))
 
 end

@@ -162,12 +162,13 @@ function make_setup(sort_orders, return_vars, tail)
 end
 
 # TODO handle repeated call_nums
-function make_join(index_and_column_nums, tail)
+function make_join(index_and_column_nums, num_vars, tail)
   n = length(index_and_column_nums)
   index_nums = map((c) -> c[1], index_and_column_nums)
   column_nums = map((c) -> c[2], index_and_column_nums)
+  vars = [Symbol("var_$i") for i in 1:num_vars]
   quote 
-    (indexes, returns) -> begin
+    (indexes, returns, $(vars...)) -> begin
       @nexprs $n (i) -> count_i = count(indexes[$index_nums[i]], Val{$column_nums[i]})
       min_count = @ncall $n min (i) -> count_i
       @nexprs $n (i) -> first(indexes[$index_nums[i]], Val{$column_nums[i]})
@@ -175,7 +176,7 @@ function make_join(index_and_column_nums, tail)
         while next(indexes[$index_nums[min]], Val{$column_nums[min]})
           let value = get(indexes[$index_nums[min]], Val{$column_nums[min]})
             if @nall $n (i) -> ((i == min) || seek(indexes[$index_nums[i]], Val{$column_nums[i]}, value))
-              $tail(indexes, returns)
+              $tail(indexes, returns, $(vars...), value)
             end
           end
         end
@@ -184,10 +185,11 @@ function make_join(index_and_column_nums, tail)
   end
 end
 
-function make_return(num_funs, index_and_column_nums)
-  pushes = [:(push!(returns[$i], get_earlier(indexes[$index_num], $(Val{column_num})))) for (i, (index_num, column_num)) in enumerate(index_and_column_nums)]
+function make_return(num_funs, num_vars, return_var_nums)
+vars = [Symbol("var_$i") for i in 1:num_vars]
+  pushes = [:(push!(returns[$i], $(Symbol("var_$i")))) for i in return_var_nums]
   quote
-    (indexes, returns) -> begin
+    (indexes, returns, $(vars...)) -> begin
       $(pushes...)
     end
   end
@@ -199,6 +201,7 @@ function compile(lambda::Lambda, inferred_type::Function)
   
   # pick a variable order
   reduced_vars = setdiff(union((call.args for call in lambda.domain)...), lambda.args)
+  vars = vcat(lambda.args, reduced_vars)
   
   # permute all finite funs accordingly
   sort_orders = Vector{Int64}[]
@@ -210,19 +213,17 @@ function compile(lambda::Lambda, inferred_type::Function)
     push!(calls, Call(call.fun, call.args[sort_order]))
   end 
   
-  # TODO rename funs and vars. only setup needs to know correct names
-  
   # make return function
   # TODO just return everything for now, figure out reduce later
-  call_and_column_nums = map(returned_vars) do var
-    find_var(var, calls)
+  returned_var_nums = map(returned_vars) do var
+    findfirst(vars, var)
   end
-  @show tail = eval(make_return(length(calls), call_and_column_nums))
+  @show tail = eval(@show make_return(length(calls), length(vars), returned_var_nums))
   
   # make join functions
   # TODO assume everything is finite for now, figure out functions later
   # TODO assume no args passed for now ie all finitely supported
-  for var in reverse(vcat(lambda.args, reduced_vars))
+  for (var_num, var) in reverse(collect(enumerate(vars)))
     call_and_column_nums = []
     for (call_num, call) in enumerate(calls)
       for (column_num, arg) in enumerate(call.args)
@@ -232,17 +233,17 @@ function compile(lambda::Lambda, inferred_type::Function)
       end
     end
     @show call_and_column_nums
-    @show tail = eval(make_join(call_and_column_nums, tail))
+    @show tail = eval(@show make_join(call_and_column_nums, var_num - 1, tail))
   end    
   
-  @show tail = eval(make_setup(sort_orders, lambda.args, tail))
+  @show tail = eval(@show make_setup(sort_orders, lambda.args, tail))
 
   tail
 end
 
 polynomial_ast = Lambda(
   Ring{Int64}(+,*,1,0),
-  [:i, :x, :y],
+  [:i],
   [
     Call(:xx, [:i, :x]), 
     Call(:yy, [:i, :y]), 
@@ -254,16 +255,14 @@ polynomial_ast = Lambda(
 p = compile(polynomial_ast, (sym) -> typeof(eval(sym)))
 
 function make_polynomial()
-  j0(indexes, results) = begin
-    x = get(indexes[1], Val{2})
-    y = get(indexes[2], Val{2})
+  j0(indexes, results, i, x, y) = begin
     push!(results[1], x)
     push!(results[2], y)
     push!(results[3], (x * x) + (y * y) + (3 * x * y))
   end
-  j1 = eval(make_join([(2,2)], j0))
-  j2 = eval(make_join([(1,2)], j1))
-  j3 = eval(make_join([(1,1),(2,1)], j2))
+  j1 = eval(make_join([(2,2)], 2, j0))
+  j2 = eval(make_join([(1,2)], 1, j1))
+  j3 = eval(make_join([(1,1),(2,1)], 0, j2))
   j4(xx, yy) = begin 
     results = (Int64[], Int64[], Int64[])
     indexes = (index(xx, Val{(1,2)}), index(yy, Val{(1,2)}))
@@ -288,7 +287,7 @@ const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 # @code_warntype j2(xx, yy, RelationFinger{1}(1,1), RelationFinger{1}(1,1), (Int64[], Int64[], Int64[]))
 # @code_warntype j3(xx, yy, RelationFinger{0}(1,1), RelationFinger{0}(1,1), (Int64[], Int64[], Int64[]))
 
-# @time p((little_xx, little_yy))
+@time p((little_xx, little_yy))
 @time polynomial(little_xx, little_yy)
 
 index(little_xx, Val{(1,2)})

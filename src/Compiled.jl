@@ -127,14 +127,14 @@ end
 
 struct Call
   fun # function, or anything which implements finite function interface
-  args::Vector{Symbol}
+  args::Vector{Any}
 end
 
 struct Lambda
   ring::Ring
   args::Vector{Symbol}
   domain::Vector{Call}
-  value::Vector{Symbol}
+  value::Vector{Any}
 end
 
 function find_var(var::Symbol, calls::Vector{Call})
@@ -148,17 +148,22 @@ function find_var(var::Symbol, calls::Vector{Call})
   error("Not found")
 end
 
-function make_setup(sort_orders, return_var_types, tail)
-  indexes = map(enumerate(sort_orders)) do i_sort_order
-    i, sort_order = i_sort_order
+function make_setup(funs, sort_orders, return_var_type, tail)
+  indexes = map(zip(funs, sort_orders)) do fun_sort_order
+    fun, sort_order = fun_sort_order
+    source = if isa(fun, Symbol)
+      :(funs[$(Expr(:quote, fun))])
+    else
+      fun
+    end
     if sort_order != nothing
       sort_order_val = Val{tuple(sort_order...)}
-      :(index(funs[$i], $sort_order_val))
+      :(index($source, $sort_order_val))
     else
-      :(funs[$i])
+      source
     end
   end
-  returns = [:($typ[]) for typ in return_var_types]
+  returns = [:($typ[]) for typ in return_var_type]
   quote
     (funs) -> begin
       returns = tuple($(returns...))
@@ -248,7 +253,7 @@ function make_return(num_funs, num_vars, return_var_nums)
     end
 end
 
-function compile(lambda::Lambda, fun_types::Dict{Symbol, Type}, var_types::Dict{Symbol, Type})
+function generate(lambda::Lambda, fun_type::Function, var_type::Function) ::Function
   # TODO handle reduce variable too
   returned_vars = vcat(lambda.args, lambda.value)
 
@@ -260,21 +265,22 @@ function compile(lambda::Lambda, fun_types::Dict{Symbol, Type}, var_types::Dict{
   sort_orders = Union{Vector{Int64}, Void}[]
   calls = Call[]
   for call in lambda.domain
-      if is_finite(fun_types[call.fun])
-        sort_order = Vector(1:length(call.args))
-        sort!(sort_order, by=(ix) -> findfirst(vars, call.args[ix]))
-        push!(sort_orders, sort_order)
-        push!(calls, Call(call.fun, call.args[sort_order]))
-      else
-        push!(sort_orders, nothing)
-        push!(calls, call)
-      end
+    @show call.fun is_finite(fun_type(call.fun))
+    if is_finite(fun_type(call.fun))
+      sort_order = Vector(1:length(call.args))
+      sort!(sort_order, by=(ix) -> findfirst(vars, call.args[ix]))
+      push!(sort_orders, sort_order)
+      push!(calls, Call(call.fun, call.args[sort_order]))
+    else
+      push!(sort_orders, nothing)
+      push!(calls, call)
+    end
   end
 
   # make return function
   # TODO just return everything for now, figure out reduce later
   returned_var_nums = map((var) -> findfirst(vars, var), returned_vars)
-  @show tail = eval(@show make_return(length(calls), length(vars), returned_var_nums))
+  @show tail = eval(make_return(length(calls), length(vars), returned_var_nums))
 
   # make join functions
   for (var_num, var) in reverse(collect(enumerate(vars)))
@@ -283,7 +289,7 @@ function compile(lambda::Lambda, fun_types::Dict{Symbol, Type}, var_types::Dict{
     for (call_num, call) in enumerate(calls)
       for (column_num, arg) in enumerate(call.args)
         if arg == var
-          if is_finite(fun_types[call.fun])
+          if is_finite(fun_type(call.fun))
             # use all finite funs
             push!(index_and_column_nums, (call_num, column_num))
           elseif column_num == length(call.args)
@@ -296,21 +302,49 @@ function compile(lambda::Lambda, fun_types::Dict{Symbol, Type}, var_types::Dict{
     end
     @show fun_and_var_nums
     if isempty(fun_and_var_nums)
-      @show tail = eval(@show make_join(index_and_column_nums, var_num - 1, tail))
+      @show tail = eval(make_join(index_and_column_nums, var_num - 1, tail))
     else
-      @show tail = eval(@show make_seek(fun_and_var_nums, index_and_column_nums, var_num - 1, tail))
+      @show tail = eval(make_seek(fun_and_var_nums, index_and_column_nums, var_num - 1, tail))
     end
   end
 
-  returned_var_types = map((var) -> var_types[var], returned_vars)
-  @show tail = eval(@show make_setup(sort_orders, returned_var_types, tail))
+  funs = map((call) -> call.fun, calls)
+  returned_var_type = map(var_type, returned_vars)
+  @show tail = eval(make_setup(funs, sort_orders, returned_var_type, tail))
 
   tail
 end
 
+function handle_constants(lambda::Lambda) ::Lambda
+  constants = Call[]
+  
+  handle_constant = (arg) -> begin
+    if isa(arg, Symbol)
+      arg
+    else
+      var = gensym("constant")
+      push!(constants, Call(() -> arg, [var]))
+      var
+    end
+  end
+  
+  domain = map(lambda.domain) do call
+    Call(call.fun, map(handle_constant, call.args))
+  end
+  
+  value = map(handle_constant, lambda.value)
+  
+  Lambda(lambda.ring, lambda.args, vcat(constants, domain), value)
+end
+
+function compile(lambda::Lambda, fun_type::Function, var_type::Function)
+  lambda = handle_constants(lambda)
+  generate(lambda, fun_type, var_type)
+end
+
 zz(x, y) = (x * x) + (y * y) + (3 * x * y)
 
-polynomial_ast = Lambda(
+polynomial_ast1 = Lambda(
   Ring{Int64}(+,*,1,0),
   [:x, :y],
   [
@@ -331,23 +365,45 @@ polynomial_ast2 = Lambda(
   ],
   [:z]
   )
+  
+zz(x, y) = (x * x) + (y * y) + (3 * x * y)
+  
+polynomial_ast3 = Lambda(
+    Ring{Int64}(+,*,1,0),
+    [:x, :y],
+    [  
+      Call(:xx, [:i, :x]),
+      Call(:yy, [:i, :y]),
+      Call(*, [:x, :x, :t1]),
+      Call(*, [:y, :y, :t2]),
+      Call(*, [3, :x, :y, :t3]),
+      Call(+, [:t1, :t2, :t3, :z])
+    ],
+    [:z]
+    )
 
 const xx = Relation((collect(0:1000),collect(0:1000)))
 const yy = Relation((collect(0:1000), collect(reverse(0:1000))))
 const big_xx = Relation((collect(0:1000000),collect(0:1000000)))
 const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 
-fun_types = Dict{Symbol, Type}(:xx => typeof(xx), :yy => typeof(yy), :zz => typeof(zz))
-var_types = Dict{Symbol, Type}(:i => Int64, :x => Int64, :y => Int64, :z => Int64)
-const p = compile(polynomial_ast, fun_types, var_types)
-const p2 = compile(polynomial_ast2, fun_types, var_types)
+fun_type(fun) = typeof(eval(fun))
+var_type = Dict(:i => Int64, :x => Int64, :y => Int64, :z => Int64)
+const p1 = compile(polynomial_ast1, fun_type, (var) -> var_type[var])
+const p2 = compile(polynomial_ast2, fun_type, (var) -> var_type[var])
+const p3 = compile(polynomial_ast3, fun_type, (var) -> var_type[var])
 
-@time p((xx, yy, zz))
-@time p2((xx, yy, zz))
-@assert p((xx, yy, zz)) == p2((xx, yy, zz))
+inputs = Dict(:xx => xx, :yy => yy, :zz => zz)
+@time p1(inputs)
+@time p2(inputs)
+@time p3(inputs)
+@assert p1(inputs) == p2(inputs)
+@assert p1(inputs) == p3(inputs)
 
-using BenchmarkTools
-# @show @benchmark p((big_xx, big_yy, zz))
-# @show @benchmark p2((big_xx, big_yy, zz))
+# using BenchmarkTools
+# big_inputs = Dict(:xx => big_xx, :yy => big_yy, :zz => zz)
+# @show @benchmark p1(big_inputs)
+# @show @benchmark p2(big_inputs)
+# @show @benchmark p3(big_inputs)
 
 end

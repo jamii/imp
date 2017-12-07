@@ -1,20 +1,20 @@
 module Compiled
 
-using Base.Cartesian 
+using Base.Cartesian
 using Match
 
 # interface for all functions
 
 function is_function(fun_type)
   false
-end 
-# fun(args...) end 
+end
+# fun(args...) end
 
 # interface for finite functions
 
-function is_finite(fun_type) 
+function is_finite(fun_type)
   false
-end 
+end
 
 # index(fun)
 # count(index, column)
@@ -67,7 +67,7 @@ end
     RelationIndex(fun.columns, fill(1, $(n+1)), fill(length(fun.columns[1])+1, $(n+1)))
   end
 end
- 
+
 function first(index::RelationIndex, ::Type{Val{C}}) where {C}
   index.his[C+1] = index.los[C]
 end
@@ -76,7 +76,7 @@ function count(index::RelationIndex, ::Type{Val{C}}) where {C}
   # not actually correct, but will do for now
   index.his[C+1] - index.los[C+1]
 end
- 
+
 function next(index::RelationIndex, ::Type{Val{C}}) where {C}
   column = index.columns[C]
   prev_hi = index.his[C]
@@ -87,7 +87,7 @@ function next(index::RelationIndex, ::Type{Val{C}}) where {C}
     index.los[C+1] = lo
     index.his[C+1] = hi
     lo < hi
-  else 
+  else
     false
   end
 end
@@ -104,7 +104,7 @@ function seek(index::RelationIndex, ::Type{Val{C}}, value) where {C}
     index.los[C+1] = lo
     index.his[C+1] = hi
     lo < hi
-  else 
+  else
     false
   end
 end
@@ -112,7 +112,7 @@ end
 function get(index::RelationIndex, ::Type{Val{C}}) where {C}
   index.columns[C][index.los[C+1]]
 end
- 
+
 # TODO eventually we will just pass variables down the call stack, so we won't need this
 function get_earlier(index::RelationIndex, ::Type{Val{C}}) where {C}
   index.columns[C][index.los[end]]
@@ -136,7 +136,7 @@ struct Lambda
   domain::Vector{Call}
   value::Vector{Symbol}
 end
-  
+
 function find_var(var::Symbol, calls::Vector{Call})
   for (call_num, call) in enumerate(calls)
     for (arg_num, arg) in enumerate(call.args)
@@ -172,41 +172,63 @@ macro all(args...)
   reduce((acc, arg) -> :($arg && $acc), true, reverse(map(esc, args)))
 end
 
-# TODO handle repeated call_nums
 function make_seek(fun_and_var_nums, index_and_column_nums, num_vars, tail)
+  sort!(index_and_column_nums) # ensures that repeated variables are seeked in the correct order
   n = length(index_and_column_nums)
   index_nums = map((c) -> c[1], index_and_column_nums)
   column_nums = map((c) -> c[2], index_and_column_nums)
+  is_repeated = [(i > 1) && (index_nums[i] == index_nums[i-1]) for i in 1:n]
   vars = [Symbol("var_$i") for i in 1:num_vars]
   calls = [:(indexes[$fun_num]($(vars[var_nums]...))) for (fun_num, var_nums) in fun_and_var_nums]
   tests = [:(value == $call) for call in calls]
-  quote 
+  quote
     (indexes, returns, $(vars...)) -> begin
       value = $(calls[1])
-      if @all($(tests[2:end]...))
-        if @nall $n (i) -> ((i == min) || seek(indexes[$index_nums[i]], Val{$column_nums[i]}, value))
-          $tail(indexes, returns, $(vars...), value)
+      if value != nothing # handles partial functions
+        if @all($(tests[2:end]...))
+          if @nall $n (i) -> begin
+            first(indexes[$index_nums[i]], Val{$column_nums[i]})
+            seek(indexes[$index_nums[i]], Val{$column_nums[i]}, value)
+          end
+            $tail(indexes, returns, $(vars...), value)
+          end
         end
       end
     end
   end
 end
 
-# TODO handle repeated call_nums
+@inline function first_if(bool, index, column)
+  if bool
+    first(index, column)
+  end
+end
+
+@inline function seek_if(bool, index, column, value)
+  first_if(bool, index, column)
+  seek(index, column, value)
+end
+
 function make_join(index_and_column_nums, num_vars, tail)
+  sort!(index_and_column_nums) # ensures that repeated variables are seeked in the correct order
   n = length(index_and_column_nums)
   index_nums = map((c) -> c[1], index_and_column_nums)
   column_nums = map((c) -> c[2], index_and_column_nums)
+  is_repeated = [(i > 1) && (index_nums[i] == index_nums[i-1]) for i in 1:n]
   vars = [Symbol("var_$i") for i in 1:num_vars]
-  quote 
+  quote
     (indexes, returns, $(vars...)) -> begin
-      @nexprs $n (i) -> count_i = count(indexes[$index_nums[i]], Val{$column_nums[i]})
+      @nexprs $n (i) -> count_i = if $is_repeated[i]
+        typemax(Int64) # we can't iter over a repeated variable, so make sure we don't pick it
+      else
+        count(indexes[$index_nums[i]], Val{$column_nums[i]})
+      end
       min_count = @ncall $n min (i) -> count_i
-      @nexprs $n (i) -> first(indexes[$index_nums[i]], Val{$column_nums[i]})
+      @nexprs $n (i) -> first_if(!$is_repeated[i], indexes[$index_nums[i]], Val{$column_nums[i]})
       @nif $n (min) -> count_min == min_count (min) -> begin
         while next(indexes[$index_nums[min]], Val{$column_nums[min]})
           let value = get(indexes[$index_nums[min]], Val{$column_nums[min]})
-            if @nall $n (i) -> ((i == min) || seek(indexes[$index_nums[i]], Val{$column_nums[i]}, value))
+            if @nall $n (i) -> ((i == min) || seek_if($is_repeated[i], indexes[$index_nums[i]], Val{$column_nums[i]}, value))
               $tail(indexes, returns, $(vars...), value)
             end
           end
@@ -229,11 +251,11 @@ end
 function compile(lambda::Lambda, fun_types::Dict{Symbol, Type}, var_types::Dict{Symbol, Type})
   # TODO handle reduce variable too
   returned_vars = vcat(lambda.args, lambda.value)
-  
+
   # order variables by order of appearance in ast
   vars = union((call.args for call in lambda.domain)...)
   @show vars
-  
+
   # permute all finite funs according to variable order
   sort_orders = Union{Vector{Int64}, Void}[]
   calls = Call[]
@@ -247,22 +269,20 @@ function compile(lambda::Lambda, fun_types::Dict{Symbol, Type}, var_types::Dict{
         push!(sort_orders, nothing)
         push!(calls, call)
       end
-  end 
-  
+  end
+
   # make return function
   # TODO just return everything for now, figure out reduce later
   returned_var_nums = map((var) -> findfirst(vars, var), returned_vars)
   @show tail = eval(@show make_return(length(calls), length(vars), returned_var_nums))
-  
+
   # make join functions
-  # TODO assume everything is finite for now, figure out functions later
-  # TODO assume no args passed for now ie all finitely supported
   for (var_num, var) in reverse(collect(enumerate(vars)))
     index_and_column_nums = []
     fun_and_var_nums = []
     for (call_num, call) in enumerate(calls)
       for (column_num, arg) in enumerate(call.args)
-        if arg == var 
+        if arg == var
           if is_finite(fun_types[call.fun])
             # use all finite funs
             push!(index_and_column_nums, (call_num, column_num))
@@ -280,8 +300,8 @@ function compile(lambda::Lambda, fun_types::Dict{Symbol, Type}, var_types::Dict{
     else
       @show tail = eval(@show make_seek(fun_and_var_nums, index_and_column_nums, var_num - 1, tail))
     end
-  end    
-  
+  end
+
   returned_var_types = map((var) -> var_types[var], returned_vars)
   @show tail = eval(@show make_setup(sort_orders, returned_var_types, tail))
 
@@ -294,9 +314,20 @@ polynomial_ast = Lambda(
   Ring{Int64}(+,*,1,0),
   [:x, :y],
   [
-    Call(:xx, [:i, :x]), 
-    Call(:yy, [:i, :y]), 
-    Call(:zz, [:x, :y, :z]), 
+    Call(:xx, [:i, :x]),
+    Call(:yy, [:i, :y]),
+    Call(:zz, [:x, :y, :z]),
+  ],
+  [:z]
+  )
+
+polynomial_ast2 = Lambda(
+  Ring{Int64}(+,*,1,0),
+  [:x, :y],
+  [
+    Call(:xx, [:x, :x]),
+    Call(:yy, [:x, :y]),
+    Call(:zz, [:x, :y, :z]),
   ],
   [:z]
   )
@@ -309,10 +340,14 @@ const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 fun_types = Dict{Symbol, Type}(:xx => typeof(xx), :yy => typeof(yy), :zz => typeof(zz))
 var_types = Dict{Symbol, Type}(:i => Int64, :x => Int64, :y => Int64, :z => Int64)
 const p = compile(polynomial_ast, fun_types, var_types)
+const p2 = compile(polynomial_ast2, fun_types, var_types)
 
 @time p((xx, yy, zz))
- 
+@time p2((xx, yy, zz))
+@assert p((xx, yy, zz)) == p2((xx, yy, zz))
+
 using BenchmarkTools
 # @show @benchmark p((big_xx, big_yy, zz))
+# @show @benchmark p2((big_xx, big_yy, zz))
 
 end

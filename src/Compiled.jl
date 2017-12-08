@@ -137,18 +137,19 @@ struct Lambda
   value::Vector{Any}
 end
 
-function find_var(var::Symbol, calls::Vector{Call})
-  for (call_num, call) in enumerate(calls)
-    for (arg_num, arg) in enumerate(call.args)
-      if arg == var
-        return (call_num, arg_num)
-      end
-    end
-  end
-  error("Not found")
+struct Index
+  num::Int64 # position in the index tuple TODO remove this hack
+  fun 
+  sort_order::Vector{Int64}
 end
 
-function make_setup(funs, sort_orders, return_var_type, tail)
+struct SumProduct
+  ring::Ring
+  var::Symbol
+  values::Vector{Union{SumProduct, Call, Symbol}}
+end
+
+function make_setup(indexes, return_var_types, tail)
   indexes = map(zip(funs, sort_orders)) do fun_sort_order
     fun, sort_order = fun_sort_order
     source = if isa(fun, Symbol)
@@ -163,7 +164,7 @@ function make_setup(funs, sort_orders, return_var_type, tail)
       source
     end
   end
-  returns = [:($typ[]) for typ in return_var_type]
+  returns = [:($typ[]) for typ in return_var_types]
   quote
     (funs) -> begin
       returns = tuple($(returns...))
@@ -184,7 +185,7 @@ function make_seek(fun_and_var_nums, index_and_column_nums, num_vars, tail)
   column_nums = map((c) -> c[2], index_and_column_nums)
   is_repeated = [(i > 1) && (index_nums[i] == index_nums[i-1]) for i in 1:n]
   vars = [Symbol("var_$i") for i in 1:num_vars]
-  calls = [:(indexes[$fun_num]($(vars[var_nums]...))) for (fun_num, var_nums) in fun_and_var_nums]
+  calls = [:($fun($(vars[var_nums]...))) for (fun, var_nums) in fun_and_var_nums]
   tests = [:(value == $call) for call in calls]
   quote
     (indexes, returns, $(vars...)) -> begin
@@ -243,7 +244,7 @@ function make_join(index_and_column_nums, num_vars, tail)
   end
 end
 
-function make_return(num_funs, num_vars, return_var_nums)
+function make_return(num_vars, return_var_nums)
     vars = [Symbol("var_$i") for i in 1:num_vars]
     pushes = [:(push!(returns[$i], $(Symbol("var_$return_var_num")))) for (i, return_var_num) in enumerate(return_var_nums)]
     quote
@@ -253,66 +254,88 @@ function make_return(num_funs, num_vars, return_var_nums)
     end
 end
 
-function generate(lambda::Lambda, fun_type::Function, var_type::Function) ::Function
-  # TODO handle reduce variable too
-  returned_vars = vcat(lambda.args, lambda.value)
-
-  # order variables by order of appearance in ast
-  vars = union((call.args for call in lambda.domain)...)
-  @show vars
-
-  # permute all finite funs according to variable order
-  sort_orders = Union{Vector{Int64}, Void}[]
+function compile(ir::SumProduct, vars::Vector{Symbol}, fun_type::Function, var_type::Function, setup::Vector{Expr}) ::Function
+  # compile any nested SumProducts
   calls = Call[]
-  for call in lambda.domain
-    @show call.fun is_finite(fun_type(call.fun))
+  values = Symbol[]
+  for value in ir.values
+    @match value begin
+      SumProduct => begin
+        args = push!(copy(vars), ir.var)
+        fun = compile(value, args, fun_type, var_type, setup)
+        push!(calls, Call(fun, args))
+      end
+      Call => push!(calls, value)
+      Symbol => push!(values, value)
+    end
+  end
+  
+  # address indexes and variables by position
+  index_and_column_nums = []
+  fun_and_var_nums = []
+  for (call_num, call) in enumerate(calls)
     if is_finite(fun_type(call.fun))
-      sort_order = Vector(1:length(call.args))
-      sort!(sort_order, by=(ix) -> findfirst(vars, call.args[ix]))
-      push!(sort_orders, sort_order)
-      push!(calls, Call(call.fun, call.args[sort_order]))
+      push!(index_and_column_nums, (call_num, length(call.args)))
     else
-      push!(sort_orders, nothing)
+      @assert call.args[end] == ir.var # TODO handle the case where ir.var is an argument and fun can only be used for testing
+      var_nums = map((arg) -> findfirst(vars, arg), call.args[1:end-1])
+      push!(fun_and_var_nums, (call.fun, var_nums))
+    end
+  end
+  
+  # TODO use values, once we are actually doing the sum
+  
+  # emit a function
+  if isempty(fun_and_var_nums)
+    eval(make_join(index_and_column_nums, length(vars)))
+  else
+    eval(make_seek(fun_and_var_nums, index_and_column_nums, length(vars)))
+  end
+end
+
+function setup(indexes::Vector{Index}, 
+
+function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::SumProduct
+  # insert indexes and partial calls
+  calls = Call[]
+  indexes = Index[]
+  for call in lambda.domain
+    if is_finite(fun_type(call.fun))
+      # sort args according to variable order
+      n = length(call.args)
+      sort_order = Vector(1:n)
+      sort!(sort_order, by=(ix) -> findfirst(vars, call.args[ix]))
+      index = Index(length(indexes) + 1, call.fun, sort_order)
+      push!(indexes, index)
+      # insert all prefixes of args
+      for i in 1:n
+        push!(calls, Call(index, call.args[sort_order][1:i]))
+      end
+    else
       push!(calls, call)
     end
   end
 
-  # make return function
-  # TODO just return everything for now, figure out reduce later
-  returned_var_nums = map((var) -> findfirst(vars, var), returned_vars)
-  @show tail = eval(make_return(length(calls), length(vars), returned_var_nums))
-
   # make join functions
-  for (var_num, var) in reverse(collect(enumerate(vars)))
-    index_and_column_nums = []
-    fun_and_var_nums = []
-    for (call_num, call) in enumerate(calls)
-      for (column_num, arg) in enumerate(call.args)
-        if arg == var
-          if is_finite(fun_type(call.fun))
-            # use all finite funs
-            push!(index_and_column_nums, (call_num, column_num))
-          elseif column_num == length(call.args)
-            # only use infinite funs if this is the return variable
-            var_nums = map((arg) -> findfirst(vars, arg), call.args[1:end-1])
-            push!(fun_and_var_nums, (call_num, var_nums))
-          end
-        end
-      end
-    end
-    @show fun_and_var_nums
-    if isempty(fun_and_var_nums)
-      @show tail = eval(make_join(index_and_column_nums, var_num - 1, tail))
-    else
-      @show tail = eval(make_seek(fun_and_var_nums, index_and_column_nums, var_num - 1, tail))
+  latest_var_nums = map(calls) do call
+    maximum(call.args) do arg 
+      findfirst(vars, arg)
     end
   end
-
-  funs = map((call) -> call.fun, calls)
-  returned_var_type = map(var_type, returned_vars)
-  @show tail = eval(make_setup(funs, sort_orders, returned_var_type, tail))
-
-  tail
+  sum_products = map(reverse(1:length(vars))) do var_num
+    var = vars[var_num]
+    values = Vector{Union{Call, SumProduct, Symbol}}(calls[latest_var_nums .== var_num])
+    if var in lambda.value
+      push!(values, var)
+    end
+    SumProduct(lambda.ring, var, values)
+  end
+  
+  # stitch them all together
+  reduce(sum_products) do tail, sum_product
+    push!(sum_product.values, tail)
+    sum_product
+  end
 end
 
 function handle_constants(lambda::Lambda) ::Lambda

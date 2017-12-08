@@ -134,7 +134,7 @@ struct Lambda
   ring::Ring
   args::Vector{Symbol}
   domain::Vector{Call}
-  value::Vector{Any}
+  value::Vector{Any} 
 end
 
 struct Index
@@ -146,31 +146,14 @@ end
 struct SumProduct
   ring::Ring
   var::Symbol
-  values::Vector{Union{SumProduct, Call, Symbol}}
+  domain::Vector{Call}
+  value::Vector{Union{SumProduct, Symbol}} 
 end
 
-function make_setup(indexes, return_var_types, tail)
-  indexes = map(zip(funs, sort_orders)) do fun_sort_order
-    fun, sort_order = fun_sort_order
-    source = if isa(fun, Symbol)
-      :(funs[$(Expr(:quote, fun))])
-    else
-      fun
-    end
-    if sort_order != nothing
-      sort_order_val = Val{tuple(sort_order...)}
-      :(index($source, $sort_order_val))
-    else
-      source
-    end
-  end
-  returns = [:($typ[]) for typ in return_var_types]
+function make_setup(indexes, tail)
+  index_inits = [:(index(funs[$(Expr(:quote, index.fun))], $(Val{tuple(index.sort_order...)}))) for index in indexes]
   quote
-    (funs) -> begin
-      returns = tuple($(returns...))
-      $tail(tuple($(indexes...)), returns)
-      returns
-    end
+    (funs) -> $tail(tuple($(index_inits...)))
   end
 end
 
@@ -244,56 +227,53 @@ function make_join(index_and_column_nums, num_vars, tail)
   end
 end
 
-function make_return(num_vars, return_var_nums)
-    vars = [Symbol("var_$i") for i in 1:num_vars]
-    pushes = [:(push!(returns[$i], $(Symbol("var_$return_var_num")))) for (i, return_var_num) in enumerate(return_var_nums)]
-    quote
-        (indexes, returns, $(vars...)) -> begin
-          $(pushes...)
-        end
-    end
-end
-
-function compile(ir::SumProduct, vars::Vector{Symbol}, fun_type::Function, var_type::Function, setup::Vector{Expr}) ::Function
-  # compile any nested SumProducts
-  calls = Call[]
-  values = Symbol[]
-  for value in ir.values
+function compile(ir::SumProduct, vars::Vector{Symbol}) ::Function
+  # make code for calculating value returned by each iteration
+  tail_vars = push!(copy(vars), ir.var)
+  tails = []
+  for value in ir.value
     @match value begin
-      SumProduct => begin
-        args = push!(copy(vars), ir.var)
-        fun = compile(value, args, fun_type, var_type, setup)
-        push!(calls, Call(fun, args))
+      SumProduct => push!(tails, :($(compile(value, tail_vars))($(tail_vars...))))
+      Symbol => push!(tails, value)
+    end
+  end
+  tail = :(@product($(tails...)))
+  
+  # check for repeated repeated variables eg foo(x,x) which need to be handled specially
+  index_and_column_nums = (Int64, Int64)[]
+  for call in ir.domain
+    if call.fun isa Index
+      push!(index_and_column_nums, (call.fun.num, length(call.args)))
+    end
+  end
+  is_repeat = map(ir.domain) do call
+    (call.fun isa Index) &&
+      contains(index_and_column_nums, (call.fun.num, length(call.args)-1))
+  end
+    
+  # make code for setting up and testing each call
+  setups = []
+  tests = []
+  for (call_num, call) in enumerarate(ir.domain) 
+    if call.fun isa Index
+      if is_repeat[call_num]
+        push!(setups, nothing)
+        push!(tests, quote
+          first(indexes[$(call.fun.num)], $(Val{length(call.args)}))
+          seek(indexes[$(call.fun.num)], $(Val{length(call.args)}), $(ir.var))
+        end)
+      else
+        push!(setups, :(first(indexes[$(call.fun.num)], $(Val{length(call.args)}))))
+        push!(tests, :(seek(indexes[$(call.fun.num)], $(Val{length(call.args)}), $(ir.var))))
       end
-      Call => push!(calls, value)
-      Symbol => push!(values, value)
-    end
-  end
-  
-  # address indexes and variables by position
-  index_and_column_nums = []
-  fun_and_var_nums = []
-  for (call_num, call) in enumerate(calls)
-    if is_finite(fun_type(call.fun))
-      push!(index_and_column_nums, (call_num, length(call.args)))
     else
-      @assert call.args[end] == ir.var # TODO handle the case where ir.var is an argument and fun can only be used for testing
-      var_nums = map((arg) -> findfirst(vars, arg), call.args[1:end-1])
-      push!(fun_and_var_nums, (call.fun, var_nums))
+      push!(setups, nothing)
+      push!(tests, :($(call.fun)($(call.args[1:end-1]...)) = $(call.args[end])))
     end
   end
   
-  # TODO use values, once we are actually doing the sum
-  
-  # emit a function
-  if isempty(fun_and_var_nums)
-    eval(make_join(index_and_column_nums, length(vars)))
-  else
-    eval(make_seek(fun_and_var_nums, index_and_column_nums, length(vars)))
-  end
+  # CONTINUE HERE
 end
-
-function setup(indexes::Vector{Index}, 
 
 function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::SumProduct
   # insert indexes and partial calls
@@ -322,18 +302,17 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::SumProduct
       findfirst(vars, arg)
     end
   end
+  
   sum_products = map(reverse(1:length(vars))) do var_num
     var = vars[var_num]
-    values = Vector{Union{Call, SumProduct, Symbol}}(calls[latest_var_nums .== var_num])
-    if var in lambda.value
-      push!(values, var)
-    end
-    SumProduct(lambda.ring, var, values)
+    domain = calls[latest_var_nums .== var_num]
+    value = (var in lambda.value) ? [var] : []
+    SumProduct(lambda.ring, var, domain, value)
   end
   
   # stitch them all together
   reduce(sum_products) do tail, sum_product
-    push!(sum_product.values, tail)
+    push!(sum_product.value, tail)
     sum_product
   end
 end
@@ -412,16 +391,16 @@ const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 
 fun_type(fun) = typeof(eval(fun))
 var_type = Dict(:i => Int64, :x => Int64, :y => Int64, :z => Int64)
-const p1 = compile(polynomial_ast1, fun_type, (var) -> var_type[var])
-const p2 = compile(polynomial_ast2, fun_type, (var) -> var_type[var])
-const p3 = compile(polynomial_ast3, fun_type, (var) -> var_type[var])
+# const p1 = compile(polynomial_ast1, fun_type, (var) -> var_type[var])
+# const p2 = compile(polynomial_ast2, fun_type, (var) -> var_type[var])
+# const p3 = compile(polynomial_ast3, fun_type, (var) -> var_type[var])
 
-inputs = Dict(:xx => xx, :yy => yy, :zz => zz)
-@time p1(inputs)
-@time p2(inputs)
-@time p3(inputs)
-@assert p1(inputs) == p2(inputs)
-@assert p1(inputs) == p3(inputs)
+# inputs = Dict(:xx => xx, :yy => yy, :zz => zz)
+# @time p1(inputs)
+# @time p2(inputs)
+# @time p3(inputs)
+# @assert p1(inputs) == p2(inputs)
+# @assert p1(inputs) == p3(inputs)
 
 # using BenchmarkTools
 # big_inputs = Dict(:xx => big_xx, :yy => big_yy, :zz => zz)

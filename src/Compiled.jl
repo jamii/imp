@@ -250,7 +250,7 @@ macro join(ir::SumProduct, value::Vector{Union{Call, Symbol}})
     end))
     min = minimum(mins)
     $(@splice i in 1:length(ir.domain) quote
-      if mins[$i] == mins
+      if mins[$i] == min
         return @sum($(ir.ring), $(ir.domain[i]), ($(esc(ir.var))) -> begin
           @product($(ir.ring), $(ir.domain[1:length(ir.domain) .!= i]), $value)
         end)
@@ -263,8 +263,8 @@ macro top_down(name, vars::Vector{Symbol}, ir::SumProduct)
   child_vars = union(vars, [ir.var])
   value = map(ir.value) do v
     if isa(v, SumProduct)
-      name = gensym("join")
-      Call(name, child_vars)
+      child_name = gensym("join")
+      Call(child_name, child_vars)
     else
       v
     end
@@ -284,13 +284,13 @@ end
 function generate(lambda::Lambda, ir::SumProduct, indexes::Vector{Index}) ::Function
   name = gensym("join")
   # TODO workaround for https://github.com/JuliaLang/julia/issues/25063
-  eval(Expr(:->, Expr(:tuple, lambda.args...), quote
+  eval(@show macroexpand(Expr(:->, Expr(:tuple), quote
     $(@splice index in indexes quote
       $(index.name) = @index($index)
     end)
-    @top_down($name, $(lambda.args), $ir)
-    $name($(lambda.args...))
-  end))
+    @top_down($name, $(Symbol[]), $ir)
+    $name()
+  end)))
 end
 
 function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{SumProduct, Vector{Index}}
@@ -418,7 +418,7 @@ const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 fun_type(fun) = typeof(eval(fun))
 var_type = Dict(:i => Int64, :x => Int64, :y => Int64, :z => Int64)
 const p1 = compile(polynomial_ast1, fun_type, (var) -> var_type[var])
-p1(1, 1)
+@show p1()
 # const p2 = compile(polynomial_ast2, fun_type, (var) -> var_type[var])
 # const p3 = compile(polynomial_ast3, fun_type, (var) -> var_type[var])
 

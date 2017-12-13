@@ -3,6 +3,31 @@ module Compiled
 using Base.Cartesian
 using Match
 
+function simplify_expr(expr::Expr)
+  @match expr begin
+    Expr(:block, lines, _) => begin
+      flattened = []
+      for line in map(simplify_expr, lines)
+        @match line begin
+          Expr(:block, more_lines, _) => append!(flattened, more_lines)
+          Expr(:line, _, _) => nothing
+          _ => push!(flattened, line)
+        end
+      end
+      if length(flattened) == 1
+        flattened[1]
+      else
+        Expr(:block, flattened...)
+      end
+    end
+    Expr(head, args, _) => Expr(simplify_expr(head), map(simplify_expr, args)...)
+  end
+end
+
+function simplify_expr(other)
+  other
+end
+
 # interface for all functions
 
 function is_function(fun_type)
@@ -220,9 +245,8 @@ macro iter(call::Call, f)
   if isa(call.fun, Index)
     quote 
       while next($(esc(call.fun.name)), $(Val{length(call.args)}))
-        let value = get($(esc(call.fun.name)), $(Val{length(call.args)}))
-          $f(value)
-        end
+        value = get($(esc(call.fun.name)), $(Val{length(call.args)}))
+        $f(value)
       end
     end
   else
@@ -284,13 +308,13 @@ end
 function generate(lambda::Lambda, ir::SumProduct, indexes::Vector{Index}) ::Function
   name = gensym("join")
   # TODO workaround for https://github.com/JuliaLang/julia/issues/25063
-  eval(@show macroexpand(Expr(:->, Expr(:tuple), quote
+  eval(@show simplify_expr(macroexpand(Expr(:->, Expr(:tuple), quote
     $(@splice index in indexes quote
       $(index.name) = @index($index)
     end)
     @top_down($name, $(Symbol[]), $ir)
     $name()
-  end)))
+  end))))
 end
 
 function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{SumProduct, Vector{Index}}

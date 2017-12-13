@@ -113,17 +113,16 @@ function get(index::RelationIndex, ::Type{Val{C}}) where {C}
   index.columns[C][index.los[C+1]]
 end
 
-# TODO eventually we will just pass variables down the call stack, so we won't need this
-function get_earlier(index::RelationIndex, ::Type{Val{C}}) where {C}
-  index.columns[C][index.los[end]]
-end
-
 struct Ring{T}
   add::Function
   mult::Function
   one::T
   zero::T
 end
+
+Base.eltype(ring::Ring{T}) where {T} = T
+
+const count_ring = Ring(+, *, 1, 0)
 
 struct Call
   fun # function, or anything which implements finite function interface
@@ -138,7 +137,7 @@ struct Lambda
 end
 
 struct Index
-  num::Int64 # position in the index tuple TODO remove this hack
+  name::Symbol
   fun 
   sort_order::Vector{Int64}
 end
@@ -150,132 +149,151 @@ struct SumProduct
   value::Vector{Union{SumProduct, Symbol}} 
 end
 
-function make_setup(indexes, tail)
-  index_inits = [:(index(funs[$(Expr(:quote, index.fun))], $(Val{tuple(index.sort_order...)}))) for index in indexes]
+macro splice(iterator, body)
+  @assert iterator.head == :call
+  @assert iterator.args[1] == :in
+  Expr(:..., :(($(esc(body)) for $(esc(iterator.args[2])) in $(esc(iterator.args[3])))))
+end
+
+macro index(index::Index)
   quote
-    (funs) -> $tail(tuple($(index_inits...)))
+    index($(esc(index.fun)), $(Val{tuple(index.sort_order...)}))
   end
 end
 
-macro all(args...)
-  reduce((acc, arg) -> :($arg && $acc), true, reverse(map(esc, args)))
+macro count(call::Call)
+  if isa(call.fun, Index)
+    quote 
+      count($(esc(call.fun.name)), $(Val{length(call.args)}))
+    end
+  else
+    1
+  end
 end
 
-function make_seek(fun_and_var_nums, index_and_column_nums, num_vars, tail)
-  sort!(index_and_column_nums) # ensures that repeated variables are seeked in the correct order
-  n = length(index_and_column_nums)
-  index_nums = map((c) -> c[1], index_and_column_nums)
-  column_nums = map((c) -> c[2], index_and_column_nums)
-  is_repeated = [(i > 1) && (index_nums[i] == index_nums[i-1]) for i in 1:n]
-  vars = [Symbol("var_$i") for i in 1:num_vars]
-  calls = [:($fun($(vars[var_nums]...))) for (fun, var_nums) in fun_and_var_nums]
-  tests = [:(value == $call) for call in calls]
+macro value(call::Call)
   quote
-    (indexes, returns, $(vars...)) -> begin
-      value = $(calls[1])
-      if value != nothing # handles partial functions
-        if @all($(tests[2:end]...))
-          if @nall $n (i) -> begin
-            first(indexes[$index_nums[i]], Val{$column_nums[i]})
-            seek(indexes[$index_nums[i]], Val{$column_nums[i]}, value)
-          end
-            $tail(indexes, returns, $(vars...), value)
-          end
+    $(esc(call.fun))($(map(esc, call.args)...))
+  end
+end
+
+macro value(sym::Symbol)
+  esc(sym)
+end
+
+macro value(sym) # TODO don't pass raw symbols to macros
+  esc(sym)
+end
+
+macro test(call::Call)
+  if isa(call.fun, Index) 
+    quote 
+      seek($(esc(call.fun.name)), $(Val{length(call.args)}), $(esc(call.args[end])))
+    end
+  else
+    quote
+      $(esc(call.fun))($(map(esc, call.args[1:end-1])...)) == $(esc(call.args[end]))
+    end
+  end
+end
+
+macro product(ring::Ring, domain::Vector{Call}, value::Vector{Union{Call, Symbol}})
+  quote
+    result = $(ring.one)
+    $(@splice call in domain quote
+      if !@test($call)
+        return $(ring.zero)
+      end
+    end)
+    $(@splice call in value quote
+      result = $(ring.mult)(result, @value($call))
+      if result == $(ring.zero)
+        return $(ring.zero)
+      end
+    end)  
+    result
+  end
+end
+
+macro iter(call::Call, f)
+  # TODO dispatch on type of fun, rather than index/not-index
+  if isa(call.fun, Index)
+    quote 
+      while next($(esc(call.fun.name)), $(Val{length(call.args)}))
+        let value = get($(esc(call.fun.name)), $(Val{length(call.args)}))
+          $f(value)
         end
       end
     end
+  else
+    quote
+      value = $(esc(call.fun))($(map(esc, call.args)...))
+      $f(value) 
+    end
   end
 end
 
-@inline function first_if(bool, index, column)
-  if bool
-    first(index, column)
-  end
-end
-
-@inline function seek_if(bool, index, column, value)
-  first_if(bool, index, column)
-  seek(index, column, value)
-end
-
-function make_join(index_and_column_nums, num_vars, tail)
-  sort!(index_and_column_nums) # ensures that repeated variables are seeked in the correct order
-  n = length(index_and_column_nums)
-  index_nums = map((c) -> c[1], index_and_column_nums)
-  column_nums = map((c) -> c[2], index_and_column_nums)
-  is_repeated = [(i > 1) && (index_nums[i] == index_nums[i-1]) for i in 1:n]
-  vars = [Symbol("var_$i") for i in 1:num_vars]
+macro sum(ring::Ring, call::Call, f)
   quote
-    (indexes, returns, $(vars...)) -> begin
-      @nexprs $n (i) -> count_i = if $is_repeated[i]
-        typemax(Int64) # we can't iter over a repeated variable, so make sure we don't pick it
-      else
-        count(indexes[$index_nums[i]], Val{$column_nums[i]})
-      end
-      min_count = @ncall $n min (i) -> count_i
-      @nexprs $n (i) -> first_if(!$is_repeated[i], indexes[$index_nums[i]], Val{$column_nums[i]})
-      @nif $n (min) -> count_min == min_count (min) -> begin
-        while next(indexes[$index_nums[min]], Val{$column_nums[min]})
-          let value = get(indexes[$index_nums[min]], Val{$column_nums[min]})
-            if @nall $n (i) -> ((i == min) || seek_if($is_repeated[i], indexes[$index_nums[i]], Val{$column_nums[i]}, value))
-              $tail(indexes, returns, $(vars...), value)
-            end
-          end
-        end
-      end
-    end
+    result = $(ring.zero)
+    @iter($call, (value) -> begin
+      result = $(ring.add)(result, $f(value))
+    end)
+    result
   end
 end
 
-function compile(ir::SumProduct, vars::Vector{Symbol}) ::Function
-  # make code for calculating value returned by each iteration
-  tail_vars = push!(copy(vars), ir.var)
-  tails = []
-  for value in ir.value
-    @match value begin
-      SumProduct => push!(tails, :($(compile(value, tail_vars))($(tail_vars...))))
-      Symbol => push!(tails, value)
-    end
-  end
-  tail = :(@product($(tails...)))
-  
-  # check for repeated repeated variables eg foo(x,x) which need to be handled specially
-  index_and_column_nums = (Int64, Int64)[]
-  for call in ir.domain
-    if call.fun isa Index
-      push!(index_and_column_nums, (call.fun.num, length(call.args)))
-    end
-  end
-  is_repeat = map(ir.domain) do call
-    (call.fun isa Index) &&
-      contains(index_and_column_nums, (call.fun.num, length(call.args)-1))
-  end
-    
-  # make code for setting up and testing each call
-  setups = []
-  tests = []
-  for (call_num, call) in enumerarate(ir.domain) 
-    if call.fun isa Index
-      if is_repeat[call_num]
-        push!(setups, nothing)
-        push!(tests, quote
-          first(indexes[$(call.fun.num)], $(Val{length(call.args)}))
-          seek(indexes[$(call.fun.num)], $(Val{length(call.args)}), $(ir.var))
+macro join(ir::SumProduct, value::Vector{Union{Call, Symbol}})
+  quote
+    mins = tuple($(@splice call in ir.domain quote
+      @count($call)
+    end))
+    min = minimum(mins)
+    $(@splice i in 1:length(ir.domain) quote
+      if mins[$i] == mins
+        return @sum($(ir.ring), $(ir.domain[i]), ($(esc(ir.var))) -> begin
+          @product($(ir.ring), $(ir.domain[1:length(ir.domain) .!= i]), $value)
         end)
-      else
-        push!(setups, :(first(indexes[$(call.fun.num)], $(Val{length(call.args)}))))
-        push!(tests, :(seek(indexes[$(call.fun.num)], $(Val{length(call.args)}), $(ir.var))))
       end
-    else
-      push!(setups, nothing)
-      push!(tests, :($(call.fun)($(call.args[1:end-1]...)) = $(call.args[end])))
-    end
+    end)
   end
-  
-  # CONTINUE HERE
 end
 
-function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::SumProduct
+macro top_down(name, vars::Vector{Symbol}, ir::SumProduct)
+  child_vars = union(vars, [ir.var])
+  value = map(ir.value) do v
+    if isa(v, SumProduct)
+      name = gensym("join")
+      Call(name, child_vars)
+    else
+      v
+    end
+  end
+  quote
+    $(@splice (old_v, new_v) in zip(ir.value, value) begin
+      if isa(old_v, SumProduct)
+        :(@top_down($(new_v.fun), $(convert(Vector{Symbol}, new_v.args)), $old_v))
+      end
+    end)
+    function $(esc(name))($(map(esc, vars)...))
+      @join($ir, $(convert(Vector{Union{Call, Symbol}}, value)))
+    end
+  end
+end
+
+function generate(lambda::Lambda, ir::SumProduct, indexes::Vector{Index}) ::Function
+  name = gensym("join")
+  # TODO workaround for https://github.com/JuliaLang/julia/issues/25063
+  eval(Expr(:->, Expr(:tuple, lambda.args...), quote
+    $(@splice index in indexes quote
+      $(index.name) = @index($index)
+    end)
+    @top_down($name, $(lambda.args), $ir)
+    $name($(lambda.args...))
+  end))
+end
+
+function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{SumProduct, Vector{Index}}
   # insert indexes and partial calls
   calls = Call[]
   indexes = Index[]
@@ -285,7 +303,7 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::SumProduct
       n = length(call.args)
       sort_order = Vector(1:n)
       sort!(sort_order, by=(ix) -> findfirst(vars, call.args[ix]))
-      index = Index(length(indexes) + 1, call.fun, sort_order)
+      index = Index(gensym("index"), call.fun, sort_order)
       push!(indexes, index)
       # insert all prefixes of args
       for i in 1:n
@@ -296,14 +314,13 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::SumProduct
     end
   end
 
-  # make join functions
+  # make individual SumProducts
   latest_var_nums = map(calls) do call
     maximum(call.args) do arg 
       findfirst(vars, arg)
     end
   end
-  
-  sum_products = map(reverse(1:length(vars))) do var_num
+  sum_products = map(1:length(vars)) do var_num
     var = vars[var_num]
     domain = calls[latest_var_nums .== var_num]
     value = (var in lambda.value) ? [var] : []
@@ -311,10 +328,17 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::SumProduct
   end
   
   # stitch them all together
-  reduce(sum_products) do tail, sum_product
+  ir = reduce(reverse(sum_products)) do tail, sum_product
     push!(sum_product.value, tail)
     sum_product
   end
+  
+  (ir, indexes)
+end
+
+function order_vars(lambda::Lambda) ::Vector{Symbol}
+  # just use order vars appear in the ast for now
+  union(lambda.args, map((call) -> call.args, lambda.domain)...)
 end
 
 function handle_constants(lambda::Lambda) ::Lambda
@@ -341,14 +365,16 @@ end
 
 function compile(lambda::Lambda, fun_type::Function, var_type::Function)
   lambda = handle_constants(lambda)
-  generate(lambda, fun_type, var_type)
+  vars = order_vars(lambda)
+  ir, indexes = factorize(lambda, vars)
+  generate(lambda, ir, indexes)
 end
 
 zz(x, y) = (x * x) + (y * y) + (3 * x * y)
 
 polynomial_ast1 = Lambda(
   Ring{Int64}(+,*,1,0),
-  [:x, :y],
+  [:i, :x, :y, :z],
   [
     Call(:xx, [:i, :x]),
     Call(:yy, [:i, :y]),
@@ -391,7 +417,8 @@ const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 
 fun_type(fun) = typeof(eval(fun))
 var_type = Dict(:i => Int64, :x => Int64, :y => Int64, :z => Int64)
-# const p1 = compile(polynomial_ast1, fun_type, (var) -> var_type[var])
+const p1 = compile(polynomial_ast1, fun_type, (var) -> var_type[var])
+p1(1, 1)
 # const p2 = compile(polynomial_ast2, fun_type, (var) -> var_type[var])
 # const p3 = compile(polynomial_ast3, fun_type, (var) -> var_type[var])
 

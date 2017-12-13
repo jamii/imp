@@ -249,7 +249,7 @@ macro product(ring::Ring, domain::Vector{Call}, value::Vector{Union{Call, Var}})
     code = quote
       result = $(ring.mult)(result, @value($call))
       if result == $(ring.zero)
-        result
+        $(ring.zero)
       else 
         $code
       end
@@ -275,7 +275,6 @@ macro iter(call::Call, f)
   value = gensym("value")
   if isa(call.fun, Index)
     quote 
-      first($(esc(call.fun.name)), $(Val{length(call.args)}))
       while next($(esc(call.fun.name)), $(Val{length(call.args)}))
         $(esc(value)) = get($(esc(call.fun.name)), $(Val{length(call.args)}))
         $(esc(inline(f, value)))
@@ -302,13 +301,13 @@ end
 
 macro join(ir::SumProduct, value::Vector{Union{Call, Var}})
   quote
+    $(@splice call in ir.domain quote
+      @prepare($call)
+    end)
     mins = tuple($(@splice call in ir.domain quote
       @count($call)
     end))
     min = Base.min(mins...)
-    $(@splice call in ir.domain quote
-      @prepare($call)
-    end)
     $(@splice i in 1:length(ir.domain) quote
       if mins[$i] == min
         return @sum($(ir.ring), $(ir.domain[i]), ($(esc(ir.var))) -> begin
@@ -336,24 +335,22 @@ macro top_down(name, vars::Vector{Symbol}, ir::SumProduct)
         :(@top_down($(new_v.fun), $(convert(Vector{Symbol}, new_v.args)), $old_v))
       end
     end)
-    function $(esc(name))($(map(esc, vars)...))
+    const $(esc(name)) = $(Expr(:->, Expr(:tuple, map(esc, vars)...), quote
       @join($ir, $(convert(Vector{Union{Call, Var}}, value)))
-    end
+    end))
   end
 end
 
 function generate(lambda::Lambda, ir::SumProduct, indexes::Vector{Index}) ::Function
   name = gensym("join")
+  index_names = map((index) -> index.name, indexes)
   # TODO workaround for https://github.com/JuliaLang/julia/issues/25063
   code = Expr(:->, Expr(:tuple), quote
-    $(@splice index in indexes quote
-      $(index.name) = @index($index)
-    end)
-    @top_down($name, $(Symbol[]), $ir)
-    $name()
+    @top_down($name, $(index_names), $ir)
+    $name($(@splice index in indexes :(@index $index)))
   end)
-  # eval(@show simplify_expr(macroexpand(code)))
-  eval(@show macroexpand(code))
+  eval(@show simplify_expr(macroexpand(code)))
+  # eval(@show macroexpand(code))
 end
 
 function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{SumProduct, Vector{Index}}
@@ -481,8 +478,8 @@ fun_type(fun) = typeof(eval(fun))
 var_type = Dict(:i => Int64, :x => Int64, :y => Int64, :z => Int64)
 const p1 = compile(polynomial_ast1, fun_type, (var) -> var_type[var])
 sum(((x * x) + (y * y) + (3 * x * y) for (x,y) in zip(xx.columns[2], yy.columns[2])))
-@show @time Base.invokelatest(p1)
-# @code_warntype p1()
+@show @time p1()
+@code_warntype p1()
 # const p2 = compile(polynomial_ast2, fun_type, (var) -> var_type[var])
 # const p3 = compile(polynomial_ast3, fun_type, (var) -> var_type[var])
 

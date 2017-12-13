@@ -149,6 +149,10 @@ Base.eltype(ring::Ring{T}) where {T} = T
 
 const count_ring = Ring(+, *, 1, 0)
 
+struct Var
+  name::Symbol
+end
+
 struct Call
   fun # function, or anything which implements finite function interface
   args::Vector{Any}
@@ -179,18 +183,6 @@ macro splice(iterator, body)
   @assert iterator.args[1] == :in
   Expr(:..., :(($(esc(body)) for $(esc(iterator.args[2])) in $(esc(iterator.args[3])))))
 end
-
-# function inline(function_expr::Expr, value)
-#   @match function_expr begin
-#     Expr(:->, [var::Symbol, body], _)  => begin
-#       walk(expr::Expr) = Expr(walk(expr.head), map(walk, expr.args)...)
-#       walk(sym::Symbol) = (sym == var) ? value : sym
-#       walk(other) = other
-#       walk(body)
-#     end
-#     _ => error("Can't inline $function_expr")
-#   end
-# end
 
 function inline(function_expr::Expr, value)
   @match function_expr begin
@@ -225,12 +217,8 @@ macro value(call::Call)
   end
 end
 
-macro value(sym::Symbol)
-  esc(sym)
-end
-
-macro value(sym) # TODO don't pass raw symbols to macros
-  esc(sym)
+macro value(var::Var)
+  esc(var.name)
 end
 
 macro prepare(call::Call)
@@ -255,7 +243,7 @@ macro test(call::Call)
   end
 end
 
-macro product(ring::Ring, domain::Vector{Call}, value::Vector{Union{Call, Symbol}})
+macro product(ring::Ring, domain::Vector{Call}, value::Vector{Union{Call, Var}})
   code = :result
   for call in reverse(value)
     code = quote
@@ -295,7 +283,7 @@ macro iter(call::Call, f)
     end
   else
     quote
-      $(esc(value)) = $(esc(call.fun))($(map(esc, call.args)...))
+      $(esc(value)) = $(esc(call.fun))($(map(esc, call.args[1:end-1])...))
       $(esc(inline(f, value)))
     end
   end
@@ -312,12 +300,12 @@ macro sum(ring::Ring, call::Call, f)
   end
 end
 
-macro join(ir::SumProduct, value::Vector{Union{Call, Symbol}})
+macro join(ir::SumProduct, value::Vector{Union{Call, Var}})
   quote
     mins = tuple($(@splice call in ir.domain quote
       @count($call)
     end))
-    min = minimum(mins)
+    min = Base.min(mins...)
     $(@splice call in ir.domain quote
       @prepare($call)
     end)
@@ -339,7 +327,7 @@ macro top_down(name, vars::Vector{Symbol}, ir::SumProduct)
       child_name = gensym("join")
       Call(child_name, child_vars)
     else
-      v
+      Var(v)
     end
   end
   quote
@@ -349,7 +337,7 @@ macro top_down(name, vars::Vector{Symbol}, ir::SumProduct)
       end
     end)
     function $(esc(name))($(map(esc, vars)...))
-      @join($ir, $(convert(Vector{Union{Call, Symbol}}, value)))
+      @join($ir, $(convert(Vector{Union{Call, Var}}, value)))
     end
   end
 end
@@ -364,8 +352,8 @@ function generate(lambda::Lambda, ir::SumProduct, indexes::Vector{Index}) ::Func
     @top_down($name, $(Symbol[]), $ir)
     $name()
   end)
-  eval(@show simplify_expr(macroexpand(code)))
-  # eval(code)
+  # eval(@show simplify_expr(macroexpand(code)))
+  eval(@show macroexpand(code))
 end
 
 function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{SumProduct, Vector{Index}}
@@ -484,7 +472,6 @@ polynomial_ast3 = Lambda(
     ],
     [:z]
     )
-
 const xx = Relation((collect(0:1000),collect(0:1000)))
 const yy = Relation((collect(0:1000), collect(reverse(0:1000))))
 const big_xx = Relation((collect(0:1000000),collect(0:1000000)))
@@ -493,8 +480,9 @@ const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 fun_type(fun) = typeof(eval(fun))
 var_type = Dict(:i => Int64, :x => Int64, :y => Int64, :z => Int64)
 const p1 = compile(polynomial_ast1, fun_type, (var) -> var_type[var])
-@show @time p1()
-@code_warntype p1()
+sum(((x * x) + (y * y) + (3 * x * y) for (x,y) in zip(xx.columns[2], yy.columns[2])))
+@show @time Base.invokelatest(p1)
+# @code_warntype p1()
 # const p2 = compile(polynomial_ast2, fun_type, (var) -> var_type[var])
 # const p3 = compile(polynomial_ast3, fun_type, (var) -> var_type[var])
 

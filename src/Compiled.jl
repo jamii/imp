@@ -180,6 +180,29 @@ macro splice(iterator, body)
   Expr(:..., :(($(esc(body)) for $(esc(iterator.args[2])) in $(esc(iterator.args[3])))))
 end
 
+# function inline(function_expr::Expr, value)
+#   @match function_expr begin
+#     Expr(:->, [var::Symbol, body], _)  => begin
+#       walk(expr::Expr) = Expr(walk(expr.head), map(walk, expr.args)...)
+#       walk(sym::Symbol) = (sym == var) ? value : sym
+#       walk(other) = other
+#       walk(body)
+#     end
+#     _ => error("Can't inline $function_expr")
+#   end
+# end
+
+function inline(function_expr::Expr, value)
+  @match function_expr begin
+    Expr(:->, [var::Symbol, body], _)  => quote
+      let $var = $value
+        $body
+      end
+    end
+    _ => error("Can't inline $function_expr")
+  end
+end
+
 macro index(index::Index)
   quote
     index($(esc(index.fun)), $(Val{tuple(index.sort_order...)}))
@@ -210,6 +233,16 @@ macro value(sym) # TODO don't pass raw symbols to macros
   esc(sym)
 end
 
+macro prepare(call::Call)
+  if isa(call.fun, Index) 
+    quote 
+      first($(esc(call.fun.name)), $(Val{length(call.args)}))
+    end
+  else
+    nothing
+  end
+end
+
 macro test(call::Call)
   if isa(call.fun, Index) 
     quote 
@@ -223,45 +256,57 @@ macro test(call::Call)
 end
 
 macro product(ring::Ring, domain::Vector{Call}, value::Vector{Union{Call, Symbol}})
-  quote
-    result = $(ring.one)
-    $(@splice call in domain quote
-      if !@test($call)
-        return $(ring.zero)
-      end
-    end)
-    $(@splice call in value quote
+  code = :result
+  for call in reverse(value)
+    code = quote
       result = $(ring.mult)(result, @value($call))
       if result == $(ring.zero)
-        return $(ring.zero)
+        result
+      else 
+        $code
       end
-    end)  
-    result
+    end
+  end
+  for call in reverse(domain)
+    code = quote
+      if !@test($call)
+        $(ring.zero)
+      else
+        $code
+      end
+    end
+  end
+  quote
+    result = $(ring.one)
+    $code
   end
 end
 
 macro iter(call::Call, f)
   # TODO dispatch on type of fun, rather than index/not-index
+  value = gensym("value")
   if isa(call.fun, Index)
     quote 
+      first($(esc(call.fun.name)), $(Val{length(call.args)}))
       while next($(esc(call.fun.name)), $(Val{length(call.args)}))
-        value = get($(esc(call.fun.name)), $(Val{length(call.args)}))
-        $f(value)
+        $(esc(value)) = get($(esc(call.fun.name)), $(Val{length(call.args)}))
+        $(esc(inline(f, value)))
       end
     end
   else
     quote
-      value = $(esc(call.fun))($(map(esc, call.args)...))
-      $f(value) 
+      $(esc(value)) = $(esc(call.fun))($(map(esc, call.args)...))
+      $(esc(inline(f, value)))
     end
   end
 end
 
 macro sum(ring::Ring, call::Call, f)
+  value = gensym("value")
   quote
     result = $(ring.zero)
-    @iter($call, (value) -> begin
-      result = $(ring.add)(result, $f(value))
+    @iter($call, ($(esc(value))) -> begin
+      result = $(ring.add)(result, $(esc(inline(f, value))))
     end)
     result
   end
@@ -273,12 +318,16 @@ macro join(ir::SumProduct, value::Vector{Union{Call, Symbol}})
       @count($call)
     end))
     min = minimum(mins)
+    $(@splice call in ir.domain quote
+      @prepare($call)
+    end)
     $(@splice i in 1:length(ir.domain) quote
       if mins[$i] == min
         return @sum($(ir.ring), $(ir.domain[i]), ($(esc(ir.var))) -> begin
           @product($(ir.ring), $(ir.domain[1:length(ir.domain) .!= i]), $value)
         end)
       end
+      error("Impossibles!")
     end)
   end
 end
@@ -308,13 +357,15 @@ end
 function generate(lambda::Lambda, ir::SumProduct, indexes::Vector{Index}) ::Function
   name = gensym("join")
   # TODO workaround for https://github.com/JuliaLang/julia/issues/25063
-  eval(@show simplify_expr(macroexpand(Expr(:->, Expr(:tuple), quote
+  code = Expr(:->, Expr(:tuple), quote
     $(@splice index in indexes quote
       $(index.name) = @index($index)
     end)
     @top_down($name, $(Symbol[]), $ir)
     $name()
-  end))))
+  end)
+  eval(@show simplify_expr(macroexpand(code)))
+  # eval(code)
 end
 
 function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{SumProduct, Vector{Index}}
@@ -442,7 +493,8 @@ const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 fun_type(fun) = typeof(eval(fun))
 var_type = Dict(:i => Int64, :x => Int64, :y => Int64, :z => Int64)
 const p1 = compile(polynomial_ast1, fun_type, (var) -> var_type[var])
-@show p1()
+@show @time p1()
+@code_warntype p1()
 # const p2 = compile(polynomial_ast2, fun_type, (var) -> var_type[var])
 # const p3 = compile(polynomial_ast3, fun_type, (var) -> var_type[var])
 

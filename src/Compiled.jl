@@ -85,14 +85,6 @@ function gallop{T}(column::AbstractArray{T}, lo::Int64, hi::Int64, value::T, thr
   lo
 end
 
-@generated function index(fun::Relation{T}, ::Type{Val{order}}) where {T, order}
-  @assert order == tuple(1:length(order)...) "Can't permute $order yet"
-  n = length(T.parameters)
-  quote
-    RelationIndex(fun.columns, fill(1, $(n+1)), fill(length(fun.columns[1])+1, $(n+1)))
-  end
-end
-
 function first(index::RelationIndex, ::Type{Val{C}}) where {C}
   index.his[C+1] = index.los[C]
 end
@@ -153,7 +145,7 @@ struct Var
   name::Symbol
 end
 
-struct Call{T} # type of fun, if known
+struct Call{T} # type of fun
   fun # function, or anything which implements finite function interface
   args::Vector{Any}
 end
@@ -165,7 +157,7 @@ struct Lambda
   value::Vector{Any} 
 end
 
-struct Index
+struct Index{T} # type of fun
   name::Symbol
   fun 
   permutation::Vector{Int64}
@@ -195,10 +187,17 @@ function inline(function_expr::Expr, value)
   end
 end
 
-macro index(fun, permutation::Vector{Int64})
+function get_index(fun, index::Index{Relation{T}}) where {T}
+  @assert index.permutation == collect(1:length(index.permutation)) "Can't permute $(index.permutation) yet"
+  n = length(T.parameters)
   quote
-    index($(esc(fun)), $(Val{tuple(permutation...)}))
+    fun = $(esc(fun))
+    RelationIndex(fun.columns, fill(1, $(n+1)), fill(length(fun.columns[1])+1, $(n+1)))
   end
+end
+
+macro get_index(fun, index)
+  get_index(fun, index)
 end
 
 macro count(call::Call)
@@ -350,7 +349,7 @@ macro callable(lambda::Lambda, ir::SumProduct, indexes::Vector{Index})
     @define_joins($child_name, $(index_names), $ir)
     function $name(env)
       $child_name($(@splice index in indexes quote
-        @index(env[$(Expr(:quote, index.fun))], $(index.permutation))
+        @get_index(env[$(Expr(:quote, index.fun))], $index)
       end))
     end
   end
@@ -367,7 +366,7 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{SumPro
       n = length(call.args)
       permutation = Vector(1:n)
       sort!(permutation, by=(ix) -> findfirst(vars, call.args[ix]))
-      index = Index(gensym("index"), call.fun, permutation)
+      index = Index{typ}(gensym("index"), call.fun, permutation)
       push!(indexes, index)
       # insert all prefixes of args
       for i in 1:n

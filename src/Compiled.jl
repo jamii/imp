@@ -152,8 +152,8 @@ function can_index(::Type{Relation{T}}) where {T}
   true
 end
 
-function get_index(fun, index::Index{Relation{T}}) where {T}
-  @assert index.permutation == collect(1:length(index.permutation)) "Can't permute $(index.permutation) yet"
+function get_index(::Type{Relation{T}}, fun, permutation::Vector{Int64}) where {T}
+  @assert permutation == collect(1:length(permutation)) "Can't permute $(index.permutation) yet"
   n = length(T.parameters)
   quote
     fun = $(esc(fun))
@@ -161,19 +161,19 @@ function get_index(fun, index::Index{Relation{T}}) where {T}
   end
 end
 
-function count(call::Call{Relation{T}}) where {T}
-  column = length(call.args)
+function count(::Type{Relation{T}}, index, args::Vector{Symbol}) where {T}
+  column = length(args)
   quote
-    index = $(esc(call.fun.name))
+    index = $(esc(index))
     index.his[$column+1] - index.los[$column+1]
   end
 end
 
-function iter(call::Call{Relation{T}}, f) where {T}
+function iter(::Type{Relation{T}}, index, args::Vector{Symbol}, f) where {T}
   value = gensym("value")
-  column = length(call.args)
+  column = length(args)
   quote 
-    index = $(esc(call.fun.name))
+    index = $(esc(index))
     while next(index, $(Val{column}))
       $(esc(value)) = index.columns[$column][index.los[$column+1]]
       $(esc(inline(f, value)))
@@ -181,17 +181,20 @@ function iter(call::Call{Relation{T}}, f) where {T}
   end
 end
 
-function prepare(call::Call{Relation{T}}) where {T}
-  column = length(call.args)
+function prepare(::Type{Relation{T}}, index, args::Vector{Symbol}) where {T}
+  column = length(args)
   quote 
-    index = $(esc(call.fun.name))
+    index = $(esc(index))
     index.his[$column+1] = index.los[$column]
   end
 end
 
-function test(call::Call{Relation{T}}) where {T}
+function contains(::Type{Relation{T}}, index, args::Vector{Symbol}) where {T}
+  column = length(args)
+  var = args[end]
   quote 
-    seek($(esc(call.fun.name)), $(Val{length(call.args)}), $(esc(call.args[end])))
+    index = $(esc(index))
+    seek(index, $(Val{column}), $(esc(var)))
   end
 end
 
@@ -201,29 +204,44 @@ function can_index(::Type{T}) where {T <: Function}
   false
 end
 
-function count(call::Call{T}) where {T <: Function}
+function count(::Type{T}, fun, args::Vector{Symbol}) where {T <: Function}
   1
 end
 
-function iter(call::Call{T}, f) where {T <: Function}
+function iter(::Type{T}, fun, args::Vector{Symbol}, f) where {T <: Function}
   value = gensym("value")
   quote
-    $(esc(value)) = $(esc(call.fun))($(map(esc, call.args[1:end-1])...))
+    $(esc(value)) = $(esc(fun))($(map(esc, args[1:end-1])...))
     $(esc(inline(f, value)))
   end
 end
 
-function prepare(call::Call{T}) where {T <: Function}
+function prepare(::Type{T}, fun, args::Vector{Symbol}) where {T <: Function}
   nothing
 end
 
-function test(call::Call{T}) where {T <: Function}
+function contains(::Type{T}, fun, args::Vector{Symbol}) where {T <: Function}
   quote
-    $(esc(call.fun))($(map(esc, call.args[1:end-1])...)) == $(esc(call.args[end]))
+    $(esc(fun))($(map(esc, args[1:end-1])...)) == $(esc(args[end]))
   end
 end
 
-# compiler
+# codegen
+
+get_type(call::Index{T}) where {T} = T
+get_type(call::Call{T}) where {T} = T
+function get_fun(call::Call)
+  if isa(call.fun, Index)
+    call.fun.name
+  else
+    call.fun
+  end
+end
+macro get_index(fun, index); get_index(get_type(index), fun, index.permutation); end
+macro count(call); count(get_type(call), get_fun(call), convert(Vector{Symbol}, call.args)); end
+macro iter(call, f); iter(get_type(call), get_fun(call), convert(Vector{Symbol}, call.args), f); end
+macro prepare(call); prepare(get_type(call), get_fun(call), convert(Vector{Symbol}, call.args)); end
+macro contains(call); contains(get_type(call), get_fun(call), convert(Vector{Symbol}, call.args)); end
 
 function value(call::Call{T}) where {T <: Function}
   quote
@@ -236,11 +254,6 @@ function value(var::Var)
 end
 
 macro value(call); value(call); end
-macro get_index(fun, index); get_index(fun, index); end
-macro count(call); count(call); end
-macro iter(call, f); iter(call, f); end
-macro prepare(call); prepare(call); end
-macro test(call); test(call); end
 
 macro product(ring::Ring, domain::Vector{Call}, value::Vector{Union{Call, Var}})
   code = :result
@@ -256,7 +269,7 @@ macro product(ring::Ring, domain::Vector{Call}, value::Vector{Union{Call, Var}})
   end
   for call in reverse(domain)
     code = quote
-      if !@test($call)
+      if !@contains($call)
         $(ring.zero)
       else
         $code

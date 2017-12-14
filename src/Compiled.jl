@@ -196,19 +196,20 @@ function get_index(fun, index::Index{Relation{T}}) where {T}
   end
 end
 
-macro get_index(fun, index)
-  get_index(fun, index)
-end
-
-macro count(call::Call)
-  if isa(call.fun, Index)
-    quote 
-      count($(esc(call.fun.name)), $(Val{length(call.args)}))
-    end
-  else
-    1
+function count(call::Call{Relation{T}}) where {T}
+  column = length(call.args)
+  quote
+    index = $(esc(call.fun.name))
+    index.his[$(column+1)] - index.los[$(column+1)]
   end
 end
+
+function count(call::Call{T}) where {T <: Function}
+  1
+end
+
+macro get_index(fun, index); get_index(fun, index); end
+macro count(call); @show call; count(call); end
 
 macro value(call::Call)
   quote
@@ -373,7 +374,7 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{SumPro
         push!(calls, Call{typ}(index, call.args[permutation][1:i]))
       end
     else
-      push!(calls, call)
+      push!(calls, Call{typ}(call.fun, call.args))
     end
   end
 

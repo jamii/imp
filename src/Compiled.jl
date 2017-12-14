@@ -411,10 +411,10 @@ function order_vars(lambda::Lambda) ::Vector{Symbol}
   union(lambda.args, map((call) -> call.args, lambda.domain)...)
 end
 
-function handle_constants(lambda::Lambda) ::Lambda
+function lower_constants(lambda::Lambda) ::Lambda
   constants = Call[]
   
-  handle_constant = (arg) -> begin
+  lower_constant = (arg) -> begin
     if isa(arg, Symbol)
       arg
     else
@@ -425,16 +425,16 @@ function handle_constants(lambda::Lambda) ::Lambda
   end
   
   domain = map(lambda.domain) do call
-    Call(call.fun, map(handle_constant, call.args))
+    Call(call.fun, map(lower_constant, call.args))
   end
   
-  value = map(handle_constant, lambda.value)
+  value = map(lower_constant, lambda.value)
   
   Lambda(lambda.ring, lambda.args, vcat(constants, domain), value)
 end
 
 function compile(lambda::Lambda, fun_type::Function, var_type::Function)
-  lambda = handle_constants(lambda)
+  lambda = lower_constants(lambda)
   vars = order_vars(lambda)
   ir, indexes = factorize(lambda, vars)
   generate(lambda, ir, indexes)

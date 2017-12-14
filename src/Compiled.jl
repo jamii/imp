@@ -37,7 +37,7 @@ end
 
 # interface for finite functions
 
-function is_finite(fun_type)
+function can_index(fun_type)
   false
 end
 
@@ -54,7 +54,7 @@ struct Relation{T <: Tuple}
   columns::T
 end
 
-function is_finite(::Type{Relation{T}}) where {T}
+function can_index(::Type{Relation{T}}) where {T}
   true
 end
 
@@ -153,7 +153,7 @@ struct Var
   name::Symbol
 end
 
-struct Call
+struct Call{T} # type of fun, if known
   fun # function, or anything which implements finite function interface
   args::Vector{Any}
 end
@@ -168,7 +168,7 @@ end
 struct Index
   name::Symbol
   fun 
-  sort_order::Vector{Int64}
+  permutation::Vector{Int64}
 end
 
 struct SumProduct
@@ -195,9 +195,9 @@ function inline(function_expr::Expr, value)
   end
 end
 
-macro index(fun, sort_order::Vector{Int64})
+macro index(fun, permutation::Vector{Int64})
   quote
-    index($(esc(fun)), $(Val{tuple(sort_order...)}))
+    index($(esc(fun)), $(Val{tuple(permutation...)}))
   end
 end
 
@@ -300,6 +300,7 @@ macro sum(ring::Ring, call::Call, f)
 end
 
 macro join(ir::SumProduct, value::Vector{Union{Call, Var}})
+  @assert !isempty(ir.domain) "Cant join on an empty domain"
   quote
     $(@splice call in ir.domain quote
       @prepare($call)
@@ -324,7 +325,7 @@ macro define_joins(name, vars::Vector{Symbol}, ir::SumProduct)
   value = map(ir.value) do v
     if isa(v, SumProduct)
       child_name = gensym("join")
-      Call(child_name, child_vars)
+      Call{Function}(child_name, child_vars)
     else
       Var(v)
     end
@@ -349,7 +350,7 @@ macro callable(lambda::Lambda, ir::SumProduct, indexes::Vector{Index})
     @define_joins($child_name, $(index_names), $ir)
     function $name(env)
       $child_name($(@splice index in indexes quote
-        @index(env[$(Expr(:quote, index.fun))], $(index.sort_order))
+        @index(env[$(Expr(:quote, index.fun))], $(index.permutation))
       end))
     end
   end
@@ -360,16 +361,17 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{SumPro
   calls = Call[]
   indexes = Index[]
   for call in lambda.domain
-    if is_finite(fun_type(call.fun))
+    typ = fun_type(call.fun)
+    if can_index(typ)
       # sort args according to variable order
       n = length(call.args)
-      sort_order = Vector(1:n)
-      sort!(sort_order, by=(ix) -> findfirst(vars, call.args[ix]))
-      index = Index(gensym("index"), call.fun, sort_order)
+      permutation = Vector(1:n)
+      sort!(permutation, by=(ix) -> findfirst(vars, call.args[ix]))
+      index = Index(gensym("index"), call.fun, permutation)
       push!(indexes, index)
       # insert all prefixes of args
       for i in 1:n
-        push!(calls, Call(index, call.args[sort_order][1:i]))
+        push!(calls, Call{typ}(index, call.args[permutation][1:i]))
       end
     else
       push!(calls, call)
@@ -411,13 +413,14 @@ function lower_constants(lambda::Lambda) ::Lambda
       arg
     else
       var = gensym("constant")
-      push!(constants, Call(() -> arg, [var]))
+      fun = () -> arg
+      push!(constants, Call{typeof(fun)}(fun, [var]))
       var
     end
   end
   
   domain = map(lambda.domain) do call
-    Call(call.fun, map(lower_constant, call.args))
+    typeof(call)(call.fun, map(lower_constant, call.args))
   end
   
   value = map(lower_constant, lambda.value)
@@ -442,9 +445,9 @@ polynomial_ast1 = Lambda(
   Ring{Int64}(+,*,1,0),
   [:i, :x, :y, :z],
   [
-    Call(:xx, [:i, :x]),
-    Call(:yy, [:i, :y]),
-    Call(:zz, [:x, :y, :z]),
+    Call{Any}(:xx, [:i, :x]),
+    Call{Any}(:yy, [:i, :y]),
+    Call{Any}(:zz, [:x, :y, :z]),
   ],
   [:z]
   )
@@ -453,9 +456,9 @@ polynomial_ast2 = Lambda(
   Ring{Int64}(+,*,1,0),
   [:x, :y, :z],
   [
-    Call(:xx, [:x, :x]),
-    Call(:yy, [:x, :y]),
-    Call(:zz, [:x, :y, :z]),
+    Call{Any}(:xx, [:x, :x]),
+    Call{Any}(:yy, [:x, :y]),
+    Call{Any}(:zz, [:x, :y, :z]),
   ],
   [:z]
   )
@@ -466,12 +469,12 @@ polynomial_ast3 = Lambda(
     Ring{Int64}(+,*,1,0),
     [:i, :x, :y, :t1, :t2, :t3, :z],
     [  
-      Call(:xx, [:i, :x]),
-      Call(:yy, [:i, :y]),
-      Call(*, [:x, :x, :t1]),
-      Call(*, [:y, :y, :t2]),
-      Call(*, [3, :x, :y, :t3]),
-      Call(+, [:t1, :t2, :t3, :z])
+      Call{Any}(:xx, [:i, :x]),
+      Call{Any}(:yy, [:i, :y]),
+      Call{Any}(*, [:x, :x, :t1]),
+      Call{Any}(*, [:y, :y, :t2]),
+      Call{Any}(*, [3, :x, :y, :t3]),
+      Call{Any}(+, [:t1, :t2, :t3, :z])
     ],
     [:z]
     )

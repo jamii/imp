@@ -81,15 +81,6 @@ function gallop{T}(column::AbstractArray{T}, lo::Int64, hi::Int64, value::T, thr
   lo
 end
 
-function first(index::RelationIndex, ::Type{Val{C}}) where {C}
-  index.his[C+1] = index.los[C]
-end
-
-function count(index::RelationIndex, ::Type{Val{C}}) where {C}
-  # not actually correct, but will do for now
-  index.his[C+1] - index.los[C+1]
-end
-
 function next(index::RelationIndex, ::Type{Val{C}}) where {C}
   column = index.columns[C]
   prev_hi = index.his[C]
@@ -217,8 +208,16 @@ function iter(call::Call{Relation{T}}, f) where {T}
 end
 
 function prepare(call::Call{Relation{T}}) where {T}
+  column = length(call.args)
   quote 
-    first($(esc(call.fun.name)), $(Val{length(call.args)}))
+    index = $(esc(call.fun.name))
+    index.his[$(column+1)] = index.los[$(column)]
+  end
+end
+
+function test(call::Call{Relation{T}}) where {T}
+  quote 
+    seek($(esc(call.fun.name)), $(Val{length(call.args)}), $(esc(call.args[end])))
   end
 end
 
@@ -244,6 +243,12 @@ function prepare(call::Call{T}) where {T <: Function}
   nothing
 end
 
+function test(call::Call{T}) where {T <: Function}
+  quote
+    $(esc(call.fun))($(map(esc, call.args[1:end-1])...)) == $(esc(call.args[end]))
+  end
+end
+
 # compiler
 
 function value(call::Call{T}) where {T <: Function}
@@ -260,19 +265,9 @@ macro get_index(fun, index); get_index(fun, index); end
 macro count(call); count(call); end
 macro iter(call, f); iter(call, f); end
 macro prepare(call); prepare(call); end
-macro value(call); value(call); end
+macro test(call); test(call); end
 
-macro test(call::Call)
-  if isa(call.fun, Index) 
-    quote 
-      seek($(esc(call.fun.name)), $(Val{length(call.args)}), $(esc(call.args[end])))
-    end
-  else
-    quote
-      $(esc(call.fun))($(map(esc, call.args[1:end-1])...)) == $(esc(call.args[end]))
-    end
-  end
-end
+macro value(call); value(call); end
 
 macro product(ring::Ring, domain::Vector{Call}, value::Vector{Union{Call, Var}})
   code = :result

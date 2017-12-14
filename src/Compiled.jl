@@ -216,6 +216,12 @@ function iter(call::Call{Relation{T}}, f) where {T}
   end
 end
 
+function prepare(call::Call{Relation{T}}) where {T}
+  quote 
+    first($(esc(call.fun.name)), $(Val{length(call.args)}))
+  end
+end
+
 # function interface
 
 function can_index(::Type{T}) where {T <: Function}
@@ -234,6 +240,12 @@ function iter(call::Call{T}, f) where {T <: Function}
   end
 end
 
+function prepare(call::Call{T}) where {T <: Function}
+  nothing
+end
+
+# compiler
+
 function value(call::Call{T}) where {T <: Function}
   quote
     $(esc(call.fun))($(map(esc, call.args)...))
@@ -244,22 +256,11 @@ function value(var::Var)
   esc(var.name)
 end
 
-# compiler
-
 macro get_index(fun, index); get_index(fun, index); end
 macro count(call); count(call); end
 macro iter(call, f); iter(call, f); end
+macro prepare(call); prepare(call); end
 macro value(call); value(call); end
-
-macro prepare(call::Call)
-  if isa(call.fun, Index) 
-    quote 
-      first($(esc(call.fun.name)), $(Val{length(call.args)}))
-    end
-  else
-    nothing
-  end
-end
 
 macro test(call::Call)
   if isa(call.fun, Index) 

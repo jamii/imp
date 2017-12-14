@@ -355,14 +355,6 @@ macro callable(lambda::Lambda, ir::SumProduct, indexes::Vector{Index})
   end
 end
 
-function generate(lambda::Lambda, ir::SumProduct, indexes::Vector{Index}) ::Function
-  code = quote
-    @callable($lambda, $ir, $indexes)
-  end
-  # @show simplify_expr(macroexpand(code))
-  eval(code)
-end
-
 function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{SumProduct, Vector{Index}}
   # insert indexes and partial calls
   calls = Call[]
@@ -437,7 +429,11 @@ function compile(lambda::Lambda, fun_type::Function, var_type::Function)
   lambda = lower_constants(lambda)
   vars = order_vars(lambda)
   ir, indexes = factorize(lambda, vars)
-  generate(lambda, ir, indexes)
+  code = quote
+    @callable($lambda, $ir, $indexes)
+  end
+  # @show simplify_expr(macroexpand(code))
+  eval(code)
 end
 
 zz(x, y) = (x * x) + (y * y) + (3 * x * y)

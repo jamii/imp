@@ -195,9 +195,9 @@ function inline(function_expr::Expr, value)
   end
 end
 
-macro index(index::Index)
+macro index(fun, sort_order::Vector{Int64})
   quote
-    index($(esc(index.fun)), $(Val{tuple(index.sort_order...)}))
+    index($(esc(fun)), $(Val{tuple(sort_order...)}))
   end
 end
 
@@ -319,7 +319,7 @@ macro join(ir::SumProduct, value::Vector{Union{Call, Var}})
   end
 end
 
-macro top_down(name, vars::Vector{Symbol}, ir::SumProduct)
+macro define_joins(name, vars::Vector{Symbol}, ir::SumProduct)
   child_vars = union(vars, [ir.var])
   value = map(ir.value) do v
     if isa(v, SumProduct)
@@ -332,25 +332,31 @@ macro top_down(name, vars::Vector{Symbol}, ir::SumProduct)
   quote
     $(@splice (old_v, new_v) in zip(ir.value, value) begin
       if isa(old_v, SumProduct)
-        :(@top_down($(new_v.fun), $(convert(Vector{Symbol}, new_v.args)), $old_v))
+        :(@define_joins($(new_v.fun), $(convert(Vector{Symbol}, new_v.args)), $old_v))
       end
     end)
-    const $(esc(name)) = $(Expr(:->, Expr(:tuple, map(esc, vars)...), quote
+    function $(esc(name))($(map(esc, vars)...))
       @join($ir, $(convert(Vector{Union{Call, Var}}, value)))
-    end))
+    end
+  end
+end
+
+macro callable(lambda::Lambda, ir::SumProduct, indexes::Vector{Index}) 
+  name = gensym("lambda")
+  child_name = gensym("join")
+  index_names = map((index) -> index.name, indexes)
+  quote
+    @define_joins($child_name, $(index_names), $ir)
+    function $name(env)
+      $child_name($(@splice index in indexes quote
+        @index(env[$(Expr(:quote, index.fun))], $(index.sort_order))
+      end))
+    end
   end
 end
 
 function generate(lambda::Lambda, ir::SumProduct, indexes::Vector{Index}) ::Function
-  name = gensym("join")
-  index_names = map((index) -> index.name, indexes)
-  # TODO workaround for https://github.com/JuliaLang/julia/issues/25063
-  code = Expr(:->, Expr(:tuple), quote
-    @top_down($name, $(index_names), $ir)
-    $name($(@splice index in indexes :(@index $index)))
-  end)
-  eval(@show simplify_expr(macroexpand(code)))
-  # eval(@show macroexpand(code))
+  eval(@show simplify_expr(macroexpand(quote @callable($lambda, $ir, $indexes) end)))
 end
 
 function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{SumProduct, Vector{Index}}
@@ -477,14 +483,12 @@ const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 fun_type(fun) = typeof(eval(fun))
 var_type = Dict(:i => Int64, :x => Int64, :y => Int64, :z => Int64)
 const p1 = compile(polynomial_ast1, fun_type, (var) -> var_type[var])
-sum(((x * x) + (y * y) + (3 * x * y) for (x,y) in zip(xx.columns[2], yy.columns[2])))
-@show @time p1()
-@code_warntype p1()
 # const p2 = compile(polynomial_ast2, fun_type, (var) -> var_type[var])
 # const p3 = compile(polynomial_ast3, fun_type, (var) -> var_type[var])
 
-# inputs = Dict(:xx => xx, :yy => yy, :zz => zz)
-# @time p1(inputs)
+inputs = Dict(:xx => xx, :yy => yy, :zz => zz)
+@show sum(((x * x) + (y * y) + (3 * x * y) for (x,y) in zip(xx.columns[2], yy.columns[2])))
+@show @time p1(inputs)
 # @time p2(inputs)
 # @time p3(inputs)
 # @assert p1(inputs) == p2(inputs)

@@ -54,10 +54,6 @@ struct Relation{T <: Tuple}
   columns::T
 end
 
-function can_index(::Type{Relation{T}}) where {T}
-  true
-end
-
 struct RelationIndex{T <: Tuple}
   columns::T
   los::Vector{Int64} # inclusive
@@ -187,6 +183,12 @@ function inline(function_expr::Expr, value)
   end
 end
 
+# relation interface
+
+function can_index(::Type{Relation{T}}) where {T}
+  true
+end
+
 function get_index(fun, index::Index{Relation{T}}) where {T}
   @assert index.permutation == collect(1:length(index.permutation)) "Can't permute $(index.permutation) yet"
   n = length(T.parameters)
@@ -204,22 +206,50 @@ function count(call::Call{Relation{T}}) where {T}
   end
 end
 
+function iter(call::Call{Relation{T}}, f) where {T}
+  value = gensym("value")
+  quote 
+    while next($(esc(call.fun.name)), $(Val{length(call.args)}))
+      $(esc(value)) = get($(esc(call.fun.name)), $(Val{length(call.args)}))
+      $(esc(inline(f, value)))
+    end
+  end
+end
+
+# function interface
+
+function can_index(::Type{T}) where {T <: Function}
+  false
+end
+
 function count(call::Call{T}) where {T <: Function}
   1
 end
 
-macro get_index(fun, index); get_index(fun, index); end
-macro count(call); @show call; count(call); end
+function iter(call::Call{T}, f) where {T <: Function}
+  value = gensym("value")
+  quote
+    $(esc(value)) = $(esc(call.fun))($(map(esc, call.args[1:end-1])...))
+    $(esc(inline(f, value)))
+  end
+end
 
-macro value(call::Call)
+function value(call::Call{T}) where {T <: Function}
   quote
     $(esc(call.fun))($(map(esc, call.args)...))
   end
 end
 
-macro value(var::Var)
+function value(var::Var)
   esc(var.name)
 end
+
+# compiler
+
+macro get_index(fun, index); get_index(fun, index); end
+macro count(call); count(call); end
+macro iter(call, f); iter(call, f); end
+macro value(call); value(call); end
 
 macro prepare(call::Call)
   if isa(call.fun, Index) 
@@ -267,24 +297,6 @@ macro product(ring::Ring, domain::Vector{Call}, value::Vector{Union{Call, Var}})
   quote
     result = $(ring.one)
     $code
-  end
-end
-
-macro iter(call::Call, f)
-  # TODO dispatch on type of fun, rather than index/not-index
-  value = gensym("value")
-  if isa(call.fun, Index)
-    quote 
-      while next($(esc(call.fun.name)), $(Val{length(call.args)}))
-        $(esc(value)) = get($(esc(call.fun.name)), $(Val{length(call.args)}))
-        $(esc(inline(f, value)))
-      end
-    end
-  else
-    quote
-      $(esc(value)) = $(esc(call.fun))($(map(esc, call.args[1:end-1])...))
-      $(esc(inline(f, value)))
-    end
   end
 end
 

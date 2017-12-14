@@ -28,95 +28,6 @@ function simplify_expr(other)
   other
 end
 
-# interface for all functions
-
-function is_function(fun_type)
-  false
-end
-# fun(args...) end
-
-# interface for finite functions
-
-function can_index(fun_type)
-  false
-end
-
-# index(fun)
-# count(index, column)
-# first(index, column)
-# next(index, column)
-# seek(index, column)
-# get(index, column)
-
-# implementation for tuple of column vectors
-
-struct Relation{T <: Tuple}
-  columns::T
-end
-
-struct RelationIndex{T <: Tuple}
-  columns::T
-  los::Vector{Int64} # inclusive
-  his::Vector{Int64} # exclusive
-end
-
-function gallop{T}(column::AbstractArray{T}, lo::Int64, hi::Int64, value::T, threshold::Int64) ::Int64
-  if (lo < hi) && cmp(column[lo], value) < threshold
-    step = 1
-    while (lo + step < hi) && cmp(column[lo + step], value) < threshold
-      lo = lo + step
-      step = step << 1
-    end
-
-    step = step >> 1
-    while step > 0
-      if (lo + step < hi) && cmp(column[lo + step], value) < threshold
-        lo = lo + step
-      end
-      step = step >> 1
-    end
-
-    lo += 1
-  end
-  lo
-end
-
-function next(index::RelationIndex, ::Type{Val{C}}) where {C}
-  column = index.columns[C]
-  prev_hi = index.his[C]
-  lo = index.his[C+1]
-  if lo < prev_hi
-    value = column[lo]
-    hi = gallop(column, lo+1, prev_hi, value, 1)
-    index.los[C+1] = lo
-    index.his[C+1] = hi
-    lo < hi
-  else
-    false
-  end
-end
-
-# TODO can push this into gallop, to search lo and hi at same time
-#      or maybe use searchsorted if we can remove the cost of the subarray
-function seek(index::RelationIndex, ::Type{Val{C}}, value) where {C}
-  column = index.columns[C]
-  prev_hi = index.his[C]
-  lo = index.his[C+1]
-  if lo < prev_hi
-    lo = gallop(column, lo, prev_hi, value, 0)
-    hi = gallop(column, lo+1, prev_hi, value, 1)
-    index.los[C+1] = lo
-    index.his[C+1] = hi
-    lo < hi
-  else
-    false
-  end
-end
-
-function get(index::RelationIndex, ::Type{Val{C}}) where {C}
-  index.columns[C][index.los[C+1]]
-end
-
 struct Ring{T}
   add::Function
   mult::Function
@@ -176,6 +87,67 @@ end
 
 # relation interface
 
+struct Relation{T <: Tuple}
+  columns::T
+end
+
+struct RelationIndex{T <: Tuple}
+  columns::T
+  los::Vector{Int64} # inclusive
+  his::Vector{Int64} # exclusive
+end
+
+function gallop{T}(column::AbstractArray{T}, lo::Int64, hi::Int64, value::T, threshold::Int64) ::Int64
+  if (lo < hi) && cmp(column[lo], value) < threshold
+    step = 1
+    while (lo + step < hi) && cmp(column[lo + step], value) < threshold
+      lo = lo + step
+      step = step << 1
+    end
+
+    step = step >> 1
+    while step > 0
+      if (lo + step < hi) && cmp(column[lo + step], value) < threshold
+        lo = lo + step
+      end
+      step = step >> 1
+    end
+
+    lo += 1
+  end
+  lo
+end
+
+function next(index::RelationIndex, ::Type{Val{C}}) where {C}
+  column = index.columns[C]
+  prev_hi = index.his[C]
+  lo = index.his[C+1]
+  if lo < prev_hi
+    value = column[lo]
+    hi = gallop(column, lo+1, prev_hi, value, 1)
+    index.los[C+1] = lo
+    index.his[C+1] = hi
+    lo < hi
+  else
+    false
+  end
+end
+
+function seek(index::RelationIndex, ::Type{Val{C}}, value) where {C}
+  column = index.columns[C]
+  prev_hi = index.his[C]
+  lo = index.his[C+1]
+  if lo < prev_hi
+    lo = gallop(column, lo, prev_hi, value, 0)
+    hi = gallop(column, lo+1, prev_hi, value, 1)
+    index.los[C+1] = lo
+    index.his[C+1] = hi
+    lo < hi
+  else
+    false
+  end
+end
+
 function can_index(::Type{Relation{T}}) where {T}
   true
 end
@@ -193,15 +165,17 @@ function count(call::Call{Relation{T}}) where {T}
   column = length(call.args)
   quote
     index = $(esc(call.fun.name))
-    index.his[$(column+1)] - index.los[$(column+1)]
+    index.his[$column+1] - index.los[$column+1]
   end
 end
 
 function iter(call::Call{Relation{T}}, f) where {T}
   value = gensym("value")
+  column = length(call.args)
   quote 
-    while next($(esc(call.fun.name)), $(Val{length(call.args)}))
-      $(esc(value)) = get($(esc(call.fun.name)), $(Val{length(call.args)}))
+    index = $(esc(call.fun.name))
+    while next(index, $(Val{column}))
+      $(esc(value)) = index.columns[$column][index.los[$column+1]]
       $(esc(inline(f, value)))
     end
   end
@@ -211,7 +185,7 @@ function prepare(call::Call{Relation{T}}) where {T}
   column = length(call.args)
   quote 
     index = $(esc(call.fun.name))
-    index.his[$(column+1)] = index.los[$(column)]
+    index.his[$column+1] = index.los[$column]
   end
 end
 

@@ -408,7 +408,7 @@ end
 
 function order_vars(lambda::Lambda) ::Vector{Symbol}
   # just use order vars appear in the ast for now
-  union(lambda.args, map((call) -> call.args, lambda.domain)...)
+  union(map((call) -> call.args, lambda.domain)...)
 end
 
 function lower_constants(lambda::Lambda) ::Lambda

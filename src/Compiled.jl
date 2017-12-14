@@ -235,13 +235,12 @@ function value(var::Var)
   esc(var.name)
 end
 
+macro value(call); value(call); end
 macro get_index(fun, index); get_index(fun, index); end
 macro count(call); count(call); end
 macro iter(call, f); iter(call, f); end
 macro prepare(call); prepare(call); end
 macro test(call); test(call); end
-
-macro value(call); value(call); end
 
 macro product(ring::Ring, domain::Vector{Call}, value::Vector{Union{Call, Var}})
   code = :result
@@ -324,7 +323,7 @@ macro define_joins(name, vars::Vector{Symbol}, ir::SumProduct)
   end
 end
 
-macro callable(lambda::Lambda, ir::SumProduct, indexes::Vector{Index}) 
+macro define_lambda(lambda::Lambda, ir::SumProduct, indexes::Vector{Index}) 
   name = gensym("lambda")
   child_name = gensym("join")
   index_names = map((index) -> index.name, indexes)
@@ -415,7 +414,7 @@ function compile(lambda::Lambda, fun_type::Function, var_type::Function)
   vars = order_vars(lambda)
   ir, indexes = factorize(lambda, vars)
   code = quote
-    @callable($lambda, $ir, $indexes)
+    @define_lambda($lambda, $ir, $indexes)
   end
   # @show simplify_expr(macroexpand(code))
   eval(code)

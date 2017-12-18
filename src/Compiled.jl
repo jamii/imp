@@ -28,16 +28,10 @@ struct IndexCall
   args::Vector{Symbol}
 end
 
-struct Lambda
+struct SumProduct
   ring::Ring
-  args::Vector{Symbol}
   domain::Vector{Union{FunCall, IndexCall}}
-  value::Vector{Union{Symbol, FunCall, Constant}}
-end
-
-struct Funs
-  main::Symbol
-  funs::Dict{Symbol, Union{Lambda}}
+  value::Vector{Union{FunCall, Symbol}}
 end
 
 struct Index
@@ -47,11 +41,20 @@ struct Index
   permutation::Vector{Int64}
 end
 
-struct SumProduct
-  ring::Ring
-  var::Symbol
-  domain::Vector{Union{FunCall, IndexCall}}
-  value::Vector{Union{FunCall, Symbol}}
+struct CreateIndexes
+  indexes::Vector{Index}
+  body::FunCall
+end
+
+struct Lambda
+  name::Symbol
+  args::Vector{Symbol}
+  body::Union{SumProduct, CreateIndexes}
+end
+
+struct Funs
+  main::Symbol
+  funs::Dict{Symbol, Union{Lambda}}
 end
 
 struct Proc
@@ -63,7 +66,7 @@ end
 struct Procs
   main::Symbol
   indexes::Dict{Symbol, Index} # (env) -> state
-  procs::Dict{Symbol, Proc} # (state, args...) -> ring_type
+  procs::Dict{Symbol, Lambda} # (state, args...) -> ring_type
 end
 
 function simplify_expr(expr::Expr)
@@ -305,8 +308,11 @@ macro sum(ring::Ring, call::Union{FunCall, IndexCall}, f)
   end
 end
 
-macro run_proc(body::SumProduct)
+macro run_proc(args::Vector{Symbol}, body::SumProduct)
   @assert !isempty(body.domain) "Cant join on an empty domain"
+  free_vars = setdiff(union(map((call) -> call.args, body.domain)...), args)
+  @assert length(free_vars) == 1 "Need to have factorized all lambdas"
+  var = free_vars[1]
   quote
     $(@splice call in body.domain quote
       @prepare($call)
@@ -317,7 +323,7 @@ macro run_proc(body::SumProduct)
     min = Base.min(mins...)
     $(@splice i in 1:length(body.domain) quote
       if mins[$i] == min
-        return @sum($(body.ring), $(body.domain[i]), ($(esc(body.var))) -> begin
+        return @sum($(body.ring), $(body.domain[i]), ($(esc(var))) -> begin
           @product($(body.ring), $(body.domain[1:length(body.domain) .!= i]), $(body.value))
         end)
       end
@@ -332,7 +338,7 @@ macro define_procs(procs::Procs)
   quote
     $(@splice (_, proc) in procs.procs quote
       function $(esc(proc.name))($(map(esc, proc.args)...))
-        @run_proc($(proc.body))
+        @run_proc($(proc.args), $(proc.body))
       end
     end)
     function $name(env)
@@ -344,9 +350,11 @@ macro define_procs(procs::Procs)
 end
 
 function insert_indexes(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{Vector{Union{FunCall, IndexCall}}, Dict{Symbol, Index}}
+  @assert isa(lambda.body, SumProduct)
+  
   domain = Union{FunCall, IndexCall}[]
   indexes = Dict{Symbol, Index}()
-  for call in lambda.domain
+  for call in lambda.body.domain
     typ = fun_type(call.name)
     if can_index(typ)
       # sort args according to variable order
@@ -367,6 +375,8 @@ function insert_indexes(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{Vector{Uni
 end
 
 function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Procs
+  @assert isa(lambda.body, SumProduct)
+  
   domain, indexes = insert_indexes(lambda, vars)
   index_names = collect(keys(indexes))
 
@@ -381,10 +391,10 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Procs
   procs = map(1:length(vars)) do var_num
     var = vars[var_num]
     proc_domain = domain[latest_var_nums .== var_num]
-    proc_value = (var in lambda.value) ? [var] : []
-    body = SumProduct(lambda.ring, var, proc_domain, proc_value)
+    proc_value = (var in lambda.body.value) ? [var] : []
+    body = SumProduct(lambda.body.ring, proc_domain, proc_value)
     args = vcat(index_names, vars[1:var_num-1])
-    Proc(gensym("proc"), args, body)
+    Lambda(gensym("lambda"), args, body)
   end
 
   # stitch them all together
@@ -395,16 +405,20 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Procs
   Procs(
     procs[1].name,
     indexes,
-    Dict{Symbol, Proc}(proc.name => proc for proc in procs),
+    Dict{Symbol, Lambda}(proc.name => proc for proc in procs),
   )
 end
 
 function order_vars(lambda::Lambda) ::Vector{Symbol}
+  @assert isa(lambda.body, SumProduct)
+  
   # just use order vars appear in the ast for now
-  union(map((call) -> call.args, lambda.domain)...)
+  union(map((call) -> call.args, lambda.body.domain)...)
 end
 
 function lower_constants(lambda::Lambda) ::Lambda
+  @assert isa(lambda.body, SumProduct)
+  
   constants = FunCall[]
 
   lower_constant = (arg) -> begin
@@ -418,13 +432,13 @@ function lower_constants(lambda::Lambda) ::Lambda
     end
   end
 
-  domain = map(lambda.domain) do call
+  domain = map(lambda.body.domain) do call
     typeof(call)(call.name, call.typ, map(lower_constant, call.args))
   end
 
-  value = map(lower_constant, lambda.value)
+  value = map(lower_constant, lambda.body.value)
 
-  Lambda(lambda.ring, lambda.args, vcat(constants, domain), value)
+  Lambda(lambda.name, lambda.args, SumProduct(lambda.body.ring, vcat(constants, domain), value))
 end
 
 function compile(lambda::Lambda, fun_type::Function, var_type::Function)
@@ -441,42 +455,52 @@ end
 zz(x, y) = (x * x) + (y * y) + (3 * x * y)
 
 polynomial_ast1 = Lambda(
-  Ring{Int64}(+,*,1,0),
+  :poly1,
   [:i, :x, :y, :z],
-  [
-    FunCall(:xx, Any, [:i, :x]),
-    FunCall(:yy, Any, [:i, :y]),
-    FunCall(:zz, Any, [:x, :y, :z]),
-  ],
-  [:z]
+  SumProduct(
+    Ring{Int64}(+,*,1,0),
+    [
+      FunCall(:xx, Any, [:i, :x]),
+      FunCall(:yy, Any, [:i, :y]),
+      FunCall(:zz, Any, [:x, :y, :z]),
+    ],
+    [:z]
   )
+)  
 
 polynomial_ast2 = Lambda(
-  Ring{Int64}(+,*,1,0),
+  :poly2,
   [:x, :y, :z],
-  [
-    FunCall(:xx, Any, [:x, :x]),
-    FunCall(:yy, Any, [:x, :y]),
-    FunCall(:zz, Any, [:x, :y, :z]),
-  ],
-  [:z]
+  SumProduct(
+    Ring{Int64}(+,*,1,0),
+    [
+      FunCall(:xx, Any, [:x, :x]),
+      FunCall(:yy, Any, [:x, :y]),
+      FunCall(:zz, Any, [:x, :y, :z]),
+    ],
+    [:z]
   )
+)
 
 zz(x, y) = (x * x) + (y * y) + (3 * x * y)
 
 polynomial_ast3 = Lambda(
-    Ring{Int64}(+,*,1,0),
+    :poly3,
     [:i, :x, :y, :t1, :t2, :t3, :z],
-    [
-      FunCall(:xx, Any, [:i, :x]),
-      FunCall(:yy, Any, [:i, :y]),
-      FunCall(*, Any, [:x, :x, :t1]),
-      FunCall(*, Any, [:y, :y, :t2]),
-      FunCall(*, Any, [Constant(3), :x, :y, :t3]),
-      FunCall(+, Any, [:t1, :t2, :t3, :z])
-    ],
-    [:z]
+    SumProduct(
+      Ring{Int64}(+,*,1,0),
+      [
+        FunCall(:xx, Any, [:i, :x]),
+        FunCall(:yy, Any, [:i, :y]),
+        FunCall(*, Any, [:x, :x, :t1]),
+        FunCall(*, Any, [:y, :y, :t2]),
+        FunCall(*, Any, [Constant(3), :x, :y, :t3]),
+        FunCall(+, Any, [:t1, :t2, :t3, :z])
+      ],
+      [:z]
     )
+)
+
 const xx = Relation((collect(0:100),collect(0:100)))
 const yy = Relation((collect(0:100), collect(reverse(0:100))))
 const big_xx = Relation((collect(0:1000000),collect(0:1000000)))

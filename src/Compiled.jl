@@ -3,6 +3,66 @@ module Compiled
 using Base.Cartesian
 using Match
 
+struct Ring{T}
+  add::Function
+  mult::Function
+  one::T
+  zero::T
+end
+
+const count_ring = Ring(+, *, 1, 0)
+
+struct Constant
+  value::Any 
+end
+
+struct FunCall
+  name::Union{Symbol, Function}
+  typ::Type
+  args::Vector{Union{Symbol, FunCall, Constant}}
+end
+
+struct IndexCall
+  name::Symbol
+  typ::Type
+  args::Vector{Symbol}
+end
+
+struct Lambda
+  ring::Ring
+  args::Vector{Symbol}
+  domain::Vector{Union{FunCall, IndexCall}}
+  value::Vector{Union{Symbol, FunCall, Constant}} 
+end
+
+struct Funs
+  funs::Dict{Symbol, Union{Lambda}}
+end
+
+struct ProcCall
+  name::Symbol
+  args::Vector{Symbol} # plus state pointer
+end
+
+struct Index
+  name::Symbol
+  typ::Type
+  fun::Union{Symbol, Function} 
+  permutation::Vector{Int64}
+end
+
+struct SumProduct
+  ring::Ring
+  var::Symbol
+  domain::Vector{Union{FunCall, IndexCall}}
+  value::Vector{Union{ProcCall, Symbol, SumProduct}} ## TODO remove SumProduct
+end
+
+struct Procs
+  state::Dict{Symbol, Union{Index}} # (env) -> state
+  procs::Dict{Symbol, Union{SumProduct}} # (state, args...) -> ring_type
+end
+
 function simplify_expr(expr::Expr)
   @match expr begin
     Expr(:block, lines, _) => begin
@@ -28,46 +88,10 @@ function simplify_expr(other)
   other
 end
 
-struct Ring{T}
-  add::Function
-  mult::Function
-  one::T
-  zero::T
-end
-
 Base.eltype(ring::Ring{T}) where {T} = T
-
-const count_ring = Ring(+, *, 1, 0)
 
 struct Var
   name::Symbol
-end
-
-struct Call 
-  fun # function, or anything which implements finite function interface
-  typ::Type
-  args::Vector{Any}
-end
-
-struct Lambda
-  ring::Ring
-  args::Vector{Symbol}
-  domain::Vector{Call}
-  value::Vector{Any} 
-end
-
-struct Index # type of fun
-  name::Symbol
-  typ::Type
-  fun 
-  permutation::Vector{Int64}
-end
-
-struct SumProduct
-  ring::Ring
-  var::Symbol
-  domain::Vector{Call}
-  value::Vector{Union{SumProduct, Symbol}} 
 end
 
 macro splice(iterator, body)
@@ -230,22 +254,15 @@ end
 
 # codegen
 
-function get_fun(call::Call)
-  if isa(call.fun, Index)
-    call.fun.name
-  else
-    call.fun
-  end
-end
 macro get_index(fun, index); get_index(index.typ, fun, index.permutation); end
-macro count(call); count(call.typ, get_fun(call), convert(Vector{Symbol}, call.args)); end
-macro iter(call, f); iter(call.typ, get_fun(call), convert(Vector{Symbol}, call.args), f); end
-macro prepare(call); prepare(call.typ, get_fun(call), convert(Vector{Symbol}, call.args)); end
-macro contains(call); contains(call.typ, get_fun(call), convert(Vector{Symbol}, call.args)); end
+macro count(call); count(call.typ, call.name, convert(Vector{Symbol}, call.args)); end
+macro iter(call, f); iter(call.typ, call.name, convert(Vector{Symbol}, call.args), f); end
+macro prepare(call); prepare(call.typ, call.name, convert(Vector{Symbol}, call.args)); end
+macro contains(call); contains(call.typ, call.name, convert(Vector{Symbol}, call.args)); end
 
-function value(call::Call) 
+function value(call::ProcCall) 
   quote
-    $(esc(call.fun))($(map(esc, call.args)...))
+    $(esc(call.name))($(map(esc, call.args)...))
   end
 end
 
@@ -255,7 +272,7 @@ end
 
 macro value(call); value(call); end
 
-macro product(ring::Ring, domain::Vector{Call}, value::Vector{Union{Call, Var}})
+macro product(ring::Ring, domain::Vector{Union{FunCall, IndexCall}}, value::Vector{Union{ProcCall, Var}})
   code = :result
   for call in reverse(value)
     code = quote
@@ -282,7 +299,7 @@ macro product(ring::Ring, domain::Vector{Call}, value::Vector{Union{Call, Var}})
   end
 end
 
-macro sum(ring::Ring, call::Call, f)
+macro sum(ring::Ring, call::Union{FunCall, IndexCall}, f)
   value = gensym("value")
   quote
     result = $(ring.zero)
@@ -293,7 +310,7 @@ macro sum(ring::Ring, call::Call, f)
   end
 end
 
-macro join(ir::SumProduct, value::Vector{Union{Call, Var}})
+macro join(ir::SumProduct, value::Vector{Union{ProcCall, Var}})
   @assert !isempty(ir.domain) "Cant join on an empty domain"
   quote
     $(@splice call in ir.domain quote
@@ -319,7 +336,7 @@ macro define_joins(name, vars::Vector{Symbol}, ir::SumProduct)
   value = map(ir.value) do v
     if isa(v, SumProduct)
       child_name = gensym("join")
-      Call(child_name, Function, child_vars)
+      ProcCall(child_name, child_vars)
     else
       Var(v)
     end
@@ -327,11 +344,11 @@ macro define_joins(name, vars::Vector{Symbol}, ir::SumProduct)
   quote
     $(@splice (old_v, new_v) in zip(ir.value, value) begin
       if isa(old_v, SumProduct)
-        :(@define_joins($(new_v.fun), $(convert(Vector{Symbol}, new_v.args)), $old_v))
+        :(@define_joins($(new_v.name), $(convert(Vector{Symbol}, new_v.args)), $old_v))
       end
     end)
     function $(esc(name))($(map(esc, vars)...))
-      @join($ir, $(convert(Vector{Union{Call, Var}}, value)))
+      @join($ir, $(convert(Vector{Union{ProcCall, Var}}, value)))
     end
   end
 end
@@ -350,37 +367,16 @@ macro define_lambda(lambda::Lambda, ir::SumProduct, indexes::Vector{Index})
   end
 end
 
-function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{SumProduct, Vector{Index}}
-  # insert indexes and partial calls
-  calls = Call[]
-  indexes = Index[]
-  for call in lambda.domain
-    typ = fun_type(call.fun)
-    if can_index(typ)
-      # sort args according to variable order
-      n = length(call.args)
-      permutation = Vector(1:n)
-      sort!(permutation, by=(ix) -> findfirst(vars, call.args[ix]))
-      index = Index(gensym("index"), typ, call.fun, permutation)
-      push!(indexes, index)
-      # insert all prefixes of args
-      for i in 1:n
-        push!(calls, Call(index, typ, call.args[permutation][1:i]))
-      end
-    else
-      push!(calls, Call(call.fun, typ, call.args))
-    end
-  end
-
+function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::SumProduct
   # make individual SumProducts
-  latest_var_nums = map(calls) do call
+  latest_var_nums = map(lambda.domain) do call
     maximum(call.args) do arg 
       findfirst(vars, arg)
     end
   end
   sum_products = map(1:length(vars)) do var_num
     var = vars[var_num]
-    domain = calls[latest_var_nums .== var_num]
+    domain = lambda.domain[latest_var_nums .== var_num]
     value = (var in lambda.value) ? [var] : []
     SumProduct(lambda.ring, var, domain, value)
   end
@@ -391,7 +387,30 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{SumPro
     sum_product
   end
   
-  (ir, indexes)
+  ir
+end
+
+function insert_indexes(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{Lambda, Vector{Index}}
+  domain = Union{FunCall, IndexCall}[]
+  indexes = Index[]
+  for call in lambda.domain
+    typ = fun_type(call.name)
+    if can_index(typ)
+      # sort args according to variable order
+      n = length(call.args)
+      permutation = Vector(1:n)
+      sort!(permutation, by=(ix) -> findfirst(vars, call.args[ix]))
+      name = gensym("index")
+      push!(indexes, Index(name, typ, call.name, permutation))
+      # insert all prefixes of args
+      for i in 1:n
+        push!(domain, IndexCall(name, typ, call.args[permutation][1:i]))
+      end
+    else
+      push!(domain, FunCall(call.name, typ, call.args))
+    end
+  end
+  (Lambda(lambda.ring, lambda.args, domain, lambda.value), indexes)
 end
 
 function order_vars(lambda::Lambda) ::Vector{Symbol}
@@ -400,21 +419,21 @@ function order_vars(lambda::Lambda) ::Vector{Symbol}
 end
 
 function lower_constants(lambda::Lambda) ::Lambda
-  constants = Call[]
+  constants = FunCall[]
   
   lower_constant = (arg) -> begin
-    if isa(arg, Symbol)
-      arg
-    else
+    if isa(arg, Constant)
       var = gensym("constant")
-      fun = () -> arg
-      push!(constants, Call(fun, typeof(fun), [var]))
+      fun = @eval () -> $(arg.value)
+      push!(constants, FunCall(fun, typeof(fun), [var]))
       var
+    else
+      arg
     end
   end
   
   domain = map(lambda.domain) do call
-    Call(call.fun, call.typ, map(lower_constant, call.args))
+    typeof(call)(call.name, call.typ, map(lower_constant, call.args))
   end
   
   value = map(lower_constant, lambda.value)
@@ -425,11 +444,12 @@ end
 function compile(lambda::Lambda, fun_type::Function, var_type::Function)
   lambda = lower_constants(lambda)
   vars = order_vars(lambda)
-  ir, indexes = factorize(lambda, vars)
+  indexed_lambda, indexes = insert_indexes(lambda, vars)
+  ir = factorize(indexed_lambda, vars)
   code = quote
-    @define_lambda($lambda, $ir, $indexes)
+    @define_lambda($indexed_lambda, $ir, $indexes)
   end
-  # @show simplify_expr(macroexpand(code))
+  # eval(@show simplify_expr(macroexpand(code)))
   eval(code)
 end
 
@@ -439,9 +459,9 @@ polynomial_ast1 = Lambda(
   Ring{Int64}(+,*,1,0),
   [:i, :x, :y, :z],
   [
-    Call(:xx, Any, [:i, :x]),
-    Call(:yy, Any, [:i, :y]),
-    Call(:zz, Any, [:x, :y, :z]),
+    FunCall(:xx, Any, [:i, :x]),
+    FunCall(:yy, Any, [:i, :y]),
+    FunCall(:zz, Any, [:x, :y, :z]),
   ],
   [:z]
   )
@@ -450,9 +470,9 @@ polynomial_ast2 = Lambda(
   Ring{Int64}(+,*,1,0),
   [:x, :y, :z],
   [
-    Call(:xx, Any, [:x, :x]),
-    Call(:yy, Any, [:x, :y]),
-    Call(:zz, Any, [:x, :y, :z]),
+    FunCall(:xx, Any, [:x, :x]),
+    FunCall(:yy, Any, [:x, :y]),
+    FunCall(:zz, Any, [:x, :y, :z]),
   ],
   [:z]
   )
@@ -463,17 +483,17 @@ polynomial_ast3 = Lambda(
     Ring{Int64}(+,*,1,0),
     [:i, :x, :y, :t1, :t2, :t3, :z],
     [  
-      Call(:xx, Any, [:i, :x]),
-      Call(:yy, Any, [:i, :y]),
-      Call(*, Any, [:x, :x, :t1]),
-      Call(*, Any, [:y, :y, :t2]),
-      Call(*, Any, [3, :x, :y, :t3]),
-      Call(+, Any, [:t1, :t2, :t3, :z])
+      FunCall(:xx, Any, [:i, :x]),
+      FunCall(:yy, Any, [:i, :y]),
+      FunCall(*, Any, [:x, :x, :t1]),
+      FunCall(*, Any, [:y, :y, :t2]),
+      FunCall(*, Any, [Constant(3), :x, :y, :t3]),
+      FunCall(+, Any, [:t1, :t2, :t3, :z])
     ],
     [:z]
     )
-const xx = Relation((collect(0:1000),collect(0:1000)))
-const yy = Relation((collect(0:1000), collect(reverse(0:1000))))
+const xx = Relation((collect(0:3),collect(0:3)))
+const yy = Relation((collect(0:3), collect(reverse(0:3))))
 const big_xx = Relation((collect(0:1000000),collect(0:1000000)))
 const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 

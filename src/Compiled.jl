@@ -43,8 +43,9 @@ struct Var
   name::Symbol
 end
 
-struct Call{T} # type of fun
+struct Call 
   fun # function, or anything which implements finite function interface
+  typ::Type
   args::Vector{Any}
 end
 
@@ -229,7 +230,6 @@ end
 # codegen
 
 get_type(call::Index{T}) where {T} = T
-get_type(call::Call{T}) where {T} = T
 function get_fun(call::Call)
   if isa(call.fun, Index)
     call.fun.name
@@ -238,12 +238,12 @@ function get_fun(call::Call)
   end
 end
 macro get_index(fun, index); get_index(get_type(index), fun, index.permutation); end
-macro count(call); count(get_type(call), get_fun(call), convert(Vector{Symbol}, call.args)); end
-macro iter(call, f); iter(get_type(call), get_fun(call), convert(Vector{Symbol}, call.args), f); end
-macro prepare(call); prepare(get_type(call), get_fun(call), convert(Vector{Symbol}, call.args)); end
-macro contains(call); contains(get_type(call), get_fun(call), convert(Vector{Symbol}, call.args)); end
+macro count(call); count(call.typ, get_fun(call), convert(Vector{Symbol}, call.args)); end
+macro iter(call, f); iter(call.typ, get_fun(call), convert(Vector{Symbol}, call.args), f); end
+macro prepare(call); prepare(call.typ, get_fun(call), convert(Vector{Symbol}, call.args)); end
+macro contains(call); contains(call.typ, get_fun(call), convert(Vector{Symbol}, call.args)); end
 
-function value(call::Call{T}) where {T <: Function}
+function value(call::Call) 
   quote
     $(esc(call.fun))($(map(esc, call.args)...))
   end
@@ -319,7 +319,7 @@ macro define_joins(name, vars::Vector{Symbol}, ir::SumProduct)
   value = map(ir.value) do v
     if isa(v, SumProduct)
       child_name = gensym("join")
-      Call{Function}(child_name, child_vars)
+      Call(child_name, Function, child_vars)
     else
       Var(v)
     end
@@ -365,10 +365,10 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{SumPro
       push!(indexes, index)
       # insert all prefixes of args
       for i in 1:n
-        push!(calls, Call{typ}(index, call.args[permutation][1:i]))
+        push!(calls, Call(index, typ, call.args[permutation][1:i]))
       end
     else
-      push!(calls, Call{typ}(call.fun, call.args))
+      push!(calls, Call(call.fun, typ, call.args))
     end
   end
 
@@ -408,13 +408,13 @@ function lower_constants(lambda::Lambda) ::Lambda
     else
       var = gensym("constant")
       fun = () -> arg
-      push!(constants, Call{typeof(fun)}(fun, [var]))
+      push!(constants, Call(fun, typeof(fun), [var]))
       var
     end
   end
   
   domain = map(lambda.domain) do call
-    typeof(call)(call.fun, map(lower_constant, call.args))
+    Call(call.fun, call.typ, map(lower_constant, call.args))
   end
   
   value = map(lower_constant, lambda.value)
@@ -439,9 +439,9 @@ polynomial_ast1 = Lambda(
   Ring{Int64}(+,*,1,0),
   [:i, :x, :y, :z],
   [
-    Call{Any}(:xx, [:i, :x]),
-    Call{Any}(:yy, [:i, :y]),
-    Call{Any}(:zz, [:x, :y, :z]),
+    Call(:xx, Any, [:i, :x]),
+    Call(:yy, Any, [:i, :y]),
+    Call(:zz, Any, [:x, :y, :z]),
   ],
   [:z]
   )
@@ -450,9 +450,9 @@ polynomial_ast2 = Lambda(
   Ring{Int64}(+,*,1,0),
   [:x, :y, :z],
   [
-    Call{Any}(:xx, [:x, :x]),
-    Call{Any}(:yy, [:x, :y]),
-    Call{Any}(:zz, [:x, :y, :z]),
+    Call(:xx, Any, [:x, :x]),
+    Call(:yy, Any, [:x, :y]),
+    Call(:zz, Any, [:x, :y, :z]),
   ],
   [:z]
   )
@@ -463,12 +463,12 @@ polynomial_ast3 = Lambda(
     Ring{Int64}(+,*,1,0),
     [:i, :x, :y, :t1, :t2, :t3, :z],
     [  
-      Call{Any}(:xx, [:i, :x]),
-      Call{Any}(:yy, [:i, :y]),
-      Call{Any}(*, [:x, :x, :t1]),
-      Call{Any}(*, [:y, :y, :t2]),
-      Call{Any}(*, [3, :x, :y, :t3]),
-      Call{Any}(+, [:t1, :t2, :t3, :z])
+      Call(:xx, Any, [:i, :x]),
+      Call(:yy, Any, [:i, :y]),
+      Call(*, Any, [:x, :x, :t1]),
+      Call(*, Any, [:y, :y, :t2]),
+      Call(*, Any, [3, :x, :y, :t3]),
+      Call(+, Any, [:t1, :t2, :t3, :z])
     ],
     [:z]
     )

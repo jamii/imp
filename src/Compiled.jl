@@ -13,7 +13,7 @@ end
 const count_ring = Ring(+, *, 1, 0)
 
 struct Constant
-  value::Any 
+  value::Any
 end
 
 struct FunCall
@@ -32,10 +32,11 @@ struct Lambda
   ring::Ring
   args::Vector{Symbol}
   domain::Vector{Union{FunCall, IndexCall}}
-  value::Vector{Union{Symbol, FunCall, Constant}} 
+  value::Vector{Union{Symbol, FunCall, Constant}}
 end
 
 struct Funs
+  main::Symbol
   funs::Dict{Symbol, Union{Lambda}}
 end
 
@@ -47,7 +48,7 @@ end
 struct Index
   name::Symbol
   typ::Type
-  fun::Union{Symbol, Function} 
+  fun::Union{Symbol, Function}
   permutation::Vector{Int64}
 end
 
@@ -55,12 +56,19 @@ struct SumProduct
   ring::Ring
   var::Symbol
   domain::Vector{Union{FunCall, IndexCall}}
-  value::Vector{Union{ProcCall, Symbol, SumProduct}} ## TODO remove SumProduct
+  value::Vector{Union{ProcCall, Symbol}}
+end
+
+struct Proc
+  name::Symbol
+  args::Vector{Symbol}
+  body::SumProduct
 end
 
 struct Procs
-  state::Dict{Symbol, Union{Index}} # (env) -> state
-  procs::Dict{Symbol, Union{SumProduct}} # (state, args...) -> ring_type
+  main::Symbol
+  indexes::Dict{Symbol, Index} # (env) -> state
+  procs::Dict{Symbol, Proc} # (state, args...) -> ring_type
 end
 
 function simplify_expr(expr::Expr)
@@ -198,7 +206,7 @@ end
 function iter(::Type{Relation{T}}, index, args::Vector{Symbol}, f) where {T}
   value = gensym("value")
   column = length(args)
-  quote 
+  quote
     index = $(esc(index))
     while next(index, $(Val{column}))
       $(esc(value)) = index.columns[$column][index.los[$column+1]]
@@ -209,7 +217,7 @@ end
 
 function prepare(::Type{Relation{T}}, index, args::Vector{Symbol}) where {T}
   column = length(args)
-  quote 
+  quote
     index = $(esc(index))
     index.his[$column+1] = index.los[$column]
   end
@@ -218,7 +226,7 @@ end
 function contains(::Type{Relation{T}}, index, args::Vector{Symbol}) where {T}
   column = length(args)
   var = args[end]
-  quote 
+  quote
     index = $(esc(index))
     seek(index, $(Val{column}), $(esc(var)))
   end
@@ -260,26 +268,18 @@ macro iter(call, f); iter(call.typ, call.name, convert(Vector{Symbol}, call.args
 macro prepare(call); prepare(call.typ, call.name, convert(Vector{Symbol}, call.args)); end
 macro contains(call); contains(call.typ, call.name, convert(Vector{Symbol}, call.args)); end
 
-function value(call::ProcCall) 
-  quote
-    $(esc(call.name))($(map(esc, call.args)...))
-  end
-end
-
-function value(var::Var)
-  esc(var.name)
-end
-
-macro value(call); value(call); end
-
-macro product(ring::Ring, domain::Vector{Union{FunCall, IndexCall}}, value::Vector{Union{ProcCall, Var}})
+macro product(ring::Ring, domain::Vector{Union{FunCall, IndexCall}}, value::Vector{Union{ProcCall, Symbol}})
   code = :result
   for call in reverse(value)
+    called = @match call begin
+      _::ProcCall => :(($(call.name))($(call.args...)))
+      _::Symbol => call
+    end
     code = quote
-      result = $(ring.mult)(result, @value($call))
+      result = $(ring.mult)(result, $(esc(called)))
       if result == $(ring.zero)
         $(ring.zero)
-      else 
+      else
         $code
       end
     end
@@ -310,20 +310,20 @@ macro sum(ring::Ring, call::Union{FunCall, IndexCall}, f)
   end
 end
 
-macro join(ir::SumProduct, value::Vector{Union{ProcCall, Var}})
-  @assert !isempty(ir.domain) "Cant join on an empty domain"
+macro run_proc(body::SumProduct)
+  @assert !isempty(body.domain) "Cant join on an empty domain"
   quote
-    $(@splice call in ir.domain quote
+    $(@splice call in body.domain quote
       @prepare($call)
     end)
-    mins = tuple($(@splice call in ir.domain quote
+    mins = tuple($(@splice call in body.domain quote
       @count($call)
     end))
     min = Base.min(mins...)
-    $(@splice i in 1:length(ir.domain) quote
+    $(@splice i in 1:length(body.domain) quote
       if mins[$i] == min
-        return @sum($(ir.ring), $(ir.domain[i]), ($(esc(ir.var))) -> begin
-          @product($(ir.ring), $(ir.domain[1:length(ir.domain) .!= i]), $value)
+        return @sum($(body.ring), $(body.domain[i]), ($(esc(body.var))) -> begin
+          @product($(body.ring), $(body.domain[1:length(body.domain) .!= i]), $(body.value))
         end)
       end
       error("Impossibles!")
@@ -331,68 +331,26 @@ macro join(ir::SumProduct, value::Vector{Union{ProcCall, Var}})
   end
 end
 
-macro define_joins(name, vars::Vector{Symbol}, ir::SumProduct)
-  child_vars = union(vars, [ir.var])
-  value = map(ir.value) do v
-    if isa(v, SumProduct)
-      child_name = gensym("join")
-      ProcCall(child_name, child_vars)
-    else
-      Var(v)
-    end
-  end
-  quote
-    $(@splice (old_v, new_v) in zip(ir.value, value) begin
-      if isa(old_v, SumProduct)
-        :(@define_joins($(new_v.name), $(convert(Vector{Symbol}, new_v.args)), $old_v))
-      end
-    end)
-    function $(esc(name))($(map(esc, vars)...))
-      @join($ir, $(convert(Vector{Union{ProcCall, Var}}, value)))
-    end
-  end
-end
-
-macro define_lambda(lambda::Lambda, ir::SumProduct, indexes::Vector{Index}) 
+macro define_procs(procs::Procs)
   name = gensym("lambda")
   child_name = gensym("join")
-  index_names = map((index) -> index.name, indexes)
   quote
-    @define_joins($child_name, $(index_names), $ir)
+    $(@splice (_, proc) in procs.procs quote
+      function $(esc(proc.name))($(map(esc, proc.args)...))
+        @run_proc($(proc.body))
+      end
+    end)
     function $name(env)
-      $child_name($(@splice index in indexes quote
+      $(procs.main)($(@splice (_, index) in procs.indexes quote
         @get_index(env[$(Expr(:quote, index.fun))], $index)
       end))
     end
   end
 end
 
-function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::SumProduct
-  # make individual SumProducts
-  latest_var_nums = map(lambda.domain) do call
-    maximum(call.args) do arg 
-      findfirst(vars, arg)
-    end
-  end
-  sum_products = map(1:length(vars)) do var_num
-    var = vars[var_num]
-    domain = lambda.domain[latest_var_nums .== var_num]
-    value = (var in lambda.value) ? [var] : []
-    SumProduct(lambda.ring, var, domain, value)
-  end
-  
-  # stitch them all together
-  ir = reduce(reverse(sum_products)) do tail, sum_product
-    push!(sum_product.value, tail)
-    sum_product
-  end
-  
-  ir
-end
-
-function insert_indexes(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{Lambda, Vector{Index}}
+function insert_indexes(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{Vector{Union{FunCall, IndexCall}}, Dict{Symbol, Index}}
   domain = Union{FunCall, IndexCall}[]
-  indexes = Index[]
+  indexes = Dict{Symbol, Index}()
   for call in lambda.domain
     typ = fun_type(call.name)
     if can_index(typ)
@@ -401,7 +359,7 @@ function insert_indexes(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{Lambda, Ve
       permutation = Vector(1:n)
       sort!(permutation, by=(ix) -> findfirst(vars, call.args[ix]))
       name = gensym("index")
-      push!(indexes, Index(name, typ, call.name, permutation))
+      indexes[name] = Index(name, typ, call.name, permutation)
       # insert all prefixes of args
       for i in 1:n
         push!(domain, IndexCall(name, typ, call.args[permutation][1:i]))
@@ -410,7 +368,40 @@ function insert_indexes(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{Lambda, Ve
       push!(domain, FunCall(call.name, typ, call.args))
     end
   end
-  (Lambda(lambda.ring, lambda.args, domain, lambda.value), indexes)
+  (domain, indexes)
+end
+
+function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Procs
+  domain, indexes = insert_indexes(lambda, vars)
+  index_names = collect(keys(indexes))
+
+  # for each call, figure out at which var we have all the args available
+  latest_var_nums = map(domain) do call
+    maximum(call.args) do arg
+      findfirst(vars, arg)
+    end
+  end
+
+  # make individual procs
+  procs = map(1:length(vars)) do var_num
+    var = vars[var_num]
+    proc_domain = domain[latest_var_nums .== var_num]
+    proc_value = (var in lambda.value) ? [var] : []
+    body = SumProduct(lambda.ring, var, proc_domain, proc_value)
+    args = vcat(index_names, vars[1:var_num-1])
+    Proc(gensym("proc"), args, body)
+  end
+
+  # stitch them all together
+  for i in 1:(length(procs)-1)
+    push!(procs[i].body.value, ProcCall(procs[i+1].name, procs[i+1].args))
+  end
+
+  Procs(
+    procs[1].name,
+    indexes,
+    Dict{Symbol, Proc}(proc.name => proc for proc in procs),
+  )
 end
 
 function order_vars(lambda::Lambda) ::Vector{Symbol}
@@ -420,7 +411,7 @@ end
 
 function lower_constants(lambda::Lambda) ::Lambda
   constants = FunCall[]
-  
+
   lower_constant = (arg) -> begin
     if isa(arg, Constant)
       var = gensym("constant")
@@ -431,25 +422,24 @@ function lower_constants(lambda::Lambda) ::Lambda
       arg
     end
   end
-  
+
   domain = map(lambda.domain) do call
     typeof(call)(call.name, call.typ, map(lower_constant, call.args))
   end
-  
+
   value = map(lower_constant, lambda.value)
-  
+
   Lambda(lambda.ring, lambda.args, vcat(constants, domain), value)
 end
 
 function compile(lambda::Lambda, fun_type::Function, var_type::Function)
   lambda = lower_constants(lambda)
   vars = order_vars(lambda)
-  indexed_lambda, indexes = insert_indexes(lambda, vars)
-  ir = factorize(indexed_lambda, vars)
-  code = quote
-    @define_lambda($indexed_lambda, $ir, $indexes)
-  end
-  # eval(@show simplify_expr(macroexpand(code)))
+  procs = factorize(lambda, vars)
+  code = macroexpand(quote
+    @define_procs($procs)
+  end)
+  # @show simplify_expr(code)
   eval(code)
 end
 
@@ -476,13 +466,13 @@ polynomial_ast2 = Lambda(
   ],
   [:z]
   )
-  
+
 zz(x, y) = (x * x) + (y * y) + (3 * x * y)
-  
+
 polynomial_ast3 = Lambda(
     Ring{Int64}(+,*,1,0),
     [:i, :x, :y, :t1, :t2, :t3, :z],
-    [  
+    [
       FunCall(:xx, Any, [:i, :x]),
       FunCall(:yy, Any, [:i, :y]),
       FunCall(*, Any, [:x, :x, :t1]),

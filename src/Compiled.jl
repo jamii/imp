@@ -482,8 +482,8 @@ polynomial_ast3 = Lambda(
     ],
     [:z]
     )
-const xx = Relation((collect(0:3),collect(0:3)))
-const yy = Relation((collect(0:3), collect(reverse(0:3))))
+const xx = Relation((collect(0:100),collect(0:100)))
+const yy = Relation((collect(0:100), collect(reverse(0:100))))
 const big_xx = Relation((collect(0:1000000),collect(0:1000000)))
 const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 
@@ -494,12 +494,13 @@ const p2 = compile(polynomial_ast2, fun_type, (var) -> var_type[var])
 const p3 = compile(polynomial_ast3, fun_type, (var) -> var_type[var])
 
 inputs = Dict(:xx => xx, :yy => yy, :zz => zz)
-@show sum(((x * x) + (y * y) + (3 * x * y) for (x,y) in zip(xx.columns[2], yy.columns[2])))
+expected = @show sum(((x * x) + (y * y) + (3 * x * y) for (x,y) in zip(xx.columns[2], yy.columns[2])))
 @show @time p1(inputs)
 @show @time p2(inputs)
 @show @time p3(inputs)
-@assert p1(inputs) == p2(inputs)
-@assert p1(inputs) == p3(inputs)
+@assert p1(inputs) == expected
+@assert p2(inputs) == expected
+@assert p3(inputs) == expected
 
 # using BenchmarkTools
 # big_inputs = Dict(:xx => big_xx, :yy => big_yy, :zz => zz)

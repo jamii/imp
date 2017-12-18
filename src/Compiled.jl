@@ -52,21 +52,10 @@ struct Lambda
   body::Union{SumProduct, CreateIndexes}
 end
 
-struct Funs
-  main::Symbol
-  funs::Dict{Symbol, Union{Lambda}}
-end
-
-struct Proc
-  name::Symbol
-  args::Vector{Symbol}
-  body::SumProduct
-end
-
-struct Procs
+struct Program
   main::Symbol
   indexes::Dict{Symbol, Index} # (env) -> state
-  procs::Dict{Symbol, Lambda} # (state, args...) -> ring_type
+  funs::Dict{Symbol, Union{Lambda}}
 end
 
 function simplify_expr(expr::Expr)
@@ -308,7 +297,7 @@ macro sum(ring::Ring, call::Union{FunCall, IndexCall}, f)
   end
 end
 
-macro run_proc(args::Vector{Symbol}, body::SumProduct)
+macro body(args::Vector{Symbol}, body::SumProduct)
   @assert !isempty(body.domain) "Cant join on an empty domain"
   free_vars = setdiff(union(map((call) -> call.args, body.domain)...), args)
   @assert length(free_vars) == 1 "Need to have factorized all lambdas"
@@ -332,17 +321,17 @@ macro run_proc(args::Vector{Symbol}, body::SumProduct)
   end
 end
 
-macro define_procs(procs::Procs)
+macro program(program::Program)
   name = gensym("lambda")
   child_name = gensym("join")
   quote
-    $(@splice (_, proc) in procs.procs quote
-      function $(esc(proc.name))($(map(esc, proc.args)...))
-        @run_proc($(proc.args), $(proc.body))
+    $(@splice (_, fun) in program.funs quote
+      function $(esc(fun.name))($(map(esc, fun.args)...))
+        @body($(fun.args), $(fun.body))
       end
     end)
     function $name(env)
-      $(procs.main)($(@splice (_, index) in procs.indexes quote
+      $(program.main)($(@splice (_, index) in program.indexes quote
         @get_index(env[$(Expr(:quote, index.fun))], $index)
       end))
     end
@@ -374,7 +363,7 @@ function insert_indexes(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{Vector{Uni
   (domain, indexes)
 end
 
-function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Procs
+function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Program
   @assert isa(lambda.body, SumProduct)
   
   domain, indexes = insert_indexes(lambda, vars)
@@ -387,25 +376,25 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Procs
     end
   end
 
-  # make individual procs
-  procs = map(1:length(vars)) do var_num
+  # make individual funs
+  funs = map(1:length(vars)) do var_num
     var = vars[var_num]
-    proc_domain = domain[latest_var_nums .== var_num]
-    proc_value = (var in lambda.body.value) ? [var] : []
-    body = SumProduct(lambda.body.ring, proc_domain, proc_value)
+    fun_domain = domain[latest_var_nums .== var_num]
+    fun_value = (var in lambda.body.value) ? [var] : []
+    body = SumProduct(lambda.body.ring, fun_domain, fun_value)
     args = vcat(index_names, vars[1:var_num-1])
     Lambda(gensym("lambda"), args, body)
   end
 
   # stitch them all together
-  for i in 1:(length(procs)-1)
-    push!(procs[i].body.value, FunCall(procs[i+1].name, Function, procs[i+1].args))
+  for i in 1:(length(funs)-1)
+    push!(funs[i].body.value, FunCall(funs[i+1].name, Function, funs[i+1].args))
   end
 
-  Procs(
-    procs[1].name,
+  Program(
+    funs[1].name,
     indexes,
-    Dict{Symbol, Lambda}(proc.name => proc for proc in procs),
+    Dict{Symbol, Lambda}(fun.name => fun for fun in funs),
   )
 end
 
@@ -444,9 +433,9 @@ end
 function compile(lambda::Lambda, fun_type::Function, var_type::Function)
   lambda = lower_constants(lambda)
   vars = order_vars(lambda)
-  procs = factorize(lambda, vars)
+  program = factorize(lambda, vars)
   code = macroexpand(quote
-    @define_procs($procs)
+    @program($program)
   end)
   # @show simplify_expr(code)
   eval(code)

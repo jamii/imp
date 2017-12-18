@@ -3,6 +3,8 @@ module Compiled
 using Base.Cartesian
 using Match
 
+# --- ast ---
+
 struct Ring{T}
   add::Function
   mult::Function
@@ -41,15 +43,10 @@ struct Index
   permutation::Vector{Int64}
 end
 
-struct CreateIndexes
-  indexes::Vector{Index}
-  body::FunCall
-end
-
 struct Lambda
   name::Symbol
   args::Vector{Symbol}
-  body::Union{SumProduct, CreateIndexes}
+  body::SumProduct
 end
 
 struct Program
@@ -57,6 +54,8 @@ struct Program
   indexes::Dict{Symbol, Index} # (env) -> state
   funs::Dict{Symbol, Union{Lambda}}
 end
+
+# --- util ---
 
 function simplify_expr(expr::Expr)
   @match expr begin
@@ -85,10 +84,6 @@ end
 
 Base.eltype(ring::Ring{T}) where {T} = T
 
-struct Var
-  name::Symbol
-end
-
 macro splice(iterator, body)
   @assert iterator.head == :call
   @assert iterator.args[1] == :in
@@ -106,7 +101,7 @@ function inline(function_expr::Expr, value)
   end
 end
 
-# relation interface
+# --- relation interface ---
 
 struct Relation{T <: Tuple}
   columns::T
@@ -219,7 +214,7 @@ function contains(::Type{Relation{T}}, index, args::Vector{Symbol}) where {T}
   end
 end
 
-# function interface
+# --- function interface ---
 
 function can_index(::Type{T}) where {T <: Function}
   false
@@ -247,7 +242,7 @@ function contains(::Type{T}, fun, args::Vector{Symbol}) where {T <: Function}
   end
 end
 
-# codegen
+# --- codegen ---
 
 macro get_index(fun, index); get_index(index.typ, fun, index.permutation); end
 macro count(call); count(call.typ, call.name, convert(Vector{Symbol}, call.args)); end
@@ -338,9 +333,9 @@ macro program(program::Program)
   end
 end
 
+# --- compiler ----
+
 function insert_indexes(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{Vector{Union{FunCall, IndexCall}}, Dict{Symbol, Index}}
-  @assert isa(lambda.body, SumProduct)
-  
   domain = Union{FunCall, IndexCall}[]
   indexes = Dict{Symbol, Index}()
   for call in lambda.body.domain
@@ -364,8 +359,6 @@ function insert_indexes(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{Vector{Uni
 end
 
 function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Program
-  @assert isa(lambda.body, SumProduct)
-  
   domain, indexes = insert_indexes(lambda, vars)
   index_names = collect(keys(indexes))
 
@@ -399,15 +392,11 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Program
 end
 
 function order_vars(lambda::Lambda) ::Vector{Symbol}
-  @assert isa(lambda.body, SumProduct)
-  
   # just use order vars appear in the ast for now
   union(map((call) -> call.args, lambda.body.domain)...)
 end
 
 function lower_constants(lambda::Lambda) ::Lambda
-  @assert isa(lambda.body, SumProduct)
-  
   constants = FunCall[]
 
   lower_constant = (arg) -> begin
@@ -440,6 +429,8 @@ function compile(lambda::Lambda, fun_type::Function, var_type::Function)
   # @show simplify_expr(code)
   eval(code)
 end
+
+# --- examples ---
 
 zz(x, y) = (x * x) + (y * y) + (3 * x * y)
 

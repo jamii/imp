@@ -40,11 +40,6 @@ struct Funs
   funs::Dict{Symbol, Union{Lambda}}
 end
 
-struct ProcCall
-  name::Symbol
-  args::Vector{Symbol} # plus state pointer
-end
-
 struct Index
   name::Symbol
   typ::Type
@@ -56,7 +51,7 @@ struct SumProduct
   ring::Ring
   var::Symbol
   domain::Vector{Union{FunCall, IndexCall}}
-  value::Vector{Union{ProcCall, Symbol}}
+  value::Vector{Union{FunCall, Symbol}}
 end
 
 struct Proc
@@ -268,11 +263,11 @@ macro iter(call, f); iter(call.typ, call.name, convert(Vector{Symbol}, call.args
 macro prepare(call); prepare(call.typ, call.name, convert(Vector{Symbol}, call.args)); end
 macro contains(call); contains(call.typ, call.name, convert(Vector{Symbol}, call.args)); end
 
-macro product(ring::Ring, domain::Vector{Union{FunCall, IndexCall}}, value::Vector{Union{ProcCall, Symbol}})
+macro product(ring::Ring, domain::Vector{Union{FunCall, IndexCall}}, value::Vector{Union{FunCall, Symbol}})
   code = :result
   for call in reverse(value)
     called = @match call begin
-      _::ProcCall => :(($(call.name))($(call.args...)))
+      _::FunCall => :(($(call.name))($(call.args...)))
       _::Symbol => call
     end
     code = quote
@@ -394,7 +389,7 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Procs
 
   # stitch them all together
   for i in 1:(length(procs)-1)
-    push!(procs[i].body.value, ProcCall(procs[i+1].name, procs[i+1].args))
+    push!(procs[i].body.value, FunCall(procs[i+1].name, Function, procs[i+1].args))
   end
 
   Procs(

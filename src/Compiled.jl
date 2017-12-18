@@ -56,8 +56,9 @@ struct Lambda
   value::Vector{Any} 
 end
 
-struct Index{T} # type of fun
+struct Index # type of fun
   name::Symbol
+  typ::Type
   fun 
   permutation::Vector{Int64}
 end
@@ -229,7 +230,6 @@ end
 
 # codegen
 
-get_type(call::Index{T}) where {T} = T
 function get_fun(call::Call)
   if isa(call.fun, Index)
     call.fun.name
@@ -237,7 +237,7 @@ function get_fun(call::Call)
     call.fun
   end
 end
-macro get_index(fun, index); get_index(get_type(index), fun, index.permutation); end
+macro get_index(fun, index); get_index(index.typ, fun, index.permutation); end
 macro count(call); count(call.typ, get_fun(call), convert(Vector{Symbol}, call.args)); end
 macro iter(call, f); iter(call.typ, get_fun(call), convert(Vector{Symbol}, call.args), f); end
 macro prepare(call); prepare(call.typ, get_fun(call), convert(Vector{Symbol}, call.args)); end
@@ -361,7 +361,7 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{SumPro
       n = length(call.args)
       permutation = Vector(1:n)
       sort!(permutation, by=(ix) -> findfirst(vars, call.args[ix]))
-      index = Index{typ}(gensym("index"), call.fun, permutation)
+      index = Index(gensym("index"), typ, call.fun, permutation)
       push!(indexes, index)
       # insert all prefixes of args
       for i in 1:n

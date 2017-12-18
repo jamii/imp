@@ -36,6 +36,12 @@ struct SumProduct
   value::Vector{Union{FunCall, Symbol}}
 end
 
+struct Lambda
+  name::Symbol
+  args::Vector{Symbol}
+  body::SumProduct
+end
+
 struct Index
   name::Symbol
   typ::Type
@@ -43,15 +49,15 @@ struct Index
   permutation::Vector{Int64}
 end
 
-struct Lambda
-  name::Symbol
-  args::Vector{Symbol}
-  body::SumProduct
+struct Result
+  typs::Vector{Type}
 end
+
+const State = Union{Index, Result}
 
 struct Program
   main::Symbol
-  indexes::Dict{Symbol, Index} # (env) -> state
+  states::Dict{Symbol, State} # (env) -> state
   funs::Dict{Symbol, Union{Lambda}}
 end
 
@@ -168,12 +174,11 @@ function can_index(::Type{Relation{T}}) where {T}
   true
 end
 
-function get_index(::Type{Relation{T}}, fun, permutation::Vector{Int64}) where {T}
+function get_index(::Type{Relation{T}}, fun::Symbol, permutation::Vector{Int64}) where {T}
   @assert permutation == collect(1:length(permutation)) "Can't permute $(index.permutation) yet"
   n = length(T.parameters)
   quote
-    fun = $(esc(fun))
-    RelationIndex(fun.columns, fill(1, $(n+1)), fill(length(fun.columns[1])+1, $(n+1)))
+    RelationIndex($(esc(fun)).columns, fill(1, $(n+1)), fill(length($(esc(fun)).columns[1])+1, $(n+1)))
   end
 end
 
@@ -244,11 +249,26 @@ end
 
 # --- codegen ---
 
-macro get_index(fun, index); get_index(index.typ, fun, index.permutation); end
 macro count(call); count(call.typ, call.name, convert(Vector{Symbol}, call.args)); end
 macro iter(call, f); iter(call.typ, call.name, convert(Vector{Symbol}, call.args), f); end
 macro prepare(call); prepare(call.typ, call.name, convert(Vector{Symbol}, call.args)); end
 macro contains(call); contains(call.typ, call.name, convert(Vector{Symbol}, call.args)); end
+
+macro state(env, state::Index)
+  fun = gensym("fun")
+  quote 
+    $(esc(fun)) = $(esc(env))[$(Expr(:quote, state.fun))]
+    $(get_index(state.typ, fun, state.permutation))
+  end
+end
+
+macro state(env, state::Result)
+  quote
+    Relation(($(@splice typ in state.typs quote
+      $typ[]
+    end),))
+  end
+end
 
 macro product(ring::Ring, domain::Vector{Union{FunCall, IndexCall}}, value::Vector{Union{FunCall, Symbol}})
   code = :result
@@ -326,9 +346,10 @@ macro program(program::Program)
       end
     end)
     function $name(env)
-      $(program.main)($(@splice (_, index) in program.indexes quote
-        @get_index(env[$(Expr(:quote, index.fun))], $index)
-      end))
+      $(@splice (state_name, state) in program.states quote
+        $(esc(state_name)) = @state(env, $state)
+      end)
+      $(esc(program.main))($(map(esc, program.funs[program.main].args)...))
     end
   end
 end

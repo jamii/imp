@@ -36,10 +36,22 @@ struct SumProduct
   value::Vector{Union{FunCall, Symbol}}
 end
 
-struct Lambda
+struct Insert
+  result_name::Symbol
+  args::Vector{Symbol}
+  value::FunCall
+end
+
+mutable struct Lambda
   name::Symbol
   args::Vector{Symbol}
-  body::SumProduct
+  body::Union{SumProduct, Insert}
+end
+
+struct Return
+  name::Symbol
+  result_name::Symbol
+  value::FunCall
 end
 
 struct Index
@@ -50,15 +62,15 @@ struct Index
 end
 
 struct Result
+  name::Symbol
   typs::Vector{Type}
 end
 
 const State = Union{Index, Result}
 
-struct Program
-  main::Symbol
+mutable struct Program
   states::Vector{State}
-  funs::Vector{Lambda} # must in definition order - can't call funs that haven't been defined yet
+  funs::Vector{Union{Lambda, Return}} # must in definition order - can't call funs that haven't been defined yet
 end
 
 # --- util ---
@@ -272,13 +284,13 @@ macro state(env, state::Index, fun_type::Function)
   fun = gensym("fun")
   quote 
     $(esc(fun))::$(fun_type(state.fun)) = $(esc(env))[$(Expr(:quote, state.fun))]
-    $(get_index(state.typ, fun, state.permutation))
+    const $(esc(state.name)) = $(get_index(state.typ, fun, state.permutation))
   end
 end
 
 macro state(env, state::Result, fun_type::Function)
   quote
-    Relation(($(@splice typ in state.typs quote
+    const $(esc(state.name)) = Relation(($(@splice typ in state.typs quote
       $typ[]
     end),))
   end
@@ -350,30 +362,42 @@ macro body(args::Vector{Symbol}, body::SumProduct)
   end
 end
 
-macro states(env::Symbol, states::Vector{State}, fun_type::Function)
+macro body(args::Vector{Symbol}, body::Insert)
   quote
-    $(@splice state in states quote
-      const $(esc(state.name)) = @state($(esc(env)), $state, $fun_type)
+    value = ($(esc(body.value.name)))($(map(esc, body.value.args)...),)
+    $(@splice (arg_num,arg) in enumerate(body.args) quote
+      push!($(esc(body.result_name)).columns[$arg_num], $(esc(arg)))
     end)
+    push!($(esc(body.result_name)).columns[end], value)
+    value
   end
 end
 
-macro funs(funs::Vector{Lambda})
+macro fun(fun::Lambda)
   quote
-    $(@splice fun in funs quote
-      const $(esc(fun.name)) = ($(map(esc, fun.args)...),) -> begin
-        @body($(fun.args), $(fun.body))
-      end 
-    end)
+    const $(esc(fun.name)) = ($(map(esc, fun.args)...),) -> begin
+      @body($(fun.args), $(fun.body))
+    end 
+  end
+end
+
+macro fun(fun::Return)
+  quote
+    ($(esc(fun.value.name)))($(map(esc, fun.value.args)...),)
+    const $(esc(fun.name)) = $(esc(fun.result_name))
+    # TODO reduce result
   end
 end
 
 macro program(program::Program, fun_type::Function)
   quote
     function setup(env) 
-      @states(env, $(program.states), $fun_type)
-      @funs($(program.funs))
-      $(esc(program.main))
+      $(@splice state in program.states quote
+        @state(env, $state, $fun_type)
+      end)
+      $(@splice fun in program.funs quote
+        @fun($fun)
+      end)
     end
   end
 end
@@ -407,7 +431,7 @@ function Compiled.factorize(program::Program, vars::Vector{Symbol}) ::Program
   end
 
   # return funs in definition order - cant call funs that haven't been defined yet
-  Program(funs[1].name, program.states, reverse(funs)) 
+  Program(program.states, reverse(funs)) 
 end
 
 function insert_indexes(program::Program, vars::Vector{Symbol}) ::Program
@@ -428,7 +452,7 @@ function insert_indexes(program::Program, vars::Vector{Symbol}) ::Program
       # insert all prefixes of args
       args = call.args[permutation]
       for i in 1:n
-        if (i == 1) || (args[i] != args[i-1]) # dont emit repeated variables
+        if (i == 1) || (args[i] != args[i-1]) # don't emit repeated variables
           push!(domain, IndexCall(name, typ, args[1:i]))
         end
       end
@@ -438,12 +462,7 @@ function insert_indexes(program::Program, vars::Vector{Symbol}) ::Program
   end
   
   lambda = Lambda(lambda.name, lambda.args, SumProduct(lambda.body.ring, domain, lambda.body.value))
-  Program(program.main, vcat(program.states, indexes), [lambda])
-end
-
-function order_vars(lambda::Lambda) ::Vector{Symbol}
-  # just use order vars appear in the ast for now
-  union(map((call) -> call.args, lambda.body.domain)...)
+  Program(vcat(program.states, indexes), [lambda])
 end
 
 function functionalize(lambda::Lambda) ::Lambda
@@ -456,6 +475,44 @@ function functionalize(lambda::Lambda) ::Lambda
   end
   
   Lambda(lambda.name, args, SumProduct(lambda.body.ring, domain, lambda.body.value))
+end
+
+function relationalize(program::Program, args::Vector{Symbol}, vars::Vector{Symbol}, var_type::Function)
+  # find the earliest function call that we can wrap
+  insert_point = findlast(program.funs) do fun
+    all(args) do arg
+      arg in fun.args
+    end
+  end
+  
+  # initialize a relation
+  result_name = gensym("result")
+  arg_types = map(var_type, args)
+  push!(arg_types, eltype(program.funs[1].body.ring))
+  result = Result(result_name, arg_types)
+  push!(program.states, result)
+  
+  # steal the functions name and wrap it in an Insert
+  old_fun = program.funs[insert_point]
+  old_fun_name = old_fun.name
+  old_fun.name = gensym("lambda")
+  new_fun = 
+    Lambda(old_fun_name, copy(old_fun.args), 
+      Insert(result_name, copy(args),
+        FunCall(old_fun.name, Function, copy(old_fun.args))))
+  insert!(program.funs, insert_point+1, new_fun)  
+        
+  # finish with a Return
+  old_fun = program.funs[end]
+  new_fun = 
+    Return(gensym("return"), result_name,
+      FunCall(old_fun.name, Function, copy(old_fun.args)))
+  push!(program.funs, new_fun)
+end
+
+function order_vars(lambda::Lambda) ::Vector{Symbol}
+  # just use order vars appear in the ast for now
+  union(map((call) -> call.args, lambda.body.domain)...)
 end
 
 function lower_constants(lambda::Lambda) ::Lambda
@@ -485,13 +542,30 @@ function compile_function(lambda::Lambda, fun_type::Function, var_type::Function
   lambda = lower_constants(lambda)
   vars = order_vars(lambda)
   lambda = functionalize(lambda)
-  program = Program(lambda.name, [], [lambda])
+  program = Program([], [lambda])
   program = insert_indexes(program, vars)
   program = factorize(program, vars)
   code = macroexpand(quote
     @program($program, $fun_type)
   end)
   # @show simplify_expr(code)
+  eval(code)
+end
+
+function compile_relation(lambda::Lambda, fun_type::Function, var_type::Function)
+  lambda = lower_constants(lambda)
+  vars = order_vars(lambda)
+  args = lambda.args
+  lambda = Lambda(lambda.name, Symbol[], lambda.body)
+  program = Program([], [lambda])
+  program = insert_indexes(program, vars)
+  program = factorize(program, vars)
+  # TODO make all other passes mutate program too instead of returning new program
+  relationalize(program, args, vars, var_type)
+  code = macroexpand(quote
+    @program($program, $fun_type)
+  end)
+  @show simplify_expr(code)
   eval(code)
 end
 
@@ -574,6 +648,8 @@ const p1 = compile_function(polynomial_ast1, fun_type, (var) -> var_type[var])
 const p2 = compile_function(polynomial_ast2, fun_type, (var) -> var_type[var])
 const p3 = compile_function(polynomial_ast3, fun_type, (var) -> var_type[var])
 const p4 = compile_function(polynomial_ast4, fun_type, (var) -> var_type[var])
+const p5 = compile_relation(polynomial_ast4, fun_type, (var) -> var_type[var])
+const p6 = compile_relation(polynomial_ast3, fun_type, (var) -> var_type[var])
 
 inputs = Dict(:xx => xx, :yy => yy, :zz => zz)
 expected = @show sum(((x * x) + (y * y) + (3 * x * y) for (x,y) in zip(xx.columns[2], yy.columns[2])))
@@ -591,12 +667,22 @@ j3 = p3(inputs)
 @assert j3() == expected
 
 j4 = p4(inputs)
-for i in 1:100
-  x = i
-  y = 100-i
+for x in 0:100
+  y = 100-x
   z = (x * x) + (y * y) + (3 * x * y)
-  @assert j4(i) == z
+  @assert j4(x) == z
 end
+
+j5 = p5(inputs)
+for x in 0:100
+  y = 100-x
+  z = (x * x) + (y * y) + (3 * x * y)
+  @assert j5.columns[1][x+1] == x
+  @assert j5.columns[2][x+1] == z
+end
+
+j6 = p6(inputs)
+@assert j6.columns[1][1] == expected
 
 # using BenchmarkTools
 # big_inputs = Dict(:xx => big_xx, :yy => big_yy, :zz => zz)

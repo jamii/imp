@@ -477,9 +477,12 @@ function functionalize(lambda::Lambda) ::Lambda
   Lambda(lambda.name, args, SumProduct(lambda.body.ring, domain, lambda.body.value))
 end
 
-function relationalize(program::Program, args::Vector{Symbol}, vars::Vector{Symbol}, var_type::Function)
+function relationalize(program::Program, args::Vector{Symbol}, vars::Vector{Symbol}, var_type::Function) ::Program
+  states = copy(program.states)
+  funs = copy(program.funs)
+  
   # find the earliest function call that we can wrap
-  insert_point = findlast(program.funs) do fun
+  insert_point = findlast(funs) do fun
     all(args) do arg
       arg in fun.args
     end
@@ -488,26 +491,28 @@ function relationalize(program::Program, args::Vector{Symbol}, vars::Vector{Symb
   # initialize a relation
   result_name = gensym("result")
   arg_types = map(var_type, args)
-  push!(arg_types, eltype(program.funs[1].body.ring))
+  push!(arg_types, eltype(funs[1].body.ring))
   result = Result(result_name, arg_types)
-  push!(program.states, result)
+  push!(states, result)
   
   # steal the functions name and wrap it in an Insert
-  old_fun = program.funs[insert_point]
+  old_fun = funs[insert_point]
   old_fun_name = old_fun.name
   old_fun.name = gensym("lambda")
   new_fun = 
     Lambda(old_fun_name, copy(old_fun.args), 
       Insert(result_name, copy(args),
         FunCall(old_fun.name, Function, copy(old_fun.args))))
-  insert!(program.funs, insert_point+1, new_fun)  
+  insert!(funs, insert_point+1, new_fun)  
         
   # finish with a Return
-  old_fun = program.funs[end]
+  old_fun = funs[end]
   new_fun = 
     Return(gensym("return"), result_name,
       FunCall(old_fun.name, Function, copy(old_fun.args)))
-  push!(program.funs, new_fun)
+  push!(funs, new_fun)
+  
+  Program(states, funs)
 end
 
 function order_vars(lambda::Lambda) ::Vector{Symbol}
@@ -560,8 +565,7 @@ function compile_relation(lambda::Lambda, fun_type::Function, var_type::Function
   program = Program([], [lambda])
   program = insert_indexes(program, vars)
   program = factorize(program, vars)
-  # TODO make all other passes mutate program too instead of returning new program
-  relationalize(program, args, vars, var_type)
+  program = relationalize(program, args, vars, var_type)
   code = macroexpand(quote
     @program($program, $fun_type)
   end)

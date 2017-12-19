@@ -57,8 +57,8 @@ const State = Union{Index, Result}
 
 struct Program
   main::Symbol
-  states::Dict{Symbol, State} # (env) -> state
-  funs::Dict{Symbol, Union{Lambda}}
+  states::Vector{State}
+  funs::Vector{Lambda} # must in definition order - can't call funs that haven't been defined yet
 end
 
 # --- util ---
@@ -254,15 +254,15 @@ macro iter(call, f); iter(call.typ, call.name, convert(Vector{Symbol}, call.args
 macro prepare(call); prepare(call.typ, call.name, convert(Vector{Symbol}, call.args)); end
 macro contains(call); contains(call.typ, call.name, convert(Vector{Symbol}, call.args)); end
 
-macro state(env, state::Index)
+macro state(env, state::Index, fun_type::Function)
   fun = gensym("fun")
   quote 
-    $(esc(fun)) = $(esc(env))[$(Expr(:quote, state.fun))]
+    $(esc(fun))::$(fun_type(state.fun)) = $(esc(env))[$(Expr(:quote, state.fun))]
     $(get_index(state.typ, fun, state.permutation))
   end
 end
 
-macro state(env, state::Result)
+macro state(env, state::Result, fun_type::Function)
   quote
     Relation(($(@splice typ in state.typs quote
       $typ[]
@@ -336,29 +336,51 @@ macro body(args::Vector{Symbol}, body::SumProduct)
   end
 end
 
-macro program(program::Program)
-  name = gensym("lambda")
-  child_name = gensym("join")
+macro states(env::Symbol, states::Vector{State}, fun_type::Function)
   quote
-    $(@splice (_, fun) in program.funs quote
-      function $(esc(fun.name))($(map(esc, fun.args)...))
-        @body($(fun.args), $(fun.body))
-      end
+    $(@splice state in states quote
+      const $(esc(state.name)) = @state($(esc(env)), $state, $fun_type)
     end)
-    function $name(env)
-      $(@splice (state_name, state) in program.states quote
-        $(esc(state_name)) = @state(env, $state)
-      end)
-      $(esc(program.main))($(map(esc, program.funs[program.main].args)...))
+  end
+end
+
+macro funs(funs::Vector{Lambda})
+  quote
+    $(@splice fun in funs quote
+      const $(esc(fun.name)) = ($(map(esc, fun.args)...),) -> begin
+        @body($(fun.args), $(fun.body))
+      end 
+    end)
+  end
+end
+
+macro program(program::Program, fun_type::Function)
+  quote
+    function setup(env) 
+      @states(env, $(program.states), $fun_type)
+      @funs($(program.funs))
+      $(esc(program.main))
     end
   end
 end
 
 # --- compiler ----
 
-function insert_indexes(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{Vector{Union{FunCall, IndexCall}}, Dict{Symbol, Index}}
+function functionalize(lambda::Lambda) ::Lambda
+  # rename args so they don't collide with vars
+  args = map(gensym, lambda.args)
+  
+  domain = copy(lambda.body.domain)
+  for (arg, var) in zip(args, lambda.args)
+    push!(domain, FunCall(identity, [arg, var])) # var = identity(arg)
+  end
+  
+  Lambda(lambda.name, args, SumProduct(lambda.body.ring, domain, lambda.body.value))
+end
+
+function insert_indexes(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{Vector{Union{FunCall, IndexCall}}, Vector{Index}}
   domain = Union{FunCall, IndexCall}[]
-  indexes = Dict{Symbol, Index}()
+  indexes = Index[]
   for call in lambda.body.domain
     typ = fun_type(call.name)
     if can_index(typ)
@@ -367,7 +389,7 @@ function insert_indexes(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{Vector{Uni
       permutation = Vector(1:n)
       sort!(permutation, by=(ix) -> findfirst(vars, call.args[ix]))
       name = gensym("index")
-      indexes[name] = Index(name, typ, call.name, permutation)
+      push!(indexes, Index(name, typ, call.name, permutation))
       # insert all prefixes of args
       for i in 1:n
         push!(domain, IndexCall(name, typ, call.args[permutation][1:i]))
@@ -381,7 +403,6 @@ end
 
 function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Program
   domain, indexes = insert_indexes(lambda, vars)
-  index_names = collect(keys(indexes))
 
   # for each call, figure out at which var we have all the args available
   latest_var_nums = map(domain) do call
@@ -396,7 +417,7 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Program
     fun_domain = domain[latest_var_nums .== var_num]
     fun_value = (var in lambda.body.value) ? [var] : []
     body = SumProduct(lambda.body.ring, fun_domain, fun_value)
-    args = vcat(index_names, vars[1:var_num-1])
+    args = vars[1:var_num-1]
     Lambda(gensym("lambda"), args, body)
   end
 
@@ -408,7 +429,7 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Program
   Program(
     funs[1].name,
     indexes,
-    Dict{Symbol, Lambda}(fun.name => fun for fun in funs),
+    reverse(funs), # in definition order - cant call funs that haven't been defined yet
   )
 end
 
@@ -445,7 +466,19 @@ function compile(lambda::Lambda, fun_type::Function, var_type::Function)
   vars = order_vars(lambda)
   program = factorize(lambda, vars)
   code = macroexpand(quote
-    @program($program)
+    @program($program, $fun_type)
+  end)
+  @show simplify_expr(code)
+  eval(code)
+end
+
+function compile_function(lambda::Lambda, fun_type::Function, var_type::Function)
+  lambda = lower_constants(lambda)
+  lambda = functionalize(lambda)
+  vars = order_vars(lambda)
+  program = factorize(lambda, vars)
+  code = macroexpand(quote
+    @program($program, $fun_type)
   end)
   # @show simplify_expr(code)
   eval(code)
@@ -515,17 +548,23 @@ const p3 = compile(polynomial_ast3, fun_type, (var) -> var_type[var])
 
 inputs = Dict(:xx => xx, :yy => yy, :zz => zz)
 expected = @show sum(((x * x) + (y * y) + (3 * x * y) for (x,y) in zip(xx.columns[2], yy.columns[2])))
-@show @time p1(inputs)
-@show @time p2(inputs)
-@show @time p3(inputs)
-@assert p1(inputs) == expected
-@assert p2(inputs) == expected
-@assert p3(inputs) == expected
+j1 = p1(inputs)
+j2 = p2(inputs)
+j3 = p3(inputs)
+@show @time j1()
+@show @time j2()
+@show @time j3()
+@show @time j1()
+@show @time j2()
+@show @time j3()
+@assert j1() == expected
+@assert j2() == expected
+@assert j3() == expected
 
-# using BenchmarkTools
-# big_inputs = Dict(:xx => big_xx, :yy => big_yy, :zz => zz)
-# @show @benchmark p1(big_inputs)
-# @show @benchmark p2(big_inputs)
-# @show @benchmark p3(big_inputs)
+using BenchmarkTools
+big_inputs = Dict(:xx => big_xx, :yy => big_yy, :zz => zz)
+@show @benchmark p1(big_inputs)()
+@show @benchmark p2(big_inputs)()
+@show @benchmark p3(big_inputs)()
 
 end

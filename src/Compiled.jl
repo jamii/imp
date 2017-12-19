@@ -329,7 +329,7 @@ end
 macro body(args::Vector{Symbol}, body::SumProduct)
   @assert !isempty(body.domain) "Cant join on an empty domain"
   free_vars = setdiff(union(map((call) -> call.args, body.domain)...), args)
-  @assert length(free_vars) == 1 "Need to have factorized all lambdas"
+  @assert length(free_vars) == 1 "Need to have factorized all lambdas: $free_vars $body"
   var = free_vars[1]
   quote
     $(@splice call in body.domain quote
@@ -380,18 +380,6 @@ end
 
 # --- compiler ----
 
-function functionalize(lambda::Lambda) ::Lambda
-  # rename args so they don't collide with vars
-  args = map(gensym, lambda.args)
-  
-  domain = copy(lambda.body.domain)
-  for (arg, var) in zip(args, lambda.args)
-    push!(domain, FunCall(identity, [arg, var])) # var = identity(arg)
-  end
-  
-  Lambda(lambda.name, args, SumProduct(lambda.body.ring, domain, lambda.body.value))
-end
-
 function insert_indexes(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{Vector{Union{FunCall, IndexCall}}, Vector{Index}}
   domain = Union{FunCall, IndexCall}[]
   indexes = Index[]
@@ -434,7 +422,7 @@ function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Program
     fun_domain = domain[latest_var_nums .== var_num]
     fun_value = (var in lambda.body.value) ? [var] : []
     body = SumProduct(lambda.body.ring, fun_domain, fun_value)
-    args = vars[1:var_num-1]
+    args = union(lambda.args, vars[1:var_num-1])
     Lambda(gensym("lambda"), args, body)
   end
 
@@ -453,6 +441,18 @@ end
 function order_vars(lambda::Lambda) ::Vector{Symbol}
   # just use order vars appear in the ast for now
   union(map((call) -> call.args, lambda.body.domain)...)
+end
+
+function functionalize(lambda::Lambda) ::Lambda
+  # rename args so they don't collide with vars
+  args = map(gensym, lambda.args)
+  
+  domain = copy(lambda.body.domain)
+  for (arg, var) in zip(args, lambda.args)
+    push!(domain, FunCall(identity, typeof(identity), [arg, var])) # var = identity(arg)
+  end
+  
+  Lambda(lambda.name, args, SumProduct(lambda.body.ring, domain, lambda.body.value))
 end
 
 function lower_constants(lambda::Lambda) ::Lambda
@@ -478,21 +478,10 @@ function lower_constants(lambda::Lambda) ::Lambda
   Lambda(lambda.name, lambda.args, SumProduct(lambda.body.ring, vcat(constants, domain), value))
 end
 
-function compile(lambda::Lambda, fun_type::Function, var_type::Function)
-  lambda = lower_constants(lambda)
-  vars = order_vars(lambda)
-  program = factorize(lambda, vars)
-  code = macroexpand(quote
-    @program($program, $fun_type)
-  end)
-  @show simplify_expr(code)
-  eval(code)
-end
-
 function compile_function(lambda::Lambda, fun_type::Function, var_type::Function)
   lambda = lower_constants(lambda)
-  lambda = functionalize(lambda)
   vars = order_vars(lambda)
+  lambda = functionalize(lambda)
   program = factorize(lambda, vars)
   code = macroexpand(quote
     @program($program, $fun_type)
@@ -507,7 +496,7 @@ zz(x, y) = (x * x) + (y * y) + (3 * x * y)
 
 polynomial_ast1 = Lambda(
   :poly1,
-  [:i, :x, :y, :z],
+  [],
   SumProduct(
     Ring{Int64}(+,*,1,0),
     [
@@ -521,7 +510,7 @@ polynomial_ast1 = Lambda(
 
 polynomial_ast2 = Lambda(
   :poly2,
-  [:x, :y, :z],
+  [],
   SumProduct(
     Ring{Int64}(+,*,1,0),
     [
@@ -537,7 +526,24 @@ zz(x, y) = (x * x) + (y * y) + (3 * x * y)
 
 polynomial_ast3 = Lambda(
     :poly3,
-    [:i, :x, :y, :t1, :t2, :t3, :z],
+    [],
+    SumProduct(
+      Ring{Int64}(+,*,1,0),
+      [
+        FunCall(:xx, Any, [:i, :x]),
+        FunCall(:yy, Any, [:i, :y]),
+        FunCall(*, Any, [:x, :x, :t1]),
+        FunCall(*, Any, [:y, :y, :t2]),
+        FunCall(*, Any, [Constant(3), :x, :y, :t3]),
+        FunCall(+, Any, [:t1, :t2, :t3, :z])
+      ],
+      [:z]
+    )
+)
+
+polynomial_ast4 = Lambda(
+    :poly4,
+    [:i],
     SumProduct(
       Ring{Int64}(+,*,1,0),
       [
@@ -559,9 +565,10 @@ const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 
 fun_type(fun) = typeof(eval(fun))
 var_type = Dict(:i => Int64, :x => Int64, :y => Int64, :z => Int64)
-const p1 = compile(polynomial_ast1, fun_type, (var) -> var_type[var])
-const p2 = compile(polynomial_ast2, fun_type, (var) -> var_type[var])
-const p3 = compile(polynomial_ast3, fun_type, (var) -> var_type[var])
+const p1 = compile_function(polynomial_ast1, fun_type, (var) -> var_type[var])
+const p2 = compile_function(polynomial_ast2, fun_type, (var) -> var_type[var])
+const p3 = compile_function(polynomial_ast3, fun_type, (var) -> var_type[var])
+const p4 = compile_function(polynomial_ast4, fun_type, (var) -> var_type[var])
 
 inputs = Dict(:xx => xx, :yy => yy, :zz => zz)
 expected = @show sum(((x * x) + (y * y) + (3 * x * y) for (x,y) in zip(xx.columns[2], yy.columns[2])))
@@ -577,6 +584,14 @@ j3 = p3(inputs)
 @assert j1() == expected
 @assert j2() == expected
 @assert j3() == expected
+
+j4 = p4(inputs)
+for i in 1:100
+  x = i
+  y = 100-i
+  z = (x * x) + (y * y) + (3 * x * y)
+  @assert j4(i) == z
+end
 
 # using BenchmarkTools
 # big_inputs = Dict(:xx => big_xx, :yy => big_yy, :zz => zz)

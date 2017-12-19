@@ -380,7 +380,40 @@ end
 
 # --- compiler ----
 
-function insert_indexes(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{Vector{Union{FunCall, IndexCall}}, Vector{Index}}
+function Compiled.factorize(program::Program, vars::Vector{Symbol}) ::Program
+  @assert length(program.funs) == 1
+  lambda = program.funs[1]
+
+  # for each call, figure out at which var we have all the args available
+  latest_var_nums = map(lambda.body.domain) do call
+    maximum(call.args) do arg
+      findfirst(vars, arg)
+    end
+  end
+
+  # make individual funs
+  funs = map(1:length(vars)) do var_num
+    var = vars[var_num]
+    domain = lambda.body.domain[latest_var_nums .== var_num]
+    value = (var in lambda.body.value) ? [var] : []
+    body = SumProduct(lambda.body.ring, domain, value)
+    args = union(lambda.args, vars[1:var_num-1])
+    Lambda(gensym("lambda"), args, body)
+  end
+
+  # stitch them all together
+  for i in 1:(length(funs)-1)
+    push!(funs[i].body.value, FunCall(funs[i+1].name, Function, funs[i+1].args))
+  end
+
+  # return funs in definition order - cant call funs that haven't been defined yet
+  Program(funs[1].name, program.states, reverse(funs)) 
+end
+
+function insert_indexes(program::Program, vars::Vector{Symbol}) ::Program
+  @assert length(program.funs) == 1
+  lambda = program.funs[1]
+  
   domain = Union{FunCall, IndexCall}[]
   indexes = Index[]
   for call in lambda.body.domain
@@ -403,39 +436,9 @@ function insert_indexes(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{Vector{Uni
       push!(domain, FunCall(call.name, typ, call.args))
     end
   end
-  (domain, indexes)
-end
-
-function Compiled.factorize(lambda::Lambda, vars::Vector{Symbol}) ::Program
-  domain, indexes = insert_indexes(lambda, vars)
-
-  # for each call, figure out at which var we have all the args available
-  latest_var_nums = map(domain) do call
-    maximum(call.args) do arg
-      findfirst(vars, arg)
-    end
-  end
-
-  # make individual funs
-  funs = map(1:length(vars)) do var_num
-    var = vars[var_num]
-    fun_domain = domain[latest_var_nums .== var_num]
-    fun_value = (var in lambda.body.value) ? [var] : []
-    body = SumProduct(lambda.body.ring, fun_domain, fun_value)
-    args = union(lambda.args, vars[1:var_num-1])
-    Lambda(gensym("lambda"), args, body)
-  end
-
-  # stitch them all together
-  for i in 1:(length(funs)-1)
-    push!(funs[i].body.value, FunCall(funs[i+1].name, Function, funs[i+1].args))
-  end
-
-  Program(
-    funs[1].name,
-    indexes,
-    reverse(funs), # in definition order - cant call funs that haven't been defined yet
-  )
+  
+  lambda = Lambda(lambda.name, lambda.args, SumProduct(lambda.body.ring, domain, lambda.body.value))
+  Program(program.main, vcat(program.states, indexes), [lambda])
 end
 
 function order_vars(lambda::Lambda) ::Vector{Symbol}
@@ -482,7 +485,9 @@ function compile_function(lambda::Lambda, fun_type::Function, var_type::Function
   lambda = lower_constants(lambda)
   vars = order_vars(lambda)
   lambda = functionalize(lambda)
-  program = factorize(lambda, vars)
+  program = Program(lambda.name, [], [lambda])
+  program = insert_indexes(program, vars)
+  program = factorize(program, vars)
   code = macroexpand(quote
     @program($program, $fun_type)
   end)

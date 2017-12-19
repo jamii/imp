@@ -332,8 +332,8 @@ macro body(args::Vector{Symbol}, body::SumProduct)
           @product($(body.ring), $(body.domain[1:length(body.domain) .!= i]), $(body.value))
         end)
       end
-      error("Impossibles!")
     end)
+    error("Impossibles!")
   end
 end
 

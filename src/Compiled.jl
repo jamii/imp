@@ -109,6 +109,10 @@ end
 
 # --- relation interface ---
 
+# probably safe to extend?
+import Base.&
+(&)() = true
+
 struct Relation{T <: Tuple}
   columns::T
 end
@@ -182,41 +186,50 @@ function get_index(::Type{Relation{T}}, fun::Symbol, permutation::Vector{Int64})
   end
 end
 
+# technically wrong, but good enough for now
 function count(::Type{Relation{T}}, index::Symbol, args::Vector{Symbol}) where {T}
-  column = length(args)
-  if (column > 1) && (args[end] == args[end-1])
-    # don't try to iter over repeated variables
-    typemax(Int64) 
-  else
-    quote
-      $(esc(index)).his[$column+1] - $(esc(index)).los[$column+1]
-    end
+  first_column = findfirst(args, args[end]) # first repetition of last var
+  quote
+    $(esc(index)).his[$first_column+1] - $(esc(index)).los[$first_column+1]
   end
 end
 
 function iter(::Type{Relation{T}}, index::Symbol, args::Vector{Symbol}, f) where {T}
+  first_column = findfirst(args, args[end]) # first repetition of last var
+  last_column = length(args)
   value = gensym("value")
-  column = length(args)
   quote
-    while next($(esc(index)), $(Val{column}))
-      $(esc(value)) = $(esc(index)).columns[$column][$(esc(index)).los[$column+1]]
-      $(esc(inline(f, value)))
+    while next($(esc(index)), $(Val{first_column}))
+      $(esc(value)) = $(esc(index)).columns[$first_column][$(esc(index)).los[$first_column+1]]
+      if (&)($(@splice column in (first_column+1):last_column quote
+        $(esc(index)).his[$column+1] = $(esc(index)).los[$column]
+        seek($(esc(index)), $(Val{column}), $(esc(value)))
+      end),)
+        $(esc(inline(f, value)))
+      end
     end
   end
 end
 
 function prepare(::Type{Relation{T}}, index::Symbol, args::Vector{Symbol}) where {T}
-  column = length(args)
+  first_column = findfirst(args, args[end]) # first repetition of last var
   quote
-    $(esc(index)).his[$column+1] = $(esc(index)).los[$column]
+    $(esc(index)).his[$first_column+1] = $(esc(index)).los[$first_column]
   end
 end
 
 function contains(::Type{Relation{T}}, index::Symbol, args::Vector{Symbol}) where {T}
-  column = length(args)
+  first_column = findfirst(args, args[end]) # first repetition of last var
+  last_column = length(args)
   var = args[end]
   quote
-    seek($(esc(index)), $(Val{column}), $(esc(var)))
+    (&)(
+      seek($(esc(index)), $(Val{first_column}), $(esc(var))),
+      $(@splice column in (first_column+1):last_column quote
+        $(esc(index)).his[$column+1] = $(esc(index)).los[$column]
+        seek($(esc(index)), $(Val{column}), $(esc(value)))
+      end) 
+    )
   end
 end
 
@@ -392,8 +405,11 @@ function insert_indexes(lambda::Lambda, vars::Vector{Symbol}) ::Tuple{Vector{Uni
       name = gensym("index")
       push!(indexes, Index(name, typ, call.name, permutation))
       # insert all prefixes of args
+      args = call.args[permutation]
       for i in 1:n
-        push!(domain, IndexCall(name, typ, call.args[permutation][1:i]))
+        if (i == 1) || (args[i] != args[i-1]) # dont emit repeated variables
+          push!(domain, IndexCall(name, typ, args[1:i]))
+        end
       end
     else
       push!(domain, FunCall(call.name, typ, call.args))
@@ -559,8 +575,7 @@ j3 = p3(inputs)
 @show @time j2()
 @show @time j3()
 @assert j1() == expected
-# TODO temporarily broke handling of repeated variables
-# @assert j2() == expected
+@assert j2() == expected
 @assert j3() == expected
 
 # using BenchmarkTools

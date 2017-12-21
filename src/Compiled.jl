@@ -3,6 +3,8 @@ module Compiled
 using Base.Cartesian
 using Match
 
+using Data
+
 # --- ast ---
 
 struct Ring{T}
@@ -125,14 +127,16 @@ end
 import Base.&
 (&)() = true
 
-struct Relation{T <: Tuple}
-  columns::T
-end
-
 struct RelationIndex{T <: Tuple}
   columns::T
   los::Vector{Int64} # inclusive
   his::Vector{Int64} # exclusive
+end
+
+function RelationIndex(columns::T) where {T}
+  los = fill(1, length(columns)+1)
+  his = fill(length(columns[1])+1, length(columns)+1)
+  RelationIndex(columns, los, his)
 end
 
 function gallop{T}(column::AbstractArray{T}, lo::Int64, hi::Int64, value::T, threshold::Int64) ::Int64
@@ -191,12 +195,14 @@ function can_index(::Type{Relation{T}}) where {T}
 end
 
 function get_index(::Type{Relation{T}}, fun::Symbol, permutation::Vector{Int64}) where {T}
-  @assert permutation == collect(1:length(permutation)) "Can't permute $(index.permutation) yet"
-  n = length(T.parameters)
   quote
-    RelationIndex($(esc(fun)).columns, fill(1, $(n+1)), fill(length($(esc(fun)).columns[1])+1, $(n+1)))
+    columns = Data.index($(esc(fun)), $permutation)
+    permuted = ($(@splice ix in permutation :(columns[$ix])),)
+    RelationIndex(permuted)
   end
 end
+
+get_index(Relation{Tuple{Int64, Int64}}, :f, [2,1])
 
 # technically wrong, but good enough for now
 function count(::Type{Relation{T}}, index::Symbol, args::Vector{Symbol}) where {T}

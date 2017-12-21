@@ -152,6 +152,10 @@ function Relation(columns, num_keys::Int)
   end
 end
 
+function Relation(columns)
+  Relation(columns, length(columns)-1)
+end
+
 function parse_relation(expr)
   (head, tail) = @match expr begin
     Expr(:call, [:(=>), head, tail], _) => (head, tail)

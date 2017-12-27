@@ -202,8 +202,6 @@ function get_index(::Type{Relation{T}}, fun::Symbol, permutation::Vector{Int64})
   end
 end
 
-get_index(Relation{Tuple{Int64, Int64}}, :f, [2,1])
-
 # technically wrong, but good enough for now
 function count(::Type{Relation{T}}, index::Symbol, args::Vector{Symbol}) where {T}
   first_column = findfirst(args, args[end]) # first repetition of last var
@@ -440,7 +438,7 @@ function Compiled.factorize(program::Program, vars::Vector{Symbol}) ::Program
   Program(program.states, reverse(funs)) 
 end
 
-function insert_indexes(program::Program, vars::Vector{Symbol}) ::Program
+function insert_indexes(program::Program, vars::Vector{Symbol}, fun_type::Function) ::Program
   @assert length(program.funs) == 1
   lambda = program.funs[1]
   
@@ -458,7 +456,7 @@ function insert_indexes(program::Program, vars::Vector{Symbol}) ::Program
       # insert all prefixes of args
       args = call.args[permutation]
       for i in 1:n
-        if (i == 1) || (args[i] != args[i-1]) # don't emit repeated variables
+        if (i == length(args)) || (args[i] != args[i+1]) # don't emit repeated variables
           push!(domain, IndexCall(name, typ, args[1:i]))
         end
       end
@@ -554,7 +552,7 @@ function compile_function(lambda::Lambda, fun_type::Function, var_type::Function
   vars = order_vars(lambda)
   lambda = functionalize(lambda)
   program = Program([], [lambda])
-  program = insert_indexes(program, vars)
+  program = insert_indexes(program, vars, fun_type)
   program = factorize(program, vars)
   code = macroexpand(quote
     @program($program, $fun_type)
@@ -569,7 +567,7 @@ function compile_relation(lambda::Lambda, fun_type::Function, var_type::Function
   args = lambda.args
   lambda = Lambda(lambda.name, Symbol[], lambda.body)
   program = Program([], [lambda])
-  program = insert_indexes(program, vars)
+  program = insert_indexes(program, vars, fun_type)
   program = factorize(program, vars)
   program = relationalize(program, args, vars, var_type)
   code = macroexpand(quote
@@ -610,8 +608,6 @@ polynomial_ast2 = Lambda(
     [:z]
   )
 )
-
-zz(x, y) = (x * x) + (y * y) + (3 * x * y)
 
 polynomial_ast3 = Lambda(
     :poly3,

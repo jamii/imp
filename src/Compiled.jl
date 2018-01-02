@@ -243,7 +243,7 @@ function contains(::Type{Relation{T}}, index::Symbol, args::Vector{Symbol}) wher
       seek($(esc(index)), $(Val{first_column}), $(esc(var))),
       $(@splice column in (first_column+1):last_column quote
         $(esc(index)).his[$column+1] = $(esc(index)).los[$column]
-        seek($(esc(index)), $(Val{column}), $(esc(value)))
+        seek($(esc(index)), $(Val{column}), $(esc(var)))
       end) 
     )
   end

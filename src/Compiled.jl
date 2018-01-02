@@ -21,7 +21,7 @@ struct Constant
 end
 
 struct FunCall
-  name::Union{Symbol, Function}
+  name::Union{Symbol, Function, Expr} # TODO Expr is a temporary hack to get parsing working
   typ::Type
   args::Vector{Union{Symbol, FunCall, Constant}}
 end
@@ -35,13 +35,14 @@ end
 struct SumProduct
   ring::Ring
   domain::Vector{Union{FunCall, IndexCall}}
-  value::Vector{Union{FunCall, Symbol}}
+  value::Vector{Union{Symbol, FunCall, Constant}}
 end
 
 struct Insert
   result_name::Symbol
+  ring::Ring
   args::Vector{Symbol}
-  value::FunCall
+  value::Union{Constant, FunCall}
 end
 
 mutable struct Lambda
@@ -59,7 +60,7 @@ end
 struct Index
   name::Symbol
   typ::Type
-  fun::Union{Symbol, Function}
+  fun::Union{Symbol, Function, Expr} # TODO Expr is a temporary hack to get parsing working
   permutation::Vector{Int64}
 end
 
@@ -286,7 +287,7 @@ function narrow_types(::Type{T}, fun_name, arg_types::Vector{Type}) where {T <: 
   # use Julia's type inference to narrow the type of the last arg
   @assert isa(fun_name, Function) "Julia functions need to be early-bound (ie not function pointers, not symbols) so we can infer types"
   return_types = Base.return_types(fun_name, tuple(arg_types[1:end-1]...))
-  @assert !isempty(return_types) "This function cannot be called with these types"
+  @assert !isempty(return_types) "This function cannot be called with these types: $fun_name $arg_types"
   new_arg_types = copy(arg_types)
   new_arg_types[end] = reduce(typejoin, return_types)
   return new_arg_types
@@ -315,7 +316,7 @@ macro state(env, state::Result, fun_type::Function)
   end
 end
 
-macro product(ring::Ring, domain::Vector{Union{FunCall, IndexCall}}, value::Vector{Union{FunCall, Symbol}})
+macro product(ring::Ring, domain::Vector{Union{FunCall, IndexCall}}, value::Vector{Union{Symbol, FunCall, Constant}})
   code = :result
   for call in reverse(value)
     called = @match call begin
@@ -382,11 +383,17 @@ macro body(args::Vector{Symbol}, body::SumProduct)
 end
 
 macro body(args::Vector{Symbol}, body::Insert)
+  value = @match body.value begin
+    call::FunCall => :(($(esc(call.name)))($(map(esc, call.args)...),))
+    constant::Constant => constant.value
+  end
   quote
-    value = ($(esc(body.value.name)))($(map(esc, body.value.args)...),)
-    $(@splice (arg_num,arg) in enumerate(body.args) quote
-      push!($(esc(body.result_name)).columns[$arg_num], $(esc(arg)))
-    end)
+    value = $value
+    if value != $(body.ring.zero)
+      $(@splice (arg_num,arg) in enumerate(body.args) quote
+        push!($(esc(body.result_name)).columns[$arg_num], $(esc(arg)))
+      end)
+    end
     push!($(esc(body.result_name)).columns[end], value)
     value
   end
@@ -498,14 +505,7 @@ end
 
 function relationalize(program::Program, args::Vector{Symbol}, vars::Vector{Symbol}, var_type::Function) ::Program
   states = copy(program.states)
-  funs = copy(program.funs)
-  
-  # find the earliest function call that we can wrap
-  insert_point = findlast(funs) do fun
-    all(args) do arg
-      arg in fun.args
-    end
-  end
+  funs = copy(program.funs) # TODO we mutate the funs - need to deepcopy :(
   
   # initialize a relation
   result_name = gensym("result")
@@ -514,15 +514,37 @@ function relationalize(program::Program, args::Vector{Symbol}, vars::Vector{Symb
   result = Result(result_name, arg_types)
   push!(states, result)
   
-  # steal the functions name and wrap it in an Insert
-  old_fun = funs[insert_point]
-  old_fun_name = old_fun.name
-  old_fun.name = gensym("lambda")
-  new_fun = 
-    Lambda(old_fun_name, copy(old_fun.args), 
-      Insert(result_name, copy(args),
-        FunCall(old_fun.name, Function, copy(old_fun.args))))
-  insert!(funs, insert_point+1, new_fun)  
+  # TODO need to collect up all values, rather than just wrapping the end
+  
+  # find the earliest point at which all args are bound
+  insert_point = findlast(funs) do fun
+    all(args) do arg
+      arg in fun.args
+    end
+  end
+
+  # put an Insert somewhere 
+  name = gensym("lambda")
+  if insert_point == 0
+    # go right at the end, call from the last fun
+    old_fun = funs[1]
+    new_fun_args = unique(vcat(old_fun.args, args))
+    push!(old_fun.body.value, FunCall(name, Any, new_fun_args))
+    new_fun = 
+      Lambda(name, new_fun_args, 
+        Insert(result_name, old_fun.body.ring, copy(args),
+          Constant(old_fun.body.ring.one)))  
+  else
+    # go in the middle somewhere, wrap some existing fun by stealing its name 
+    old_fun = funs[insert_point]
+    new_fun_args = copy(old_fun.args)
+    new_fun = 
+      Lambda(old_fun.name, new_fun_args, 
+        Insert(result_name, old_fun.body.ring, copy(args),
+          FunCall(name, Function, new_fun_args)))
+    old_fun.name = name
+  end 
+  insert!(funs, insert_point+1, new_fun) 
         
   # finish with a Return
   old_fun = funs[end]

@@ -249,6 +249,11 @@ function contains(::Type{Relation{T}}, index::Symbol, args::Vector{Symbol}) wher
   end
 end
 
+function narrow_types(::Type{Relation{T}}, fun_name, arg_types::Vector{Type}) where T
+  # just return the types of the columns
+  return Type[eltype(T.parameters[i]) for i in 1:length(arg_types)]
+end
+
 # --- function interface ---
 
 function can_index(::Type{T}) where {T <: Function}
@@ -275,6 +280,16 @@ function contains(::Type{T}, fun, args::Vector{Symbol}) where {T <: Function}
   quote
     $(esc(fun))($(map(esc, args[1:end-1])...)) == $(esc(args[end]))
   end
+end
+
+function narrow_types(::Type{T}, fun_name, arg_types::Vector{Type}) where {T <: Function}
+  # use Julia's type inference to narrow the type of the last arg
+  @assert isa(fun_name, Function) "Julia functions need to be early-bound (ie not function pointers, not symbols) so we can infer types"
+  return_types = Base.return_types(fun_name, tuple(arg_types[1:end-1]...))
+  @assert !isempty(return_types) "This function cannot be called with these types"
+  new_arg_types = copy(arg_types)
+  new_arg_types[end] = reduce(typejoin, return_types)
+  return new_arg_types
 end
 
 # --- codegen ---
@@ -547,23 +562,53 @@ function lower_constants(lambda::Lambda) ::Lambda
   Lambda(lambda.name, lambda.args, SumProduct(lambda.body.ring, vcat(constants, domain), value))
 end
 
-function compile_function(lambda::Lambda, fun_type::Function, var_type::Function)
+const inference_fixpoint_limit = 100
+
+function infer_var_types(lambda::Lambda, fun_type::Function, vars::Vector{Symbol}) ::Dict{Symbol, Type}
+  var_type = Dict{Symbol, Type}((var => Any for var in vars))
+  
+  # loop until fixpoint
+  for i in 1:inference_fixpoint_limit
+    new_var_type = copy(var_type)
+    # infer type for each call in domain
+    for call in lambda.body.domain
+      narrowed_types = narrow_types(fun_type(call.name), call.name, Type[var_type[arg] for arg in call.args])
+      for (arg, typ) in zip(call.args, narrowed_types)
+        new_var_type[arg] = typeintersect(new_var_type[arg], typ)
+      end
+    end
+    # if at fixpoint, return
+    if new_var_type == var_type
+      return @show var_type
+    else
+      var_type = new_var_type
+    end
+  end
+  
+  return error("Type inference failed to reach fixpoint after $inference_fixpoint_limit iterations")
+end
+
+function compile_function(lambda::Lambda, fun_type::Function)
   lambda = lower_constants(lambda)
   vars = order_vars(lambda)
+  raw_var_type = infer_var_types(lambda, fun_type, vars)
+  var_type = (var) -> raw_var_type[var]
   lambda = functionalize(lambda)
   program = Program([], [lambda])
   program = insert_indexes(program, vars, fun_type)
-  program = factorize(program, vars)
+  @show program = factorize(program, vars)
   code = macroexpand(quote
     @program($program, $fun_type)
   end)
-  # @show simplify_expr(code)
+  @show simplify_expr(code)
   eval(code)
 end
 
-function compile_relation(lambda::Lambda, fun_type::Function, var_type::Function)
+function compile_relation(lambda::Lambda, fun_type::Function)
   lambda = lower_constants(lambda)
   vars = order_vars(lambda)
+  raw_var_type = infer_var_types(lambda, fun_type, vars)
+  var_type = (var) -> raw_var_type[var]
   args = lambda.args
   lambda = Lambda(lambda.name, Symbol[], lambda.body)
   program = Program([], [lambda])
@@ -589,7 +634,7 @@ polynomial_ast1 = Lambda(
     [
       FunCall(:xx, Any, [:i, :x]),
       FunCall(:yy, Any, [:i, :y]),
-      FunCall(:zz, Any, [:x, :y, :z]),
+      FunCall(zz, Any, [:x, :y, :z]),
     ],
     [:z]
   )
@@ -603,7 +648,7 @@ polynomial_ast2 = Lambda(
     [
       FunCall(:xx, Any, [:x, :x]),
       FunCall(:yy, Any, [:x, :y]),
-      FunCall(:zz, Any, [:x, :y, :z]),
+      FunCall(zz, Any, [:x, :y, :z]),
     ],
     [:z]
   )
@@ -649,13 +694,12 @@ const big_xx = Relation((collect(0:1000000),collect(0:1000000)))
 const big_yy = Relation((collect(0:1000000), collect(reverse(0:1000000))))
 
 fun_type(fun) = typeof(eval(fun))
-var_type = Dict(:i => Int64, :x => Int64, :y => Int64, :z => Int64)
-p1 = compile_function(polynomial_ast1, fun_type, (var) -> var_type[var])
-p2 = compile_function(polynomial_ast2, fun_type, (var) -> var_type[var])
-p3 = compile_function(polynomial_ast3, fun_type, (var) -> var_type[var])
-p4 = compile_function(polynomial_ast4, fun_type, (var) -> var_type[var])
-p5 = compile_relation(polynomial_ast4, fun_type, (var) -> var_type[var])
-p6 = compile_relation(polynomial_ast3, fun_type, (var) -> var_type[var])
+p1 = compile_function(polynomial_ast1, fun_type)
+p2 = compile_function(polynomial_ast2, fun_type)
+p3 = compile_function(polynomial_ast3, fun_type)
+p4 = compile_function(polynomial_ast4, fun_type)
+p5 = compile_relation(polynomial_ast4, fun_type)
+p6 = compile_relation(polynomial_ast3, fun_type)
 
 inputs = Dict(:xx => xx, :yy => yy, :zz => zz)
 expected = @show sum(((x * x) + (y * y) + (3 * x * y) for (x,y) in zip(xx.columns[2], yy.columns[2])))
@@ -671,8 +715,12 @@ j3 = p3(inputs)
 @assert j1() == expected
 @assert j2() == expected
 @assert j3() == expected
+@assert Base.return_types(j1, ()) == [Int64]
+@assert Base.return_types(j2, ()) == [Int64]
+@assert Base.return_types(j3, ()) == [Int64]
 
 j4 = p4(inputs)
+@assert Base.return_types(j4, (Int64,)) == [Int64]
 for x in 0:100
   y = 100-x
   z = (x * x) + (y * y) + (3 * x * y)
@@ -680,6 +728,7 @@ for x in 0:100
 end
 
 j5 = p5(inputs)
+@assert Base.return_types(p5, (typeof(inputs),)) == [Data.Relation{Tuple{Vector{Int64},Vector{Int64}}}]
 for x in 0:100
   y = 100-x
   z = (x * x) + (y * y) + (3 * x * y)
@@ -688,6 +737,7 @@ for x in 0:100
 end
 
 j6 = p6(inputs)
+@assert Base.return_types(p6, (typeof(inputs),)) == [Data.Relation{Tuple{Vector{Int64}}}]
 @assert j6.columns[1][1] == expected
 
 # using BenchmarkTools

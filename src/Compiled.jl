@@ -285,7 +285,7 @@ end
 
 function narrow_types(::Type{T}, fun_name, arg_types::Vector{Type}) where {T <: Function}
   # use Julia's type inference to narrow the type of the last arg
-  @assert isa(fun_name, Function) "Julia functions need to be early-bound (ie not function pointers, not symbols) so we can infer types"
+  @assert isa(fun_name, Function) "Julia functions need to be early-bound (ie function pointers, not symbols) so we can infer types"
   return_types = Base.return_types(fun_name, tuple(arg_types[1:end-1]...))
   @assert !isempty(return_types) "This function cannot be called with these types: $fun_name $arg_types"
   new_arg_types = copy(arg_types)

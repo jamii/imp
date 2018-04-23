@@ -1,0 +1,13 @@
+job/
+data/imdb.jld
+
+lb/proto-gen
+lb/LB_SUMMARY.lbp
+*.lbb
+*.log
+lb/demo/*.logic
+
+/target/
+**/*.rs.bk
+.vscode
+callgrind.out

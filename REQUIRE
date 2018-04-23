@@ -1,0 +1,5 @@
+julia 0.6.2
+Match 0.4.0
+DataFrames 0.11.5
+JLD 0.8.3
+BenchmarkTools 0.2.4

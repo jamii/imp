@@ -11,6 +11,7 @@ end
 
 include("util.jl")
 include("semantics.jl")
+include("inference.jl")
 
 macro imp(ast)
     parse(ast)
@@ -20,6 +21,6 @@ macro imp(env, ast)
     :(interpret($(esc(env)), parse($(QuoteNode(ast)))))
 end
 
-export stdenv, @imp
+export stdenv, @imp, interpret, infer
 
 end

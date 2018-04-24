@@ -10,15 +10,18 @@ function Base.show(io::IO, set::Set)
 end
 
 include("util.jl")
+include("syntax.jl")
 include("semantics.jl")
 include("inference.jl")
+include("compile.jl")
 
 macro imp(ast)
-    parse(ast)
+    desugar(parse(ast))
 end
 
 macro imp(env, ast)
-    :(interpret($(esc(env)), parse($(QuoteNode(ast)))))
+    # TODO not sure why ast doesn't need escaping...
+    :(interpret($(esc(env)), @imp($ast)))
 end
 
 export stdenv, @imp, interpret, infer

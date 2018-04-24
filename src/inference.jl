@@ -1,7 +1,6 @@
 const RowType = NTuple{N, Type} where N
 const SetType = Set{RowType}
 const EnvTypes = Dict{Symbol, SetType}
-const universe_types = Set([Int64, Float64, String])
 const bool_type = SetType([()])
 const false_type = SetType([])
 
@@ -17,30 +16,28 @@ function infer(env_types::EnvTypes, expr::Var)::SetType
     env_types[expr.name]
 end
 
-function infer(env_types::EnvTypes, expr::Apply)::SetType
+function infer(env_types::EnvTypes, expr::Apply1)::SetType
     f_type = infer(env_types, expr.f)
-    for arg_type in map((arg) -> infer(env_types, arg), expr.args)
-        result_type = SetType()
-        for f_row_type in f_type
-            for arg_row_type in arg_type
-                if length(arg_row_type) <= length(f_row_type) &&
-                    arg_row_type == f_row_type[1:length(arg_row_type)]
-                    push!(result_type, f_row_type[length(arg_row_type)+1:end])
-                end
+    arg_type = infer(env_types, expr.arg)
+    result_type = SetType()
+    for f_row_type in f_type
+        for arg_row_type in arg_type
+            if length(arg_row_type) <= length(f_row_type) &&
+                arg_row_type == f_row_type[1:length(arg_row_type)]
+                push!(result_type, f_row_type[length(arg_row_type)+1:end])
             end
         end
-        f_type = result_type
     end
-    f_type
+    result_type
 end
 
-function infer(env_types::EnvTypes, expr::Abstract)::SetType
+function infer(env_types::EnvTypes, expr::Abstract1)::SetType
     result_type = SetType()
     env_types = copy(env_types)
-    for variable_type in universe_types
-        env_types[expr.variable] = SetType([(variable_type,)])
+    for variable_type in env_types[:everything]
+        env_types[expr.var] = SetType([variable_type])
         for value_type in infer(env_types, expr.value)
-            push!(result_type, (variable_type, value_type...))
+            push!(result_type, (variable_type..., value_type...))
         end
     end
     result_type

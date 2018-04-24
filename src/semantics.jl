@@ -81,7 +81,6 @@ function interpret(env::Env, expr::Primitive) ::Set
         (:!, [arg]) => bool_to_set(!set_to_bool(arg))
         (:(=>), [a, b]) => bool_to_set((!set_to_bool(a) || set_to_bool(b)))
         (:(==), _) => bool_to_set((==)(args...))
-        (:iff, [cond, true_branch]) => set_to_bool(cond) ? true_branch : bool_to_set(false)
         (:iff, [cond, true_branch, false_branch]) => set_to_bool(cond) ? true_branch : false_branch
         (:reduce, [raw_op, raw_init, values]) => begin
             op = Dict(((a,b) => c for (a,b,c) in raw_op))
@@ -109,7 +108,7 @@ function parse(ast)
             Apply(parse(f), map(parse, args))
         end
     elseif @capture(ast, if cond_ true_branch_ end)
-        Primitive(:iff, [parse(cond), parse(true_branch)])
+        Primitive(:iff, [parse(cond), parse(true_branch), Constant(false)])
     elseif @capture(ast, if cond_ true_branch_ else false_branch_ end)
         Primitive(:iff, [parse(cond), parse(true_branch), parse(false_branch)])
     elseif @capture(ast, (variable_Symbol) -> value_)
@@ -125,7 +124,7 @@ function unparse(expr)
         Var(name) => name
         Apply(f, args) => :($(unparse(f))($(map(unparse, args)...)))
         Abstract(variable, value) => :(($variable) -> $(unparse(value)))
-        Primitive(:iff, [cond, true_branch]) => :(if $(unparse(cond)) $(unparse(true_branch)) end)
+        Primitive(:iff, [cond, true_branch, Constant(false)]) => :(if $(unparse(cond)) $(unparse(true_branch)) end)
         Primitive(:iff, [cond, true_branch, false_branch]) => :(if $(unparse(cond)) $(unparse(true_branch)) else $(unparse(false_branch)) end)
         Primitive(f, args) => :($(unparse(f))($(map(unparse, args)...)))
     end

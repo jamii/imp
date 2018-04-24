@@ -33,7 +33,7 @@ struct Apply <: Expr
 end
 
 struct Abstract <: Expr
-    variable::Symbol
+    vars::Vector{Symbol}
     value::Expr
 end
 
@@ -58,8 +58,10 @@ function parse(ast)
         Primitive(:iff, [parse(cond), parse(true_branch), Constant(false)])
     elseif @capture(ast, if cond_ true_branch_ else false_branch_ end)
         Primitive(:iff, [parse(cond), parse(true_branch), parse(false_branch)])
-    elseif @capture(ast, (variable_Symbol) -> value_)
-        Abstract(variable, parse(value))
+    elseif @capture(ast, (var_Symbol) -> value_)
+        Abstract([var], parse(value))
+     elseif @capture(ast, (vars__) -> value_)
+        Abstract([vars], parse(value))
     else
         error("Unknown syntax: $ast")
     end
@@ -70,7 +72,7 @@ function unparse(expr)
         Constant(value) => value
         Var(name) => name
         Apply(f, args) => :($(unparse(f))($(map(unparse, args)...)))
-        Abstract(variable, value) => :(($variable) -> $(unparse(value)))
+        Abstract(vars, value) => :(($(vars...)) -> $(unparse(value)))
         Primitive(:iff, [cond, true_branch, Constant(false)]) => :(if $(unparse(cond)) $(unparse(true_branch)) end)
         Primitive(:iff, [cond, true_branch, false_branch]) => :(if $(unparse(cond)) $(unparse(true_branch)) else $(unparse(false_branch)) end)
         Primitive(f, args) => :($(unparse(f))($(map(unparse, args)...)))
@@ -79,20 +81,7 @@ end
 
 # --- interpret ---
 
-const Env = Dict{Symbol, Set}
-
-const truthy = Set([()])
-const falsey = Set()
-bool_to_set(bool::Bool)::Set = bool ? truthy : falsey
-set_to_bool(set::Set)::Bool = length(set) > 0
-
-function interpret(env::Env, expr::Constant) ::Set
-    Set([(expr.value,)])
-end
-
-function interpret(env::Env, expr::Constant{Bool}) ::Set
-    bool_to_set(expr.value)
-end
+const Env{T} = Dict{Symbol, T}
 
 function interpret(env::Env, expr::Var) ::Set
     env[expr.name]
@@ -114,20 +103,40 @@ function interpret(env::Env, expr::Apply) ::Set
     f
 end
 
-function interpret(env::Env, expr::Abstract) ::Set
-    env = copy(env)
-    result = Set()
-    for domain_row in env[:everything]
-        env[expr.variable] = Set([domain_row])
-        value = interpret(env, expr.value)
-        for value_row in value
-            push!(result, (domain_row..., value_row...))
+function interpret(env::Env, expr::Abstract, var_ix::Int64) ::Set
+    if var_ix > length(expr.vars)
+        interpret(env, expr.value)
+    else
+        var = expr.vars[var_ix]
+        result = Set()
+        for var_row in env[:everything]
+            env[var] = Set([var_row])
+            value = interpret(env, expr, var_ix+1)
+            for value_row in value
+                push!(result, (var_row..., value_row...))
+            end
         end
+        result
     end
-    result
+end
+interpret(env::Env, expr::Abstract) = interpret(env, expr, 1)
+
+# --- interpret values ---
+
+const truthy = Set([()])
+const falsey = Set()
+bool_to_set(bool::Bool)::Set = bool ? truthy : falsey
+set_to_bool(set::Set)::Bool = length(set) > 0
+
+function interpret(env::Env{Set}, expr::Constant) ::Set
+    Set([(expr.value,)])
 end
 
-function interpret(env::Env, expr::Primitive) ::Set
+function interpret(env::Env{Set}, expr::Constant{Bool}) ::Set
+    bool_to_set(expr.value)
+end
+
+function interpret(env::Env{Set}, expr::Primitive) ::Set
     args = [interpret(env, arg) for arg in expr.args]
     @match (expr.f, args) begin
         (:|, _) => union(args...)
@@ -155,59 +164,24 @@ stdenv = Dict{Symbol, Set}(
   :nothing => Set([]),
 )
 
-# --- infer ---
+# --- interpret types ---
 
 const RowType = NTuple{N, Type} where N
 const SetType = Set{RowType}
-const EnvTypes = Dict{Symbol, SetType}
 
-const universe_types = Set([Int64, Float64, String])
 const bool_type = SetType([()])
 const false_type = SetType([])
 
-function infer(env_types::EnvTypes, expr::Constant{T})::SetType where T
+function interpret(env::Env{SetType}, expr::Constant{T})::SetType where T
     Set([(T,)])
 end
 
-function infer(env_types::EnvTypes, expr::Constant{Bool})::SetType where T
+function interpret(env::Env{SetType}, expr::Constant{Bool})::SetType where T
     expr.value ? bool_type : false_type
 end
 
-function infer(env_types::EnvTypes, expr::Var)::SetType
-    env_types[expr.name]
-end
-
-function infer(env_types::EnvTypes, expr::Apply)::SetType
-    f_type = infer(env_types, expr.f)
-    for arg_type in map((arg) -> infer(env_types, arg), expr.args)
-        result_type = SetType()
-        for f_row_type in f_type
-            for arg_row_type in arg_type
-                if length(arg_row_type) <= length(f_row_type) &&
-                    arg_row_type == f_row_type[1:length(arg_row_type)]
-                    push!(result_type, f_row_type[length(arg_row_type)+1:end])
-                end
-            end
-        end
-        f_type = result_type
-    end
-    f_type
-end
-
-function infer(env_types::EnvTypes, expr::Abstract)::SetType
-    result_type = SetType()
-    env_types = copy(env_types)
-    for variable_type in universe_types
-        env_types[expr.variable] = SetType([(variable_type,)])
-        for value_type in infer(env_types, expr.value)
-            push!(result_type, (variable_type, value_type...))
-        end
-    end
-    result_type
-end
-
-function infer(env_types::EnvTypes, expr::Primitive)::SetType
-    arg_types = [infer(env_types, arg) for arg in expr.args]
+function interpret(env::Env{SetType}, expr::Primitive)::SetType
+    arg_types = [interpret(env, arg) for arg in expr.args]
     @match (expr.f, arg_types) begin
         (:|, _) => union(arg_types...)
         (:&, _) => intersect(arg_types...)
@@ -228,6 +202,11 @@ function infer(env_types::EnvTypes, expr::Primitive)::SetType
         _ => error("Unknown primitive: $expr")
     end
 end
+
+row_type(row::Tuple) = map(typeof, row)
+set_type(set::Set) = map(row_type, set)
+env_types(env::Env{Set}) = Env{SetType}(name => set_type(set) for (name, set) in env)
+infer(env::Env{Set}, expr::Expr) = interpret(env_types(env), expr)
 
 # --- exports ---
 

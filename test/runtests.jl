@@ -108,10 +108,8 @@ end
 
 # --- infer ---
 
-env_types = Dict{Symbol, Imp.SetType}((name => Imp.SetType([map(typeof, row) for row in set]) for (name, set) in env))
-
 macro test_infer(expr, typs...)
-    :(@test infer($env_types, @imp($expr)) == Imp.SetType([$(typs...)]))
+    :(@test infer($env, @imp($expr)) == Imp.SetType([$(typs...)]))
 end
 
 @test_infer true ()
@@ -136,7 +134,7 @@ end
 @test_infer if true "yes" else "no" end (String,)
 @test_infer if true "yes" else 0 end (Int64,) (String,)
 
-@test_infer (x -> true) (String,) (Int64,) (Float64,)
+@test_infer (x -> true) (String,) (Int64,)
 @test_infer (p -> if person(p) rsvp(p) end) (String, String)
 @test_infer (p -> if person(p) rsvp(p) else (if string(p) "n/a" end) end) (String, String)
 @test_infer (p -> if person(p) rsvp(p) else (if string(p) "n/a" end) end)("cthulu") (String,)
@@ -163,5 +161,7 @@ end
 
 # TODO requires reasoning with sets as bounds rather than just types
 # @test_infer (x -> if person(x); (if person(x) "yes" else 0 end) end) (String, String)
+
+printstyled("Pass!\n", color=:light_green)
 
 end

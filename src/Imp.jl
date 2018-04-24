@@ -47,7 +47,11 @@ function parse(ast)
     if @capture(ast, constant_Int64_String_Bool)
         Constant(constant)
     elseif @capture(ast, name_Symbol)
-        Var(name)
+        if name == :(_)
+            Var(:everything)
+        else
+            Var(name)
+        end
     elseif @capture(ast, f_(args__)) && length(args) > 0
         if f in [:|, :&, :!, :(=>), :(==), :reduce, :exists, :forall]
             Primitive(f, map(parse, args))
@@ -60,8 +64,8 @@ function parse(ast)
         Primitive(:iff, [parse(cond), parse(true_branch), parse(false_branch)])
     elseif @capture(ast, (var_Symbol) -> value_)
         Abstract([var], parse(value))
-     elseif @capture(ast, (vars__) -> value_)
-        Abstract([vars], parse(value))
+    elseif @capture(ast, (vars__,) -> value_)
+        Abstract(vars, parse(value))
     else
         error("Unknown syntax: $ast")
     end
@@ -111,15 +115,18 @@ function interpret(env::Env, expr::Abstract, var_ix::Int64) ::Set
         result = Set()
         for var_row in env[:everything]
             env[var] = Set([var_row])
-            value = interpret(env, expr, var_ix+1)
-            for value_row in value
+            for value_row in interpret(env, expr, var_ix+1)
                 push!(result, (var_row..., value_row...))
             end
         end
         result
     end
 end
-interpret(env::Env, expr::Abstract) = interpret(env, expr, 1)
+
+function interpret(env::Env, expr::Abstract)
+    env = copy(env)
+    interpret(env, expr, 1)
+end
 
 # --- interpret values ---
 
@@ -139,11 +146,11 @@ end
 function interpret(env::Env{Set}, expr::Primitive) ::Set
     args = [interpret(env, arg) for arg in expr.args]
     @match (expr.f, args) begin
-        (:|, _) => union(args...)
-        (:&, _) => intersect(args...)
+        (:|, [a, b]) => union(a,b)
+        (:&, [a, b]) => intersect(a,b)
         (:!, [arg]) => bool_to_set(!set_to_bool(arg))
         (:(=>), [a, b]) => bool_to_set((!set_to_bool(a) || set_to_bool(b)))
-        (:(==), _) => bool_to_set((==)(args...))
+        (:(==), [a, b]) => bool_to_set(a == b)
         (:iff, [cond, true_branch, false_branch]) => set_to_bool(cond) ? true_branch : false_branch
         (:reduce, [raw_op, raw_init, values]) => begin
             op = Dict(((a,b) => c for (a,b,c) in raw_op))
@@ -183,11 +190,11 @@ end
 function interpret(env::Env{SetType}, expr::Primitive)::SetType
     arg_types = [interpret(env, arg) for arg in expr.args]
     @match (expr.f, arg_types) begin
-        (:|, _) => union(arg_types...)
-        (:&, _) => intersect(arg_types...)
+        (:|, [a, b]) => union(a, b)
+        (:&, [a, b]) => intersect(a, b)
         (:!, [arg]) => bool_type
         (:(=>), [a, b]) => bool_type
-        (:(==), _) => intersect(arg_types...) == false_type ? false_type : bool_type
+        (:(==), [a, b]) => intersect(a, b) == false_type ? false_type : bool_type
         (:iff, [cond_type, then_type, else_type]) => begin
             # TODO if we had lower bounds on cond we could also do then_type when it's definitely true 
             if cond_type == false_type
@@ -208,10 +215,124 @@ set_type(set::Set) = map(row_type, set)
 env_types(env::Env{Set}) = Env{SetType}(name => set_type(set) for (name, set) in env)
 infer(env::Env{Set}, expr::Expr) = interpret(env_types(env), expr)
 
+# --- bounded abstract ----
+
+# need Abstract over fully lowered value of arity 0
+
+struct Permute <: Expr
+    arg::Symbol
+    columns::Vector{Int64}
+end
+
+struct BoundedAbstract <: Expr
+    var::Symbol
+    upper_bound::Expr
+    value::Expr
+end
+
+# TODO unparse
+
+function upper_bound(bound_vars::Vector{Symbol}, var::Symbol, expr::Constant)::Expr
+    (expr.value == false) ? Var(:nothing) : Var(:everything)
+end
+
+function upper_bound(bound_vars::Vector{Symbol}, var::Symbol, expr::Apply)::Expr
+    @assert expr.f isa Var
+    f = expr.f.name
+    args = map(expr.args) do arg
+        @assert arg isa Var
+        arg.name
+    end
+    if !(var in args) 
+        Var(:everything)
+    else
+        apply_args = Var[]
+        permute_columns = Int64[]
+        for bound_var in bound_vars
+            column = findfirst(args, bound_var)
+            if column != 0
+                push!(apply_args, Var(bound_var))
+                push!(permute_columns, column)
+            end
+        end
+        column = findfirst(args, var) # TODO repeated vars?
+        push!(permute_columns, column)
+        Apply(Permute(f, permute_columns), apply_args)
+    end 
+end
+
+function todo(expr)
+    @warn "Unimplemented: $expr"
+    Var(:everything)
+end
+
+function upper_bound(bound_vars::Vector{Symbol}, var::Symbol, expr::Primitive)::Expr
+    @match (expr.f, expr.args) begin
+        (:|, [a, b]) => Primitive(:|, [upper_bound(bound_vars, var, a), upper_bound(bound_vars, var, b)])
+        (:&, [a, b]) => Primitive(:&, [upper_bound(bound_vars, var, a), upper_bound(bound_vars, var, b)])
+        (:!, [arg]) => todo(expr)
+        (:(=>), [a, b]) => todo(expr)
+        (:(==), [a, b]) => todo(expr)
+        # branches must be boolean at this point
+        (:iff, [cond, true_branch, false_branch]) => upper_bound(bound_vars, var, Primitive(:|, [Primitive(:&, [cond, true_branch]), false_branch]))
+        (:reduce, [raw_op, raw_init, values]) => todo(expr)
+        (:exists, [arg]) => upper_bound(bound_vars, var, arg)
+        (:forall, [arg]) => todo(expr)
+        _ => error("Unknown primitive: $expr")
+    end
+end
+
+function simplify_upper_bound(expr::Expr)::Expr
+    s(expr::Expr) = @match expr begin
+        Primitive(:|, [a && Var(:everything), b]) => s(a)
+        Primitive(:|, [a, b && Var(:everything)]) => s(b)
+        Primitive(:|, [a && Var(:nothing), b]) => s(b)
+        Primitive(:|, [a, b && Var(:nothing)]) => s(a)
+        Primitive(:&, [a && Var(:everything), b]) => s(b)
+        Primitive(:&, [a, b && Var(:everything)]) => s(a)
+        Primitive(:&, [a && Var(:nothing), b]) => s(a)
+        Primitive(:&, [a, b && Var(:nothing)]) => s(b)
+        Primitive(:!, [Var(:nothing)]) => Var(:everything)
+        Primitive(:!, [Var(:everything)]) => Var(:nothing)
+        _ => expr
+    end
+    @show @match expr begin
+        _::Var => expr
+        _::Apply => expr
+        Primitive(f, args) => s(Primitive(f, map(s, args)))
+    end
+end     
+
+function with_upper_bound(expr::Abstract)
+    value = expr.value # TODO once bounds are precise can do value = true
+    for i in reverse(1:length(expr.vars))
+        bound = upper_bound(expr.vars[1:i-1], expr.vars[i], expr.value)
+        bound = simplify_upper_bound(bound)
+        value = BoundedAbstract(expr.vars[i], bound, value)
+    end
+    value
+end
+
+function interpret(env::Env, expr::Permute)::Set
+    Set((row[expr.columns] for row in env[expr.arg]))
+end
+
+function interpret(env::Env, expr::BoundedAbstract)::Set
+    upper_bound = interpret(env, expr.upper_bound)
+    result = Set()
+    for var_row in upper_bound
+        env[expr.var] = Set([var_row])
+        for value_row in interpret(env, expr.value)
+            push!(result, (var_row..., value_row...))
+        end
+    end
+    result
+end
+
 # --- exports ---
 
 macro imp(ast)
-    parse(ast)
+    :(parse($(QuoteNode(ast))))
 end
 
 macro imp(env, ast)

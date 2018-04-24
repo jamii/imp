@@ -162,6 +162,24 @@ end
 # TODO requires reasoning with sets as bounds rather than just types
 # @test_infer (x -> if person(x); (if person(x) "yes" else 0 end) end) (String, String)
 
-printstyled("Pass!\n", color=:light_green)
+# --- bounded abstract ---
+
+bounded_env = copy(env)
+delete!(bounded_env, :everything) # no cheating
+
+macro test_bounded(ast)
+    :(@test @imp($env, $ast) == interpret($bounded_env, Imp.with_upper_bound(@imp($ast))))
+end
+
+macro test_unbounded(ast)
+    :(@test_throws KeyError interpret($bounded_env, Imp.with_upper_bound(@imp($ast))))
+end
+
+@test_bounded x -> false
+@test_unbounded x -> true
+
+@test_bounded p -> person(p)
+@test_bounded (p, r) -> if person(p) rsvp(p, r) end
+@test_bounded (x, y) -> person(x) & person(y)
 
 end

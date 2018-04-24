@@ -230,7 +230,12 @@ struct BoundedAbstract <: Expr
     value::Expr
 end
 
-# TODO unparse
+function unparse(expr::Union{Permute, BoundedAbstract})
+    @match expr begin
+        Permute(arg, columns) => :($arg[$(columns...)])
+        BoundedAbstract(var, upper_bound, value) => :(for $var in $(unparse(upper_bound)); $(unparse(value)); end)
+    end
+end
 
 function upper_bound(bound_vars::Vector{Symbol}, var::Symbol, expr::Constant)::Expr
     (expr.value == false) ? Var(:nothing) : Var(:everything)

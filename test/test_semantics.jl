@@ -1,17 +1,7 @@
-macro test_sugar(ast)
-    @assert @capture(ast, ast1_ == ast2_)
-    # TODO not sure why these don't need escaping...
-    :(@test @imp($ast1) == @imp($ast2))
-end
-
-@test_sugar f(x,y,z) == f(x)(y)(z)
-@test_sugar ((x,y,z) -> 0) == (x -> y -> z -> 0)
-@test_sugar ((x,y,z) -> f(x)(y)(z)) == (x -> y -> z -> f(x)(y)(z))
-
 macro test_imp(ast)
-    @assert @capture(ast, ast1_ == ast2_)
+    @assert @capture(ast, left_ == right_)
     # TODO not sure why these don't need escaping...
-    :(@test @imp($env, $ast1) == @imp($env, $ast2))
+    :(@test @imp($env, $left) == @imp($env, $right))
 end
 
 @test Imp.set_to_bool(Imp.bool_to_set(true)) == true

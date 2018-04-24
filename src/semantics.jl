@@ -1,28 +1,27 @@
-struct Apply1 <: Expr
-    f::Expr
-    arg::Expr
+abstract type Expr end
+
+struct Constant{T} <: Expr
+    value::T # scalar
 end
 
-struct Abstract1 <: Expr
-    var::Symbol
+struct Var <: Expr
+    name::Symbol
+end
+
+struct Apply <: Expr
+    f::Expr
+    args::Vector{Expr}
+end
+
+struct Abstract <: Expr
+    variable::Symbol
     value::Expr
 end
 
-function unparse(expr::Union{Apply1, Abstract1})
-    @match expr begin
-        Apply1(f, arg) => :($(unparse(f))($(unparse(arg))))
-        Abstract1(var, arg) => :($(unparse(var)) -> $(unparse(arg)))
-    end
-end
-
-function desugar(expr)
-    @match expr begin
-        _::Constant => expr
-        _::Var => expr
-        Apply(f, args) => reduce(Apply1, desugar(f), map(desugar, args))
-        Primitive(f, args) => Primitive(f, map(desugar, args))
-        Abstract(vars, value) => reduce((value, var) -> Abstract1(var, value), desugar(value), reverse(vars))
-    end
+# things which operate on relations rather than on values
+struct Primitive <: Expr
+    f::Symbol
+    args::Vector{Expr}
 end
 
 const Env = Dict{Symbol, Set}
@@ -44,25 +43,28 @@ function interpret(env::Env, expr::Var) ::Set
     env[expr.name]
 end
 
-function interpret(env::Env, expr::Apply1) ::Set
+function interpret(env::Env, expr::Apply) ::Set
     f = interpret(env, expr.f)
-    arg = interpret(env, expr.arg)
-    result = Set()
-    for n in map(length, arg)
-        for row in f
-            if (length(row) >= n) && (row[1:n] in arg)
-                push!(result, row[n+1:end])
+    for arg in map((arg) -> interpret(env, arg), expr.args)
+        result = Set()
+        if !isempty(arg)
+            n = length(first((arg)))
+            for row in f
+                if row[1:n] in arg
+                    push!(result, row[n+1:end])
+                end
             end
+            f = result
         end
     end
-    result
+    f
 end
 
-function interpret(env::Env, expr::Abstract1) ::Set
+function interpret(env::Env, expr::Abstract) ::Set
     env = copy(env)
     result = Set()
     for domain_row in env[:everything]
-        env[expr.var] = Set([domain_row])
+        env[expr.variable] = Set([domain_row])
         value = interpret(env, expr.value)
         for value_row in value
             push!(result, (domain_row..., value_row...))
@@ -91,6 +93,40 @@ function interpret(env::Env, expr::Primitive) ::Set
         (:exists, [arg]) => bool_to_set(arg != env[:nothing])
         (:forall, [arg]) => bool_to_set(arg == env[:everything])
         _ => error("Unknown primitive: $expr")
+    end
+end
+
+function parse(ast)
+    if @capture(ast, constant_Int64_String_Bool)
+        Constant(constant)
+    elseif @capture(ast, name_Symbol)
+        Var(name)
+    elseif @capture(ast, f_(args__)) && length(args) > 0
+        if f in [:|, :&, :!, :(=>), :(==), :reduce, :exists, :forall]
+            Primitive(f, map(parse, args))
+        else
+            Apply(parse(f), map(parse, args))
+        end
+    elseif @capture(ast, if cond_ true_branch_ end)
+        Primitive(:iff, [parse(cond), parse(true_branch), Constant(false)])
+    elseif @capture(ast, if cond_ true_branch_ else false_branch_ end)
+        Primitive(:iff, [parse(cond), parse(true_branch), parse(false_branch)])
+    elseif @capture(ast, (variable_Symbol) -> value_)
+        Abstract(variable, parse(value))
+    else
+        error("Unknown syntax: $ast")
+    end
+end
+
+function unparse(expr)
+    @match expr begin
+        Constant(value) => value
+        Var(name) => name
+        Apply(f, args) => :($(unparse(f))($(map(unparse, args)...)))
+        Abstract(variable, value) => :(($variable) -> $(unparse(value)))
+        Primitive(:iff, [cond, true_branch, Constant(false)]) => :(if $(unparse(cond)) $(unparse(true_branch)) end)
+        Primitive(:iff, [cond, true_branch, false_branch]) => :(if $(unparse(cond)) $(unparse(true_branch)) else $(unparse(false_branch)) end)
+        Primitive(f, args) => :($(unparse(f))($(map(unparse, args)...)))
     end
 end
 

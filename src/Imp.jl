@@ -52,32 +52,20 @@ end
          end)
 end
 
-const ContainsExpr = Union{Expr, Vector{T} where T <: Expr}
-
-@generated function Base.map(f, constructor, expr::Expr)
+@generated function map_expr(f, constructor, expr::Expr)
     quote
         constructor($(@splice fieldname in fieldnames(expr) begin
-                      if fieldtype(expr, fieldname) <: ContainsExpr
+                      if fieldtype(expr, fieldname) <: Expr
                       :(f(expr.$fieldname))
+                      elseif fieldtype(expr, fieldname) <: Vector{T} where {T <: Expr}
+                      :(map(f, expr.$fieldname))
                       else
                       :(expr.$fieldname)
                       end
                       end))
     end
 end
-Base.map(f, expr::Expr) = map(f, typeof(expr), expr)
-
-@generated function Base.foreach(f, expr::Expr)
-    quote
-        $(@splice fieldname in fieldnames(expr) begin
-          if fieldtype(expr, fieldname) <: ContainsExpr
-          :(f(expr.$fieldname))
-          else
-          :(expr.$fieldname)
-          end
-          end)
-    end
-end
+map_expr(f, expr::Expr) = map_expr(f, typeof(expr), expr)
 
 function parse(ast)
     if @capture(ast, constant_Int64_String_Bool)
@@ -107,8 +95,8 @@ function parse(ast)
     end
 end
 
-function unparse(expr::ContainsExpr)
-    @match (expr, map(unparse, tuple, expr)) begin
+function unparse(expr::Expr)
+    @match (expr, map_expr(unparse, tuple, expr)) begin
         (_::Constant, (value,)) => value
         (_::Var, (name, _)) => name
         (_::Apply, (f, args)) => :($f($(args...)))
@@ -134,7 +122,7 @@ end
 Scope() = Scope(Dict(), Dict())
 Scope(env::Dict{Var}) = Scope(Dict(var.name => 0 for var in keys(env)), Dict(var.name => 0 for var in keys(env)))
 
-scopify(scope::Scope, expr::ContainsExpr) = map((expr) -> scopify(scope, expr), expr)
+scopify(scope::Scope, expr::Expr) = map_expr((expr) -> scopify(scope, expr), expr)
 
 function scopify(scope::Scope, expr::Var)
     id = get(scope.current, expr.name) do
@@ -148,7 +136,7 @@ function scopify(scope::Scope, expr::Abstract)
     for var in expr.vars
         scope.current[var.name] = scope.used[var.name] = get(scope.used, var.name, 0) + 1
     end
-    map((expr) -> scopify(scope, expr), expr)
+    map_expr((expr) -> scopify(scope, expr), expr)
 end
 
 # --- interpret ---
@@ -301,7 +289,7 @@ struct BoundedAbstract <: Expr
 end
 
 function unparse(expr::Union{Permute, BoundedAbstract})
-    @match (expr, map(unparse, tuple, expr)) begin
+    @match (expr, map_expr(unparse, tuple, expr)) begin
         (_::Permute, (arg, columns)) => :($arg[$(columns...)])
         (_::BoundedAbstract, (var, upper_bound, value)) => :(for $var in $upper_bound; $value; end)
     end
@@ -355,8 +343,8 @@ function upper_bound(bound_vars::Vector{Var}, var::Var, expr::Primitive)::Expr
     end
 end
 
-function simplify_upper_bound(expr::ContainsExpr)
-    @match map(simplify_upper_bound, expr) begin
+function simplify_upper_bound(expr::Expr)
+    @match map_expr(simplify_upper_bound, expr) begin
         Primitive(:|, [a && Var(:everything, _), b]) => a
         Primitive(:|, [a, b && Var(:everything, _)]) => b
         Primitive(:|, [a && Var(:nothing, _), b]) => b

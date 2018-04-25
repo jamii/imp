@@ -108,6 +108,8 @@ function unparse(expr::Expr)
     end
 end
 
+Base.show(io::IO, expr::Expr) = print(io, string("@imp(", unparse(expr), ")"))
+
 # --- analyze ---
 
 struct CompileError

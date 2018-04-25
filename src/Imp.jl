@@ -46,6 +46,12 @@ struct Primitive <: Expr
     args::Vector{Expr}
 end
 
+@generated function Base.:(==)(a::T, b::T) where {T <: Expr}
+    Base.Expr(:&&, @splice fieldname in fieldnames(T) quote
+         (a.$fieldname == b.$fieldname)
+         end)
+end      
+
 function parse(ast)
     if @capture(ast, constant_Int64_String_Bool)
         Constant(constant)
@@ -341,24 +347,19 @@ function upper_bound(bound_vars::Vector{Var}, var::Var, expr::Primitive)::Expr
     end
 end
 
-function simplify_upper_bound(expr::Expr)::Expr
-    s(expr::Expr) = @match expr begin
-        Primitive(:|, [a && Var(:everything, _), b]) => s(a)
-        Primitive(:|, [a, b && Var(:everything, _)]) => s(b)
-        Primitive(:|, [a && Var(:nothing, _), b]) => s(b)
-        Primitive(:|, [a, b && Var(:nothing, _)]) => s(a)
-        Primitive(:&, [a && Var(:everything, _), b]) => s(b)
-        Primitive(:&, [a, b && Var(:everything, _)]) => s(a)
-        Primitive(:&, [a && Var(:nothing, _), b]) => s(a)
-        Primitive(:&, [a, b && Var(:nothing, _)]) => s(b)
+function simplify_upper_bound(expr)
+    @match walk(simplify_upper_bound, expr) begin
+        Primitive(:|, [a && Var(:everything, _), b]) => a
+        Primitive(:|, [a, b && Var(:everything, _)]) => b
+        Primitive(:|, [a && Var(:nothing, _), b]) => b
+        Primitive(:|, [a, b && Var(:nothing, _)]) => a
+        Primitive(:&, [a && Var(:everything, _), b]) => b
+        Primitive(:&, [a, b && Var(:everything, _)]) => a
+        Primitive(:&, [a && Var(:nothing, _), b]) => a
+        Primitive(:&, [a, b && Var(:nothing, _)]) => b
         Primitive(:!, [Var(:nothing, _)]) => Var(:everything)
         Primitive(:!, [Var(:everything, _)]) => Var(:nothing)
-        _ => expr
-    end
-    @match expr begin
-        _::Var => expr
-        _::Apply => expr
-        Primitive(f, args) => s(Primitive(f, map(s, args)))
+        other => other
     end
 end     
 

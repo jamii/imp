@@ -186,6 +186,23 @@ end
 
 # --- bounded abstract ---
 
+const bounds_env = merge(stdenv, Imp.Env{Set}([Imp.Var(name) => Set() for name in [:x, :y, :z]]))
+macro test_bound(original, simple)
+    :(@test Imp.simplify_upper_bound(@imp($(copy(bounds_env)), $original)) == @imp($(copy(bounds_env)), $simple))
+end
+
+@test_bound nothing nothing
+@test_bound everything everything
+@test_bound (nothing & everything) nothing
+@test_bound (nothing | everything) everything
+@test_bound !(everything) nothing
+@test_bound ((x & everything) | y) (x | y)
+@test_bound ((x | nothing) & y) (x & y)
+@test_bound ((x | everything) & y) y
+@test_bound ((x & nothing) | y) y
+@test_bound (x(y,z) | (y(x,z) & nothing)) x(y,z)
+@test_bound x(nothing) x(nothing)
+
 bounded_env = copy(env)
 delete!(bounded_env, Imp.Var(:everything)) # no cheating
 

@@ -12,7 +12,7 @@ end
 macro splice(iterator, body)
   @assert iterator.head == :call
   @assert iterator.args[1] == :in
-  Expr(:..., :(($(esc(body)) for $(esc(iterator.args[2])) in $(esc(iterator.args[3])))))
+  Base.Expr(:..., :(($(esc(body)) for $(esc(iterator.args[2])) in $(esc(iterator.args[3])))))
 end
 
 # --- parse ---
@@ -83,6 +83,44 @@ function unparse(expr)
     end
 end
 
+# walk(f, value) = value
+# walk(f, exprs::Vector{Expr}) = map(expr -> walk(f, expr), exprs)
+
+# @generated function walk(f, expr::Expr)
+#     quote
+#         $(expr)($(@splice fieldname in fieldnames(expr) quote
+#                  f(expr.$fieldname)
+#                  end))
+#     end
+# end
+
+# --- analyze ---
+
+struct CompileError
+    message::String
+end
+
+function scopify(scope::Dict{Symbol, Symbol}, name::Symbol)
+    get(scope, name) do
+        throw(CompileError(("Not in scope: $name"))) # TODO how do we report location?
+    end
+end
+
+scopify(scope::Dict{Symbol, Symbol}, exprs::Vector) = map((expr) -> scopify(scope, expr), exprs)
+scopify(scope::Dict{Symbol, Symbol}, expr::Constant) = expr
+scopify(scope::Dict{Symbol, Symbol}, expr::Var) = Var(scopify(scope, expr.name))
+scopify(scope::Dict{Symbol, Symbol}, expr::Apply) = Apply(scopify(scope, expr.f), scopify(scope, expr.args))
+
+function scopify(scope::Dict{Symbol, Symbol}, expr::Abstract)
+    scope = copy(scope)
+    for var in expr.vars
+        scope[var] = gensym(var)
+    end
+    Abstract(scopify(scope, expr.vars), scopify(scope, expr.value))
+end
+
+scopify(scope::Dict{Symbol, Symbol}, expr::Primitive) = Primitive(expr.f, scopify(scope, expr.args))
+
 # --- interpret ---
 
 const Env{T} = Dict{Symbol, T}
@@ -124,7 +162,6 @@ function interpret(env::Env, expr::Abstract, var_ix::Int64) ::Set
 end
 
 function interpret(env::Env, expr::Abstract)
-    env = copy(env)
     interpret(env, expr, 1)
 end
 
@@ -301,7 +338,7 @@ function simplify_upper_bound(expr::Expr)::Expr
         Primitive(:!, [Var(:everything)]) => Var(:nothing)
         _ => expr
     end
-    @show @match expr begin
+    @match expr begin
         _::Var => expr
         _::Apply => expr
         Primitive(f, args) => s(Primitive(f, map(s, args)))
@@ -336,14 +373,27 @@ end
 
 # --- exports ---
 
+function imp(ast)
+    scopify(Dict{Symbol, Symbol}(), parse(ast))
+end
+
+function imp(env, ast)
+    scope = Dict(name => name for (name, _) in env)
+    scopify(scope, parse(ast))
+end
+
 macro imp(ast)
-    :(parse($(QuoteNode(ast))))
+    :(imp($(QuoteNode(ast))))
 end
 
 macro imp(env, ast)
-    :(interpret($(esc(env)), parse($(QuoteNode(ast)))))
+    :(imp($(esc(env)), $(QuoteNode(ast))))
 end
 
-export stdenv, @imp, interpret, infer
+macro imp!(env, ast)
+    :(interpret($(esc(env)), imp($(esc(env)), $(QuoteNode(ast)))))
+end
+
+export stdenv, @imp, @imp!, interpret, infer
 
 end

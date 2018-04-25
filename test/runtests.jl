@@ -15,20 +15,26 @@ env = merge(stdenv, Dict{Symbol, Set}(
     :points => Set([("alice", 0), ("bob", 1), ("cthulu", 1)]),
 ))
 
+# --- analyze ---
+
+# catch scoping errors at compile time so we don't have to pay the cost of runtime env copying
+@test_throws Imp.CompileError @imp(env, p -> q)
+@test_throws Imp.CompileError @imp(env, p -> (q -> true) & q)
+
 # --- interpret ---
 
 macro test_imp(ast)
     @assert @capture(ast, left_ == right_)
     # TODO not sure why these don't need escaping...
-    :(@test @imp($env, $left) == @imp($env, $right))
+    :(@test @imp!($(copy(env)), $left) == @imp!($(copy(env)), $right))
 end
 
 @test Imp.set_to_bool(Imp.bool_to_set(true)) == true
 @test Imp.set_to_bool(Imp.bool_to_set(false)) == false
 
 # basic booleans
-@test @imp(env, true) == Set([()])
-@test @imp(env, false) == Set()
+@test @imp!(env, true) == Set([()])
+@test @imp!(env, false) == Set()
 @test_imp (true | true) == true
 @test_imp (true | false) == true
 @test_imp (false | true) == true
@@ -109,7 +115,7 @@ end
 # --- infer ---
 
 macro test_infer(expr, typs...)
-    :(@test infer($env, @imp($expr)) == Imp.SetType([$(typs...)]))
+    :(@test infer($(copy(env)), @imp($(copy(env)), $expr)) == Imp.SetType([$(typs...)]))
 end
 
 @test_infer true ()
@@ -144,6 +150,16 @@ end
 
 @test_infer reduce(+, 0, points) (Int64,)
 
+macro test_infer_var(expr, vars_and_typs...)
+    quote
+        env = copy($env)
+        infer(env, @imp($expr))
+        $(Imp.@splice (var, typ) in vars_and_typs quote
+            @test env[$(QuoteNode(var))] == $(esc(typ))
+          end)
+    end 
+end
+
 # harder cases
 
 @test_infer (p -> p == 0) (Int64,)
@@ -168,11 +184,11 @@ bounded_env = copy(env)
 delete!(bounded_env, :everything) # no cheating
 
 macro test_bounded(ast)
-    :(@test @imp($env, $ast) == interpret($bounded_env, Imp.with_upper_bound(@imp($ast))))
+    :(@test @imp!($(copy(env)), $ast) == interpret($bounded_env, Imp.with_upper_bound(@imp($(copy(env)), $ast))))
 end
 
 macro test_unbounded(ast)
-    :(@test_throws KeyError interpret($bounded_env, Imp.with_upper_bound(@imp($ast))))
+    :(@test_throws KeyError interpret($(copy(bounded_env)), Imp.with_upper_bound(@imp($(copy(env)), $ast))))
 end
 
 @test_bounded x -> false

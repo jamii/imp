@@ -118,6 +118,17 @@ macro test_infer(expr, typs...)
     :(@test infer($(copy(env)), @imp($(copy(env)), $expr)) == Imp.SetType([$(typs...)]))
 end
 
+macro test_infer_var(expr, vars_and_typs...)
+    quote
+        env = Imp.env_types($env)
+        interpret(env, @imp(env, $expr))
+        $(Imp.@splice var_and_typ in vars_and_typs begin
+            @assert @capture(var_and_typ, var_ => typ_)
+            :(@test env[Imp.Var($(QuoteNode(var)), 1)] == Set($typ))
+          end)
+    end 
+end
+
 @test_infer true ()
 @test_infer false
 @test_infer 1 (Int64,)
@@ -149,17 +160,6 @@ end
 @test_infer forall(p -> person(p) => string(p)) ()
 
 @test_infer reduce(+, 0, points) (Int64,)
-
-macro test_infer_var(expr, vars_and_typs...)
-    quote
-        env = Imp.env_types($env)
-        interpret(env, @imp(env, $expr))
-        $(Imp.@splice var_and_typ in vars_and_typs begin
-            @assert @capture(var_and_typ, var_ => typ_)
-            :(@test env[Imp.Var($(QuoteNode(var)), 1)] == Set($typ))
-          end)
-    end 
-end
 
 @imp(env, forall(p -> person(p) => string(p)))
 

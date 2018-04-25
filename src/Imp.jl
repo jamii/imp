@@ -25,7 +25,10 @@ end
 
 struct Var <: Expr
     name::Symbol
+    scope::Int64 # vars with the same name in different scopes get different ids here
 end
+
+Var(name::Symbol) = Var(name, 0) # 0 == global scope
 
 struct Apply <: Expr
     f::Expr
@@ -33,7 +36,7 @@ struct Apply <: Expr
 end
 
 struct Abstract <: Expr
-    vars::Vector{Symbol}
+    vars::Vector{Var}
     value::Expr
 end
 
@@ -63,9 +66,9 @@ function parse(ast)
     elseif @capture(ast, if cond_ true_branch_ else false_branch_ end)
         Primitive(:iff, [parse(cond), parse(true_branch), parse(false_branch)])
     elseif @capture(ast, (var_Symbol) -> value_)
-        Abstract([var], parse(value))
+        Abstract([Var(var)], parse(value))
     elseif @capture(ast, (vars__,) -> value_)
-        Abstract(vars, parse(value))
+        Abstract(map(Var, vars), parse(value))
     else
         error("Unknown syntax: $ast")
     end
@@ -74,9 +77,9 @@ end
 function unparse(expr)
     @match expr begin
         Constant(value) => value
-        Var(name) => name
+        Var(name, _) => name
         Apply(f, args) => :($(unparse(f))($(map(unparse, args)...)))
-        Abstract(vars, value) => :(($(vars...)) -> $(unparse(value)))
+        Abstract(vars, value) => :(($(map(unparse, vars)...)) -> $(unparse(value)))
         Primitive(:iff, [cond, true_branch, Constant(false)]) => :(if $(unparse(cond)) $(unparse(true_branch)) end)
         Primitive(:iff, [cond, true_branch, false_branch]) => :(if $(unparse(cond)) $(unparse(true_branch)) else $(unparse(false_branch)) end)
         Primitive(f, args) => :($(unparse(f))($(map(unparse, args)...)))
@@ -100,33 +103,40 @@ struct CompileError
     message::String
 end
 
-function scopify(scope::Dict{Symbol, Symbol}, name::Symbol)
-    get(scope, name) do
-        throw(CompileError(("Not in scope: $name"))) # TODO how do we report location?
-    end
+struct Scope
+    current::Dict{Symbol, Int64}
+    used::Dict{Symbol, Int64}
 end
 
-scopify(scope::Dict{Symbol, Symbol}, exprs::Vector) = map((expr) -> scopify(scope, expr), exprs)
-scopify(scope::Dict{Symbol, Symbol}, expr::Constant) = expr
-scopify(scope::Dict{Symbol, Symbol}, expr::Var) = Var(scopify(scope, expr.name))
-scopify(scope::Dict{Symbol, Symbol}, expr::Apply) = Apply(scopify(scope, expr.f), scopify(scope, expr.args))
+Scope() = Scope(Dict(), Dict())
+Scope(env::Dict{Var, T}) where T = Scope(Dict(var.name => 0 for var in keys(env)), Dict(var.name => 0 for var in keys(env)))
 
-function scopify(scope::Dict{Symbol, Symbol}, expr::Abstract)
-    scope = copy(scope)
+scopify(scope::Scope, exprs::Vector) = map((expr) -> scopify(scope, expr), exprs)
+scopify(scope::Scope, expr::Constant) = expr
+scopify(scope::Scope, expr::Apply) = Apply(scopify(scope, expr.f), scopify(scope, expr.args))
+scopify(scope::Scope, expr::Primitive) = Primitive(expr.f, scopify(scope, expr.args))
+
+function scopify(scope::Scope, expr::Var)
+    id = get(scope.current, expr.name) do
+        throw(CompileError(("Not in scope: $(expr.name)"))) # TODO how do we report location?
+    end
+    Var(expr.name, id)
+end
+
+function scopify(scope::Scope, expr::Abstract)
+    scope = Scope(copy(scope.current), scope.used)
     for var in expr.vars
-        scope[var] = gensym(var)
+        scope.current[var.name] = scope.used[var.name] = get(scope.used, var.name, 0) + 1
     end
     Abstract(scopify(scope, expr.vars), scopify(scope, expr.value))
 end
 
-scopify(scope::Dict{Symbol, Symbol}, expr::Primitive) = Primitive(expr.f, scopify(scope, expr.args))
-
 # --- interpret ---
 
-const Env{T} = Dict{Symbol, T}
+const Env{T} = Dict{Var, T}
 
 function interpret(env::Env, expr::Var) ::Set
-    env[expr.name]
+    env[expr]
 end
 
 function interpret(env::Env, expr::Apply) ::Set
@@ -151,12 +161,15 @@ function interpret(env::Env, expr::Abstract, var_ix::Int64) ::Set
     else
         var = expr.vars[var_ix]
         result = Set()
-        for var_row in env[:everything]
+        var_rows = Set()
+        for var_row in env[Var(:everything)]
             env[var] = Set([var_row])
             for value_row in interpret(env, expr, var_ix+1)
                 push!(result, (var_row..., value_row...))
+                push!(var_rows, var_row)
             end
         end
+        env[var] = var_rows # kind of ugly that we put this in just for typechecking
         result
     end
 end
@@ -197,15 +210,15 @@ function interpret(env::Env{Set}, expr::Primitive) ::Set
             value = reduce((a,b) -> op[a,b[end]], init, values)
             Set([(value,)])
         end
-        (:exists, [arg]) => bool_to_set(arg != env[:nothing])
-        (:forall, [arg]) => bool_to_set(arg == env[:everything])
+        (:exists, [arg]) => bool_to_set(arg != env[Var(:nothing)])
+        (:forall, [arg]) => bool_to_set(arg == env[Var(:everything)])
         _ => error("Unknown primitive: $expr")
     end
 end
 
-stdenv = Dict{Symbol, Set}(
-  :everything => Set{Any}([(scalar,) for scalar in [0, 1, 2, "alice", "bob", "eve", "cthulu", "yes", "no"]]),
-  :nothing => Set([]),
+stdenv = Env{Set}(
+  Var(:everything) => Set{Any}([(scalar,) for scalar in [0, 1, 2, "alice", "bob", "eve", "cthulu", "yes", "no"]]),
+  Var(:nothing) => Set([]),
 )
 
 # --- interpret types ---
@@ -229,7 +242,7 @@ function interpret(env::Env{SetType}, expr::Primitive)::SetType
     @match (expr.f, arg_types) begin
         (:|, [a, b]) => union(a, b)
         (:&, [a, b]) => intersect(a, b)
-        (:!, [arg]) => bool_type
+        (:!, [arg]) => bool_type # because we don't have a true_type
         (:(=>), [a, b]) => bool_type
         (:(==), [a, b]) => intersect(a, b) == false_type ? false_type : bool_type
         (:iff, [cond_type, then_type, else_type]) => begin
@@ -257,12 +270,12 @@ infer(env::Env{Set}, expr::Expr) = interpret(env_types(env), expr)
 # need Abstract over fully lowered value of arity 0
 
 struct Permute <: Expr
-    arg::Symbol
+    arg::Var
     columns::Vector{Int64}
 end
 
 struct BoundedAbstract <: Expr
-    var::Symbol
+    var::Var
     upper_bound::Expr
     value::Expr
 end
@@ -270,36 +283,34 @@ end
 function unparse(expr::Union{Permute, BoundedAbstract})
     @match expr begin
         Permute(arg, columns) => :($arg[$(columns...)])
-        BoundedAbstract(var, upper_bound, value) => :(for $var in $(unparse(upper_bound)); $(unparse(value)); end)
+        BoundedAbstract(var, upper_bound, value) => :(for $(unparse(var)) in $(unparse(upper_bound)); $(unparse(value)); end)
     end
 end
 
-function upper_bound(bound_vars::Vector{Symbol}, var::Symbol, expr::Constant)::Expr
+function upper_bound(bound_vars::Vector{Var}, var::Var, expr::Constant)::Expr
     (expr.value == false) ? Var(:nothing) : Var(:everything)
 end
 
-function upper_bound(bound_vars::Vector{Symbol}, var::Symbol, expr::Apply)::Expr
+function upper_bound(bound_vars::Vector{Var}, var::Var, expr::Apply)::Expr
     @assert expr.f isa Var
-    f = expr.f.name
-    args = map(expr.args) do arg
-        @assert arg isa Var
-        arg.name
+    @assert all(expr.args) do arg
+        arg isa Var
     end
-    if !(var in args) 
+    if !(var in expr.args) 
         Var(:everything)
     else
         apply_args = Var[]
         permute_columns = Int64[]
         for bound_var in bound_vars
-            column = findfirst(args, bound_var)
+            column = findfirst(expr.args, bound_var)
             if column != 0
-                push!(apply_args, Var(bound_var))
+                push!(apply_args, bound_var)
                 push!(permute_columns, column)
             end
         end
-        column = findfirst(args, var) # TODO repeated vars?
+        column = findfirst(expr.args, var) # TODO repeated vars?
         push!(permute_columns, column)
-        Apply(Permute(f, permute_columns), apply_args)
+        Apply(Permute(expr.f, permute_columns), apply_args)
     end 
 end
 
@@ -308,7 +319,7 @@ function todo(expr)
     Var(:everything)
 end
 
-function upper_bound(bound_vars::Vector{Symbol}, var::Symbol, expr::Primitive)::Expr
+function upper_bound(bound_vars::Vector{Var}, var::Var, expr::Primitive)::Expr
     @match (expr.f, expr.args) begin
         (:|, [a, b]) => Primitive(:|, [upper_bound(bound_vars, var, a), upper_bound(bound_vars, var, b)])
         (:&, [a, b]) => Primitive(:&, [upper_bound(bound_vars, var, a), upper_bound(bound_vars, var, b)])
@@ -326,16 +337,16 @@ end
 
 function simplify_upper_bound(expr::Expr)::Expr
     s(expr::Expr) = @match expr begin
-        Primitive(:|, [a && Var(:everything), b]) => s(a)
-        Primitive(:|, [a, b && Var(:everything)]) => s(b)
-        Primitive(:|, [a && Var(:nothing), b]) => s(b)
-        Primitive(:|, [a, b && Var(:nothing)]) => s(a)
-        Primitive(:&, [a && Var(:everything), b]) => s(b)
-        Primitive(:&, [a, b && Var(:everything)]) => s(a)
-        Primitive(:&, [a && Var(:nothing), b]) => s(a)
-        Primitive(:&, [a, b && Var(:nothing)]) => s(b)
-        Primitive(:!, [Var(:nothing)]) => Var(:everything)
-        Primitive(:!, [Var(:everything)]) => Var(:nothing)
+        Primitive(:|, [a && Var(:everything, _), b]) => s(a)
+        Primitive(:|, [a, b && Var(:everything, _)]) => s(b)
+        Primitive(:|, [a && Var(:nothing, _), b]) => s(b)
+        Primitive(:|, [a, b && Var(:nothing, _)]) => s(a)
+        Primitive(:&, [a && Var(:everything, _), b]) => s(b)
+        Primitive(:&, [a, b && Var(:everything, _)]) => s(a)
+        Primitive(:&, [a && Var(:nothing, _), b]) => s(a)
+        Primitive(:&, [a, b && Var(:nothing, _)]) => s(b)
+        Primitive(:!, [Var(:nothing, _)]) => Var(:everything)
+        Primitive(:!, [Var(:everything, _)]) => Var(:nothing)
         _ => expr
     end
     @match expr begin
@@ -374,12 +385,15 @@ end
 # --- exports ---
 
 function imp(ast)
-    scopify(Dict{Symbol, Symbol}(), parse(ast))
+    scopify(Scope(), parse(ast))
 end
 
 function imp(env, ast)
-    scope = Dict(name => name for (name, _) in env)
-    scopify(scope, parse(ast))
+    scopify(Scope(env), parse(ast))
+end
+
+function imp!(env, ast)
+    interpret(env, imp(env, ast))
 end
 
 macro imp(ast)
@@ -391,9 +405,9 @@ macro imp(env, ast)
 end
 
 macro imp!(env, ast)
-    :(interpret($(esc(env)), imp($(esc(env)), $(QuoteNode(ast)))))
+    :(imp!($(esc(env)), $(QuoteNode(ast))))
 end
 
-export stdenv, @imp, @imp!, interpret, infer
+export stdenv, imp, imp!, @imp, @imp!, interpret, infer
 
 end

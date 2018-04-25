@@ -76,7 +76,7 @@ function parse(ast)
         else
             Var(name)
         end
-    elseif @capture(ast, f_(args__)) && length(args) > 0
+    elseif @capture(ast, f_(args__))
         if f in [:|, :&, :!, :(=>), :(==), :reduce, :exists, :forall]
             Primitive(f, map(parse, args))
         else

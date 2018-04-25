@@ -86,16 +86,25 @@ function unparse(expr)
     end
 end
 
-# walk(f, value) = value
-# walk(f, exprs::Vector{Expr}) = map(expr -> walk(f, expr), exprs)
+@generated function Base.map(f, constructor, expr::Expr)
+    quote
+        constructor($(@splice fieldname in fieldnames(expr) quote
+                      f(expr.$fieldname)
+                      end))
+    end
+end
+Base.map(f, expr::Expr) = map(f, typeof(expr), expr)
 
-# @generated function walk(f, expr::Expr)
-#     quote
-#         $(expr)($(@splice fieldname in fieldnames(expr) quote
-#                  f(expr.$fieldname)
-#                  end))
-#     end
-# end
+@generated function Base.foreach(f, expr::Expr)
+    quote
+        $(@splice fieldname in fieldnames(expr) quote
+          f(expr.$fieldname)
+          end)
+    end
+end
+
+walk(f, value) = value
+walk(f, expr::Union{Expr, Vector{T}}) where {T <: Expr} = map(f, expr)
 
 # --- analyze ---
 
@@ -109,12 +118,9 @@ struct Scope
 end
 
 Scope() = Scope(Dict(), Dict())
-Scope(env::Dict{Var, T}) where T = Scope(Dict(var.name => 0 for var in keys(env)), Dict(var.name => 0 for var in keys(env)))
+Scope(env::Dict{Var}) = Scope(Dict(var.name => 0 for var in keys(env)), Dict(var.name => 0 for var in keys(env)))
 
-scopify(scope::Scope, exprs::Vector) = map((expr) -> scopify(scope, expr), exprs)
-scopify(scope::Scope, expr::Constant) = expr
-scopify(scope::Scope, expr::Apply) = Apply(scopify(scope, expr.f), scopify(scope, expr.args))
-scopify(scope::Scope, expr::Primitive) = Primitive(expr.f, scopify(scope, expr.args))
+scopify(scope::Scope, expr) = walk((expr) -> scopify(scope, expr), expr)
 
 function scopify(scope::Scope, expr::Var)
     id = get(scope.current, expr.name) do
@@ -128,7 +134,7 @@ function scopify(scope::Scope, expr::Abstract)
     for var in expr.vars
         scope.current[var.name] = scope.used[var.name] = get(scope.used, var.name, 0) + 1
     end
-    Abstract(scopify(scope, expr.vars), scopify(scope, expr.value))
+    walk((expr) -> scopify(scope, expr), expr)
 end
 
 # --- interpret ---

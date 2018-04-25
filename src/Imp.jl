@@ -35,22 +35,49 @@ struct Apply <: Expr
     args::Vector{Expr}
 end
 
-struct Abstract <: Expr
-    vars::Vector{Var}
-    value::Expr
-end
-
 # things which operate on relations rather than on values
 struct Primitive <: Expr
     f::Symbol
     args::Vector{Expr}
 end
 
+struct Abstract <: Expr
+    vars::Vector{Var}
+    value::Expr
+end
+
 @generated function Base.:(==)(a::T, b::T) where {T <: Expr}
     Base.Expr(:&&, @splice fieldname in fieldnames(T) quote
          (a.$fieldname == b.$fieldname)
          end)
-end      
+end
+
+const ContainsExpr = Union{Expr, Vector{T} where T <: Expr}
+
+@generated function Base.map(f, constructor, expr::Expr)
+    quote
+        constructor($(@splice fieldname in fieldnames(expr) begin
+                      if fieldtype(expr, fieldname) <: ContainsExpr
+                      :(f(expr.$fieldname))
+                      else
+                      :(expr.$fieldname)
+                      end
+                      end))
+    end
+end
+Base.map(f, expr::Expr) = map(f, typeof(expr), expr)
+
+@generated function Base.foreach(f, expr::Expr)
+    quote
+        $(@splice fieldname in fieldnames(expr) begin
+          if fieldtype(expr, fieldname) <: ContainsExpr
+          :(f(expr.$fieldname))
+          else
+          :(expr.$fieldname)
+          end
+          end)
+    end
+end
 
 function parse(ast)
     if @capture(ast, constant_Int64_String_Bool)
@@ -71,7 +98,7 @@ function parse(ast)
         Primitive(:iff, [parse(cond), parse(true_branch), Constant(false)])
     elseif @capture(ast, if cond_ true_branch_ else false_branch_ end)
         Primitive(:iff, [parse(cond), parse(true_branch), parse(false_branch)])
-    elseif @capture(ast, (var_Symbol) -> value_)
+    elseif @capture(ast, var_Symbol -> value_)
         Abstract([Var(var)], parse(value))
     elseif @capture(ast, (vars__,) -> value_)
         Abstract(map(Var, vars), parse(value))
@@ -80,37 +107,18 @@ function parse(ast)
     end
 end
 
-function unparse(expr)
-    @match expr begin
-        Constant(value) => value
-        Var(name, _) => name
-        Apply(f, args) => :($(unparse(f))($(map(unparse, args)...)))
-        Abstract(vars, value) => :(($(map(unparse, vars)...)) -> $(unparse(value)))
-        Primitive(:iff, [cond, true_branch, Constant(false)]) => :(if $(unparse(cond)) $(unparse(true_branch)) end)
-        Primitive(:iff, [cond, true_branch, false_branch]) => :(if $(unparse(cond)) $(unparse(true_branch)) else $(unparse(false_branch)) end)
-        Primitive(f, args) => :($(unparse(f))($(map(unparse, args)...)))
+function unparse(expr::ContainsExpr)
+    @match (expr, map(unparse, tuple, expr)) begin
+        (_::Constant, (value,)) => value
+        (_::Var, (name, _)) => name
+        (_::Apply, (f, args)) => :($f($(args...)))
+        (_::Primitive, (:iff, [cond, true_branch, Constant(false)])) => :(if $cond; $true_branch end)
+        (_::Primitive, (:iff, [cond, true_branch, false_branch])) => :(if $cond; $true_branch else $false_branch end)
+        (_::Primitive, (f, args)) => :($f($(args...)))
+        (_::Abstract, ([var], value)) => :($var -> $value)
+        (_::Abstract, (vars, value)) => :(($(vars...)) -> $value)
     end
 end
-
-@generated function Base.map(f, constructor, expr::Expr)
-    quote
-        constructor($(@splice fieldname in fieldnames(expr) quote
-                      f(expr.$fieldname)
-                      end))
-    end
-end
-Base.map(f, expr::Expr) = map(f, typeof(expr), expr)
-
-@generated function Base.foreach(f, expr::Expr)
-    quote
-        $(@splice fieldname in fieldnames(expr) quote
-          f(expr.$fieldname)
-          end)
-    end
-end
-
-walk(f, value) = value
-walk(f, expr::Union{Expr, Vector{T}}) where {T <: Expr} = map(f, expr)
 
 # --- analyze ---
 
@@ -126,7 +134,7 @@ end
 Scope() = Scope(Dict(), Dict())
 Scope(env::Dict{Var}) = Scope(Dict(var.name => 0 for var in keys(env)), Dict(var.name => 0 for var in keys(env)))
 
-scopify(scope::Scope, expr) = walk((expr) -> scopify(scope, expr), expr)
+scopify(scope::Scope, expr::ContainsExpr) = map((expr) -> scopify(scope, expr), expr)
 
 function scopify(scope::Scope, expr::Var)
     id = get(scope.current, expr.name) do
@@ -140,7 +148,7 @@ function scopify(scope::Scope, expr::Abstract)
     for var in expr.vars
         scope.current[var.name] = scope.used[var.name] = get(scope.used, var.name, 0) + 1
     end
-    walk((expr) -> scopify(scope, expr), expr)
+    map((expr) -> scopify(scope, expr), expr)
 end
 
 # --- interpret ---
@@ -293,9 +301,9 @@ struct BoundedAbstract <: Expr
 end
 
 function unparse(expr::Union{Permute, BoundedAbstract})
-    @match expr begin
-        Permute(arg, columns) => :($arg[$(columns...)])
-        BoundedAbstract(var, upper_bound, value) => :(for $(unparse(var)) in $(unparse(upper_bound)); $(unparse(value)); end)
+    @match (expr, map(unparse, tuple, expr)) begin
+        (_::Permute, (arg, columns)) => :($arg[$(columns...)])
+        (_::BoundedAbstract, (var, upper_bound, value)) => :(for $var in $upper_bound; $value; end)
     end
 end
 
@@ -347,8 +355,8 @@ function upper_bound(bound_vars::Vector{Var}, var::Var, expr::Primitive)::Expr
     end
 end
 
-function simplify_upper_bound(expr)
-    @match walk(simplify_upper_bound, expr) begin
+function simplify_upper_bound(expr::ContainsExpr)
+    @match map(simplify_upper_bound, expr) begin
         Primitive(:|, [a && Var(:everything, _), b]) => a
         Primitive(:|, [a, b && Var(:everything, _)]) => b
         Primitive(:|, [a && Var(:nothing, _), b]) => b

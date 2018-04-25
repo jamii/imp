@@ -15,6 +15,19 @@ env = merge(stdenv, Imp.Env{Set}(
     Imp.Var(:points) => Set([("alice", 0), ("bob", 1), ("cthulu", 1)]),
 ))
 
+macro test_parse(ast)
+    quote
+        expr = Imp.parse($(QuoteNode(ast)))
+        # cant test Imp.unparse(Imp.parse(ast)) == ast because of LineNumberNodes
+        @test Imp.parse(Imp.unparse(expr)) == expr
+    end
+end
+
+@test_parse true
+@test_parse (p -> 1)
+@test_parse (p -> if person(p) rsvp(p) else (if string(p) "n/a" end) end)(2)
+@test_parse (x -> (y -> (person(x) & person(y)) | (x + y == 0)))
+
 # --- analyze ---
 
 # catch scoping errors at compile time so we don't have to pay the cost of runtime env copying

@@ -128,16 +128,20 @@ end
 # --- infer ---
 
 macro test_infer(expr, typs...)
-    :(@test infer($(copy(env)), @imp($(copy(env)), $expr)) == Imp.SetType([$(typs...)]))
+    quote
+        env = copy($env)
+        expr = @imp(env, $expr)
+        expr_types = Imp.infer(env, expr)
+        @test expr_types[expr] == Imp.SetType([$(typs...)])
+    end
 end
 
 macro test_infer_var(expr, vars_and_typs...)
     quote
-        env = Imp.env_types($env)
-        interpret(env, @imp(env, $expr))
+        expr_types = Imp.infer(env, @imp(env, $expr))
         $(Imp.@splice var_and_typ in vars_and_typs begin
             @assert @capture(var_and_typ, var_ => typ_)
-            :(@test env[Imp.Var($(QuoteNode(var)), 1)] == Set($typ))
+            :(@test expr_types[Imp.Var($(QuoteNode(var)), 1)] == Set($typ))
           end)
     end 
 end
@@ -174,11 +178,6 @@ end
 
 @test_infer reduce(+, 0, points) (Int64,)
 
-@imp(env, forall(p -> person(p) => string(p)))
-
-@test_infer_var p -> string(p) p=>[(String,)]
-@test_infer_var forall(p -> person(p) => string(p)) p=>[(Int64,), (String,)]
-
 # harder cases
 
 @test_infer (p -> p == 0) (Int64,)
@@ -196,6 +195,23 @@ end
 
 # TODO requires reasoning with sets as bounds rather than just types
 # @test_infer (x -> if person(x); (if person(x) "yes" else 0 end) end) (String, String)
+
+# --- lower ---
+
+const lower_env = merge(stdenv, Imp.Env{Set}([Imp.Var(name) => Set() for name in [:f, :g, :h, :x, :y, :z]]))
+const arities = Dict(Imp.Var(:f) => 0, Imp.Var(:g) => 1, Imp.Var(:h) => 2)
+
+macro test_lower(higher, lower)
+    :(@test Imp.lower($arities, @imp($(copy(lower_env)), $higher)) == @imp($(copy(lower_env)), $lower))
+end
+
+# nothing to do
+# @test_lower true true
+# @test_lower f() f()
+# @test_lower x -> g(x) x -> g(x)
+# @test_lower (x,y) -> h(x,y) (x,y) -> h(x,y)
+
+# @test_lower x -> h(x) (x, __tmp__{1}) -> h(x, __tmp__{1})
 
 # --- bounded abstract ---
 

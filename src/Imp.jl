@@ -73,6 +73,8 @@ function parse(ast)
     elseif @capture(ast, name_Symbol)
         if name == :(_)
             Var(:everything)
+        elseif name == :(nothing)
+            Constant(false)
         else
             Var(name)
         end
@@ -116,6 +118,8 @@ struct CompileError
     message::String
 end
 
+compile_error(message::String) = throw(CompileError(message))
+
 struct Scope
     current::Dict{Symbol, Int64}
     used::Dict{Symbol, Int64}
@@ -128,7 +132,7 @@ scopify(scope::Scope, expr::Expr) = map_expr((expr) -> scopify(scope, expr), exp
 
 function scopify(scope::Scope, expr::Var)
     id = get(scope.current, expr.name) do
-        throw(CompileError(("Not in scope: $(expr.name)"))) # TODO how do we report location?
+        compile_error("Not in scope: $(expr.name)") # TODO how do we report location?
     end
     Var(expr.name, id)
 end
@@ -145,11 +149,15 @@ end
 
 const Env{T} = Dict{Var, T}
 
-function interpret(env::Env, expr::Var) ::Set
+function interpret(env::Env, expr::Expr) ::Set
+    _interpret(env, expr)
+end
+
+function _interpret(env::Env, expr::Var) ::Set
     env[expr]
 end
 
-function interpret(env::Env, expr::Apply) ::Set
+function _interpret(env::Env, expr::Apply) ::Set
     f = interpret(env, expr.f)
     for arg in map((arg) -> interpret(env, arg), expr.args)
         result = Set()
@@ -165,27 +173,24 @@ function interpret(env::Env, expr::Apply) ::Set
     f
 end
 
-function interpret(env::Env, expr::Abstract, var_ix::Int64) ::Set
+function _interpret(env::Env, expr::Abstract, var_ix::Int64) ::Set
     if var_ix > length(expr.vars)
         interpret(env, expr.value)
     else
         var = expr.vars[var_ix]
         result = Set()
-        var_rows = Set()
         for var_row in env[Var(:everything)]
             env[var] = Set([var_row])
-            for value_row in interpret(env, expr, var_ix+1)
+            for value_row in _interpret(env, expr, var_ix+1)
                 push!(result, (var_row..., value_row...))
-                push!(var_rows, var_row)
             end
         end
-        env[var] = var_rows # kind of ugly that we put this in just for typechecking
         result
     end
 end
 
-function interpret(env::Env, expr::Abstract)
-    interpret(env, expr, 1)
+function _interpret(env::Env, expr::Abstract)
+    _interpret(env, expr, 1)
 end
 
 # --- interpret values ---
@@ -195,15 +200,15 @@ const falsey = Set()
 bool_to_set(bool::Bool)::Set = bool ? truthy : falsey
 set_to_bool(set::Set)::Bool = length(set) > 0
 
-function interpret(env::Env{Set}, expr::Constant) ::Set
+function _interpret(env::Env{Set}, expr::Constant) ::Set
     Set([(expr.value,)])
 end
 
-function interpret(env::Env{Set}, expr::Constant{Bool}) ::Set
+function _interpret(env::Env{Set}, expr::Constant{Bool}) ::Set
     bool_to_set(expr.value)
 end
 
-function interpret(env::Env{Set}, expr::Primitive) ::Set
+function _interpret(env::Env{Set}, expr::Primitive) ::Set
     args = [interpret(env, arg) for arg in expr.args]
     @match (expr.f, args) begin
         (:|, [a, b]) => union(a,b)
@@ -220,7 +225,7 @@ function interpret(env::Env{Set}, expr::Primitive) ::Set
             value = reduce((a,b) -> op[a,b[end]], init, values)
             Set([(value,)])
         end
-        (:exists, [arg]) => bool_to_set(arg != env[Var(:nothing)])
+        (:exists, [arg]) => bool_to_set(arg != falsey)
         (:forall, [arg]) => bool_to_set(arg == env[Var(:everything)])
         _ => error("Unknown primitive: $expr")
     end
@@ -239,15 +244,15 @@ const SetType = Set{RowType}
 const bool_type = SetType([()])
 const false_type = SetType([])
 
-function interpret(env::Env{SetType}, expr::Constant{T})::SetType where T
+function _interpret(env::Env{SetType}, expr::Constant{T})::SetType where T
     Set([(T,)])
 end
 
-function interpret(env::Env{SetType}, expr::Constant{Bool})::SetType where T
+function _interpret(env::Env{SetType}, expr::Constant{Bool})::SetType where T
     expr.value ? bool_type : false_type
 end
 
-function interpret(env::Env{SetType}, expr::Primitive)::SetType
+function _interpret(env::Env{SetType}, expr::Primitive)::SetType
     arg_types = [interpret(env, arg) for arg in expr.args]
     @match (expr.f, arg_types) begin
         (:|, [a, b]) => union(a, b)
@@ -273,7 +278,121 @@ end
 row_type(row::Tuple) = map(typeof, row)
 set_type(set::Set) = map(row_type, set)
 env_types(env::Env{Set}) = Env{SetType}(name => set_type(set) for (name, set) in env)
-infer(env::Env{Set}, expr::Expr) = interpret(env_types(env), expr)
+
+# TODO totally gross global, pass a context instead
+const expr_types = Dict{Expr, SetType}()
+function interpret(env::Env{SetType}, expr::Expr)
+    expr_types[expr] = _interpret(env, expr)
+end
+function infer(env::Env{Set}, expr::Expr)::Dict{Expr, SetType}
+    empty!(expr_types)
+    interpret(env_types(env), expr)
+    copy(expr_types)
+end
+
+# --- lower ---
+
+# TODO should probably replace anything that has false_type with false
+
+function replace_expr(expr::Expr, replacements::Dict)::Expr
+    new_expr = haskey(replacements, expr) ? replacements[expr] : expr
+    walk_expr(expr -> replace_expr(expr, replacements), new_expr)
+end
+
+# rewrite until every Apply has var/constant f, boolean type and bound var args
+function simple_apply(arity::Dict{Expr, Int64}, expr::Expr)::Expr
+    const last_id = Ref(0)
+    const make_slots(n) = [Var(Symbol("__slot$(last_id[] += 1)__"), 1) for _ in 1:arity[g]]
+    const apply(expr::Expr) = begin
+        slots = make_slots(arity[expr])
+        Abstract(slots, apply(expr, slots))
+    end
+    const apply(expr::Expr, slots::Vector{Var})::Expr = @match expr begin
+
+        # false[slots...] => false
+        Constant(false) => expr
+        
+        # true[] => true
+        Constant(true) => begin
+            @match [] = slots
+            expr
+        end
+        
+        # 1[slot] => slot==1
+        _::Constant => begin
+            @match [slot] = slots
+            Primitive(:(==), [slot, expr])
+        end
+        
+        # f[slots...] => f(slots...)
+        Var(_, 0) =>  Apply(expr, slots)
+        
+        # x[slot] => slot==x
+        Var(_, _) => begin
+            @match [slot] = slots
+            Primitive(:(==), [slot, expr])
+        end
+        
+        # f(x,y)[slots...] => f(x)(y)[slots...]
+        Apply(f, args) where length(args) > 1 => apply(reduce(Apply, f, args), slots)
+        
+        # f(x)[slots...] => f[x, slots...]
+        Apply(f, [g && Var(_, scope)]) where scope != 0 => apply(f, [x, slots...])
+        
+        # f(g)[slots...] => exists((new_slots...) -> g[new_slots...] & f[new_slots..., slots...])
+        Apply(f, [g]) => begin
+            new_slots = make_slots(arity[g])
+            Primitive(:exists,
+                      [Abstract(new_slots,
+                                Primitive(:&, [
+                                    apply(g, new_slots),
+                                    apply(f, vcat(new_slots, slots))
+                                ]))])
+        end
+
+        # things which produce bools
+        # (a == b)[] => (a[...] == b[...])
+        Primitive(f, args) where f in [:!, :(=>), :(==), :exists, :forall] => begin
+            @match [] = slots
+            Primitive(f, map(apply, args))
+        end
+
+        # things which produce scalars
+        # reduce(...)[slot] => slot==reduce(...)
+        Primitive(:reduce, _) => begin
+            @match [slot] = slots
+            Primitive(:(==), [slot, expr])
+        end
+
+        # things which produce sets
+        # (a | b)[slots...] => (a[slots...] | b[slots...])
+        Primitive(:|, [a,b]) => Primitive(:|, [apply(a, slots), apply(b, slots)])
+        Primitive(:&, [a,b]) => Primitive(:&, [apply(a, slots), apply(b, slots)])
+        Primitive(:iff, [cond, true_branch, false_branch]) => Primitive(:iff, [cond, apply(true_branch, slots), apply(false_branch, slots)])
+
+        # ((vars...) -> value)[slots...] => value[vars... = slots...]
+        Abstract(vars, value) => begin
+            n = length(vars)
+            @assert n <= length(slots)
+            apply(replace_expr(value, Dict(zip(vars, slots[1:n]))), slots[n+1:end])
+        end
+    end
+    apply(expr)
+end
+
+function arity(set_type::SetType)::Int64
+    arities = map(length, set_type)
+    @match length(arities) begin
+        0 => 0 # TODO we actually need to be a bit smarter about false_type
+        1 => first(arities)
+        _ => compile_error("Ill-typed: $set_type")
+    end
+end
+
+function lower(expr_types::Dict{Expr, SetType}, expr::Expr)::Expr
+    arities = [(expr, arity(set_type)) for (expr, set_type) in expr_types]
+    simple_apply(arities, expr)
+end
 
 # --- bounded abstract ----
 
@@ -298,7 +417,7 @@ function unparse(expr::Union{Permute, BoundedAbstract})
 end
 
 function upper_bound(bound_vars::Vector{Var}, var::Var, expr::Constant)::Expr
-    (expr.value == false) ? Var(:nothing) : Var(:everything)
+    (expr.value == false) ? Constant(false) : Var(:everything)
 end
 
 function upper_bound(bound_vars::Vector{Var}, var::Var, expr::Apply)::Expr
@@ -347,16 +466,16 @@ end
 
 function simplify_upper_bound(expr::Expr)
     @match map_expr(simplify_upper_bound, expr) begin
-        Primitive(:|, [a && Var(:everything, _), b]) => a
-        Primitive(:|, [a, b && Var(:everything, _)]) => b
-        Primitive(:|, [a && Var(:nothing, _), b]) => b
-        Primitive(:|, [a, b && Var(:nothing, _)]) => a
-        Primitive(:&, [a && Var(:everything, _), b]) => b
-        Primitive(:&, [a, b && Var(:everything, _)]) => a
-        Primitive(:&, [a && Var(:nothing, _), b]) => a
-        Primitive(:&, [a, b && Var(:nothing, _)]) => b
-        Primitive(:!, [Var(:nothing, _)]) => Var(:everything)
-        Primitive(:!, [Var(:everything, _)]) => Var(:nothing)
+        Primitive(:|, [a && Var(:everything, 0), b]) => a
+        Primitive(:|, [a, b && Var(:everything, 0)]) => b
+        Primitive(:|, [a && Constant(false), b]) => b
+        Primitive(:|, [a, b && Constant(false)]) => a
+        Primitive(:&, [a && Var(:everything, 0), b]) => b
+        Primitive(:&, [a, b && Var(:everything, 0)]) => a
+        Primitive(:&, [a && Constant(false), b]) => a
+        Primitive(:&, [a, b && Constant(false)]) => b
+        Primitive(:!, [Constant(false)]) => Var(:everything)
+        Primitive(:!, [Var(:everything, 0)]) => Constant(false)
         other => other
     end
 end     
@@ -371,11 +490,11 @@ function with_upper_bound(expr::Abstract)
     value
 end
 
-function interpret(env::Env, expr::Permute)::Set
+function _interpret(env::Env, expr::Permute)::Set
     Set((row[expr.columns] for row in env[expr.arg]))
 end
 
-function interpret(env::Env, expr::BoundedAbstract)::Set
+function _interpret(env::Env, expr::BoundedAbstract)::Set
     upper_bound = interpret(env, expr.upper_bound)
     result = Set()
     for var_row in upper_bound

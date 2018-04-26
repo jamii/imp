@@ -136,16 +136,6 @@ macro test_infer(expr, typs...)
     end
 end
 
-macro test_infer_var(expr, vars_and_typs...)
-    quote
-        expr_types = Imp.infer(env, @imp(env, $expr))
-        $(Imp.@splice var_and_typ in vars_and_typs begin
-            @assert @capture(var_and_typ, var_ => typ_)
-            :(@test expr_types[Imp.Var($(QuoteNode(var)), 1)] == Set($typ))
-          end)
-    end 
-end
-
 @test_infer true ()
 @test_infer false
 @test_infer 1 (Int64,)
@@ -198,20 +188,40 @@ end
 
 # --- lower ---
 
-const lower_env = merge(stdenv, Imp.Env{Set}([Imp.Var(name) => Set() for name in [:f, :g, :h, :x, :y, :z]]))
-const arities = Dict(Imp.Var(:f) => 0, Imp.Var(:g) => 1, Imp.Var(:h) => 2)
+const lower_env = merge(stdenv, Imp.Env{Set}([
+    Imp.Var(:f) => Set([()]),
+    Imp.Var(:g) => Set([(1,)]),
+    Imp.Var(:h) => Set([(1,2)]),
+]))
 
-macro test_lower(higher, lower)
-    :(@test Imp.lower($arities, @imp($(copy(lower_env)), $higher)) == @imp($(copy(lower_env)), $lower))
+macro test_lower(ast)
+    @assert @capture(ast, expr_ => lower_)
+    quote
+        env = copy($lower_env)
+        expr = @imp(env, $expr)
+        lower = @imp(env, $lower)
+        expr_types = Imp.infer(env, expr)
+        @test Imp.lower(expr_types, expr) == lower
+        # TODO figure out why this is not true - probably something to do with _1 == _2 
+        # expr_types = Imp.infer(env, lower)
+        # @test Imp.lower(expr_types, lower) == lower # ie idempotent
+    end
 end
 
 # nothing to do
-# @test_lower true true
-# @test_lower f() f()
-# @test_lower x -> g(x) x -> g(x)
-# @test_lower (x,y) -> h(x,y) (x,y) -> h(x,y)
+@test_lower true => true
+@test_lower f() => f()
+@test_lower (x -> g(x)) => (_1 -> g(_1))
+@test_lower ((x,y) -> h(x,y)) => ((_1, _2) -> h(_1, _2))
 
-# @test_lower x -> h(x) (x, __tmp__{1}) -> h(x, __tmp__{1})
+@test_lower (x -> h(x)) => ((_1, _2) -> h(_1, _2))
+@test_lower h => ((_1, _2) -> h(_1, _2))
+@test_lower (x -> x == g) => (_1 -> (_2 -> _2 == _1) == (_3 -> g(_3)))
+@test_lower h(g) => (_1 -> exists(_2 -> g(_2) & h(_2, _1)))
+@test_lower (x -> h(x) | g) => ((_1, _2) -> h(_1, _2) | g(_2))
+@test_lower g(0) => exists(_1 -> (_1 == 0) & g(_1))
+@test_lower !(g(0)) => !(exists(_1 -> (_1 == 0) & g(_1)))
+@test_lower (x -> y -> !(y(x))) => ((_1, _2) -> !(_1 == _2))
 
 # --- bounded abstract ---
 

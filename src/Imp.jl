@@ -52,6 +52,14 @@ end
          end)
 end
 
+@generated function Base.hash(expr::Expr, h::UInt)
+    value = :h
+    for fieldname in fieldnames(expr)
+        value = :(hash(expr.$fieldname, $value))
+    end
+    value
+end
+
 @generated function map_expr(f, constructor, expr::Expr)
     quote
         constructor($(@splice fieldname in fieldnames(expr) begin
@@ -294,26 +302,42 @@ end
 
 # TODO should probably replace anything that has false_type with false
 
+function arity(set_type::SetType)::Int64
+    arities = map(length, set_type)
+    @match length(arities) begin
+        0 => 0 # TODO we actually need to be a bit smarter about false_type
+        1 => first(arities)
+        _ => compile_error("Ill-typed: $set_type")
+    end
+end
+
 function replace_expr(expr::Expr, replacements::Dict)::Expr
     new_expr = haskey(replacements, expr) ? replacements[expr] : expr
-    walk_expr(expr -> replace_expr(expr, replacements), new_expr)
+    map_expr(expr -> replace_expr(expr, replacements), new_expr)
 end
 
 # rewrite until every Apply has var/constant f, boolean type and bound var args
 function simple_apply(arity::Dict{Expr, Int64}, expr::Expr)::Expr
-    const last_id = Ref(0)
-    const make_slots(n) = [Var(Symbol("__slot$(last_id[] += 1)__"), 1) for _ in 1:arity[g]]
-    const apply(expr::Expr) = begin
+    arity = copy(arity)
+    last_id = Ref(0)
+    make_slots(n) = begin
+        slots = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:n]
+        for slot in slots
+            arity[slot] = 1
+        end
+        slots
+    end
+    apply(expr::Expr) = begin
         slots = make_slots(arity[expr])
         Abstract(slots, apply(expr, slots))
     end
-    const apply(expr::Expr, slots::Vector{Var})::Expr = @match expr begin
+    apply(expr::Expr, slots::Vector{Var})::Expr = @match expr begin
 
         # false[slots...] => false
-        Constant(false) => expr
+        Constant{Bool}(false) => expr
         
         # true[] => true
-        Constant(true) => begin
+        Constant{Bool}(true) => begin
             @match [] = slots
             expr
         end
@@ -334,14 +358,16 @@ function simple_apply(arity::Dict{Expr, Int64}, expr::Expr)::Expr
         end
         
         # f(x,y)[slots...] => f(x)(y)[slots...]
-        Apply(f, args) where length(args) > 1 => apply(reduce(Apply, f, args), slots)
+        Apply(f, []) => apply(f, slots)
+        Apply(f, args) where (length(args) > 1) => apply(reduce((f, arg) -> Apply(f, [arg]), f, args), slots)
         
         # f(x)[slots...] => f[x, slots...]
-        Apply(f, [g && Var(_, scope)]) where scope != 0 => apply(f, [x, slots...])
+        Apply(f, [x && Var(_, scope)]) where (scope != 0) => apply(f, [x, slots...])
         
         # f(g)[slots...] => exists((new_slots...) -> g[new_slots...] & f[new_slots..., slots...])
         Apply(f, [g]) => begin
             new_slots = make_slots(arity[g])
+            @show g typeof(g) new_slots apply(g, new_slots)
             Primitive(:exists,
                       [Abstract(new_slots,
                                 Primitive(:&, [
@@ -352,7 +378,7 @@ function simple_apply(arity::Dict{Expr, Int64}, expr::Expr)::Expr
 
         # things which produce bools
         # (a == b)[] => (a[...] == b[...])
-        Primitive(f, args) where f in [:!, :(=>), :(==), :exists, :forall] => begin
+        Primitive(f, args) where (f in [:!, :(=>), :(==), :exists, :forall]) => begin
             @match [] = slots
             Primitive(f, map(apply, args))
         end
@@ -374,29 +400,35 @@ function simple_apply(arity::Dict{Expr, Int64}, expr::Expr)::Expr
         Abstract(vars, value) => begin
             n = length(vars)
             @assert n <= length(slots)
-            apply(replace_expr(value, Dict(zip(vars, slots[1:n]))), slots[n+1:end])
+            replace_expr(apply(value, slots[n+1:end]), Dict(zip(vars, slots[1:n])))
         end
     end
     apply(expr)
 end
 
-function arity(set_type::SetType)::Int64
-    arities = map(length, set_type)
-    @match length(arities) begin
-        0 => 0 # TODO we actually need to be a bit smarter about false_type
-        1 => first(arities)
-        _ => compile_error("Ill-typed: $set_type")
+function simple_abstract(expr::Expr)
+    expr = map_expr(simple_abstract, expr)
+    while true
+        expr = @match expr begin
+            Abstract([], value) => value
+            Abstract(vars1, Abstract(vars2, value)) => Abstract(vcat(vars1, vars2), value)
+            _ => return expr
+        end
     end
-end
+end 
 
 function lower(expr_types::Dict{Expr, SetType}, expr::Expr)::Expr
-    arities = [(expr, arity(set_type)) for (expr, set_type) in expr_types]
-    simple_apply(arities, expr)
+    arities = Dict{Expr, Int64}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
+    expr = simple_apply(arities, expr)
+    expr = simple_abstract(expr)
+    expr
 end
 
 # --- bounded abstract ----
 
 # need Abstract over fully lowered value of arity 0
+
+# TODO might want to permute stuff so we can hit vars earlier? does it matter?
 
 struct Permute <: Expr
     arg::Var

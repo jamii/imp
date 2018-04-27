@@ -49,6 +49,12 @@ struct Abstract <: Expr
     value::Expr
 end
 
+struct Let <: Expr
+    var::Var
+    value::Expr
+    body::Expr
+end
+
 @generated function Base.:(==)(a::T, b::T) where {T <: Expr}
     Base.Expr(:&&, @splice fieldname in fieldnames(T) quote
          (a.$fieldname == b.$fieldname)
@@ -105,6 +111,11 @@ function parse(ast)
         Abstract([Var(var)], parse(value))
     elseif @capture(ast, (vars__,) -> value_)
         Abstract(map(Var, vars), parse(value))
+    elseif @capture(ast, let begin bindings__ end; body_ end)
+        reduce(parse(body), bindings) do body, binding
+            @assert @capture(binding, var_Symbol = value_) "Unknown syntax: $ast"
+            Let(Var(var), parse(value), body)
+        end
     else
         error("Unknown syntax: $ast")
     end
@@ -122,6 +133,7 @@ function unparse(expr::Expr)
         (_::Primitive, (f, args)) => :($f($(args...),))
         (_::Abstract, ([var], value)) => :($var -> $value)
         (_::Abstract, (vars, value)) => :(($(vars...),) -> $value)
+        (_::Let, (var, value, body)) => :(let $var = $value; $body end)
     end
 end
 
@@ -160,19 +172,29 @@ function separate_scopes(scope::Scope, expr::Abstract)
     map_expr((expr) -> separate_scopes(scope, expr), expr)
 end
 
+function separate_scopes(scope::Scope, expr::Let)
+    # expr.var is not in scope during expr.value
+    value = separate_scopes(scope, expr.value)
+    scope = Scope(copy(scope.current), scope.used)
+    scope.current[expr.var.name] = scope.used[expr.var.name] = get(scope.used, expr.var.name, 0) + 1
+    var = separate_scopes(scope, expr.var)
+    body = separate_scopes(scope, expr.body)
+    Let(var, value, body)
+end
+
 # --- interpret ---
 
 const Env{T} = Dict{Var, T}
 
-function interpret(env::Env, expr::Expr) ::Set
+function interpret(env::Env, expr::Expr)::Set
     _interpret(env, expr)
 end
 
-function _interpret(env::Env, expr::Var) ::Set
+function _interpret(env::Env, expr::Var)::Set
     env[expr]
 end
 
-function _interpret(env::Env, expr::Apply) ::Set
+function _interpret(env::Env, expr::Apply)::Set
     f = interpret(env, expr.f)
     for arg in map((arg) -> interpret(env, arg), expr.args)
         result = Set()
@@ -188,7 +210,7 @@ function _interpret(env::Env, expr::Apply) ::Set
     f
 end
 
-function _interpret(env::Env, expr::Abstract, var_ix::Int64) ::Set
+function _interpret(env::Env, expr::Abstract, var_ix::Int64)::Set
     if var_ix > length(expr.vars)
         interpret(env, expr.value)
     else
@@ -204,8 +226,13 @@ function _interpret(env::Env, expr::Abstract, var_ix::Int64) ::Set
     end
 end
 
-function _interpret(env::Env, expr::Abstract)
+function _interpret(env::Env, expr::Abstract)::Set
     _interpret(env, expr, 1)
+end
+
+function _interpret(env::Env, expr::Let)::Set
+    env[expr.var] = interpret(env, expr.value)
+    interpret(env, expr.body)
 end
 
 # --- interpret values ---
@@ -301,6 +328,20 @@ function infer_types(env::Env{Set}, expr::Expr)::Dict{Expr, SetType}
     copy(expr_types)
 end
 
+# --- inline ---
+
+function replace_expr(expr::Expr, replacements::Dict)::Expr
+    new_expr = haskey(replacements, expr) ? replacements[expr] : expr
+    map_expr(expr -> replace_expr(expr, replacements), new_expr)
+end
+
+function inline_let(expr::Expr)::Expr
+    @match expr begin
+        Let(var, value, body) => replace_expr(body, Dict(var => value))
+        _ => map_expr(inline_let, expr)
+    end
+end
+
 # --- lower ---
 
 # TODO should probably replace anything that has false_type with false
@@ -314,11 +355,6 @@ function arity(set_type::SetType)::Arity
         1 => first(arities)
         _ => compile_error("Ill-typed: $set_type")
     end
-end
-
-function replace_expr(expr::Expr, replacements::Dict)::Expr
-    new_expr = haskey(replacements, expr) ? replacements[expr] : expr
-    map_expr(expr -> replace_expr(expr, replacements), new_expr)
 end
 
 function is_scalar(expr::Expr)
@@ -562,7 +598,7 @@ end
 
 # --- exports ---
 
-const all_passes = [:parse, :separate_scopes, :infer_types, :lower_apply, :bound_abstract, :interpret]
+const all_passes = [:parse, :separate_scopes, :inline_let, :infer_types, :lower_apply, :bound_abstract, :interpret]
 
 function imp(expr; globals=Dict{Symbol, Set}(), everything=nothing, passes=all_passes)
     env = Env{Set}(Var(name) => set for (name, set) in globals)
@@ -574,6 +610,9 @@ function imp(expr; globals=Dict{Symbol, Set}(), everything=nothing, passes=all_p
     end
     if :separate_scopes in passes
         expr = separate_scopes(Scope(env), expr)
+    end
+    if :inline_let in passes
+        expr = inline_let(expr)
     end
     if :infer_types in passes
         inferred_types = infer_types(env, expr)

@@ -60,6 +60,11 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
             (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
         end
 
+        expr = Imp.inline_let(expr)
+        if everything != nothing
+            (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
+        end
+
         expr = Imp.lower_apply(Imp.infer_types(env, expr), expr)
         if lowered_expr != nothing
             @test expr == imp(lowered_expr, passes=[:parse, :separate_scopes], globals=globals)
@@ -180,6 +185,11 @@ test_imp(:( reduce(+, 0, points) ), result=:( 2 ), unboundable=true)
 
 # tricky expressions
 test_imp(:( (x -> x(x)) ), result=:( everything ), unboundable=true)
+
+# let
+test_imp(:( let x = 1; x + 1 end ), result=:( 2 ))
+test_imp(:( let inc = x -> x + 1; inc(1) end ), result=:( 2 ))
+test_imp(:( let inc = x -> x + 1; inc(inc(1)) end ), result=:( 0 ))
 
 # --- infer_types ---
 

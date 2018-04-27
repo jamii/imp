@@ -91,7 +91,7 @@ end
 
 imp(:( p -> person(p) => string(p) ), globals=globals, everything=everything)
 
-# --- analyze ---
+# --- scoping ---
 
 function test_separate_scopes(expr)
     @test_throws Imp.CompileError imp(expr, passes=[:parse, :separate_scopes], everything=everything)

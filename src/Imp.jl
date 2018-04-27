@@ -139,7 +139,7 @@ end
 
 Base.show(io::IO, expr::Expr) = print(io, string("@imp(", unparse(expr), ")"))
 
-# --- analyze ---
+# --- scoping ---
 
 struct CompileError
     message::String

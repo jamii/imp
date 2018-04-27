@@ -42,10 +42,9 @@ struct Primitive <: Expr
 end
 
 struct Abstract <: Expr
-    var::Var
+    vars::Vector{Var}
     value::Expr
 end
-Abstract(vars::Vector{Var}, value::Expr) = reduce((value, var) -> Abstract(var, value), value, reverse(vars))
 
 @generated function Base.:(==)(a::T, b::T) where {T <: Expr}
     Base.Expr(:&&, @splice fieldname in fieldnames(T) quote
@@ -98,7 +97,7 @@ function parse(ast)
     elseif @capture(ast, if cond_ true_branch_ else false_branch_ end)
         Primitive(:iff, [parse(cond), parse(true_branch), parse(false_branch)])
     elseif @capture(ast, var_Symbol -> value_)
-        Abstract(Var(var), parse(value))
+        Abstract([Var(var)], parse(value))
     elseif @capture(ast, (vars__,) -> value_)
         Abstract(map(Var, vars), parse(value))
     else
@@ -114,7 +113,8 @@ function unparse(expr::Expr)
         (_::Primitive, (:iff, [cond, true_branch, Constant{Bool}(false)])) => :(if $cond; $true_branch end)
         (_::Primitive, (:iff, [cond, true_branch, false_branch])) => :(if $cond; $true_branch else $false_branch end)
         (_::Primitive, (f, args)) => :($f($(args...),))
-        (_::Abstract, (var, value)) => :($var -> $value)
+        (_::Abstract, ([var], value)) => :($var -> $value)
+        (_::Abstract, (vars, value)) => :(($(vars...),) -> $value)
     end
 end
 
@@ -147,7 +147,9 @@ end
 
 function separate_scopes(scope::Scope, expr::Abstract)
     scope = Scope(copy(scope.current), scope.used)
-    scope.current[expr.var.name] = scope.used[expr.var.name] = get(scope.used, expr.var.name, 0) + 1
+    for var in expr.vars
+        scope.current[var.name] = scope.used[var.name] = get(scope.used, var.name, 0) + 1
+    end
     map_expr((expr) -> separate_scopes(scope, expr), expr)
 end
 
@@ -183,19 +185,20 @@ function _interpret(env::Env, expr::Abstract, var_ix::Int64) ::Set
     if var_ix > length(expr.vars)
         interpret(env, expr.value)
     else
-        
+        var = expr.vars[var_ix]
+        result = Set()
+        for var_row in env[Var(:everything)]
+            env[var] = Set([var_row])
+            for value_row in _interpret(env, expr, var_ix+1)
+                push!(result, (var_row..., value_row...))
+            end
+        end
+        result
     end
 end
 
 function _interpret(env::Env, expr::Abstract)
-    result = Set()
-    for var_row in env[Var(:everything)]
-        env[expr.var] = Set([var_row])
-        for value_row in interpret(env, expr.value)
-            push!(result, (var_row..., value_row...))
-        end
-    end
-    result
+    _interpret(env, expr, 1)
 end
 
 # --- interpret values ---
@@ -324,18 +327,18 @@ function is_scalar(expr::Expr)
 end
 
 # rewrite until every Apply has var/constant f, boolean type and bound var args
-function lower_apply(expr_types::Dict{Expr, SetType}, expr::Expr)::Expr
-    arities = Dict{Expr, Arity}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
+function simple_apply(arity::Dict{Expr, Arity}, expr::Expr)::Expr
+    arity = copy(arity)
     last_id = Ref(0)
     make_slots(n) = begin
         slots = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:n]
         for slot in slots
-            arities[slot] = 1
+            arity[slot] = 1
         end
         slots
     end
-    apply(expr::Expr) = @match arities[expr] begin
-        nothing => Imp.Constant(false) # if it's provable false, don't bother keeping it around
+    apply(expr::Expr) = @match arity[expr] begin
+        nothing => Imp.Constant(false) # if it's provable false, why bother keeping it around?
         n => begin
             slots = make_slots(n)
             Abstract(slots, apply(expr, slots))
@@ -376,7 +379,7 @@ function lower_apply(expr_types::Dict{Expr, SetType}, expr::Expr)::Expr
 
         # f(g)[slots...] => exists((new_slots...) -> g[new_slots...] & f[new_slots..., slots...])
         Apply(f, [g]) => begin
-            new_slots = make_slots(arities[g])
+            new_slots = make_slots(arity[g])
             Primitive(:exists,
                       [Abstract(new_slots,
                                 Primitive(:&, [
@@ -409,13 +412,33 @@ function lower_apply(expr_types::Dict{Expr, SetType}, expr::Expr)::Expr
         Primitive(:&, [a,b]) => Primitive(:&, [apply(a, slots), apply(b, slots)])
         Primitive(:iff, [cond, true_branch, false_branch]) => Primitive(:iff, [cond, apply(true_branch, slots), apply(false_branch, slots)])
 
-        # (var -> value)[slot, slots...] => value{var=>slot}[slots...]
-        Abstract(var, value) => begin
-            @match [slot, more_slots...] = slots
-            replace_expr(apply(value, more_slots), Dict([var => slot]))
+        # ((vars...) -> value)[slots...] => value[vars... = slots...]
+        Abstract(vars, value) => begin
+            n = length(vars)
+            @assert n <= length(slots)
+            replace_expr(apply(value, slots[n+1:end]), Dict(zip(vars, slots[1:n])))
         end
     end
     apply(expr)
+end
+
+# TODO can remove this if we switch to 1-arg abstract
+function simple_abstract(expr::Expr)
+    expr = map_expr(simple_abstract, expr)
+    while true
+        expr = @match expr begin
+            Abstract([], value) => value
+            Abstract(vars1, Abstract(vars2, value)) => Abstract(vcat(vars1, vars2), value)
+            _ => return expr
+        end
+    end
+end
+
+function lower_apply(expr_types::Dict{Expr, SetType}, expr::Expr)::Expr
+    arities = Dict{Expr, Arity}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
+    expr = simple_apply(arities, expr)
+    expr = simple_abstract(expr)
+    expr
 end
 
 # --- bounded abstract ----
@@ -476,7 +499,7 @@ function bound(bound_vars::Vector{Var}, var::Var, expr::Expr)::Expr
         Primitive(:exists, [arg]) => bound(arg)
 
         # approximate bounds
-        Abstract(_, value) => bound(value)
+        Abstract(vars, value) => bound(value)
         Primitive(:!, [arg]) => Var(:everything)
         Primitive(:(=>), [a, b]) => Var(:everything)
         Primitive(:iff, [c, t, f]) => Primitive(:|, [Primitive(:&, [bound(c), bound(t)]), bound(f)])
@@ -504,17 +527,17 @@ function simplify_bound(expr::Expr)
     end
 end
 
-function bound_abstract(bound_vars::Vector{Var}, expr::Expr)::Expr
-    @match expr begin
-        Abstract(var, value) => begin
-            var_bound = simplify_bound(bound(bound_vars, var, value))
-            bounded_value = bound_abstract(push!(copy(bound_vars), var), value)
-            BoundedAbstract(var, var_bound, bounded_value)
-        end
-        _ => map_expr(expr -> bound_abstract(bound_vars, expr), expr)
+bound_abstract(expr::Expr)::Expr = map_expr(bound_abstract, expr)
+function bound_abstract(expr::Abstract)::Expr
+    # TODO need to also remove redundant computation from value
+    value = bound_abstract(expr.value)
+    for i in reverse(1:length(expr.vars))
+        var_bound = bound(expr.vars[1:i-1], expr.vars[i], expr.value)
+        var_bound = simplify_bound(var_bound)
+        value = BoundedAbstract(expr.vars[i], var_bound, value)
     end
+    value
 end
-bound_abstract(expr::Expr) = bound_abstract(Var[], expr)
 
 function _interpret(env::Env, expr::Permute)::Set
     Set((row[expr.columns] for row in env[expr.arg]))

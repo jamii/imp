@@ -7,7 +7,7 @@ using Test
 
 const globals = Dict{Symbol, Set}(
     :person => Set([("alice",), ("bob",), ("eve",)]),
-    :string => Set([("alice",), ("bob",), ("eve",), ("cthulu",)]),
+    :string => Set([("alice",), ("bob",), ("eve",), ("cthulu",), ("n/a",)]),
     :integer => Set([(0,), (1,), (2,)]),
     :evil => Set([("eve",), ("cthulu",)]),
     :rsvp => Set([("alice", "yes"), ("bob", "no"), ("cthulu", "no")]),
@@ -60,13 +60,14 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
             (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
         end
 
-        expr = Imp.lower_apply(Imp.infer_types(env, expr), expr)
-        # if lowered_expr != nothing
-        #     @test expr == imp(lowered_expr, passes=[:parse, :separate_scopes], globals=globals)
-        # end
-        # if everything != nothing
-        #     (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
-        # end
+        expr = Imp.lower_apply(@show(Imp.infer_types(env, expr)), expr)
+        if lowered_expr != nothing
+            @test expr == imp(lowered_expr, passes=[:parse, :separate_scopes], globals=globals)
+        end
+        if everything != nothing
+            @show expr
+            (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
+        end
 
         # TODO this needs work, especially around ==
         # relowered = Imp.lower_apply(Imp.infer_types(env, expr), expr)

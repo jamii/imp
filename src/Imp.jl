@@ -272,7 +272,7 @@ function _interpret(env::Env{SetType}, expr::Primitive)::SetType
             end
         end
         (:reduce, [raw_op, raw_init, values]) => map(row_type -> (row_type[3],), raw_op)
-        (:exists, [arg]) => bool_type
+        (:exists, [arg]) => arg == false_type ? false_type : bool_type
         (:forall, [arg]) => bool_type
         _ => error("Unknown primitive: $expr")
     end
@@ -285,7 +285,10 @@ env_types(env::Env{Set}) = Env{SetType}(name => set_type(set) for (name, set) in
 # TODO totally gross global, pass a context instead
 const expr_types = Dict{Expr, SetType}()
 function interpret(env::Env{SetType}, expr::Expr)
-    expr_types[expr] = _interpret(env, expr)
+    expr_type = _interpret(env, expr)
+    # TODO really we want to union types of vars in their abstract, much more than the type of the expression
+    union!(get!(expr_types, expr, SetType()), expr_type) 
+    expr_type
 end
 function infer_types(env::Env{Set}, expr::Expr)::Dict{Expr, SetType}
     empty!(expr_types)
@@ -367,7 +370,6 @@ function simple_apply(arity::Dict{Expr, Arity}, expr::Expr)::Expr
         # f(g)[slots...] => exists((new_slots...) -> g[new_slots...] & f[new_slots..., slots...])
         Apply(f, [g]) => begin
             new_slots = make_slots(arity[g])
-            @show g typeof(g) new_slots apply(g, new_slots)
             Primitive(:exists,
                       [Abstract(new_slots,
                                 Primitive(:&, [

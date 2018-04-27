@@ -19,8 +19,11 @@ end
 
 abstract type Expr end
 
-struct Constant{T} <: Expr
-    value::T # scalar
+struct False <: Expr end
+struct True <: Expr end
+
+struct Constant <: Expr
+    value # scalar
 end
 
 struct Var <: Expr
@@ -76,13 +79,15 @@ end
 map_expr(f, expr::Expr) = map_expr(f, typeof(expr), expr)
 
 function parse(ast)
-    if @capture(ast, constant_Int64_String_Bool)
+    if @capture(ast, bool_Bool)
+        bool ? True() : False()
+    elseif @capture(ast, constant_Int64_String)
         Constant(constant)
     elseif @capture(ast, name_Symbol)
         if name == :(_)
             Var(:everything)
         elseif name == :(nothing)
-            Constant(false)
+            False()
         else
             Var(name)
         end
@@ -93,7 +98,7 @@ function parse(ast)
             Apply(parse(f), map(parse, args))
         end
     elseif @capture(ast, if cond_ true_branch_ end)
-        Primitive(:iff, [parse(cond), parse(true_branch), Constant(false)])
+        Primitive(:iff, [parse(cond), parse(true_branch), False()])
     elseif @capture(ast, if cond_ true_branch_ else false_branch_ end)
         Primitive(:iff, [parse(cond), parse(true_branch), parse(false_branch)])
     elseif @capture(ast, var_Symbol -> value_)
@@ -107,10 +112,12 @@ end
 
 function unparse(expr::Expr)
     @match (expr, map_expr(unparse, tuple, expr)) begin
+        (_::True, ()) => true
+        (_::False, ()) => false
         (_::Constant, (value,)) => value
         (_::Var, (name, _)) => name
         (_::Apply, (f, args)) => :($f($(args...)))
-        (_::Primitive, (:iff, [cond, true_branch, Constant{Bool}(false)])) => :(if $cond; $true_branch end)
+        (_::Primitive, (:iff, [cond, true_branch, False()])) => :(if $cond; $true_branch end)
         (_::Primitive, (:iff, [cond, true_branch, false_branch])) => :(if $cond; $true_branch else $false_branch end)
         (_::Primitive, (f, args)) => :($f($(args...),))
         (_::Abstract, ([var], value)) => :($var -> $value)
@@ -203,17 +210,16 @@ end
 
 # --- interpret values ---
 
-const truthy = Set([()])
-const falsey = Set()
-bool_to_set(bool::Bool)::Set = bool ? truthy : falsey
+const false_set = Set()
+const true_set = Set([()])
+bool_to_set(bool::Bool)::Set = bool ? true_set : false_set
 set_to_bool(set::Set)::Bool = length(set) > 0
+
+_interpret(env::Env{Set}, expr::False) = false_set
+_interpret(env::Env{Set}, expr::True) = true_set
 
 function _interpret(env::Env{Set}, expr::Constant) ::Set
     Set([(expr.value,)])
-end
-
-function _interpret(env::Env{Set}, expr::Constant{Bool}) ::Set
-    bool_to_set(expr.value)
 end
 
 function _interpret(env::Env{Set}, expr::Primitive) ::Set
@@ -233,7 +239,7 @@ function _interpret(env::Env{Set}, expr::Primitive) ::Set
             value = reduce((a,b) -> op[a,b[end]], init, values)
             Set([(value,)])
         end
-        (:exists, [arg]) => bool_to_set(arg != falsey)
+        (:exists, [arg]) => bool_to_set(arg != false_set)
         (:forall, [arg]) => bool_to_set(arg == env[Var(:everything)])
         _ => error("Unknown primitive: $expr")
     end
@@ -247,12 +253,11 @@ const SetType = Set{RowType}
 const bool_type = SetType([()])
 const false_type = SetType([])
 
-function _interpret(env::Env{SetType}, expr::Constant{T})::SetType where T
-    Set([(T,)])
-end
+_interpret(env::Env{SetType}, expr::True) = bool_type
+_interpret(env::Env{SetType}, expr::False) = false_type
 
-function _interpret(env::Env{SetType}, expr::Constant{Bool})::SetType where T
-    expr.value ? bool_type : false_type
+function _interpret(env::Env{SetType}, expr::Constant)::SetType
+    Set([(typeof(expr.value),)])
 end
 
 function _interpret(env::Env{SetType}, expr::Primitive)::SetType
@@ -318,7 +323,6 @@ end
 
 function is_scalar(expr::Expr)
     @match expr begin
-        _::Constant{Bool} => false
         _::Constant => true
         Var(_, 0) => false
         Var(_, _) => true
@@ -338,7 +342,7 @@ function simple_apply(arity::Dict{Expr, Arity}, expr::Expr)::Expr
         slots
     end
     apply(expr::Expr) = @match arity[expr] begin
-        nothing => Imp.Constant(false) # if it's provable false, why bother keeping it around?
+        nothing => False() # if it's provable false, why bother keeping it around?
         n => begin
             slots = make_slots(n)
             Abstract(slots, apply(expr, slots))
@@ -347,10 +351,10 @@ function simple_apply(arity::Dict{Expr, Arity}, expr::Expr)::Expr
     apply(expr::Expr, slots::Vector{Var})::Expr = @match expr begin
 
         # false[slots...] => false
-        Constant{Bool}(false) => expr
+        False() => expr
 
         # true[] => true
-        Constant{Bool}(true) => begin
+        True() => begin
             @match [] = slots
             expr
         end
@@ -483,7 +487,8 @@ end
 function bound(bound_vars::Vector{Var}, var::Var, expr::Expr)::Expr
     bound(expr) = @match expr begin
         # precise bounds
-        _::Constant{Bool} => expr.value ? Var(:everything) : Constant(false)
+        False() => False()
+        True() => Var(:everything)
         Apply(f, args) => (var in args) ? permute(bound_vars, var, expr) : Var(:everything)
         Primitive(:|, [a, b]) => Primitive(:|, [bound(a), bound(b)])
         Primitive(:&, [a, b]) => Primitive(:&, [bound(a), bound(b)])
@@ -515,14 +520,14 @@ function simplify_bound(expr::Expr)
     @match map_expr(simplify_bound, expr) begin
         Primitive(:|, [a && Var(:everything, 0), b]) => a
         Primitive(:|, [a, b && Var(:everything, 0)]) => b
-        Primitive(:|, [a && Constant{Bool}(false), b]) => b
-        Primitive(:|, [a, b && Constant{Bool}(false)]) => a
+        Primitive(:|, [a && False(), b]) => b
+        Primitive(:|, [a, b && False()]) => a
         Primitive(:&, [a && Var(:everything, 0), b]) => b
         Primitive(:&, [a, b && Var(:everything, 0)]) => a
-        Primitive(:&, [a && Constant{Bool}(false), b]) => a
-        Primitive(:&, [a, b && Constant{Bool}(false)]) => b
-        Primitive(:!, [Constant{Bool}(false)]) => Var(:everything)
-        Primitive(:!, [Var(:everything, 0)]) => Constant{Bool}(false)
+        Primitive(:&, [a && False(), b]) => a
+        Primitive(:&, [a, b && False()]) => b
+        Primitive(:!, [False()]) => Var(:everything)
+        Primitive(:!, [Var(:everything, 0)]) => False()
         other => other
     end
 end

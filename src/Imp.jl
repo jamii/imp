@@ -297,10 +297,12 @@ end
 
 # TODO should probably replace anything that has false_type with false
 
-function arity(set_type::SetType)::Int64
+const Arity = Union{Int64, Nothing} # false has arity nothing
+
+function arity(set_type::SetType)::Arity
     arities = map(length, set_type)
     @match length(arities) begin
-        0 => 0 # TODO we actually need to be a bit smarter about false_type
+        0 => nothing
         1 => first(arities)
         _ => compile_error("Ill-typed: $set_type")
     end
@@ -312,7 +314,7 @@ function replace_expr(expr::Expr, replacements::Dict)::Expr
 end
 
 # rewrite until every Apply has var/constant f, boolean type and bound var args
-function simple_apply(arity::Dict{Expr, Int64}, expr::Expr)::Expr
+function simple_apply(arity::Dict{Expr, Arity}, expr::Expr)::Expr
     arity = copy(arity)
     last_id = Ref(0)
     make_slots(n) = begin
@@ -322,9 +324,12 @@ function simple_apply(arity::Dict{Expr, Int64}, expr::Expr)::Expr
         end
         slots
     end
-    apply(expr::Expr) = begin
-        slots = make_slots(arity[expr])
-        Abstract(slots, apply(expr, slots))
+    apply(expr::Expr) = @match arity[expr] begin
+        nothing => Imp.Constant(false) # if it's provable false, why bother keeping it around?
+        n => begin
+            slots = make_slots(n)
+            Abstract(slots, apply(expr, slots))
+        end
     end
     apply(expr::Expr, slots::Vector{Var})::Expr = @match expr begin
 
@@ -414,7 +419,7 @@ function simple_abstract(expr::Expr)
 end 
 
 function lower_apply(expr_types::Dict{Expr, SetType}, expr::Expr)::Expr
-    arities = Dict{Expr, Int64}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
+    arities = Dict{Expr, Arity}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
     expr = simple_apply(arities, expr)
     expr = simple_abstract(expr)
     expr

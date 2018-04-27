@@ -60,8 +60,7 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
             (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
         end
 
-        # TODO this needs work
-        # expr = Imp.lower_apply(Imp.infer_types(env, expr), expr)
+        expr = Imp.lower_apply(Imp.infer_types(env, expr), expr)
         # if lowered_expr != nothing
         #     @test expr == imp(lowered_expr, passes=[:parse, :separate_scopes], globals=globals)
         # end
@@ -229,20 +228,20 @@ test_imp(:( (x -> (y -> (person(x) & person(y)) | (x + y == 0))) ), inferred_typ
 # --- lower_apply ---
 
 # nothing to do
-test_imp(:( true ), lowered_expr=:( true ), everything=nothing)
-test_imp(:( f() ), lowered_expr=:( f() ), everything=nothing)
-test_imp(:( (x -> g(x)) ), lowered_expr=:( (_1 -> g(_1)) ), everything=nothing)
-test_imp(:( (x,y) -> h(x,y) ), lowered_expr=:( (_1, _2) -> h(_1, _2) ), everything=nothing)
+test_imp(:( true ), lowered_expr=:( true ))
+test_imp(:( f() ), lowered_expr=:( f() ))
+test_imp(:( (x -> g(x)) ), lowered_expr=:( (_1 -> g(_1)) ))
+test_imp(:( (x,y) -> h(x,y) ), lowered_expr=:( (_1, _2) -> h(_1, _2) ))
 
 # actual lowering
-test_imp(:( (x -> h(x)) ), lowered_expr=:( (_1, _2) -> h(_1, _2) ), everything=nothing)
-test_imp(:( h ), lowered_expr=:( (_1, _2) -> h(_1, _2) ), everything=nothing)
-test_imp(:( (x -> x == g) ), lowered_expr=:( _1 -> (_2 -> _2 == _1) == (_3 -> g(_3)) ), everything=nothing)
-test_imp(:( h(g) ), lowered_expr=:( _1 -> exists(_2 -> g(_2) & h(_2, _1)) ), everything=nothing)
-test_imp(:( (x -> h(x) | g) ), lowered_expr=:( (_1, _2) -> h(_1, _2) | g(_2) ), everything=nothing)
-test_imp(:( g(0) ), lowered_expr=:( exists(_1 -> (_1 == 0) & g(_1)) ), everything=nothing)
-test_imp(:( !(g(0)) ), lowered_expr=:( !(exists(_1 -> (_1 == 0) & g(_1))) ), everything=nothing)
-test_imp(:( (x -> y -> !(y(x))) ), lowered_expr=:( (_1, _2) -> !(_1 == _2) ), everything=nothing)
+test_imp(:( (x -> h(x)) ), lowered_expr=:( (_1, _2) -> h(_1, _2) ))
+test_imp(:( h ), lowered_expr=:( (_1, _2) -> h(_1, _2) ))
+test_imp(:( (x -> x == g) ), lowered_expr=:( _1 -> (_2 -> _2 == _1) == (_3 -> g(_3)) ))
+test_imp(:( h(g) ), lowered_expr=:( _1 -> exists(_2 -> g(_2) & h(_2, _1)) ))
+test_imp(:( (x -> h(x) | g) ), lowered_expr=:( (_1, _2) -> h(_1, _2) | g(_2) ))
+test_imp(:( g(0) ), lowered_expr=:( exists(_1 -> (_1 == 0) & g(_1)) ))
+test_imp(:( !(g(0)) ), lowered_expr=:( !(exists(_1 -> (_1 == 0) & g(_1))) ))
+test_imp(:( (x -> y -> !(y(x))) ), lowered_expr=:( (_1, _2) -> !(_1 == _2) ))
 
 # --- simplify_bound ---
 

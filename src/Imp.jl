@@ -538,11 +538,9 @@ end
 
 # --- exports ---
 
-const everything = Set{Any}([(scalar,) for scalar in [0, 1, 2, "alice", "bob", "eve", "cthulu", "yes", "no"]])
-
 const all_passes = [:parse, :separate_scopes, :infer_types, :lower_apply, :bound_abstract, :interpret]
 
-function imp(expr; globals=Dict{Symbol, Set}(), everything=everything, passes=all_passes)
+function imp(expr; globals=Dict{Symbol, Set}(), everything=nothing, passes=all_passes)
     env = Env{Set}(Var(name) => set for (name, set) in globals)
     if everything != nothing
         env[Var(:everything)] = everything

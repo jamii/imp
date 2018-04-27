@@ -110,7 +110,7 @@ function unparse(expr::Expr)
         (_::Constant, (value,)) => value
         (_::Var, (name, _)) => name
         (_::Apply, (f, args)) => :($f($(args...)))
-        (_::Primitive, (:iff, [cond, true_branch, Constant(false)])) => :(if $cond; $true_branch end)
+        (_::Primitive, (:iff, [cond, true_branch, Constant{Bool}(false)])) => :(if $cond; $true_branch end)
         (_::Primitive, (:iff, [cond, true_branch, false_branch])) => :(if $cond; $true_branch else $false_branch end)
         (_::Primitive, (f, args)) => :($f($(args...),))
         (_::Abstract, ([var], value)) => :($var -> $value)
@@ -264,7 +264,7 @@ function _interpret(env::Env{SetType}, expr::Primitive)::SetType
         (:(=>), [a, b]) => bool_type
         (:(==), [a, b]) => intersect(a, b) == false_type ? false_type : bool_type
         (:iff, [cond_type, then_type, else_type]) => begin
-            # TODO if we had lower bounds on cond we could also do then_type when it's definitely true 
+            # TODO if we had lower bounds on cond we could also do then_type when it's definitely true
             if cond_type == false_type
                 else_type
             else
@@ -316,6 +316,16 @@ function replace_expr(expr::Expr, replacements::Dict)::Expr
     map_expr(expr -> replace_expr(expr, replacements), new_expr)
 end
 
+function is_scalar(expr::Expr)
+    @match expr begin
+        _::Constant{Bool} => false
+        _::Constant => true
+        Var(_, 0) => false
+        Var(_, _) => true
+        _ => false
+    end
+end
+
 # rewrite until every Apply has var/constant f, boolean type and bound var args
 function simple_apply(arity::Dict{Expr, Arity}, expr::Expr)::Expr
     arity = copy(arity)
@@ -338,35 +348,35 @@ function simple_apply(arity::Dict{Expr, Arity}, expr::Expr)::Expr
 
         # false[slots...] => false
         Constant{Bool}(false) => expr
-        
+
         # true[] => true
         Constant{Bool}(true) => begin
             @match [] = slots
             expr
         end
-        
+
         # 1[slot] => slot==1
         _::Constant => begin
             @match [slot] = slots
             Primitive(:(==), [slot, expr])
         end
-        
+
         # f[slots...] => f(slots...)
         Var(_, 0) =>  Apply(expr, slots)
-        
+
         # x[slot] => slot==x
         Var(_, _) => begin
             @match [slot] = slots
             Primitive(:(==), [slot, expr])
         end
-        
+
         # f(x,y)[slots...] => f(x)(y)[slots...]
         Apply(f, []) => apply(f, slots)
         Apply(f, args) where (length(args) > 1) => apply(reduce((f, arg) -> Apply(f, [arg]), f, args), slots)
-        
+
         # f(x)[slots...] => f[x, slots...]
         Apply(f, [x && Var(_, scope)]) where (scope != 0) => apply(f, [x, slots...])
-        
+
         # f(g)[slots...] => exists((new_slots...) -> g[new_slots...] & f[new_slots..., slots...])
         Apply(f, [g]) => begin
             new_slots = make_slots(arity[g])
@@ -380,6 +390,10 @@ function simple_apply(arity::Dict{Expr, Arity}, expr::Expr)::Expr
 
         # things which produce bools
         # (a == b)[] => (a[...] == b[...])
+        Primitive(:(==), [a, b]) where (is_scalar(a) && is_scalar(b)) => begin
+            @match [] = slots
+            expr
+        end
         Primitive(f, args) where (f in [:!, :(=>), :(==), :exists, :forall]) => begin
             @match [] = slots
             Primitive(f, map(apply, args))
@@ -418,7 +432,7 @@ function simple_abstract(expr::Expr)
             _ => return expr
         end
     end
-end 
+end
 
 function lower_apply(expr_types::Dict{Expr, SetType}, expr::Expr)::Expr
     arities = Dict{Expr, Arity}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
@@ -428,8 +442,6 @@ function lower_apply(expr_types::Dict{Expr, SetType}, expr::Expr)::Expr
 end
 
 # --- bounded abstract ----
-
-# need Abstract over fully lowered value of arity 0
 
 # TODO might want to permute stuff so we can hit vars earlier? does it matter?
 
@@ -451,75 +463,67 @@ function unparse(expr::Union{Permute, BoundedAbstract})
     end
 end
 
-function todo(expr)
-    @warn "Unimplemented: $expr"
-    Var(:everything)
+function permute(bound_vars::Vector{Var}, var::Var, expr::Apply)::Expr
+    apply_args = Var[]
+    permute_columns = Int64[]
+    for bound_var in bound_vars
+        column = findfirst(expr.args, bound_var)
+        if column != 0
+            push!(apply_args, bound_var)
+            push!(permute_columns, column)
+        end
+    end
+    column = findfirst(expr.args, var) # TODO repeated vars?
+    push!(permute_columns, column)
+    Apply(Permute(expr.f, permute_columns), apply_args)
+end
+
+# TODO probably want to push negation down because I can't see inside it
+# TODO A(p -> a => b) = !E(p -> !(a => b)) = !E(p in a -> !(a => b))
+function bound(bound_vars::Vector{Var}, var::Var, expr::Expr)::Expr
+    bound(expr) = @match expr begin
+        # precise bounds
+        _::Constant{Bool} => expr.value ? Var(:everything) : Constant(false)
+        Apply(f, args) => (var in args) ? permute(bound_vars, var, expr) : Var(:everything)
+        Primitive(:|, [a, b]) => Primitive(:|, [bound(a), bound(b)])
+        Primitive(:&, [a, b]) => Primitive(:&, [bound(a), bound(b)])
+        Primitive(:(==), [a, b]) => begin
+            if (a == var) && ((b isa Constant) || (b in bound_vars))
+                b
+            elseif (b == var) && ((a isa Constant) || (a in bound_vars))
+                a
+            else
+                Var(:everything)
+            end
+        end
+        Primitive(:exists, [arg]) => bound(arg)
+
+        # approximate bounds
+        Abstract(vars, value) => bound(value)
+        Primitive(:!, [arg]) => Var(:everything)
+        Primitive(:(=>), [a, b]) => Var(:everything)
+        Primitive(:iff, [c, t, f]) => Primitive(:|, [Primitive(:&, [bound(c), bound(t)]), bound(f)])
+        Primitive(:reduce, [raw_op, raw_init, values]) => Var(:everything)
+        Primitive(:forall, [arg]) => Var(:everything)
+
+        _::Constant || Var => compile_error("Should have been lowered: $expr")
+    end
+    bound(expr)
 end
 
 function simplify_bound(expr::Expr)
     @match map_expr(simplify_bound, expr) begin
         Primitive(:|, [a && Var(:everything, 0), b]) => a
         Primitive(:|, [a, b && Var(:everything, 0)]) => b
-        Primitive(:|, [a && Constant(false), b]) => b
-        Primitive(:|, [a, b && Constant(false)]) => a
+        Primitive(:|, [a && Constant{Bool}(false), b]) => b
+        Primitive(:|, [a, b && Constant{Bool}(false)]) => a
         Primitive(:&, [a && Var(:everything, 0), b]) => b
         Primitive(:&, [a, b && Var(:everything, 0)]) => a
-        Primitive(:&, [a && Constant(false), b]) => a
-        Primitive(:&, [a, b && Constant(false)]) => b
-        Primitive(:!, [Constant(false)]) => Var(:everything)
-        Primitive(:!, [Var(:everything, 0)]) => Constant(false)
+        Primitive(:&, [a && Constant{Bool}(false), b]) => a
+        Primitive(:&, [a, b && Constant{Bool}(false)]) => b
+        Primitive(:!, [Constant{Bool}(false)]) => Var(:everything)
+        Primitive(:!, [Var(:everything, 0)]) => Constant{Bool}(false)
         other => other
-    end
-end
-
-function bound(bound_vars::Vector{Var}, var::Var, expr::Constant)::Expr
-    (expr.value == false) ? Constant(false) : Var(:everything)
-end
-
-function bound(bound_vars::Vector{Var}, var::Var, expr::Abstract)::Expr
-    compile_error("Should have been lowered: $expr")
-end
-
-function bound(bound_vars::Vector{Var}, var::Var, expr::Abstract)::Expr
-    bound(bound_vars, var, expr.value)
-end
-
-function bound(bound_vars::Vector{Var}, var::Var, expr::Apply)::Expr
-    @assert expr.f isa Var
-    @assert all(expr.args) do arg
-        arg isa Var
-    end
-    if !(var in expr.args) 
-        Var(:everything)
-    else
-        apply_args = Var[]
-        permute_columns = Int64[]
-        for bound_var in bound_vars
-            column = findfirst(expr.args, bound_var)
-            if column != 0
-                push!(apply_args, bound_var)
-                push!(permute_columns, column)
-            end
-        end
-        column = findfirst(expr.args, var) # TODO repeated vars?
-        push!(permute_columns, column)
-        Apply(Permute(expr.f, permute_columns), apply_args)
-    end 
-end
-
-function bound(bound_vars::Vector{Var}, var::Var, expr::Primitive)::Expr
-    @match (expr.f, expr.args) begin
-        (:|, [a, b]) => Primitive(:|, [bound(bound_vars, var, a), bound(bound_vars, var, b)])
-        (:&, [a, b]) => Primitive(:&, [bound(bound_vars, var, a), bound(bound_vars, var, b)])
-        (:!, [arg]) => todo(expr)
-        (:(=>), [a, b]) => todo(expr)
-        (:(==), [a, b]) => todo(expr)
-        # branches must be boolean at this point
-        (:iff, [cond, true_branch, false_branch]) => bound(bound_vars, var, Primitive(:|, [Primitive(:&, [cond, true_branch]), false_branch]))
-        (:reduce, [raw_op, raw_init, values]) => todo(expr)
-        (:exists, [arg]) => bound(bound_vars, var, arg)
-        (:forall, [arg]) => todo(expr)
-        _ => error("Unknown primitive: $expr")
     end
 end
 

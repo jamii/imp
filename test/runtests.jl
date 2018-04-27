@@ -5,22 +5,24 @@ import MacroTools: @capture
 using Imp
 using Test
 
-env = merge(stdenv, Imp.Env{Set}(
-    Imp.Var(:person) => Set([("alice",), ("bob",), ("eve",)]),
-    Imp.Var(:string) => Set([("alice",), ("bob",), ("eve",), ("cthulu",)]),
-    Imp.Var(:integer) => Set([(0,), (1,), (2,)]),
-    Imp.Var(:evil) => Set([("eve",), ("cthulu",)]),
-    Imp.Var(:rsvp) => Set([("alice", "yes"), ("bob", "no"), ("cthulu", "no")]),
-    Imp.Var(:+) => Set([(a, b, (a+b) % 3) for a in 0:2 for b in 0:2]),
-    Imp.Var(:points) => Set([("alice", 0), ("bob", 1), ("cthulu", 1)]),
-))
+const globals = Dict{Symbol, Set}(
+    :person => Set([("alice",), ("bob",), ("eve",)]),
+    :string => Set([("alice",), ("bob",), ("eve",), ("cthulu",)]),
+    :integer => Set([(0,), (1,), (2,)]),
+    :evil => Set([("eve",), ("cthulu",)]),
+    :rsvp => Set([("alice", "yes"), ("bob", "no"), ("cthulu", "no")]),
+    :+ => Set([(a, b, (a+b) % 3) for a in 0:2 for b in 0:2]),
+    :points => Set([("alice", 0), ("bob", 1), ("cthulu", 1)]),
+)
 
-macro test_parse(ast)
-    quote
-        expr = Imp.parse($(QuoteNode(ast)))
-        # cant test Imp.unparse(Imp.parse(ast)) == ast because of LineNumberNodes
-        @test Imp.parse(Imp.unparse(expr)) == expr
-    end
+function test_parse(expr)
+    parsed = Imp.parse(expr)
+    # cant test Imp.unparse(Imp.parse(expr)) == expr because of LineNumberNodes
+    @test Imp.parse(Imp.unparse(parsed)) == parsed
+end
+
+macro test_parse(expr)
+    :(test_parse($(QuoteNode(expr))))
 end
 
 @test_parse true
@@ -30,227 +32,260 @@ end
 
 # --- analyze ---
 
+function test_separate_scopes(expr)
+    @test_throws Imp.CompileError imp(expr, passes=[:parse, :separate_scopes])
+end
+
+macro test_separate_scopes(expr)
+    :(test_separate_scopes($(QuoteNode(expr))))
+end
+
 # catch scoping errors at compile time so we don't have to pay the cost of runtime env copying
-@test_throws Imp.CompileError @imp(env, p -> q)
-@test_throws Imp.CompileError @imp(env, p -> (q -> true) & q)
+@test_separate_scopes p -> q
+@test_separate_scopes p -> (q -> true) & q
 
 # --- interpret ---
 
-macro test_imp(ast)
-    @assert @capture(ast, left_ == right_)
-    # TODO not sure why these don't need escaping...
-    :(@test @imp!($(copy(env)), $left) == @imp!($(copy(env)), $right))
+function test_interpret(expr1, expr2)
+    passes = [:parse, :separate_scopes, :interpret]
+    @test imp(expr1, passes=passes, globals=globals) == imp(expr2, passes=passes, globals=globals)
+end
+
+macro test_interpret(expr)
+    @assert @capture(expr, expr1_ == expr2_)
+    :(test_interpret($(QuoteNode(expr1)), $(QuoteNode(expr2))))
 end
 
 @test Imp.set_to_bool(Imp.bool_to_set(true)) == true
 @test Imp.set_to_bool(Imp.bool_to_set(false)) == false
 
 # basic booleans
-@test @imp!(env, true) == Set([()])
-@test @imp!(env, false) == Set()
-@test_imp (true | true) == true
-@test_imp (true | false) == true
-@test_imp (false | true) == true
-@test_imp (false | false) == false
-@test_imp (true & true) == true
-@test_imp (true & false) == false
-@test_imp (false & true) == false
-@test_imp (false & false) == false
-@test_imp !true == false
-@test_imp !false == true
+@test_interpret (true | true) == true
+@test_interpret (true | false) == true
+@test_interpret (false | true) == true
+@test_interpret (false | false) == false
+@test_interpret (true & true) == true
+@test_interpret (true & false) == false
+@test_interpret (false & true) == false
+@test_interpret (false & false) == false
+@test_interpret !true == false
+@test_interpret !false == true
 
 # 'implicit' boolean
-@test_imp person("alice") == true
-@test_imp person(0) == false
-@test_imp person == "alice" | "bob" | "eve"
+@test_interpret person("alice") == true
+@test_interpret person(0) == false
+@test_interpret person == "alice" | "bob" | "eve"
 
 # three-valued logic
-@test_imp rsvp("alice") == "yes"
-@test_imp rsvp("bob") == "no"
-@test_imp rsvp("eve") == nothing
+@test_interpret rsvp("alice") == "yes"
+@test_interpret rsvp("bob") == "no"
+@test_interpret rsvp("eve") == nothing
 
 # convert value to boolean
-@test_imp ("yes" == "yes") == true
-@test_imp ("yes" == "no") == false
-@test_imp (rsvp("alice") == "yes") == true
-@test_imp (rsvp("bob") == "yes") == false
-@test_imp (rsvp("eve") == "yes") == false
-@test_imp rsvp("alice", "yes") == true
-@test_imp rsvp("bob", "yes") == false
-@test_imp rsvp("eve", "yes") == false
+@test_interpret ("yes" == "yes") == true
+@test_interpret ("yes" == "no") == false
+@test_interpret (rsvp("alice") == "yes") == true
+@test_interpret (rsvp("bob") == "yes") == false
+@test_interpret (rsvp("eve") == "yes") == false
+@test_interpret rsvp("alice", "yes") == true
+@test_interpret rsvp("bob", "yes") == false
+@test_interpret rsvp("eve", "yes") == false
 
 # convert boolean to value
 # (`if` is taken so `iff`)
-@test_imp if true "yes" else "no" end == "yes"
-@test_imp if false "yes" else "no" end == "no"
-@test_imp (true ? "yes" : "no") == "yes"
-@test_imp (false ? "yes" : "no") == "no"
+@test_interpret if true "yes" else "no" end == "yes"
+@test_interpret if false "yes" else "no" end == "no"
+@test_interpret (true ? "yes" : "no") == "yes"
+@test_interpret (false ? "yes" : "no") == "no"
 
 # abstraction
-@test_imp (x -> true) == everything
-@test_imp (x -> false) == nothing
-@test_imp (p -> person(p)) == person
-@test_imp (x -> "alice")(2) == "alice"
+@test_interpret (x -> true) == everything
+@test_interpret (x -> false) == nothing
+@test_interpret (p -> person(p)) == person
+@test_interpret (x -> "alice")(2) == "alice"
 
 # domain expressed via `iff`
-@test_imp (p -> if person(p) rsvp(p) end)("alice") == "yes"
-@test_imp (p -> if person(p) rsvp(p) end)("cthulu") == false
-@test_imp (p -> if person(p) rsvp(p, "yes") end) == "alice"
-@test_imp (p -> if person(p) rsvp(p, "no") end) == "bob"
-@test_imp (p -> rsvp(p, "no")) == ("bob" | "cthulu")
+@test_interpret (p -> if person(p) rsvp(p) end)("alice") == "yes"
+@test_interpret (p -> if person(p) rsvp(p) end)("cthulu") == false
+@test_interpret (p -> if person(p) rsvp(p, "yes") end) == "alice"
+@test_interpret (p -> if person(p) rsvp(p, "no") end) == "bob"
+@test_interpret (p -> rsvp(p, "no")) == ("bob" | "cthulu")
 
 # defaults via `iff`
-@test_imp (p -> if person(p) rsvp(p) else "n/a" end)("alice") == "yes"
-@test_imp (p -> if person(p) rsvp(p) else "n/a" end)("cthulu") == "n/a"
-@test_imp (p -> if person(p) rsvp(p) else "n/a" end)(2) == "n/a"
-@test_imp (p -> if person(p) rsvp(p) else (if string(p) "n/a" end) end)("cthulu") == "n/a"
-@test_imp (p -> if person(p) rsvp(p) else (if string(p) "n/a" end) end)(2) == false
+@test_interpret (p -> if person(p) rsvp(p) else "n/a" end)("alice") == "yes"
+@test_interpret (p -> if person(p) rsvp(p) else "n/a" end)("cthulu") == "n/a"
+@test_interpret (p -> if person(p) rsvp(p) else "n/a" end)(2) == "n/a"
+@test_interpret (p -> if person(p) rsvp(p) else (if string(p) "n/a" end) end)("cthulu") == "n/a"
+@test_interpret (p -> if person(p) rsvp(p) else (if string(p) "n/a" end) end)(2) == false
 
 # can do quantification via eq
 
 # exists == X :: not(eq(X, nothing))
-@test_imp exists(person) == true
-@test_imp exists(nothing) == false
+@test_interpret exists(person) == true
+@test_interpret exists(nothing) == false
 
 # forall == X :: eq(X, everything)
-@test_imp forall(p -> person(p) => string(p)) == true
-@test_imp forall(p -> person(p) => evil(p)) == false
-@test_imp forall(p -> person(p) => rsvp(p, "yes")) == false
-@test_imp forall(p -> person(p) => (rsvp(p, "yes") | rsvp(p, "no"))) == false
-@test_imp forall(p -> person(p) => (rsvp(p, "yes") | rsvp(p, "no") | "eve"(p))) == true
+@test_interpret forall(p -> person(p) => string(p)) == true
+@test_interpret forall(p -> person(p) => evil(p)) == false
+@test_interpret forall(p -> person(p) => rsvp(p, "yes")) == false
+@test_interpret forall(p -> person(p) => (rsvp(p, "yes") | rsvp(p, "no"))) == false
+@test_interpret forall(p -> person(p) => (rsvp(p, "yes") | rsvp(p, "no") | "eve"(p))) == true
 
 # aggregation
-@test_imp reduce(+, 0, points) == 2
+@test_interpret reduce(+, 0, points) == 2
 
 # tricky expressions
-@test_imp (x -> x(x)) == everything
+@test_interpret (x -> x(x)) == everything
 
 # --- infer ---
 
-macro test_infer(expr, typs...)
-    quote
-        env = copy($env)
-        expr = @imp(env, $expr)
-        expr_types = Imp.infer(env, expr)
-        @test expr_types[expr] == Imp.SetType([$(typs...)])
-    end
+function test_infer_types(expr, typs...)
+    # TODO this is a big gross because of the global expr_types
+    expr = imp(expr, passes=[:parse, :separate_scopes], globals=globals)
+    imp(expr, passes=[:infer_types], globals=globals)
+    inferred_type = Imp.expr_types[expr]
+    @test inferred_type == Imp.SetType(typs)
 end
 
-@test_infer true ()
-@test_infer false
-@test_infer 1 (Int64,)
-@test_infer "yes" (String,)
+macro test_infer_types(expr, typs...)
+    :(test_infer_types($(QuoteNode(expr)), $(typs...)))
+end
 
-@test_infer (true | true) ()
-@test_infer (true & true) ()
-@test_infer !true ()
+@test_infer_types true ()
+@test_infer_types false
+@test_infer_types 1 (Int64,)
+@test_infer_types "yes" (String,)
 
-@test_infer person("alice") ()
-@test_infer person(0) 
-@test_infer "alice" | "bob" | "eve" (String,)
+@test_infer_types (true | true) ()
+@test_infer_types (true & true) ()
+@test_infer_types !true ()
 
-@test_infer rsvp("alice") (String,)
+@test_infer_types person("alice") ()
+@test_infer_types person(0) 
+@test_infer_types "alice" | "bob" | "eve" (String,)
 
-@test_infer "yes" == "yes" ()
-@test_infer rsvp("alice") == "yes" ()
-@test_infer rsvp("alice", "yes") ()
+@test_infer_types rsvp("alice") (String,)
 
-@test_infer if true "yes" else "no" end (String,)
-@test_infer if true "yes" else 0 end (Int64,) (String,)
+@test_infer_types "yes" == "yes" ()
+@test_infer_types rsvp("alice") == "yes" ()
+@test_infer_types rsvp("alice", "yes") ()
 
-@test_infer (x -> true) (String,) (Int64,)
-@test_infer (p -> if person(p) rsvp(p) end) (String, String)
-@test_infer (p -> if person(p) rsvp(p) else (if string(p) "n/a" end) end) (String, String)
-@test_infer (p -> if person(p) rsvp(p) else (if string(p) "n/a" end) end)("cthulu") (String,)
+@test_infer_types if true "yes" else "no" end (String,)
+@test_infer_types if true "yes" else 0 end (Int64,) (String,)
 
-@test_infer exists(person) ()
-@test_infer forall(p -> person(p) => string(p)) ()
+@test_infer_types (x -> true) (String,) (Int64,)
+@test_infer_types (p -> if person(p) rsvp(p) end) (String, String)
+@test_infer_types (p -> if person(p) rsvp(p) else (if string(p) "n/a" end) end) (String, String)
+@test_infer_types (p -> if person(p) rsvp(p) else (if string(p) "n/a" end) end)("cthulu") (String,)
 
-@test_infer reduce(+, 0, points) (Int64,)
+@test_infer_types exists(person) ()
+@test_infer_types forall(p -> person(p) => string(p)) ()
+
+@test_infer_types reduce(+, 0, points) (Int64,)
 
 # harder cases
 
-@test_infer (p -> p == 0) (Int64,)
-@test_infer (p -> (p == 0) | string(p)) (Int64,) (String,)
-@test_infer (p -> (p == 0) | (string(p) & integer(p))) (Int64,)
-@test_infer (p -> if person(p) 0 else (if integer(p) "yes" end) end) (String, Int64) (Int64, String)
-@test_infer (p -> if person(p) 0 else (if p == 0 "yes" end) end) (String, Int64) (Int64, String)
+@test_infer_types (p -> p == 0) (Int64,)
+@test_infer_types (p -> (p == 0) | string(p)) (Int64,) (String,)
+@test_infer_types (p -> (p == 0) | (string(p) & integer(p))) (Int64,)
+@test_infer_types (p -> if person(p) 0 else (if integer(p) "yes" end) end) (String, Int64) (Int64, String)
+@test_infer_types (p -> if person(p) 0 else (if p == 0 "yes" end) end) (String, Int64) (Int64, String)
 
-@test_infer (x -> (y -> (string(x) & string(y)) | (integer(x) & integer(y)))) (String, String) (Int64, Int64)
-@test_infer (x -> (y -> (person(x) & person(y)) | (x + y == 0))) (String, String) (Int64, Int64)
+@test_infer_types (x -> (y -> (string(x) & string(y)) | (integer(x) & integer(y)))) (String, String) (Int64, Int64)
+@test_infer_types (x -> (y -> (person(x) & person(y)) | (x + y == 0))) (String, String) (Int64, Int64)
 
 # TODO need a way to represent true_type
 # TODO need to know that string(x) is always true if x::String
-# @test_infer (x -> if person(x); (if string(x) "yes" else 0 end) end) (String, String)
+# @test_infer_types (x -> if person(x); (if string(x) "yes" else 0 end) end) (String, String)
 
 # TODO requires reasoning with sets as bounds rather than just types
-# @test_infer (x -> if person(x); (if person(x) "yes" else 0 end) end) (String, String)
+# @test_infer_types (x -> if person(x); (if person(x) "yes" else 0 end) end) (String, String)
 
 # --- lower ---
 
-const lower_env = merge(stdenv, Imp.Env{Set}([
-    Imp.Var(:f) => Set([()]),
-    Imp.Var(:g) => Set([(1,)]),
-    Imp.Var(:h) => Set([(1,2)]),
-]))
+const lower_globals = Dict{Symbol, Set}([
+   :f => Set([()]),
+   :g => Set([(1,)]),
+   :h => Set([(1,2)]),
+])
 
-macro test_lower(ast)
-    @assert @capture(ast, expr_ => lower_)
-    quote
-        env = copy($lower_env)
-        expr = @imp(env, $expr)
-        lower = @imp(env, $lower)
-        expr_types = Imp.infer(env, expr)
-        @test Imp.lower(expr_types, expr) == lower
-        # TODO figure out why this is not true - probably something to do with _1 == _2 
-        # expr_types = Imp.infer(env, lower)
-        # @test Imp.lower(expr_types, lower) == lower # ie idempotent
-    end
+function test_lower_apply(expr1, expr2)
+    passes = [:parse, :separate_scopes, :interpret]
+    lowered = imp(expr1, passes=[:parse, :separate_scopes, :infer_types, :lower_apply], globals=lower_globals)
+    lower = imp(expr2, passes=[:parse, :separate_scopes], globals=lower_globals)
+    @test lowered == lower
+    # TODO lower should be idempotent, but has trouble with ==
+    # relowered = imp(lowered, passes=[:infer_types, :lower_apply], globals=lower_globals)
+    # @test lowered == relowered
+end
+
+macro test_lower_apply(expr)
+    @assert @capture(expr, expr1_ => expr2_)
+    :(test_lower_apply($(QuoteNode(expr1)), $(QuoteNode(expr2))))
 end
 
 # nothing to do
-@test_lower true => true
-@test_lower f() => f()
-@test_lower (x -> g(x)) => (_1 -> g(_1))
-@test_lower ((x,y) -> h(x,y)) => ((_1, _2) -> h(_1, _2))
+@test_lower_apply true => true
+@test_lower_apply f() => f()
+@test_lower_apply (x -> g(x)) => (_1 -> g(_1))
+@test_lower_apply ((x,y) -> h(x,y)) => ((_1, _2) -> h(_1, _2))
 
-@test_lower (x -> h(x)) => ((_1, _2) -> h(_1, _2))
-@test_lower h => ((_1, _2) -> h(_1, _2))
-@test_lower (x -> x == g) => (_1 -> (_2 -> _2 == _1) == (_3 -> g(_3)))
-@test_lower h(g) => (_1 -> exists(_2 -> g(_2) & h(_2, _1)))
-@test_lower (x -> h(x) | g) => ((_1, _2) -> h(_1, _2) | g(_2))
-@test_lower g(0) => exists(_1 -> (_1 == 0) & g(_1))
-@test_lower !(g(0)) => !(exists(_1 -> (_1 == 0) & g(_1)))
-@test_lower (x -> y -> !(y(x))) => ((_1, _2) -> !(_1 == _2))
+@test_lower_apply (x -> h(x)) => ((_1, _2) -> h(_1, _2))
+@test_lower_apply h => ((_1, _2) -> h(_1, _2))
+@test_lower_apply (x -> x == g) => (_1 -> (_2 -> _2 == _1) == (_3 -> g(_3)))
+@test_lower_apply h(g) => (_1 -> exists(_2 -> g(_2) & h(_2, _1)))
+@test_lower_apply (x -> h(x) | g) => ((_1, _2) -> h(_1, _2) | g(_2))
+@test_lower_apply g(0) => exists(_1 -> (_1 == 0) & g(_1))
+@test_lower_apply !(g(0)) => !(exists(_1 -> (_1 == 0) & g(_1)))
+@test_lower_apply (x -> y -> !(y(x))) => ((_1, _2) -> !(_1 == _2))
 
 # --- bounded abstract ---
 
-const bounds_env = merge(stdenv, Imp.Env{Set}([Imp.Var(name) => Set() for name in [:x, :y, :z]]))
-macro test_bound(original, simple)
-    :(@test Imp.simplify_upper_bound(@imp($(copy(bounds_env)), $original)) == @imp($(copy(bounds_env)), $simple))
+const bound_globals = Dict{Symbol, Set}([
+    :x => Set(),
+    :y => Set(),
+    :z => Set(),
+])
+
+function test_simplify_bound(expr1, expr2)
+    @test Imp.simplify_bound(imp(expr1, passes=[:parse], globals=bound_globals)) == imp(expr2, passes=[:parse], globals=bound_globals)
 end
 
-@test_bound nothing nothing
-@test_bound everything everything
-@test_bound (nothing & everything) nothing
-@test_bound (nothing | everything) everything
-@test_bound !(everything) nothing
-@test_bound ((x & everything) | y) (x | y)
-@test_bound ((x | nothing) & y) (x & y)
-@test_bound ((x | everything) & y) y
-@test_bound ((x & nothing) | y) y
-@test_bound (x(y,z) | (y(x,z) & nothing)) x(y,z)
-@test_bound x(nothing) x(nothing)
-
-bounded_env = copy(env)
-delete!(bounded_env, Imp.Var(:everything)) # no cheating
-
-macro test_bounded(ast)
-    :(@test @imp!($(copy(env)), $ast) == interpret($bounded_env, Imp.with_upper_bound(@imp($(copy(env)), $ast))))
+macro test_simplify_bound(expr1, expr2)
+    :(test_simplify_bound($(QuoteNode(expr1)), $(QuoteNode(expr2))))
 end
 
-macro test_unbounded(ast)
-    :(@test_throws KeyError interpret($(copy(bounded_env)), Imp.with_upper_bound(@imp($(copy(bounded_env)), $ast))))
+@test_simplify_bound nothing nothing
+@test_simplify_bound everything everything
+@test_simplify_bound (nothing & everything) nothing
+@test_simplify_bound (nothing | everything) everything
+@test_simplify_bound !(everything) nothing
+@test_simplify_bound ((x & everything) | y) (x | y)
+@test_simplify_bound ((x | nothing) & y) (x & y)
+@test_simplify_bound ((x | everything) & y) y
+@test_simplify_bound ((x & nothing) | y) y
+@test_simplify_bound (x(y,z) | (y(x,z) & nothing)) x(y,z)
+@test_simplify_bound x(nothing) x(nothing)
+
+function test_bounded(expr)
+    without_bounds = imp(expr, passes=[:parse, :separate_scopes, :infer_types, :interpret], globals=globals)
+    # TODO use lower too
+    with_bounds = imp(expr, passes=[:parse, :separate_scopes, :infer_types, :bound_abstract, :interpret], globals=globals, everything=Set([(0,),("a",)]))
+    @test without_bounds == with_bounds
+end
+
+macro test_bounded(expr)
+    :(test_bounded($(QuoteNode(expr))))
+end
+
+function test_unbounded(expr)
+    without_bounds = imp(expr, passes=[:parse, :separate_scopes, :infer_types, :interpret], globals=globals)
+    # TODO use lower too
+    @test_throws KeyError imp(expr, passes=[:parse, :separate_scopes, :infer_types, :bound_abstract, :interpret], globals=globals, everything=nothing)
+end
+
+macro test_unbounded(expr)
+    :(test_unbounded($(QuoteNode(expr))))
 end
 
 @test_bounded x -> false

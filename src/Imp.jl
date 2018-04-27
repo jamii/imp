@@ -136,21 +136,21 @@ end
 Scope() = Scope(Dict(), Dict())
 Scope(env::Dict{Var}) = Scope(Dict(var.name => 0 for var in keys(env)), Dict(var.name => 0 for var in keys(env)))
 
-scopify(scope::Scope, expr::Expr) = map_expr((expr) -> scopify(scope, expr), expr)
+separate_scopes(scope::Scope, expr::Expr) = map_expr((expr) -> separate_scopes(scope, expr), expr)
 
-function scopify(scope::Scope, expr::Var)
+function separate_scopes(scope::Scope, expr::Var)
     id = get(scope.current, expr.name) do
         compile_error("Not in scope: $(expr.name)") # TODO how do we report location?
     end
     Var(expr.name, id)
 end
 
-function scopify(scope::Scope, expr::Abstract)
+function separate_scopes(scope::Scope, expr::Abstract)
     scope = Scope(copy(scope.current), scope.used)
     for var in expr.vars
         scope.current[var.name] = scope.used[var.name] = get(scope.used, var.name, 0) + 1
     end
-    map_expr((expr) -> scopify(scope, expr), expr)
+    map_expr((expr) -> separate_scopes(scope, expr), expr)
 end
 
 # --- interpret ---
@@ -239,11 +239,6 @@ function _interpret(env::Env{Set}, expr::Primitive) ::Set
     end
 end
 
-stdenv = Env{Set}(
-  Var(:everything) => Set{Any}([(scalar,) for scalar in [0, 1, 2, "alice", "bob", "eve", "cthulu", "yes", "no"]]),
-  Var(:nothing) => Set([]),
-)
-
 # --- interpret types ---
 
 const RowType = NTuple{N, Type} where N
@@ -292,7 +287,7 @@ const expr_types = Dict{Expr, SetType}()
 function interpret(env::Env{SetType}, expr::Expr)
     expr_types[expr] = _interpret(env, expr)
 end
-function infer(env::Env{Set}, expr::Expr)::Dict{Expr, SetType}
+function infer_types(env::Env{Set}, expr::Expr)::Dict{Expr, SetType}
     empty!(expr_types)
     interpret(env_types(env), expr)
     copy(expr_types)
@@ -406,6 +401,7 @@ function simple_apply(arity::Dict{Expr, Int64}, expr::Expr)::Expr
     apply(expr)
 end
 
+# TODO can remove this if we switch to 1-arg abstract
 function simple_abstract(expr::Expr)
     expr = map_expr(simple_abstract, expr)
     while true
@@ -417,7 +413,7 @@ function simple_abstract(expr::Expr)
     end
 end 
 
-function lower(expr_types::Dict{Expr, SetType}, expr::Expr)::Expr
+function lower_apply(expr_types::Dict{Expr, SetType}, expr::Expr)::Expr
     arities = Dict{Expr, Int64}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
     expr = simple_apply(arities, expr)
     expr = simple_abstract(expr)
@@ -437,7 +433,7 @@ end
 
 struct BoundedAbstract <: Expr
     var::Var
-    upper_bound::Expr
+    bound::Expr
     value::Expr
 end
 
@@ -448,11 +444,32 @@ function unparse(expr::Union{Permute, BoundedAbstract})
     end
 end
 
-function upper_bound(bound_vars::Vector{Var}, var::Var, expr::Constant)::Expr
+function todo(expr)
+    @warn "Unimplemented: $expr"
+    Var(:everything)
+end
+
+function simplify_bound(expr::Expr)
+    @match map_expr(simplify_bound, expr) begin
+        Primitive(:|, [a && Var(:everything, 0), b]) => a
+        Primitive(:|, [a, b && Var(:everything, 0)]) => b
+        Primitive(:|, [a && Constant(false), b]) => b
+        Primitive(:|, [a, b && Constant(false)]) => a
+        Primitive(:&, [a && Var(:everything, 0), b]) => b
+        Primitive(:&, [a, b && Var(:everything, 0)]) => a
+        Primitive(:&, [a && Constant(false), b]) => a
+        Primitive(:&, [a, b && Constant(false)]) => b
+        Primitive(:!, [Constant(false)]) => Var(:everything)
+        Primitive(:!, [Var(:everything, 0)]) => Constant(false)
+        other => other
+    end
+end
+
+function bound(bound_vars::Vector{Var}, var::Var, expr::Constant)::Expr
     (expr.value == false) ? Constant(false) : Var(:everything)
 end
 
-function upper_bound(bound_vars::Vector{Var}, var::Var, expr::Apply)::Expr
+function bound(bound_vars::Vector{Var}, var::Var, expr::Apply)::Expr
     @assert expr.f isa Var
     @assert all(expr.args) do arg
         arg isa Var
@@ -475,49 +492,30 @@ function upper_bound(bound_vars::Vector{Var}, var::Var, expr::Apply)::Expr
     end 
 end
 
-function todo(expr)
-    @warn "Unimplemented: $expr"
-    Var(:everything)
-end
-
-function upper_bound(bound_vars::Vector{Var}, var::Var, expr::Primitive)::Expr
+function bound(bound_vars::Vector{Var}, var::Var, expr::Primitive)::Expr
     @match (expr.f, expr.args) begin
-        (:|, [a, b]) => Primitive(:|, [upper_bound(bound_vars, var, a), upper_bound(bound_vars, var, b)])
-        (:&, [a, b]) => Primitive(:&, [upper_bound(bound_vars, var, a), upper_bound(bound_vars, var, b)])
+        (:|, [a, b]) => Primitive(:|, [bound(bound_vars, var, a), bound(bound_vars, var, b)])
+        (:&, [a, b]) => Primitive(:&, [bound(bound_vars, var, a), bound(bound_vars, var, b)])
         (:!, [arg]) => todo(expr)
         (:(=>), [a, b]) => todo(expr)
         (:(==), [a, b]) => todo(expr)
         # branches must be boolean at this point
-        (:iff, [cond, true_branch, false_branch]) => upper_bound(bound_vars, var, Primitive(:|, [Primitive(:&, [cond, true_branch]), false_branch]))
+        (:iff, [cond, true_branch, false_branch]) => bound(bound_vars, var, Primitive(:|, [Primitive(:&, [cond, true_branch]), false_branch]))
         (:reduce, [raw_op, raw_init, values]) => todo(expr)
-        (:exists, [arg]) => upper_bound(bound_vars, var, arg)
+        (:exists, [arg]) => bound(bound_vars, var, arg)
         (:forall, [arg]) => todo(expr)
         _ => error("Unknown primitive: $expr")
     end
 end
 
-function simplify_upper_bound(expr::Expr)
-    @match map_expr(simplify_upper_bound, expr) begin
-        Primitive(:|, [a && Var(:everything, 0), b]) => a
-        Primitive(:|, [a, b && Var(:everything, 0)]) => b
-        Primitive(:|, [a && Constant(false), b]) => b
-        Primitive(:|, [a, b && Constant(false)]) => a
-        Primitive(:&, [a && Var(:everything, 0), b]) => b
-        Primitive(:&, [a, b && Var(:everything, 0)]) => a
-        Primitive(:&, [a && Constant(false), b]) => a
-        Primitive(:&, [a, b && Constant(false)]) => b
-        Primitive(:!, [Constant(false)]) => Var(:everything)
-        Primitive(:!, [Var(:everything, 0)]) => Constant(false)
-        other => other
-    end
-end     
-
-function with_upper_bound(expr::Abstract)
-    value = expr.value # TODO once bounds are precise can do value = true
+bound_abstract(expr::Expr)::Expr = map_expr(bound_abstract, expr)
+function bound_abstract(expr::Abstract)::Expr
+    # TODO need to also remove redundant computation from value
+    value = bound_abstract(expr.value)
     for i in reverse(1:length(expr.vars))
-        bound = upper_bound(expr.vars[1:i-1], expr.vars[i], expr.value)
-        bound = simplify_upper_bound(bound)
-        value = BoundedAbstract(expr.vars[i], bound, value)
+        var_bound = bound(expr.vars[1:i-1], expr.vars[i], expr.value)
+        var_bound = simplify_bound(var_bound)
+        value = BoundedAbstract(expr.vars[i], var_bound, value)
     end
     value
 end
@@ -527,9 +525,9 @@ function _interpret(env::Env, expr::Permute)::Set
 end
 
 function _interpret(env::Env, expr::BoundedAbstract)::Set
-    upper_bound = interpret(env, expr.upper_bound)
+    bound = interpret(env, expr.bound)
     result = Set()
-    for var_row in upper_bound
+    for var_row in bound
         env[expr.var] = Set([var_row])
         for value_row in interpret(env, expr.value)
             push!(result, (var_row..., value_row...))
@@ -540,30 +538,36 @@ end
 
 # --- exports ---
 
-function imp(ast)
-    scopify(Scope(), parse(ast))
+const everything = Set{Any}([(scalar,) for scalar in [0, 1, 2, "alice", "bob", "eve", "cthulu", "yes", "no"]])
+
+const all_passes = [:parse, :separate_scopes, :infer_types, :lower_apply, :bound_abstract, :interpret]
+
+function imp(expr; globals=Dict{Symbol, Set}(), everything=everything, passes=all_passes)
+    env = Env{Set}(Var(name) => set for (name, set) in globals)
+    if everything != nothing
+        env[Var(:everything)] = everything
+    end
+    if :parse in passes
+        expr = parse(expr)
+    end
+    if :separate_scopes in passes
+        expr = separate_scopes(Scope(env), expr)
+    end
+    if :infer_types in passes
+        inferred_types = infer_types(env, expr)
+    end
+    if :lower_apply in passes
+        expr = lower_apply(inferred_types, expr)
+    end
+    if :bound_abstract in passes
+        expr = bound_abstract(expr)
+    end
+    if :interpret in passes
+        expr = interpret(env, expr)
+    end
+    expr
 end
 
-function imp(env, ast)
-    scopify(Scope(env), parse(ast))
-end
-
-function imp!(env, ast)
-    interpret(env, imp(env, ast))
-end
-
-macro imp(ast)
-    :(imp($(QuoteNode(ast))))
-end
-
-macro imp(env, ast)
-    :(imp($(esc(env)), $(QuoteNode(ast))))
-end
-
-macro imp!(env, ast)
-    :(imp!($(esc(env)), $(QuoteNode(ast))))
-end
-
-export stdenv, imp, imp!, @imp, @imp!, interpret, infer
+export imp
 
 end

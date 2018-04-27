@@ -116,6 +116,8 @@ function parse(ast)
             @assert @capture(binding, var_Symbol = value_) "Unknown syntax: $ast"
             Let(Var(var), parse(value), body)
         end
+    elseif @capture(ast, (exprs__,))
+        Primitive(:tuple, map(parse, exprs))
     else
         error("Unknown syntax: $ast")
     end
@@ -130,6 +132,7 @@ function unparse(expr::Expr)
         (_::Apply, (f, args)) => :($f($(args...)))
         (_::Primitive, (:iff, [cond, true_branch, False()])) => :(if $cond; $true_branch end)
         (_::Primitive, (:iff, [cond, true_branch, false_branch])) => :(if $cond; $true_branch else $false_branch end)
+        (_::Primitive, (:tuple, args)) => :(($(args...),))
         (_::Primitive, (f, args)) => :($f($(args...),))
         (_::Abstract, ([var], value)) => :($var -> $value)
         (_::Abstract, (vars, value)) => :(($(vars...),) -> $value)
@@ -268,6 +271,9 @@ function _interpret(env::Env{Set}, expr::Primitive) ::Set
         end
         (:exists, [arg]) => bool_to_set(arg != false_set)
         (:forall, [arg]) => bool_to_set(arg == env[Var(:everything)])
+        (:tuple, args) => reduce(true_set, args) do a, b
+            Set(((a_row..., b_row...) for a_row in a for b_row in b))
+        end
         _ => error("Unknown primitive: $expr")
     end
 end
@@ -306,6 +312,9 @@ function _interpret(env::Env{SetType}, expr::Primitive)::SetType
         (:reduce, [raw_op, raw_init, values]) => map(row_type -> (row_type[3],), raw_op)
         (:exists, [arg]) => arg == false_type ? false_type : bool_type
         (:forall, [arg]) => bool_type
+        (:tuple, args) => reduce(true_set, args) do a, b
+            Set(((a_row..., b_row...) for a_row in a for b_row in b))
+        end
         _ => error("Unknown primitive: $expr")
     end
 end
@@ -328,23 +337,7 @@ function infer_types(env::Env{Set}, expr::Expr)::Dict{Expr, SetType}
     copy(expr_types)
 end
 
-# --- inline ---
-
-function replace_expr(expr::Expr, replacements::Dict)::Expr
-    new_expr = haskey(replacements, expr) ? replacements[expr] : expr
-    map_expr(expr -> replace_expr(expr, replacements), new_expr)
-end
-
-function inline_let(expr::Expr)::Expr
-    @match expr begin
-        Let(var, value, body) => replace_expr(body, Dict(var => value))
-        _ => map_expr(inline_let, expr)
-    end
-end
-
 # --- lower ---
-
-# TODO should probably replace anything that has false_type with false
 
 const Arity = Union{Int64, Nothing} # false has arity nothing
 
@@ -357,6 +350,28 @@ function arity(set_type::SetType)::Arity
     end
 end
 
+function replace_expr(expr::Expr, replacements::Dict)::Expr
+    new_expr = haskey(replacements, expr) ? replacements[expr] : expr
+    map_expr(expr -> replace_expr(expr, replacements), new_expr)
+end
+
+function desugar(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)::Expr
+    desugar(expr) = @match expr begin
+        Let(var, value, body) => replace_expr(desugar(body), Dict(var => desugar(value)))
+        Primitive(:tuple, args) => begin
+            vars = Var[]
+            body = reduce(True(), args) do body, arg
+                arg_vars = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:coalesce(arity[arg], 0)]
+                append!(vars, arg_vars)
+                Primitive(:&, [body, Apply(arg, arg_vars)])
+            end
+            Abstract(vars, body)
+        end
+        _ => map_expr(desugar, expr)
+    end
+    desugar(expr)
+end
+
 function is_scalar(expr::Expr)
     @match expr begin
         _::Constant => true
@@ -367,9 +382,7 @@ function is_scalar(expr::Expr)
 end
 
 # rewrite until every Apply has var/constant f, boolean type and bound var args
-function simple_apply(arity::Dict{Expr, Arity}, expr::Expr)::Expr
-    arity = copy(arity)
-    last_id = Ref(0)
+function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)::Expr
     make_slots(n) = begin
         slots = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:n]
         for slot in slots
@@ -474,11 +487,19 @@ function simple_abstract(expr::Expr)
     end
 end
 
-function lower_apply(expr_types::Dict{Expr, SetType}, expr::Expr)::Expr
+function lower(env::Env{Set}, expr::Expr)::Expr
+    last_id = Ref(0)
+
+    expr_types = infer_types(env, expr)
     arities = Dict{Expr, Arity}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
-    expr = simple_apply(arities, expr)
-    expr = simple_abstract(expr)
-    expr
+    expr = desugar(arities, last_id, expr)
+
+    # TODO gross that we have to do type inference twice - that global!
+    expr_types = infer_types(env, expr)
+    arities = Dict{Expr, Arity}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
+    expr = simple_apply(arities, last_id, expr)
+
+    simple_abstract(expr)
 end
 
 # --- bounded abstract ----
@@ -598,7 +619,7 @@ end
 
 # --- exports ---
 
-const all_passes = [:parse, :separate_scopes, :inline_let, :infer_types, :lower_apply, :bound_abstract, :interpret]
+const all_passes = [:parse, :lower, :bound_abstract, :interpret]
 
 function imp(expr; globals=Dict{Symbol, Set}(), everything=nothing, passes=all_passes)
     env = Env{Set}(Var(name) => set for (name, set) in globals)
@@ -607,18 +628,10 @@ function imp(expr; globals=Dict{Symbol, Set}(), everything=nothing, passes=all_p
     end
     if :parse in passes
         expr = parse(expr)
-    end
-    if :separate_scopes in passes
         expr = separate_scopes(Scope(env), expr)
     end
-    if :inline_let in passes
-        expr = inline_let(expr)
-    end
-    if :infer_types in passes
-        inferred_types = infer_types(env, expr)
-    end
-    if :lower_apply in passes
-        expr = lower_apply(inferred_types, expr)
+    if :lower in passes
+        expr = lower(env, expr)
     end
     if :bound_abstract in passes
         expr = bound_abstract(expr)

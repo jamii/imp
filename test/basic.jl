@@ -47,7 +47,7 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
             env[Imp.Var(:everything)] = everything
         end
         expected_inferred_type = (inferred_type != nothing) ? Imp.SetType(inferred_type) : nothing
-        expected_result = (result != nothing) ? imp(result, globals=globals, everything=everything, passes=[:parse, :separate_scopes, :interpret]) : nothing
+        expected_result = (result != nothing) ? imp(result, globals=globals, everything=everything, passes=[:parse, :interpret]) : nothing
         
         (prev_inferred_type, prev_result) = (nothing, nothing)
         
@@ -60,21 +60,16 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
             (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
         end
 
-        expr = Imp.inline_let(expr)
-        if everything != nothing
-            (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
-        end
-
-        expr = Imp.lower_apply(Imp.infer_types(env, expr), expr)
+        expr = Imp.lower(env, expr)
         if lowered_expr != nothing
-            @test expr == imp(lowered_expr, passes=[:parse, :separate_scopes], globals=globals)
+            @test expr == imp(lowered_expr, passes=[:parse], globals=globals)
         end
         if everything != nothing
             (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
         end
 
         # TODO this needs work, especially around ==
-        # relowered = Imp.lower_apply(Imp.infer_types(env, expr), expr)
+        # relowered = Imp.lower(Imp.infer_types(env, expr), expr)
         # @test expr == relowered
 
         expr = Imp.bound_abstract(expr)
@@ -94,7 +89,7 @@ imp(:( p -> person(p) => string(p) ), globals=globals, everything=everything)
 # --- scoping ---
 
 function test_separate_scopes(expr)
-    @test_throws Imp.CompileError imp(expr, passes=[:parse, :separate_scopes], everything=everything)
+    @test_throws Imp.CompileError imp(expr, passes=[:parse], everything=everything)
 end
 
 test_separate_scopes(:(p -> q))
@@ -191,6 +186,12 @@ test_imp(:( let x = 1; x + 1 end ), result=:( 2 ))
 test_imp(:( let inc = x -> x + 1; inc(1) end ), result=:( 2 ))
 test_imp(:( let inc = x -> x + 1; inc(inc(1)) end ), result=:( 0 ))
 
+# tuples
+test_imp(:( (1,2) ), result=:( (a,b) -> (a==1) & (b==2) ))
+test_imp(:( (person, rsvp) ), result=:( (a,b,c) -> person(a) & rsvp(b,c) ))
+test_imp(:( (rsvp, false) ), result=:( false ))
+test_imp(:( ("alice", "yes")|("bob", "no")|("cthulu", "no") ), result=:( rsvp ))
+
 # --- infer_types ---
 
 test_imp(:( true ), inferred_type=[()])
@@ -244,7 +245,7 @@ test_imp(:( (x -> (y -> (string(x) & string(y)) | (integer(x) & integer(y)))) ),
 # TODO requires reasoning with sets as bounds rather than just types
 # test_imp(:( (x -> if person(x); (if person(x) "yes" else 0 end) end) ), inferred_type=[(String, String)])
 
-# --- lower_apply ---
+# --- lower ---
 
 # nothing to do
 test_imp(:( true ), lowered_expr=:( true ))
@@ -272,7 +273,7 @@ const bound_globals = Dict{Symbol, Set}([
 ])
 
 function test_simplify_bound(expr1, expr2)
-    @test Imp.simplify_bound(imp(expr1, passes=[:parse], globals=bound_globals)) == imp(expr2, passes=[:parse], globals=bound_globals, everything=everything)
+    @test Imp.simplify_bound(Imp.parse(expr1)) == Imp.parse(expr2)
 end
 
 macro test_simplify_bound(expr1, expr2)

@@ -287,7 +287,7 @@ const expr_types = Dict{Expr, SetType}()
 function interpret(env::Env{SetType}, expr::Expr)
     expr_type = _interpret(env, expr)
     # TODO really we want to union types of vars in their abstract, much more than the type of the expression
-    union!(get!(expr_types, expr, SetType()), expr_type) 
+    union!(get!(expr_types, expr, SetType()), expr_type)
     expr_type
 end
 function infer_types(env::Env{Set}, expr::Expr)::Dict{Expr, SetType}
@@ -474,6 +474,14 @@ end
 
 function bound(bound_vars::Vector{Var}, var::Var, expr::Constant)::Expr
     (expr.value == false) ? Constant(false) : Var(:everything)
+end
+
+function bound(bound_vars::Vector{Var}, var::Var, expr::Abstract)::Expr
+    compile_error("Should have been lowered: $expr")
+end
+
+function bound(bound_vars::Vector{Var}, var::Var, expr::Abstract)::Expr
+    bound(bound_vars, var, expr.value)
 end
 
 function bound(bound_vars::Vector{Var}, var::Var, expr::Apply)::Expr

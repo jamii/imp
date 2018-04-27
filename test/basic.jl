@@ -36,7 +36,7 @@ function test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_
     (actual_inferred_type, actual_result)
 end
 
-function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=nothing, everything=everything, globals=globals)
+function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=nothing, unboundable=false, everything=everything, globals=globals)
     name = string(raw_expr)
     name = replace(name, r"#=[^(=#)]*=#" => " ")
     name = replace(name, r"\n\s*"s => " ")
@@ -65,7 +65,6 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
             @test expr == imp(lowered_expr, passes=[:parse, :separate_scopes], globals=globals)
         end
         if everything != nothing
-            @show expr
             (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
         end
 
@@ -73,9 +72,13 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
         # relowered = Imp.lower_apply(Imp.infer_types(env, expr), expr)
         # @test expr == relowered
 
-        # TODO this needs work, can't bound Abstract atm
-        # expr = Imp.bound_abstract(expr)
-        # (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
+        expr = Imp.bound_abstract(expr)
+        (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
+
+        # if !unboundable
+        #     delete!(env, Imp.Var(:everything))
+        #     (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
+        # end
     end
 end
 

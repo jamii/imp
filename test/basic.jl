@@ -53,8 +53,7 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
         
         expr = Imp.parse(raw_expr)
         # cant test Imp.unparse(Imp.parse(expr)) == expr because of LineNumberNodes
-        # TODO this needs work
-        # @test Imp.parse(Imp.unparse(expr)) == expr
+        @test Imp.parse(Imp.unparse(expr)) == expr
         
         expr = Imp.separate_scopes(Imp.Scope(env), expr)
         if everything != nothing

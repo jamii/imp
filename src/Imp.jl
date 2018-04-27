@@ -112,9 +112,9 @@ function unparse(expr::Expr)
         (_::Apply, (f, args)) => :($f($(args...)))
         (_::Primitive, (:iff, [cond, true_branch, Constant(false)])) => :(if $cond; $true_branch end)
         (_::Primitive, (:iff, [cond, true_branch, false_branch])) => :(if $cond; $true_branch else $false_branch end)
-        (_::Primitive, (f, args)) => :($f($(args...)))
+        (_::Primitive, (f, args)) => :($f($(args...),))
         (_::Abstract, ([var], value)) => :($var -> $value)
-        (_::Abstract, (vars, value)) => :(($(vars...)) -> $value)
+        (_::Abstract, (vars, value)) => :(($(vars...),) -> $value)
     end
 end
 

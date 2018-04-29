@@ -256,8 +256,8 @@ test_imp(:( (x -> (y -> (string(x) & string(y)) | (integer(x) & integer(y)))) ),
 # --- lower ---
 
 # nothing to do
-test_imp(:( true ), lowered_expr=:( true ))
-test_imp(:( f() ), lowered_expr=:( f() ))
+test_imp(:( true ), lowered_expr=:( () -> true ))
+test_imp(:( f() ), lowered_expr=:( () -> f() ))
 test_imp(:( (x -> g(x)) ), lowered_expr=:( (_1 -> g(_1)) ))
 test_imp(:( (x,y) -> h(x,y) ), lowered_expr=:( (_1, _2) -> h(_1, _2) ))
 
@@ -268,9 +268,9 @@ test_imp(:( h ), lowered_expr=:( (_1, _2) -> h(_1, _2) ))
 # test_imp(:( (x -> x == g) ), lowered_expr=:( _1 -> (_2 -> _2 == _1) == (_3 -> g(_3)) ))
 test_imp(:( h(g) ), lowered_expr=:( _1 -> exists(_2 -> g(_2) & h(_2, _1)) ))
 test_imp(:( (x -> h(x) | g) ), lowered_expr=:( (_1, _2) -> h(_1, _2) | g(_2) ), unboundable=true)
-test_imp(:( g(0) ), lowered_expr=:( exists(_1 -> (_1 == 0) & g(_1)) ))
-test_imp(:( !(g(0)) ), lowered_expr=:( !(exists(_1 -> (_1 == 0) & g(_1))) ))
-test_imp(:( (x -> y -> !(y(x))) ), lowered_expr=:( (_1, _2) -> !(_1 == _2) ), unboundable=true)
+test_imp(:( g(0) ), lowered_expr=:( () -> exists(_1 -> (_1 == 0) & g(_1)) ))
+test_imp(:( !(g(0)) ), lowered_expr=:( () -> !(() -> exists(_1 -> (_1 == 0) & g(_1))) ))
+test_imp(:( (x -> y -> !(y(x))) ), lowered_expr=:( (_1, _2) -> !(() -> _1 == _2) ), unboundable=true)
 
 # --- simplify_bound ---
 

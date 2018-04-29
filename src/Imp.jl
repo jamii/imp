@@ -476,18 +476,6 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
     apply(expr)
 end
 
-# TODO can remove this if we switch to 1-arg abstract
-function simple_abstract(expr::Expr)
-    expr = map_expr(simple_abstract, expr)
-    while true
-        expr = @match expr begin
-            Abstract([], value) => value
-            Abstract(vars1, Abstract(vars2, value)) => Abstract(vcat(vars1, vars2), value)
-            _ => return expr
-        end
-    end
-end
-
 function lower(env::Env{Set}, expr::Expr)::Expr
     last_id = Ref(0)
 
@@ -500,7 +488,7 @@ function lower(env::Env{Set}, expr::Expr)::Expr
     arities = Dict{Expr, Arity}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
     expr = simple_apply(arities, last_id, expr)
 
-    simple_abstract(expr)
+    expr
 end
 
 # --- bounded abstract ----

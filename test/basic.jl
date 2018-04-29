@@ -194,9 +194,8 @@ test_imp(:( ("alice", "yes")|("bob", "no")|("cthulu", "no") ), result=:( rsvp ))
 
 # wildcards
 test_imp(:( _ ), result=:( x -> true ), unboundable=true)
-# TODO only unboundable because we lack remainder
-test_imp(:( r -> rsvp(_, r) ), result=:( r -> exists(p -> rsvp(p, r)) ), unboundable=true)
-test_imp(:( rsvp(_) ), result=:( r -> exists(p -> rsvp(p, r)) ), unboundable=true)
+test_imp(:( r -> rsvp(_, r) ), result=:( r -> exists(p -> rsvp(p, r)) ))
+test_imp(:( rsvp(_) ), result=:( r -> exists(p -> rsvp(p, r)) ))
 
 test_imp(:( p -> if person(p); (r -> true) end ), unboundable=true)
 
@@ -292,7 +291,6 @@ end
 @test_simplify_bound everything everything
 @test_simplify_bound (nothing & everything) nothing
 @test_simplify_bound (nothing | everything) everything
-@test_simplify_bound !(everything) nothing
 @test_simplify_bound ((x & everything) | y) (x | y)
 @test_simplify_bound ((x | nothing) & y) (x & y)
 @test_simplify_bound ((x | everything) & y) y

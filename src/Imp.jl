@@ -580,11 +580,10 @@ function is_scalar_bound(bound_vars::Vector{Var}, expr::Expr)
     end
 end
 
-# TODO probably want to push negation down because I can't see inside it
+# TODO where bound/remainder is |, need to push the abstract inside
+
 function bound(bound_vars::Vector{Var}, var::Var, expr::Expr)::Expr
     bound(expr) = @match expr begin
-
-        # precise bounds
         False() => expr
         True() => Var(:everything)
         Apply(f, args) => (var in args) ? permute(bound_vars, var, expr) : Var(:everything)
@@ -600,21 +599,35 @@ function bound(bound_vars::Vector{Var}, var::Var, expr::Expr)::Expr
             end
         end
         Primitive(:exists, [arg]) => bound(arg)
-
-        # approximate bounds
-        Abstract(vars, value) => bound(value)
         Primitive(:!, [arg]) => Var(:everything)
-        Primitive(:reduce, [raw_op, raw_init, values]) => Var(:everything)
-        Primitive(:forall, [arg]) => Var(:everything)
-
-        # impossibles
-        Primitive(:(=>), _) ||
-        Primitive(:iff, _) ||
-        _::Constant ||
-        Var => compile_error("Should have been lowered: $expr")
-
+        Abstract(vars, value) => bound(value)
     end
     bound(expr)
+end
+
+function remainder(bound_vars::Vector{Var}, var::Var, expr::Expr)::Expr
+    remainder(expr) = @match expr begin
+        False() => expr
+        True() => expr
+        Apply(f, args) => issubset(args, union(bound_vars, (var, Var(:everything)))) ? True() : expr
+        # TODO we can't simplify inside disjunction because bound covers both
+        # Primitive(:|, [a, b]) => Primitive(:|, [remainder(a), remainder(b)])
+        Primitive(:|, [a, b]) => Primitive(:|, [a, b])
+        Primitive(:&, [a, b]) => Primitive(:&, [remainder(a), remainder(b)])
+        Primitive(:(==), [a, b]) => begin
+            if (a == var) && is_scalar_bound(bound_vars, b)
+                True()
+            elseif (b == var) && is_scalar_bound(bound_vars, a)
+                True()
+            else
+                expr
+            end
+        end
+        Primitive(:exists, [arg]) => Primitive(:exists, [remainder(arg)])
+        Primitive(:!, [arg]) => expr
+        Abstract(vars, value) => Abstract(vars, remainder(value))
+    end
+    remainder(expr)
 end
 
 function simplify_bound(expr::Expr)
@@ -627,23 +640,50 @@ function simplify_bound(expr::Expr)
         Primitive(:&, [a, b && Var(:everything, 0)]) => a
         Primitive(:&, [a && False(), b]) => a
         Primitive(:&, [a, b && False()]) => b
-        Primitive(:!, [False()]) => Var(:everything)
-        Primitive(:!, [Var(:everything, 0)]) => False()
         other => other
     end
 end
 
-bound_abstract(expr::Expr)::Expr = map_expr(bound_abstract, expr)
-function bound_abstract(expr::Abstract)::Expr
+function simplify_remainder(expr::Expr)
+    @match map_expr(simplify_bound, expr) begin
+        Primitive(:|, [a && True(), b]) => a
+        Primitive(:|, [a, b && True()]) => b
+        Primitive(:|, [a && False(), b]) => b
+        Primitive(:|, [a, b && False()]) => a
+        Primitive(:&, [a && True(), b]) => b
+        Primitive(:&, [a, b && True()]) => a
+        Primitive(:&, [a && False(), b]) => a
+        Primitive(:&, [a, b && False()]) => b
+        Primitive(:!, [False()]) => True()
+        Primitive(:!, [True()]) => False()
+        Primitive(:exists, [True()]) => True()
+        Primitive(:exists, [False()]) => False()
+        Primitive(:(==), [a, a]) => True()
+        Primitive(:(==), [True(), False()]) => False()
+        Primitive(:(==), [False(), True()]) => False()
+        Primitive(:(==), [Constant(a), Constant(b)]) => False()
+        other => other
+    end
+end
+
+function bound_abstract(bound_vars::Vector{Var}, expr::Abstract)::Expr
     # TODO need to also remove redundant computation from value
-    value = bound_abstract(expr.value)
-    for i in reverse(1:length(expr.vars))
-        var_bound = bound(expr.vars[1:i-1], expr.vars[i], expr.value)
-        var_bound = simplify_bound(var_bound)
-        value = BoundedAbstract(expr.vars[i], var_bound, value)
+    value = expr.value
+    bounds = Expr[]
+    for i in 1:length(expr.vars)
+        vars = vcat(bound_vars, expr.vars[1:i-1])
+        var = expr.vars[i]
+        push!(bounds, simplify_bound(bound(vars, var, value)))
+        value = remainder(vars, var, value)
+    end
+    value = bound_abstract(vcat(expr.vars, bound_vars), simplify_remainder(value))
+    for (var, bound) in zip(reverse(expr.vars), reverse(bounds))
+        value = BoundedAbstract(var, bound, value)
     end
     value
 end
+bound_abstract(bound_vars::Vector{Var}, expr::Expr)::Expr = map_expr(expr -> bound_abstract(bound_vars, expr), expr)
+bound_abstract(expr::Expr)::Expr = bound_abstract(Var[], expr)
 
 function _interpret(env::Env, expr::Permute)::Set
     Set((row[expr.columns] for row in env[expr.arg]))

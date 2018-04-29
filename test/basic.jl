@@ -40,21 +40,21 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
     name = string(raw_expr)
     name = replace(name, r"#=[^(=#)]*=#" => " ")
     name = replace(name, r"\n\s*"s => " ")
-    @testset "$name" begin 
+    @testset "$name" begin
         env = Imp.Env{Set}(Imp.Var(name) => set for (name, set) in globals)
-        
+
         if everything != nothing
             env[Imp.Var(:everything)] = everything
         end
         expected_inferred_type = (inferred_type != nothing) ? Imp.SetType(inferred_type) : nothing
         expected_result = (result != nothing) ? imp(result, globals=globals, everything=everything, passes=[:parse, :interpret]) : nothing
-        
+
         (prev_inferred_type, prev_result) = (nothing, nothing)
-        
+
         expr = Imp.parse(raw_expr)
         # cant test Imp.unparse(Imp.parse(expr)) == expr because of LineNumberNodes
         @test Imp.parse(Imp.unparse(expr)) == expr
-        
+
         expr = Imp.separate_scopes(Imp.Scope(env), expr)
         if everything != nothing
             (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)

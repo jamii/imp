@@ -448,7 +448,11 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
             @match [] = slots
             expr
         end
-        Primitive(f, args) where (f in [:!, :(=>), :(==), :exists, :forall]) => begin
+        Primitive(:(=>), [a, b]) => begin
+            @match [] = slots
+            Primitive(:|, [apply(b), Primitive(:!, [apply(a)])])
+        end
+        Primitive(f, args) where (f in [:!, :(==), :exists, :forall]) => begin
             @match [] = slots
             Primitive(f, map(apply, args))
         end
@@ -464,7 +468,9 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
         # (a | b)[slots...] => (a[slots...] | b[slots...])
         Primitive(:|, [a,b]) => Primitive(:|, [apply(a, slots), apply(b, slots)])
         Primitive(:&, [a,b]) => Primitive(:&, [apply(a, slots), apply(b, slots)])
-        Primitive(:iff, [cond, true_branch, false_branch]) => Primitive(:iff, [cond, apply(true_branch, slots), apply(false_branch, slots)])
+        Primitive(:iff, [c, t, f]) => Primitive(:|,
+                                                [Primitive(:&, [apply(c), apply(t, slots)]),
+                                                 Primitive(:&, [Primitive(:!, [apply(c)]), apply(f, slots)])])
 
         # ((vars...) -> value)[slots...] => value[vars... = slots...]
         Abstract(vars, value) => begin
@@ -532,6 +538,7 @@ end
 # TODO A(p -> a => b) = !E(p -> !(a => b)) = !E(p in a -> !(a => b))
 function bound(bound_vars::Vector{Var}, var::Var, expr::Expr)::Expr
     bound(expr) = @match expr begin
+
         # precise bounds
         False() => expr
         True() => Var(:everything)
@@ -552,12 +559,15 @@ function bound(bound_vars::Vector{Var}, var::Var, expr::Expr)::Expr
         # approximate bounds
         Abstract(vars, value) => bound(value)
         Primitive(:!, [arg]) => Var(:everything)
-        Primitive(:(=>), [a, b]) => Var(:everything)
-        Primitive(:iff, [c, t, f]) => Primitive(:|, [Primitive(:&, [bound(c), bound(t)]), bound(f)])
         Primitive(:reduce, [raw_op, raw_init, values]) => Var(:everything)
         Primitive(:forall, [arg]) => Var(:everything)
 
-        _::Constant || Var => compile_error("Should have been lowered: $expr")
+        # impossibles
+        Primitive(:(=>), _) ||
+        Primitive(:iff, _) ||
+        _::Constant ||
+        Var => compile_error("Should have been lowered: $expr")
+
     end
     bound(expr)
 end

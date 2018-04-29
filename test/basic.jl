@@ -233,6 +233,8 @@ test_imp(:( forall(p -> person(p) => string(p)) ), inferred_type=[()])
 
 test_imp(:( reduce(+, 0, points) ), inferred_type=[(Int64,)])
 
+test_imp(:( p -> rsvp(rsvp(rsvp(p))) ), inferred_type=[(String,String)])
+
 # harder cases
 
 test_imp(:( (p -> p == 0) ), inferred_type=[(Int64,)])

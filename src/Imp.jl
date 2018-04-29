@@ -243,7 +243,7 @@ end
 const false_set = Set()
 const true_set = Set([()])
 bool_to_set(bool::Bool)::Set = bool ? true_set : false_set
-set_to_bool(set::Set)::Bool = length(set) > 0
+set_to_bool(set::Set)::Bool = !isempty(set)
 
 _interpret(env::Env{Set}, expr::False) = false_set
 _interpret(env::Env{Set}, expr::True) = true_set
@@ -399,9 +399,11 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
     end
     apply(expr::Expr, slots::Vector{Var})::Expr = @match expr begin
 
+        # things that don't make sense will be hard to lower
+        _ where get(arity, expr, -1) == nothing => False()
+
         # false[slots...] => false
         False() => expr
-        _ where get(arity, expr, -1) == nothing => False()
 
         # true[] => true
         True() => begin
@@ -442,35 +444,46 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
                                 ]))])
         end
 
-        # things which produce bools
-        # (a == b)[] => (a[...] == b[...])
-        Primitive(:(==), [a, b]) where (is_scalar(a) && is_scalar(b)) => begin
-            @match [] = slots
-            expr
-        end
+        # (a & b)[slots...] => a[slots...] & b[slots...]
+        Primitive(:&, [a, b]) => Primitive(:&, [apply(a, slots), apply(b, slots)])
+
+        # (a | b)[slots...] => a[slots...] & b[slots...]
+        Primitive(:|, [a, b]) => Primitive(:|, [apply(a, slots), apply(b, slots)])
+
+        # (!a)[] => !(a[...])
+        Primitive(:!, [arg]) => Primitive(:!, [apply(arg)])
+
+        # (a => b)[] => b[] | !a[]
         Primitive(:(=>), [a, b]) => begin
             @match [] = slots
-            Primitive(:|, [apply(b), Primitive(:!, [apply(a)])])
-        end
-        Primitive(f, args) where (f in [:!, :(==), :exists, :forall]) => begin
-            @match [] = slots
-            Primitive(f, map(apply, args))
+            Primitive(:|, [Primitive(:!, [apply(a)]), apply(b)])
         end
 
-        # things which produce scalars
+        # leave scalar eq alone, otherwise lower isn't idempotent
+        Primitive(:(==), [a, b]) where (is_scalar(a) && is_scalar(b)) => expr
+        # (a == b)[] => (a[...] == b[...])
+        Primitive(:(==), [a, b]) => Primitive(:(==), [apply(a), apply(b)])
+
+        # (c ? t : f)[slots...] => (c[...] & t[slots...]) | (!c[...] & f[slots...])
+        Primitive(:iff, [c, t, f]) => Primitive(:|,
+                                                [Primitive(:&, [Primitive(:exists, [apply(c)]), apply(t, slots)]),
+                                                 Primitive(:&, [Primitive(:!, [apply(c)]), apply(f, slots)])])
+
         # reduce(...)[slot] => slot==reduce(...)
         Primitive(:reduce, _) => begin
             @match [slot] = slots
             Primitive(:(==), [slot, expr])
         end
 
-        # things which produce sets
-        # (a | b)[slots...] => (a[slots...] | b[slots...])
-        Primitive(:|, [a,b]) => Primitive(:|, [apply(a, slots), apply(b, slots)])
-        Primitive(:&, [a,b]) => Primitive(:&, [apply(a, slots), apply(b, slots)])
-        Primitive(:iff, [c, t, f]) => Primitive(:|,
-                                                [Primitive(:&, [apply(c), apply(t, slots)]),
-                                                 Primitive(:&, [Primitive(:!, [apply(c)]), apply(f, slots)])])
+        # E(arg)[] => E(arg[...])
+        Primitive(:exists, [arg]) => Primitive(:exists, [apply(arg)])
+
+        # something is wonky with negation - shouldn't need to do two reduction steps together
+        # A(arg)[] => !(slot -> !arg[slot])
+        Primitive(:forall, [arg]) => begin
+            new_slots = make_slots(arity[arg])
+            Primitive(:!, [Abstract(new_slots, Primitive(:!, [apply(arg, new_slots)]))])
+        end
 
         # ((vars...) -> value)[slots...] => value[vars... = slots...]
         Abstract(vars, value) => begin
@@ -480,6 +493,31 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
         end
     end
     apply(expr)
+end
+
+function negate(expr::Expr)
+    @match expr begin
+        False() => True()
+        True() => False()
+        Constant(_) => False()
+        # abstract vars can't be empty
+        Var(_, scope) where scope > 0 => False()
+        Primitive(:|, [a, b]) => Primitive(:&, [negate(a), negate(b)])
+        Primitive(:&, [a, b]) => Primitive(:|, [negate(a), negate(b)])
+        # don't need an exists because everything is already boolean by this point
+        Primitive(:!, [arg]) => lower_negation(arg)
+        # TODO reduce?
+        Primitive(:exists, [arg]) => negate(arg)
+        Abstract([], value) => Abstract([], negate(value))
+        _ => Primitive(:!, [lower_negation(expr)])
+    end
+end
+
+function lower_negation(expr::Expr)
+    @match expr begin
+        Primitive(:!, [arg]) => negate(arg)
+        _ => map_expr(lower_negation, expr)
+    end
 end
 
 function lower(env::Env{Set}, expr::Expr)::Expr
@@ -494,7 +532,7 @@ function lower(env::Env{Set}, expr::Expr)::Expr
     arities = Dict{Expr, Arity}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
     expr = simple_apply(arities, last_id, expr)
 
-    expr
+    lower_negation(expr)
 end
 
 # --- bounded abstract ----
@@ -534,8 +572,16 @@ function permute(bound_vars::Vector{Var}, var::Var, expr::Apply)::Expr
     Apply(Permute(expr.f, permute_columns), apply_args)
 end
 
+function is_scalar_bound(bound_vars::Vector{Var}, expr::Expr)
+    @match expr begin
+        Constant(_) => true
+        Var(_,_) where expr in bound_vars => true
+        Primitive(:reduce, _) => true
+        _ => false
+    end
+end
+
 # TODO probably want to push negation down because I can't see inside it
-# TODO A(p -> a => b) = !E(p -> !(a => b)) = !E(p in a -> !(a => b))
 function bound(bound_vars::Vector{Var}, var::Var, expr::Expr)::Expr
     bound(expr) = @match expr begin
 
@@ -546,9 +592,9 @@ function bound(bound_vars::Vector{Var}, var::Var, expr::Expr)::Expr
         Primitive(:|, [a, b]) => Primitive(:|, [bound(a), bound(b)])
         Primitive(:&, [a, b]) => Primitive(:&, [bound(a), bound(b)])
         Primitive(:(==), [a, b]) => begin
-            if (a == var) && ((b isa Constant) || (b in bound_vars))
+            if (a == var) && is_scalar_bound(bound_vars, b)
                 b
-            elseif (b == var) && ((a isa Constant) || (a in bound_vars))
+            elseif (b == var) && is_scalar_bound(bound_vars, a)
                 a
             else
                 Var(:everything)

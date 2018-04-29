@@ -169,14 +169,14 @@ test_imp(:( exists(person) ), result=:( true ))
 test_imp(:( exists(nothing) ), result=:( false ))
 
 # forall == X :: eq(X, everything)
-test_imp(:( forall(p -> person(p) => string(p)) ), result=:( true ), unboundable=true)
-test_imp(:( forall(p -> person(p) => evil(p)) ), result=:( false ), unboundable=true)
-test_imp(:( forall(p -> person(p) => rsvp(p, "yes")) ), result=:( false ), unboundable=true)
-test_imp(:( forall(p -> person(p) => (rsvp(p, "yes") | rsvp(p, "no"))) ), result=:( false ), unboundable=true)
-test_imp(:( forall(p -> person(p) => (rsvp(p, "yes") | rsvp(p, "no") | "eve"(p))) ), result=:( true ), unboundable=true)
+test_imp(:( forall(p -> person(p) => string(p)) ), result=:( true ))
+test_imp(:( forall(p -> person(p) => evil(p)) ), result=:( false ))
+test_imp(:( forall(p -> person(p) => rsvp(p, "yes")) ), result=:( false ))
+test_imp(:( forall(p -> person(p) => (rsvp(p, "yes") | rsvp(p, "no"))) ), result=:( false ))
+test_imp(:( forall(p -> person(p) => (rsvp(p, "yes") | rsvp(p, "no") | "eve"(p))) ), result=:( true ))
 
 # aggregation
-test_imp(:( reduce(+, 0, points) ), result=:( 2 ), unboundable=true)
+test_imp(:( reduce(+, 0, points) ), result=:( 2 ))
 
 # tricky expressions
 test_imp(:( (x -> x(x)) ), result=:( everything ), unboundable=true)
@@ -230,9 +230,9 @@ test_imp(:( (p -> if person(p) rsvp(p) else (if string(p) "n/a" end) end) ), inf
 test_imp(:( (p -> if person(p) rsvp(p) else (if string(p) "n/a" end) end)("cthulu") ), inferred_type=[(String,)])
 
 test_imp(:( exists(person) ), inferred_type=[()])
-test_imp(:( forall(p -> person(p) => string(p)) ), inferred_type=[()], unboundable=true)
+test_imp(:( forall(p -> person(p) => string(p)) ), inferred_type=[()])
 
-test_imp(:( reduce(+, 0, points) ), inferred_type=[(Int64,)], unboundable=true)
+test_imp(:( reduce(+, 0, points) ), inferred_type=[(Int64,)])
 
 # harder cases
 
@@ -269,8 +269,8 @@ test_imp(:( h ), lowered_expr=:( (_1, _2) -> h(_1, _2) ))
 test_imp(:( h(g) ), lowered_expr=:( _1 -> exists(_2 -> g(_2) & h(_2, _1)) ))
 test_imp(:( (x -> h(x) | g) ), lowered_expr=:( (_1, _2) -> h(_1, _2) | g(_2) ), unboundable=true)
 test_imp(:( g(0) ), lowered_expr=:( () -> exists(_1 -> (_1 == 0) & g(_1)) ))
-test_imp(:( !(g(0)) ), lowered_expr=:( () -> !(() -> exists(_1 -> (_1 == 0) & g(_1))) ))
-test_imp(:( (x -> y -> !(y(x))) ), lowered_expr=:( (_1, _2) -> !(() -> _1 == _2) ), unboundable=true)
+test_imp(:( !(g(0)) ), lowered_expr=:( () -> (() -> !(_1 -> (_1 == 0) & g(_1))) ))
+test_imp(:( (x -> y -> !(y(x))) ), lowered_expr=:( (_1, _2) -> (() -> !(_1 == _2)) ), unboundable=true)
 
 # --- simplify_bound ---
 

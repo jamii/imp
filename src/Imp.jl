@@ -495,7 +495,7 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
     apply(expr)
 end
 
-function negate(expr::Expr)
+function negate(expr::Expr)::Expr
     @match expr begin
         False() => True()
         True() => False()
@@ -512,11 +512,24 @@ function negate(expr::Expr)
     end
 end
 
-function lower_negation(expr::Expr)
+function lower_negation(expr::Expr)::Expr
     @match expr begin
         Primitive(:!, [arg]) => negate(arg)
         _ => map_expr(lower_negation, expr)
     end
+end
+
+# DNF
+# TODO creates duplicate vars - does that need to be fixed?
+function raise_union(expr::Expr)::Expr
+    raise(expr) = @match expr begin
+        Abstract(vars, Primitive(:|, [a, b])) => Primitive(:|, [raise(Abstract(vars, a)), raise(Abstract(vars, b))])
+        Primitive(:&, [Primitive(:|, [a1, a2]), b]) => Primitive(:|, [raise(Primitive(:&, [a1, b])), raise(Primitive(:&, [a2, b]))])
+        Primitive(:&, [a, Primitive(:|, [b1, b2])]) => Primitive(:|, [raise(Primitive(:&, [a, b1])), raise(Primitive(:&, [a, b2]))])
+        Primitive(:exists, [Primitive(:|, [a, b])]) => Primitive(:|, [raise(Primitive(:exists, [a])), raise(Primitive(:exists, [b]))])
+        _ => expr
+    end
+    raise(map_expr(raise_union, expr))
 end
 
 function lower(env::Env{Set}, expr::Expr)::Expr
@@ -531,7 +544,12 @@ function lower(env::Env{Set}, expr::Expr)::Expr
     arities = Dict{Expr, Arity}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
     expr = simple_apply(arities, last_id, expr)
 
-    lower_negation(expr)
+    expr = lower_negation(expr)
+    expr = raise_union(expr)
+
+    # TODO if we want to change variable ordering, need a pass that lifts exists here
+
+    expr
 end
 
 # --- bounded abstract ----
@@ -645,7 +663,7 @@ function simplify_bound(expr::Expr)
 end
 
 function simplify_remainder(expr::Expr)
-    @match map_expr(simplify_bound, expr) begin
+    @match map_expr(simplify_remainder, expr) begin
         Primitive(:|, [a && True(), b]) => a
         Primitive(:|, [a, b && True()]) => b
         Primitive(:|, [a && False(), b]) => b
@@ -662,6 +680,8 @@ function simplify_remainder(expr::Expr)
         Primitive(:(==), [True(), False()]) => False()
         Primitive(:(==), [False(), True()]) => False()
         Primitive(:(==), [Constant(a), Constant(b)]) => False()
+        Abstract(_, False()) => False()
+        Abstract([], value) => value
         other => other
     end
 end

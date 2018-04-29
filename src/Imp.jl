@@ -676,6 +676,7 @@ function simplify_remainder(expr::Expr)
         Primitive(:!, [True()]) => False()
         Primitive(:exists, [True()]) => True()
         Primitive(:exists, [False()]) => False()
+        Primitive(:exists, [Abstract(_, True())]) => True()
         Primitive(:(==), [a, a]) => True()
         Primitive(:(==), [True(), False()]) => False()
         Primitive(:(==), [False(), True()]) => False()
@@ -698,7 +699,9 @@ function bound_abstract(bound_vars::Vector{Var}, expr::Abstract)::Expr
     end
     value = bound_abstract(vcat(expr.vars, bound_vars), simplify_remainder(value))
     for (var, bound) in zip(reverse(expr.vars), reverse(bounds))
-        value = BoundedAbstract(var, bound, value)
+        if !(bound isa False)
+            value = BoundedAbstract(var, bound, value)
+        end
     end
     value
 end

@@ -381,7 +381,7 @@ function is_scalar(expr::Expr)
     end
 end
 
-# rewrite until every Apply has var/constant f, boolean type and bound var args
+# rewrite until every Apply has var/constant f and boolean type and all args are bound vars or _
 function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)::Expr
     make_slots(n) = begin
         slots = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:n]
@@ -401,6 +401,7 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
 
         # false[slots...] => false
         False() => expr
+        _ where get(arity, expr, -1) == nothing => False()
 
         # true[] => true
         True() => begin
@@ -428,7 +429,7 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
         Apply(f, args) where (length(args) > 1) => apply(reduce((f, arg) -> Apply(f, [arg]), f, args), slots)
 
         # f(x)[slots...] => f[x, slots...]
-        Apply(f, [x && Var(_, scope)]) where (scope != 0) => apply(f, [x, slots...])
+        Apply(f, [x && Var(name, scope)]) where ((name == :(everything)) || (scope != 0)) => apply(f, [x, slots...])
 
         # f(g)[slots...] => exists((new_slots...) -> g[new_slots...] & f[new_slots..., slots...])
         Apply(f, [g]) => begin
@@ -544,7 +545,7 @@ end
 function bound(bound_vars::Vector{Var}, var::Var, expr::Expr)::Expr
     bound(expr) = @match expr begin
         # precise bounds
-        False() => False()
+        False() => expr
         True() => Var(:everything)
         Apply(f, args) => (var in args) ? permute(bound_vars, var, expr) : Var(:everything)
         Primitive(:|, [a, b]) => Primitive(:|, [bound(a), bound(b)])

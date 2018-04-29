@@ -192,6 +192,14 @@ test_imp(:( (person, rsvp) ), result=:( (a,b,c) -> person(a) & rsvp(b,c) ))
 test_imp(:( (rsvp, false) ), result=:( false ))
 test_imp(:( ("alice", "yes")|("bob", "no")|("cthulu", "no") ), result=:( rsvp ))
 
+# wildcards
+test_imp(:( _ ), result=:( x -> true ), unboundable=true)
+# TODO only unboundable because we lack remainder
+test_imp(:( r -> rsvp(_, r) ), result=:( r -> exists(p -> rsvp(p, r)) ), unboundable=true)
+test_imp(:( rsvp(_) ), result=:( r -> exists(p -> rsvp(p, r)) ), unboundable=true)
+
+test_imp(:( p -> if person(p); (r -> true) end ), unboundable=true)
+
 # --- infer_types ---
 
 test_imp(:( true ), inferred_type=[()])

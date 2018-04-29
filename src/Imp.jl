@@ -504,8 +504,7 @@ function negate(expr::Expr)
         Var(_, scope) where scope > 0 => False()
         Primitive(:|, [a, b]) => Primitive(:&, [negate(a), negate(b)])
         Primitive(:&, [a, b]) => Primitive(:|, [negate(a), negate(b)])
-        # don't need an exists because everything is already boolean by this point
-        Primitive(:!, [arg]) => lower_negation(arg)
+        Primitive(:!, [arg]) => Primitive(:exists, [lower_negation(arg)])
         # TODO reduce?
         Primitive(:exists, [arg]) => negate(arg)
         Abstract([], value) => Abstract([], negate(value))

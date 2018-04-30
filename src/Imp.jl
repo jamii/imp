@@ -433,14 +433,14 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
         # f(x)[slots...] => f[x, slots...]
         Apply(f, [x && Var(name, scope)]) where ((name == :(everything)) || (scope != 0)) => apply(f, [x, slots...])
 
-        # f(g)[slots...] => exists((new_slots...) -> g[new_slots...] & f[new_slots..., slots...])
+        # f(g)[slots...] => exists((new_slots...) -> f[new_slots..., slots...] & g[new_slots...])
         Apply(f, [g]) => begin
             new_slots = make_slots(arity[g])
             Primitive(:exists,
                       [Abstract(new_slots,
                                 Primitive(:&, [
-                                    apply(g, new_slots),
-                                    apply(f, vcat(new_slots, slots))
+                                    apply(f, vcat(new_slots, slots)),
+                                    apply(g, new_slots)
                                 ]))])
         end
 

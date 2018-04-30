@@ -7,6 +7,7 @@ using Test
 
 const globals = Dict{Symbol, Set}(
     :person => Set([("alice",), ("bob",), ("eve",)]),
+    :likes => Set([("alice", "bob"), ("bob", "bob"), ("eve", "eve")]),
     :string => Set([("alice",), ("bob",), ("eve",), ("cthulu",), ("n/a",)]),
     :integer => Set([(0,), (1,), (2,)]),
     :evil => Set([("eve",), ("cthulu",)]),
@@ -195,6 +196,10 @@ test_imp(:( ("alice", "yes")|("bob", "no")|("cthulu", "no") ), result=:( rsvp ))
 test_imp(:( _ ), result=:( x -> true ), unboundable=true)
 test_imp(:( r -> rsvp(_, r) ), result=:( r -> exists(p -> rsvp(p, r)) ))
 test_imp(:( rsvp(_) ), result=:( r -> exists(p -> rsvp(p, r)) ))
+
+# repeated vars
+# TODO permute needs to take from_column=>to_column to handle this
+@test_broken test_imp(:( x -> likes(x, x) ), result=:( "bob" | "eve" ))
 
 test_imp(:( p -> if person(p); (r -> true) end ), unboundable=true)
 

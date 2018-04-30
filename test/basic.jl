@@ -201,7 +201,7 @@ test_imp(:( rsvp(_) ), result=:( r -> exists(p -> rsvp(p, r)) ))
 
 # repeated vars
 # TODO permute needs to take from_column=>to_column to handle this
-@test_broken test_imp(:( x -> likes(x, x) ), result=:( "bob" | "eve" ))
+test_imp(:( x -> likes(x, x) ), result=:( "bob" | "eve" ))
 
 test_imp(:( p -> if person(p); (r -> true) end ), unboundable=true)
 

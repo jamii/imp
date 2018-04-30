@@ -559,6 +559,7 @@ end
 struct Permute <: Expr
     arg::Var
     columns::Vector{Int64}
+    dupe_columns::Vector{Pair{Int64, Int64}}
 end
 
 struct BoundedAbstract <: Expr
@@ -569,24 +570,46 @@ end
 
 function unparse(expr::Union{Permute, BoundedAbstract})
     @match (expr, map_expr(unparse, tuple, expr)) begin
-        (_::Permute, (arg, columns)) => :($arg[$(columns...)])
+        (_::Permute, (arg, columns, dupe_columns)) => :($arg[$(columns...), $((:($a=$b) for (a,b) in dupe_columns)...)])
         (_::BoundedAbstract, (var, upper_bound, value)) => :(for $var in $upper_bound; $value; end)
     end
 end
 
-function permute(bound_vars::Vector{Var}, var::Var, expr::Apply)::Expr
-    apply_args = Var[]
-    permute_columns = Int64[]
-    for bound_var in bound_vars
-        column = findfirst(expr.args, bound_var)
-        if column != 0
-            push!(apply_args, bound_var)
-            push!(permute_columns, column)
+function _interpret(env::Env, expr::Permute)::Set
+    Set((row[expr.columns] for row in env[expr.arg]
+         if all((d) -> row[d[1]] == row[d[2]], expr.dupe_columns)))
+end
+
+function _interpret(env::Env, expr::BoundedAbstract)::Set
+    bound = interpret(env, expr.bound)
+    result = Set()
+    for var_row in bound
+        env[expr.var] = Set([var_row])
+        for value_row in interpret(env, expr.value)
+            push!(result, (var_row..., value_row...))
         end
     end
-    column = findfirst(expr.args, var) # TODO repeated vars?
-    push!(permute_columns, column)
-    Apply(Permute(expr.f, permute_columns), apply_args)
+    result
+end
+
+function permute(bound_vars::Vector{Var}, var::Var, expr::Apply)::Expr
+    apply_args = Var[]
+    columns = Int64[]
+    dupe_columns = Pair{Int64,Int64}[]
+    permute_column!(bound_var) = begin
+        bound_columns = findall(isequal(bound_var), expr.args)
+        if !isempty(bound_columns)
+            push!(apply_args, bound_var)
+            push!(columns, bound_columns[1])
+            for column in bound_columns[2:end]
+                push!(dupe_columns, column => bound_columns[1])
+            end
+        end
+    end
+    foreach(permute_column!, bound_vars)
+    permute_column!(var)
+    pop!(apply_args) # don't actually want to apply var
+    Apply(Permute(expr.f, columns, dupe_columns), apply_args)
 end
 
 function is_scalar_bound(bound_vars::Vector{Var}, expr::Expr)
@@ -707,22 +730,6 @@ function bound_abstract(bound_vars::Vector{Var}, expr::Abstract)::Expr
 end
 bound_abstract(bound_vars::Vector{Var}, expr::Expr)::Expr = map_expr(expr -> bound_abstract(bound_vars, expr), expr)
 bound_abstract(expr::Expr)::Expr = bound_abstract(Var[], expr)
-
-function _interpret(env::Env, expr::Permute)::Set
-    Set((row[expr.columns] for row in env[expr.arg]))
-end
-
-function _interpret(env::Env, expr::BoundedAbstract)::Set
-    bound = interpret(env, expr.bound)
-    result = Set()
-    for var_row in bound
-        env[expr.var] = Set([var_row])
-        for value_row in interpret(env, expr.value)
-            push!(result, (var_row..., value_row...))
-        end
-    end
-    result
-end
 
 # --- exports ---
 

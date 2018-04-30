@@ -136,7 +136,6 @@ test_imp(:( rsvp("eve", "yes") ), result=:( false ))
 
 
 # convert boolean to value
-# (`if` is taken so `iff`)
 test_imp(:( if true "yes" else "no" end ), result=:( "yes" ))
 test_imp(:( if false "yes" else "no" end ), result=:( "no" ))
 test_imp(:( (true ? "yes" : "no") ), result=:( "yes" ))
@@ -148,14 +147,14 @@ test_imp(:( (x -> false) ), result=:( nothing ))
 test_imp(:( (p -> person(p)) ), result=:( person ))
 test_imp(:( (x -> "alice")(2) ), result=:( "alice" ))
 
-# domain expressed via `iff`
+# domain expressed via `if`
 test_imp(:( (p -> if person(p) rsvp(p) end)("alice") ), result=:( "yes" ))
 test_imp(:( (p -> if person(p) rsvp(p) end)("cthulu") ), result=:( false ))
 test_imp(:( (p -> if person(p) rsvp(p, "yes") end) ), result=:( "alice" ))
 test_imp(:( (p -> if person(p) rsvp(p, "no") end) ), result=:( "bob" ))
 test_imp(:( (p -> rsvp(p, "no")) ), result=:( ("bob" | "cthulu") ))
 
-# defaults via `iff`
+# defaults via `if`
 test_imp(:( (p -> if person(p) rsvp(p) else "n/a" end)("alice") ), result=:( "yes" ))
 test_imp(:( (p -> if person(p) rsvp(p) else "n/a" end)("cthulu") ), result=:( "n/a" ))
 test_imp(:( (p -> if person(p) rsvp(p) else "n/a" end)(2) ), result=:( "n/a" ))

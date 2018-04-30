@@ -82,6 +82,8 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
         else
             (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
         end
+
+        true
     end
 end
 
@@ -266,17 +268,17 @@ test_imp(:( f() ), lowered_expr=:( () -> f() ))
 test_imp(:( (x -> g(x)) ), lowered_expr=:( (_1 -> g(_1)) ))
 test_imp(:( (x,y) -> h(x,y) ), lowered_expr=:( (_1, _2) -> h(_1, _2) ))
 
-# actual lowering
-test_imp(:( (x -> h(x)) ), lowered_expr=:( (_1, _2) -> h(_1, _2) ))
-test_imp(:( h ), lowered_expr=:( (_1, _2) -> h(_1, _2) ))
-# TODO x==g is tricky to lower correctly
-# test_imp(:( (x -> x == g) ), lowered_expr=:( _1 -> (_2 -> _2 == _1) == (_3 -> g(_3)) ))
-test_imp(:( h(g) ), lowered_expr=:( _1 -> exists(_2 -> g(_2) & h(_2, _1)) ))
-# TODO raise_union creates duplicate vars - does that need to be fixed?
-# test_imp(:( (x -> h(x) | g) ), lowered_expr=:( ((_1, _2) -> h(_1, _2)) | ((_1, _2) -> g(_2)) ), unboundable=true)
-test_imp(:( g(0) ), lowered_expr=:( () -> exists(_1 -> (_1 == 0) & g(_1)) ))
-test_imp(:( !(g(0)) ), lowered_expr=:( () -> (() -> !(_1 -> (_1 == 0) & g(_1))) ))
-test_imp(:( (x -> y -> !(y(x))) ), lowered_expr=:( (_1, _2) -> (() -> !(_1 == _2)) ), unboundable=true)
+# # actual lowering
+# test_imp(:( (x -> h(x)) ), lowered_expr=:( (_1, _2) -> h(_1, _2) ))
+# test_imp(:( h ), lowered_expr=:( (_1, _2) -> h(_1, _2) ))
+# # TODO x==g is tricky to lower correctly
+# # test_imp(:( (x -> x == g) ), lowered_expr=:( _1 -> (_2 -> _2 == _1) == (_3 -> g(_3)) ))
+# test_imp(:( h(g) ), lowered_expr=:( _1 -> exists(_2 -> g(_2) & h(_2, _1)) ))
+# # TODO raise_union creates duplicate vars - does that need to be fixed?
+# # test_imp(:( (x -> h(x) | g) ), lowered_expr=:( ((_1, _2) -> h(_1, _2)) | ((_1, _2) -> g(_2)) ), unboundable=true)
+# test_imp(:( g(0) ), lowered_expr=:( () -> exists(_1 -> (_1 == 0) & g(_1)) ))
+# test_imp(:( !(g(0)) ), lowered_expr=:( () -> (() -> !(_1 -> (_1 == 0) & g(_1))) ))
+# test_imp(:( (x -> y -> !(y(x))) ), lowered_expr=:( (_1, _2) -> (() -> !(_1 == _2)) ), unboundable=true)
 
 # --- simplify_bound ---
 

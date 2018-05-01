@@ -303,10 +303,26 @@ function _interpret(env::Env{Set}, expr::Apply) ::Set
         f = expr.f
         result = Set()
         for row in interpret(env, Primitive(:tuple, expr.args))
-            @assert length(f.in_types) == length(row)
-            if all(vt -> vt[1] isa vt[2], zip(row, f.in_types))
-                returned = invoke(f.f, Tuple{f.in_types...}, row...)
-                return!(result, returned)
+            if length(f.in_types) == length(row)
+                if all(vt -> vt[1] isa vt[2], zip(row, f.in_types))
+                    returned = invoke(f.f, Tuple{f.in_types...}, row...)
+                    return!(result, returned)
+                end
+            elseif length(f.in_types) + length(f.out_types) == length(row)
+                tmp = Set()
+                in_row = row[1:length(f.in_types)]
+                out_row = row[length(f.in_types)+1:end]
+                if all(vt -> vt[1] isa vt[2], zip(in_row, f.in_types))
+                    returned = invoke(f.f, Tuple{f.in_types...}, in_row...)
+                    # TODO we only need to tmp because we don't know how to iter over returned without return!
+                    return!(tmp, returned)
+                end
+                if out_row in tmp
+                    push!(result, ())
+                end
+            else
+                # TODO technically these other cases have valid semantics, but I don't care to execute them just yet
+                compile_error("Cannot apply $f to $row")
             end
         end
         result
@@ -362,8 +378,22 @@ function _interpret(env::Env{SetType}, expr::Apply) ::SetType
         f = expr.f
         result = SetType()
         for row_type in interpret(env, Primitive(:tuple, expr.args))
-            if all(vt -> vt[1] <: vt[2], zip(row_type, f.in_types))
-                push!(result, f.out_types)
+            if length(f.in_types) == length(row_type)
+                if all(vt -> vt[1] <: vt[2], zip(row_type, f.in_types))
+                    push!(result, f.out_types)
+                end
+            elseif length(f.in_types) + length(f.out_types) == length(row_type)
+                tmp = Set()
+                in_row_type = row_type[1:length(f.in_types)]
+                out_row_type = row_type[length(f.in_types)+1:end]
+                if all(vt -> vt[1] <: vt[2], zip(in_row_type, f.in_types))
+                    if f.out_types == out_row_type
+                        push!(result, ())
+                    end
+                end
+            else
+                # TODO technically these other cases have valid semantics, but I don't care to execute them just yet
+                compile_error("Cannot apply $f to $row_type")
             end
         end
         result
@@ -718,6 +748,8 @@ function remainder(bound_vars::Vector{Var}, var::Var, expr::Expr)::Expr
         Apply(f::Var, args) => issubset(args, union(bound_vars, (var, Var(:everything)))) ? True() : expr
         Apply(f::Native, args) => begin
             if all(in(bound_vars), args[1:length(f.in_types)]) &&
+                length(f.out_types) == 1 &&
+                var == args[end]
                 True()
             else
                 expr

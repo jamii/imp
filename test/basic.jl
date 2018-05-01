@@ -205,9 +205,11 @@ test_imp(:( x -> likes(x, x) ), result=:( "bob" | "eve" ))
 
 test_imp(:( p -> if person(p); (r -> true) end ), unboundable=true)
 
-@test_throws Imp.CompileError imp(:( {Native(+, (Int64, Int64), (Int64,))} ))
-# test_imp(:( {Native(+, (Int64, Int64), (Int64,))}(1, 1) ), result=:( 2 ), everything=nothing)
-# test_imp(:( {Native(+, (Int64, Int64), (Int64,))}(0 | 1, 0 | 1) ), result=:( 0 | 1 | 2 ), everything=nothing)
+add = Imp.Native((a,b) -> (a+b)%3, (Int64, Int64), (Int64,))
+@test_throws Imp.CompileError imp(:( {$add} ))
+test_imp(:( (a,b,c) -> integer(a) & integer(b) & integer(c) & {$add}(a, b, c) ), result=:( + ))
+# test_imp(:( {$add}(1, 1) ), result=:( 2 ), everything=nothing)
+# test_imp(:( {$add}(0 | 1, 0 | 1) ), result=:( 0 | 1 | 2 ), everything=nothing)
 
 # --- infer_types ---
 

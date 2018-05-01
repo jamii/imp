@@ -87,8 +87,6 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
     end
 end
 
-imp(:( p -> person(p) => string(p) ), globals=globals, everything=everything)
-
 # --- scoping ---
 
 function test_separate_scopes(expr)
@@ -200,7 +198,6 @@ test_imp(:( r -> rsvp(_, r) ), result=:( r -> exists(p -> rsvp(p, r)) ))
 test_imp(:( rsvp(_) ), result=:( r -> exists(p -> rsvp(p, r)) ))
 
 # repeated vars
-# TODO permute needs to take from_column=>to_column to handle this
 test_imp(:( x -> likes(x, x) ), result=:( "bob" | "eve" ))
 
 test_imp(:( p -> if person(p); (r -> true) end ), unboundable=true)
@@ -210,13 +207,15 @@ add = Imp.Native((a,b) -> (a+b)%3, (Int64, Int64), (Int64,))
 @test_throws Imp.CompileError imp(:( {$add} ))
 test_imp(:( (a,b,c) -> {$add}(a, b, c) ), result=:( + ), unboundable=true)
 test_imp(:( (a,b,c) -> integer(a) & integer(b) & integer(c) & {$add}(a, b, c) ), result=:( + ))
-# test_imp(:( {$add}(1, 1) ), result=:( 2 ), everything=nothing)
-# test_imp(:( {$add}(0 | 1, 0 | 1) ), result=:( 0 | 1 | 2 ), everything=nothing)
+test_imp(:( {$add}(1, 1) ), result=:( 2 ), everything=nothing)
+# TODO should probably propagate constants before dnf
+test_imp(:( {$add}(0 | 1, 0 | 1) ), result=:( 0 | 1 | 2 ), everything=nothing)
 stringy = Imp.Native(a -> a isa String, (String,), ())
 @test_throws Imp.CompileError imp(:( {$stringy} ))
 test_imp(:( a -> {$stringy}(a) ), result=:( string ), unboundable=true)
 test_imp(:( a -> string(a) & {$stringy}(a) ), result=:( string ))
 test_imp(:( string & (a -> {$stringy}(a)) ), result=:( string ))
+# TODO reduce +
 
 # --- infer_types ---
 
@@ -292,32 +291,5 @@ test_imp(:( (x,y) -> h(x,y) ), lowered_expr=:( (_1, _2) -> h(_1, _2) ))
 # test_imp(:( g(0) ), lowered_expr=:( () -> exists(_1 -> (_1 == 0) & g(_1)) ))
 # test_imp(:( !(g(0)) ), lowered_expr=:( () -> (() -> !(_1 -> (_1 == 0) & g(_1))) ))
 # test_imp(:( (x -> y -> !(y(x))) ), lowered_expr=:( (_1, _2) -> (() -> !(_1 == _2)) ), unboundable=true)
-
-# --- simplify_bound ---
-
-const bound_globals = Dict{Symbol, Set}([
-    :x => Set(),
-    :y => Set(),
-    :z => Set(),
-])
-
-function test_simplify_bound(expr1, expr2)
-    @test Imp.simplify_bound(Imp.parse(expr1)) == Imp.parse(expr2)
-end
-
-macro test_simplify_bound(expr1, expr2)
-    :(test_simplify_bound($(QuoteNode(expr1)), $(QuoteNode(expr2))))
-end
-
-@test_simplify_bound nothing nothing
-@test_simplify_bound everything everything
-@test_simplify_bound (nothing & everything) nothing
-@test_simplify_bound (nothing | everything) everything
-@test_simplify_bound ((x & everything) | y) (x | y)
-@test_simplify_bound ((x | nothing) & y) (x & y)
-@test_simplify_bound ((x | everything) & y) y
-@test_simplify_bound ((x & nothing) | y) y
-@test_simplify_bound (x(y,z) | (y(x,z) & nothing)) x(y,z)
-@test_simplify_bound x(nothing) x(nothing)
 
 end

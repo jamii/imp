@@ -635,14 +635,19 @@ function lower(env::Env{Set}, expr::Expr)::Expr
     expr = lower_negation(expr)
     expr = raise_union(expr)
 
-    # TODO if we want to change variable ordering, need a pass that lifts exists here
-
     expr
 end
 
-# --- bounded abstract ----
+# --- bound ---
 
-# TODO might want to permute stuff so we can hit vars earlier? does it matter?
+# equivalent to (yield_vars) -> E((query_vars/yield_vars) -> &(clauses...))
+# easier to manipulate all in one place
+struct ConjunctiveQuery <: Expr
+    yield_vars::Vector{Var}
+    query_vars::Vector{Var}
+    query_bounds::Union{Nothing, Vector{Expr}} # nothing when not initialized yet
+    clauses::Vector{Expr}
+end
 
 struct Permute <: Expr
     arg::Var
@@ -650,16 +655,16 @@ struct Permute <: Expr
     dupe_columns::Vector{Pair{Int64, Int64}}
 end
 
-struct BoundedAbstract <: Expr
-    var::Var
-    bound::Expr
-    value::Expr
-end
-
-function unparse(expr::Union{Permute, BoundedAbstract})
+function unparse(expr::Union{Permute, ConjunctiveQuery})
     @match (expr, map_expr(unparse, tuple, expr)) begin
         (_::Permute, (arg, columns, dupe_columns)) => :($arg[$(columns...), $((:($a=$b) for (a,b) in dupe_columns)...)])
-        (_::BoundedAbstract, (var, upper_bound, value)) => :(for $var in $upper_bound; $value; end)
+        (_::ConjunctiveQuery, (yield_vars, query_vars, query_bounds, clauses)) => begin
+            body = :(if &($(clauses...)); return ($(yield_vars...)); end)
+            for (var, bound) in zip(reverse(query_vars), reverse(query_bounds))
+                body = :(for $var in $bound; $body; end)
+            end
+            body
+        end
     end
 end
 
@@ -668,16 +673,30 @@ function _interpret(env::Env, expr::Permute)::Set
          if all((d) -> row[d[1]] == row[d[2]], expr.dupe_columns)))
 end
 
-function _interpret(env::Env, expr::BoundedAbstract)::Set
-    bound = interpret(env, expr.bound)
-    result = Set()
-    for var_row in bound
-        env[expr.var] = Set([var_row])
-        for value_row in interpret(env, expr.value)
-            push!(result, (var_row..., value_row...))
+function _interpret(env::Env, expr::ConjunctiveQuery, var_ix::Int64)::Set
+    if var_ix > length(expr.query_vars)
+        if isempty(expr.clauses)
+            Set([()])
+        else
+            intersect(map(expr -> interpret(env, expr), expr.clauses)...)
         end
+    else
+        var = expr.query_vars[var_ix]
+        bound = expr.query_bounds[var_ix]
+        result = Set()
+        for var_row in interpret(env, bound)
+            env[var] = Set([var_row])
+            for value_row in _interpret(env, expr, var_ix+1)
+                push!(result, (var_row..., value_row...))
+            end
+        end
+        result
     end
-    result
+end
+
+function _interpret(env::Env, expr::ConjunctiveQuery)::Set
+    yield_ixes = map(var -> findfirst(isequal(var), expr.query_vars), expr.yield_vars)
+    Set((row[yield_ixes] for row in _interpret(env, expr, 1)))
 end
 
 function permute(bound_vars::Vector{Var}, var::Var, expr::Apply)::Expr
@@ -709,131 +728,110 @@ function is_scalar_bound(bound_vars::Vector{Var}, expr::Expr)
     end
 end
 
-function bound(bound_vars::Vector{Var}, var::Var, expr::Expr)::Expr
-    bound(expr) = @match expr begin
-        False() => expr
-        True() => Var(:everything)
-        Apply(f::Var, args) => (var in args) ? permute(bound_vars, var, expr) : Var(:everything)
-        Apply(f::Native, args) => begin
-            if all(in(bound_vars), args[1:length(f.in_types)]) &&
-                length(f.out_types) == 1 &&
-                var == args[end]
-                Apply(f, args[1:length(f.in_types)])
-            else
-                Var(:everything)
-            end
+function conjunctive_query(expr::Abstract)::Expr
+    used_vars = Var[]
+    exists_vars = Var[]
+    clauses = Expr[]
+    is_false = false
+    gather(expr) = @match expr begin
+        False() => (is_false = true)
+        True() => nothing
+        Apply(f, vars) => begin
+            push!(clauses, expr)
+            append!(used_vars, vars)
         end
-        Primitive(:|, [a, b]) => Primitive(:|, [bound(a), bound(b)])
-        Primitive(:&, [a, b]) => Primitive(:&, [bound(a), bound(b)])
         Primitive(:(==), [a, b]) => begin
-            if (a == var) && is_scalar_bound(bound_vars, b)
-                b
-            elseif (b == var) && is_scalar_bound(bound_vars, a)
-                a
-            else
-                Var(:everything)
-            end
+            push!(clauses, expr)
+            a isa Var && push!(used_vars, a)
+            b isa Var && push!(used_vars, b)
         end
-        Primitive(:exists, [arg]) => bound(arg)
-        Primitive(:!, [arg]) => Var(:everything)
-        Abstract(vars, value) => bound(value)
-    end
-    bound(expr)
-end
-
-function remainder(bound_vars::Vector{Var}, var::Var, expr::Expr)::Expr
-    remainder(expr) = @match expr begin
-        False() => expr
-        True() => expr
-        Apply(f::Var, args) => issubset(args, union(bound_vars, (var, Var(:everything)))) ? True() : expr
-        Apply(f::Native, args) => begin
-            if all(in(bound_vars), args[1:length(f.in_types)]) &&
-                length(f.out_types) == 1 &&
-                var == args[end]
-                True()
-            else
-                expr
-            end
+        Primitive(:!, [arg]) => push!(clauses, expr)
+        Primitive(:&, [a, b]) => begin
+            gather(a)
+            gather(b)
         end
-        # TODO we can't simplify inside disjunction because bound covers both - unless we know it's disjoint
-        # Primitive(:|, [a, b]) => Primitive(:|, [remainder(a), remainder(b)])
-        Primitive(:|, [a, b]) => Primitive(:|, [a, b])
-        Primitive(:&, [a, b]) => Primitive(:&, [remainder(a), remainder(b)])
-        Primitive(:(==), [a, b]) => begin
-            if (a == var) && is_scalar_bound(bound_vars, b)
-                True()
-            elseif (b == var) && is_scalar_bound(bound_vars, a)
-                True()
-            else
-                expr
-            end
+        Primitive(:exists, [Abstract(vars, value)]) => begin
+            append!(exists_vars, vars)
+            gather(value)
         end
-        Primitive(:exists, [arg]) => Primitive(:exists, [remainder(arg)])
-        Primitive(:!, [arg]) => expr
-        Abstract(vars, value) => Abstract(vars, remainder(value))
+        # TODO this is daft
+        Primitive(:exists, [value]) => gather(value)
+        # TODO this is daft
+        Abstract([], value) => gather(value)
     end
-    remainder(expr)
+    gather(expr.value)
+    is_false && return False()
+
+    # heuristic - solve variables in the order they are mentioned
+    query_vars = unique!(vcat(used_vars, expr.vars, exists_vars))
+    
+    ConjunctiveQuery(copy(expr.vars), query_vars, Expr[], clauses)
 end
 
-function simplify_bound(expr::Expr)
-    @match map_expr(simplify_bound, expr) begin
-        Primitive(:|, [a && Var(:everything, 0), b]) => a
-        Primitive(:|, [a, b && Var(:everything, 0)]) => b
-        Primitive(:|, [a && False(), b]) => b
-        Primitive(:|, [a, b && False()]) => a
-        Primitive(:&, [a && Var(:everything, 0), b]) => b
-        Primitive(:&, [a, b && Var(:everything, 0)]) => a
-        Primitive(:&, [a && False(), b]) => a
-        Primitive(:&, [a, b && False()]) => b
-        other => other
-    end
-end
-
-function simplify_remainder(expr::Expr)
-    @match map_expr(simplify_remainder, expr) begin
-        Primitive(:|, [a && True(), b]) => a
-        Primitive(:|, [a, b && True()]) => b
-        Primitive(:|, [a && False(), b]) => b
-        Primitive(:|, [a, b && False()]) => a
-        Primitive(:&, [a && True(), b]) => b
-        Primitive(:&, [a, b && True()]) => a
-        Primitive(:&, [a && False(), b]) => a
-        Primitive(:&, [a, b && False()]) => b
-        Primitive(:!, [False()]) => True()
-        Primitive(:!, [True()]) => False()
-        Primitive(:exists, [True()]) => True()
-        Primitive(:exists, [False()]) => False()
-        Primitive(:exists, [Abstract(_, True())]) => True()
-        Primitive(:(==), [a, a]) => True()
-        Primitive(:(==), [True(), False()]) => False()
-        Primitive(:(==), [False(), True()]) => False()
-        Primitive(:(==), [Constant(a), Constant(b)]) => False()
-        Abstract(_, False()) => False()
-        Abstract([], value) => value
-        other => other
-    end
-end
-
-function bound_abstract(bound_vars::Vector{Var}, expr::Abstract)::Expr
-    # TODO need to also remove redundant computation from value
-    value = expr.value
+function bound_clauses(bound_vars::Vector{Var}, var::Var, clauses::Vector{Expr})
+    remaining = Expr[]
     bounds = Expr[]
-    for i in 1:length(expr.vars)
-        vars = vcat(bound_vars, expr.vars[1:i-1])
-        var = expr.vars[i]
-        push!(bounds, simplify_bound(bound(vars, var, value)))
-        value = remainder(vars, var, value)
-    end
-    value = bound_abstract(vcat(expr.vars, bound_vars), simplify_remainder(value))
-    for (var, bound) in zip(reverse(expr.vars), reverse(bounds))
-        if !(bound isa False)
-            value = BoundedAbstract(var, bound, value)
+    for clause in clauses
+        @match clause begin
+            Apply(f::Var, args) => begin
+                if var in args
+                    push!(bounds, permute(bound_vars, var, clause))
+                end
+                if !issubset(args, union(bound_vars, (var, Var(:everything))))
+                    push!(remaining, clause)
+                end
+            end
+            Apply(f::Native, args) => begin
+                if all(in(bound_vars), args[1:length(f.in_types)]) &&
+                    length(f.out_types) == 1 &&
+                    var == args[end]
+                    push!(bounds, Apply(f, args[1:length(f.in_types)]))
+                else
+                    push!(remaining, clause)
+                end
+            end
+            Primitive(:(==), [a, b]) => begin
+                if (a == var) && is_scalar_bound(bound_vars, b)
+                    push!(bounds, b)
+                elseif (b == var) && is_scalar_bound(bound_vars, a)
+                    push!(bounds, a)
+                else
+                    push!(remaining, clause)
+                end
+            end
+            Primitive(:!, [arg]) => begin
+                push!(remaining, clause)
+            end
         end
     end
-    value
+    (bounds, remaining)
 end
-bound_abstract(bound_vars::Vector{Var}, expr::Expr)::Expr = map_expr(expr -> bound_abstract(bound_vars, expr), expr)
-bound_abstract(expr::Expr)::Expr = bound_abstract(Var[], expr)
+
+function bound_abstract(bound_vars::Vector{Var}, expr::Expr)::Expr
+    @match expr begin
+        _::Abstract => begin
+            query = conjunctive_query(expr)
+            query == False() && return query
+            clauses = query.clauses
+            bounds = Expr[]
+            for i in 1:length(query.query_vars)
+                vars = query.query_vars[1:i-1]
+                var = query.query_vars[i]
+                (bound, clauses) = bound_clauses(vcat(bound_vars, vars), var, clauses)
+                if isempty(bound)
+                    push!(bounds, Var(:everything))
+                else
+                    push!(bounds, reduce((a,b) -> Primitive(:&, [a,b]), bound))
+                end
+            end
+            clause_bound_vars = vcat(bound_vars, query.query_vars)
+            clauses = map(expr -> bound_abstract(clause_bound_vars, expr), clauses)
+            ConjunctiveQuery(query.yield_vars, query.query_vars, bounds, clauses)
+        end
+        _ => map_expr(expr -> bound_abstract(bound_vars, expr), expr)
+    end
+end
+bound_abstract(expr::Expr) = bound_abstract(Var[], expr)
 
 # --- exports ---
 

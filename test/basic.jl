@@ -8,7 +8,7 @@ using Test
 const globals = Dict{Symbol, Set}(
     :person => Set([("alice",), ("bob",), ("eve",)]),
     :likes => Set([("alice", "bob"), ("bob", "bob"), ("eve", "eve")]),
-    :string => Set([("alice",), ("bob",), ("eve",), ("cthulu",), ("n/a",)]),
+    :string => Set([("alice",), ("bob",), ("eve",), ("cthulu",), ("n/a",), ("yes",), ("no",)]),
     :integer => Set([(0,), (1,), (2,)]),
     :evil => Set([("eve",), ("cthulu",)]),
     :rsvp => Set([("alice", "yes"), ("bob", "no"), ("cthulu", "no")]),
@@ -205,11 +205,18 @@ test_imp(:( x -> likes(x, x) ), result=:( "bob" | "eve" ))
 
 test_imp(:( p -> if person(p); (r -> true) end ), unboundable=true)
 
+# native functions
 add = Imp.Native((a,b) -> (a+b)%3, (Int64, Int64), (Int64,))
 @test_throws Imp.CompileError imp(:( {$add} ))
+test_imp(:( (a,b,c) -> {$add}(a, b, c) ), result=:( + ), unboundable=true)
 test_imp(:( (a,b,c) -> integer(a) & integer(b) & integer(c) & {$add}(a, b, c) ), result=:( + ))
 # test_imp(:( {$add}(1, 1) ), result=:( 2 ), everything=nothing)
 # test_imp(:( {$add}(0 | 1, 0 | 1) ), result=:( 0 | 1 | 2 ), everything=nothing)
+stringy = Imp.Native(a -> a isa String, (String,), ())
+@test_throws Imp.CompileError imp(:( {$stringy} ))
+test_imp(:( a -> {$stringy}(a) ), result=:( string ), unboundable=true)
+test_imp(:( a -> string(a) & {$stringy}(a) ), result=:( string ))
+test_imp(:( string & (a -> {$stringy}(a)) ), result=:( string ))
 
 # --- infer_types ---
 

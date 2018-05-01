@@ -205,6 +205,10 @@ test_imp(:( x -> likes(x, x) ), result=:( "bob" | "eve" ))
 
 test_imp(:( p -> if person(p); (r -> true) end ), unboundable=true)
 
+@test_throws Imp.CompileError imp(:( {Native(+, (Int64, Int64), (Int64,))} ))
+# test_imp(:( {Native(+, (Int64, Int64), (Int64,))}(1, 1) ), result=:( 2 ), everything=nothing)
+# test_imp(:( {Native(+, (Int64, Int64), (Int64,))}(0 | 1, 0 | 1) ), result=:( 0 | 1 | 2 ), everything=nothing)
+
 # --- infer_types ---
 
 test_imp(:( true ), inferred_type=[()])

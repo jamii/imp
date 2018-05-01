@@ -44,6 +44,12 @@ struct Primitive <: Expr
     args::Vector{Expr}
 end
 
+struct Native <: Expr
+    f::Function
+    in_types::NTuple{N, Type} where N
+    out_types::NTuple{N, Type} where N
+end
+
 struct Abstract <: Expr
     vars::Vector{Var}
     value::Expr
@@ -118,6 +124,8 @@ function parse(ast)
         end
     elseif @capture(ast, (exprs__,))
         Primitive(:tuple, map(parse, exprs))
+    elseif @capture(ast, {expr_})
+        eval(expr)
     else
         error("Unknown syntax: $ast")
     end
@@ -139,6 +147,8 @@ function unparse(expr::Expr)
         (_::Let, (var, value, body)) => :(let $var = $value; $body end)
     end
 end
+
+unparse(expr::Native) = :({Native($(expr.f), $(expr.in_types), $(expr.out_types))})
 
 Base.show(io::IO, expr::Expr) = print(io, string("@imp(", unparse(expr), ")"))
 
@@ -188,12 +198,11 @@ end
 # --- interpret ---
 
 const Env{T} = Dict{Var, T}
-
 function interpret(env::Env, expr::Expr)::Set
     _interpret(env, expr)
 end
 
-function _interpret(env::Env, expr::Var)::Set
+function _interpret(env::Env{T}, expr::Var)::T where T
     env[expr]
 end
 
@@ -238,6 +247,10 @@ function _interpret(env::Env, expr::Let)::Set
     interpret(env, expr.body)
 end
 
+function _interpret(env::Env, expr::Native)
+    compile_error("Tried to interpret Native outside Apply: $expr")
+end
+
 # --- interpret values ---
 
 const false_set = Set()
@@ -275,6 +288,31 @@ function _interpret(env::Env{Set}, expr::Primitive) ::Set
             Set(((a_row..., b_row...) for a_row in a for b_row in b))
         end
         _ => error("Unknown primitive: $expr")
+    end
+end
+
+# TODO these are kinda hacky - should probably depend on native.out_types
+return!(result::Set, returned::Union{Vector, Set}) = foreach(returned -> return!(result, returned), returned)
+return!(result::Set, returned::Tuple) = push!(result, returned)
+return!(result::Set, returned::Bool) = returned && push!(result, ())
+return!(result::Set, returned::Nothing) = nothing
+return!(result::Set, returned) = push!(result, (returned,))
+
+function _interpret(env::Env{Set}, expr::Apply) ::Set
+    if expr.f isa Native
+        f = expr.f
+        result = Set()
+        for row in interpret(env, Primitive(:tuple, expr.args))
+            @assert length(f.in_types) == length(row)
+            if all(vt -> vt[1] isa vt[2], zip(row, f.in_types))
+                returned = invoke(f.f, Tuple{f.in_types...}, row...)
+                return!(result, returned)
+            end
+        end
+        result
+    else
+        # fallback to default
+        invoke(_interpret, Tuple{Env, Apply}, env, expr)
     end
 end
 
@@ -316,6 +354,22 @@ function _interpret(env::Env{SetType}, expr::Primitive)::SetType
             Set(((a_row..., b_row...) for a_row in a for b_row in b))
         end
         _ => error("Unknown primitive: $expr")
+    end
+end
+
+function _interpret(env::Env{SetType}, expr::Apply) ::SetType
+    if expr.f isa Native
+        f = expr.f
+        result = SetType()
+        for row_type in interpret(env, Primitive(:tuple, expr.args))
+            if all(vt -> vt[1] <: vt[2], zip(row_type, f.in_types))
+                push!(result, f.out_types)
+            end
+        end
+        result
+    else
+        # fallback to default
+        invoke(_interpret, Tuple{Env, Apply}, env, expr)
     end
 end
 
@@ -381,7 +435,7 @@ function is_scalar(expr::Expr)
     end
 end
 
-# rewrite until every Apply has var/constant f and boolean type and all args are bound vars or _
+# rewrite until every Apply has var/native f and boolean type and all args are bound vars or _
 function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)::Expr
     make_slots(n) = begin
         slots = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:n]
@@ -484,6 +538,10 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
             new_slots = make_slots(arity[arg])
             Primitive(:!, [Abstract(new_slots, Primitive(:!, [apply(arg, new_slots)]))])
         end
+
+        # TODO this can't be interpreted until after bounding
+        # n[slots...] => n(slots...)
+        Native(_, _, _) => Apply(expr, slots) 
 
         # ((vars...) -> value)[slots...] => value[vars... = slots...]
         Abstract(vars, value) => begin
@@ -621,13 +679,20 @@ function is_scalar_bound(bound_vars::Vector{Var}, expr::Expr)
     end
 end
 
-# TODO where bound/remainder is |, need to push the abstract inside
-
 function bound(bound_vars::Vector{Var}, var::Var, expr::Expr)::Expr
     bound(expr) = @match expr begin
         False() => expr
         True() => Var(:everything)
-        Apply(f, args) => (var in args) ? permute(bound_vars, var, expr) : Var(:everything)
+        Apply(f::Var, args) => (var in args) ? permute(bound_vars, var, expr) : Var(:everything)
+        Apply(f::Native, args) => begin
+            if all(in(bound_vars), args[1:length(f.in_types)]) &&
+                length(f.out_types) == 1 &&
+                var == args[end]
+                Apply(f, args[1:length(f.in_types)])
+            else
+                Var(:everything)
+            end
+        end
         Primitive(:|, [a, b]) => Primitive(:|, [bound(a), bound(b)])
         Primitive(:&, [a, b]) => Primitive(:&, [bound(a), bound(b)])
         Primitive(:(==), [a, b]) => begin
@@ -650,8 +715,15 @@ function remainder(bound_vars::Vector{Var}, var::Var, expr::Expr)::Expr
     remainder(expr) = @match expr begin
         False() => expr
         True() => expr
-        Apply(f, args) => issubset(args, union(bound_vars, (var, Var(:everything)))) ? True() : expr
-        # TODO we can't simplify inside disjunction because bound covers both
+        Apply(f::Var, args) => issubset(args, union(bound_vars, (var, Var(:everything)))) ? True() : expr
+        Apply(f::Native, args) => begin
+            if all(in(bound_vars), args[1:length(f.in_types)]) &&
+                True()
+            else
+                expr
+            end
+        end
+        # TODO we can't simplify inside disjunction because bound covers both - unless we know it's disjoint
         # Primitive(:|, [a, b]) => Primitive(:|, [remainder(a), remainder(b)])
         Primitive(:|, [a, b]) => Primitive(:|, [a, b])
         Primitive(:&, [a, b]) => Primitive(:&, [remainder(a), remainder(b)])

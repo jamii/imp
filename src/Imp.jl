@@ -307,7 +307,7 @@ function _interpret(env::Env{Set}, expr::Apply) ::Set
         for row in interpret(env, Primitive(:tuple, expr.args))
             if length(f.in_types) == length(row)
                 if all(vt -> vt[1] isa vt[2], zip(row, f.in_types))
-                    returned = invoke(f.f, Tuple{f.in_types...}, row...)
+                    returned = Base.invokelatest(f.f, row...)
                     return!(result, returned)
                 end
             elseif length(f.in_types) + length(f.out_types) == length(row)
@@ -315,7 +315,7 @@ function _interpret(env::Env{Set}, expr::Apply) ::Set
                 in_row = row[1:length(f.in_types)]
                 out_row = row[length(f.in_types)+1:end]
                 if all(vt -> vt[1] isa vt[2], zip(in_row, f.in_types))
-                    returned = invoke(f.f, Tuple{f.in_types...}, in_row...)
+                    returned = Base.invokelatest(f.f, in_row...)
                     # TODO we only need to tmp because we don't know how to iter over returned without return!
                     return!(tmp, returned)
                 end
@@ -375,34 +375,8 @@ function _interpret(env::Env{SetType}, expr::Primitive)::SetType
     end
 end
 
-function _interpret(env::Env{SetType}, expr::Apply) ::SetType
-    if expr.f isa Native
-        f = expr.f
-        result = SetType()
-        for row_type in interpret(env, Primitive(:tuple, expr.args))
-            if length(f.in_types) == length(row_type)
-                if all(vt -> vt[1] <: vt[2], zip(row_type, f.in_types))
-                    push!(result, f.out_types)
-                end
-            elseif length(f.in_types) + length(f.out_types) == length(row_type)
-                tmp = Set()
-                in_row_type = row_type[1:length(f.in_types)]
-                out_row_type = row_type[length(f.in_types)+1:end]
-                if all(vt -> vt[1] <: vt[2], zip(in_row_type, f.in_types))
-                    if f.out_types == out_row_type
-                        push!(result, ())
-                    end
-                end
-            else
-                # TODO technically these other cases have valid semantics, but I don't care to execute them just yet
-                compile_error("Cannot apply $f to $row_type")
-            end
-        end
-        result
-    else
-        # fallback to default
-        invoke(_interpret, Tuple{Env, Apply}, env, expr)
-    end
+function _interpret(env::Env{SetType}, expr::Native) ::SetType
+    SetType([(expr.in_types..., expr.out_types...)])
 end
 
 row_type(row::Tuple) = map(typeof, row)

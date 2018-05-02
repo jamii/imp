@@ -4,6 +4,8 @@ import MacroTools
 import MacroTools: @capture
 using Rematch
 
+include("columns.jl")
+
 # TODO remove workaround for https://github.com/JuliaLang/julia/issues/26885
 function Base.show(io::IO, set::Set)
     print(io, "Set(", collect(set), ")")

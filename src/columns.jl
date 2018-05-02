@@ -1,322 +1,339 @@
-module Columns
+TupleOfVectors = NTuple{N, Vector{T} where T} where N
 
-using Rematch
-using Base.Test
+# --- sorting ---
+# TODO clean this section up
 
-@generated function cmp_in{T <: Tuple}(xs::T, ys::T, x_at::Int, y_at::Int)
-  n = length(T.parameters)
-  if n == 0
-    :(return 0)
-  else 
+@generated function cmp_in(xs::T, ys::T, x_at::Int, y_at::Int)::Int64 where {T <: TupleOfVectors}
+    n = length(T.parameters)
+    if n == 0
+        :(return 0)
+    else 
+        quote
+            $(Base.Expr(:meta, :inline))
+            @inbounds begin 
+                $([:(result = cmp(xs[$c][x_at], ys[$c][y_at]); if result != 0; return result; end) for c in 1:(n-1)]...)
+                return cmp(xs[$n][x_at], ys[$n][y_at])
+            end
+        end
+    end
+end
+
+@generated function swap_in!(xs::T, i::Int, j::Int) where {T <: TupleOfVectors}
+    n = length(T.parameters)
     quote
-      $(Expr(:meta, :inline))
-      @inbounds begin 
-        $([:(result = cmp(xs[$c][x_at], ys[$c][y_at]); if result != 0; return result; end) for c in 1:(n-1)]...)
-        return cmp(xs[$n][x_at], ys[$n][y_at])
-      end
+        $(Base.Expr(:meta, :inline))
+        @inbounds begin 
+            $([quote 
+               let tmp = xs[$c][i]
+               xs[$c][i] = xs[$c][j]
+               xs[$c][j] = tmp
+               end	    
+               end for c in 1:n]...)
+        end
     end
-  end
 end
 
-@generated function swap_in{T <: Tuple}(xs::T, i::Int, j::Int)
-  n = length(T.parameters)
-  quote
-    $(Expr(:meta, :inline))
-    @inbounds begin 
-      $([quote 
-        let tmp = xs[$c][i]
-          xs[$c][i] = xs[$c][j]
-          xs[$c][j] = tmp
-        end	    
-      end for c in 1:n]...)
+@generated function set_in!(xs::T, i::Int, j::Int) where {T <: TupleOfVectors}
+    n = length(T.parameters)
+    quote
+        $(Base.Expr(:meta, :inline))
+        @inbounds begin 
+            $([quote 
+               xs[$c][i] = xs[$c][j]
+               end for c in 1:n]...)
+        end
     end
-  end
 end
 
-@generated function push_in!{T <: Tuple}(result::T, cs::T, i::Int)
-  n = length(T.parameters)
-  quote
-    $(Expr(:meta, :inline))
-    @inbounds begin 
-      $([:(push!(result[$c], cs[$c][i])) for c in 1:n]...)
+@generated function push_in!(result::T, cs::T, i::Int) where {T <: TupleOfVectors}
+    n = length(T.parameters)
+    quote
+        $(Base.Expr(:meta, :inline))
+        @inbounds begin 
+            $([:(push!(result[$c], cs[$c][i])) for c in 1:n]...)
+        end
     end
-  end
+end
+
+@generated function push_in!(result::T, row) where {T <: TupleOfVectors}
+    n = length(T.parameters)
+    quote
+        $(Base.Expr(:meta, :inline))
+        @inbounds begin 
+            $([:(push!(result[$c], row[$c])) for c in 1:n]...)
+        end
+    end
 end
 
 # sorting cribbed from Base.Sort
 # but unrolls `cmp` and `swap` to avoid heap allocation of rows
 # and use random pivot selection because stdlib pivot caused 1000x sadness on real data
 
-function insertion_sort!{T <: Tuple}(cs::T, lo::Int, hi::Int)
-  @inbounds for i = lo+1:hi
-    j = i
-    while j > lo && (cmp_in(cs, cs, j, j-1) == -1)
-      swap_in(cs, j, j-1)
-      j -= 1
+function insertion_sort!(cs::T, lo::Int, hi::Int) where {T <: TupleOfVectors}
+    @inbounds for i = lo+1:hi
+        j = i
+        while j > lo && (cmp_in(cs, cs, j, j-1) == -1)
+            swap_in!(cs, j, j-1)
+            j -= 1
+        end
     end
-  end
 end
 
-function partition!{T <: Tuple}(cs::T, lo::Int, hi::Int)
+function partition!(cs::T, lo::Int, hi::Int) where {T <: TupleOfVectors}
+    @inbounds begin
+        pivot = rand(lo:hi)
+        swap_in!(cs, pivot, lo)
+        i, j = lo+1, hi
+        while true
+            while (i <= j) && (cmp_in(cs, cs, i, lo) == -1); i += 1; end;
+            while (i <= j) && (cmp_in(cs, cs, lo, j) == -1); j -= 1; end;
+            i >= j && break
+            swap_in!(cs, i, j)
+            i += 1; j -= 1
+        end
+        swap_in!(cs, lo, j)
+        return j
+    end
+end
+
+function quicksort!(cs::T, lo::Int, hi::Int) where {T <: TupleOfVectors}
+    @inbounds if hi-lo <= 0
+        return
+    elseif hi-lo <= 20 
+        insertion_sort!(cs, lo, hi)
+    else
+        j = partition!(cs, lo, hi)
+        quicksort!(cs, lo, j-1)
+        quicksort!(cs, j+1, hi)
+    end
+end
+
+function quicksort!(cs::T) where {T <: TupleOfVectors}
+    quicksort!(cs, 1, length(cs[1]))
+end
+
+function is_sorted(data::T)::Bool where {T <: TupleOfVectors}
+    for i in 2:length(data[1])
+        if cmp_in(data, data, i, i-1) == -1
+            return false
+        end
+    end
+    return true
+end
+
+@generated function dedup_sorted!(data::T) where {T <: TupleOfVectors}
+    quote 
+        read = 1
+        write = 1
+        for outer read in 2:length(data[1])
+            if cmp_in(data, data, read, write) != 0
+                write += 1
+                set_in!(data, write, read)
+            end
+        end
+        $(@splice c in 1:length(T.parameters) :(resize!(data[$c], write)))
+    end
+end
+
+function diff!(a::T, b::T, f_a, f_b, f_ab) where {T <: TupleOfVectors}
   @inbounds begin
-    pivot = rand(lo:hi)
-    swap_in(cs, pivot, lo)
-    i, j = lo+1, hi
-    while true
-      while (i <= j) && (cmp_in(cs, cs, i, lo) == -1); i += 1; end;
-      while (i <= j) && (cmp_in(cs, cs, lo, j) == -1); j -= 1; end;
-      i >= j && break
-      swap_in(cs, i, j)
-      i += 1; j -= 1
-    end
-    swap_in(cs, lo, j)
-    return j
-  end
-end
-
-function quicksort!{T <: Tuple}(cs::T, lo::Int, hi::Int)
-  @inbounds if hi-lo <= 0
-    return
-  elseif hi-lo <= 20 
-    insertion_sort!(cs, lo, hi)
-  else
-    j = partition!(cs, lo, hi)
-    quicksort!(cs, lo, j-1)
-    quicksort!(cs, j+1, hi)
-  end
-end
-
-function quicksort!{T <: Tuple}(cs::T)
-  quicksort!(cs, 1, length(cs[1]))
-end
-
-# TODO should be typed {K,V} instead of {T}, but pain in the ass to change now
-mutable struct Relation{T <: Tuple} # where T is a tuple of columns
-  columns::T
-  num_keys::Int
-  indexes::Dict{Vector{Int},T}
-end
-
-function is_sorted{T}(columns::T)
-  for i in 2:length(columns[1])
-    if cmp_in(columns, columns, i, i-1) == -1
-      return false
-    end
-  end
-  return true
-end
-
-function is_unique_and_sorted{T}(columns::T)
-  for i in 2:length(columns[1])
-    if cmp_in(columns, columns, i, i-1) != 1
-      return false
-    end
-  end
-  return true
-end
-
-function index{T}(relation::Relation{T}, order::Vector{Int})
-  get!(relation.indexes, order) do
-    columns = tuple(((ix in order) ? copy(column) : empty(column) for (ix, column) in enumerate(relation.columns))...)
-    sortable_columns = tuple((columns[ix] for ix in order)...)
-    if !is_sorted(sortable_columns)
-      quicksort!(sortable_columns)
-    end
-    columns
-  end::T
-end
-
-function dedup_sorted!{T}(columns::T, key, val, deduped::T)
-  at = 1
-  hi = length(columns[1])
-  while at <= hi
-    push_in!(deduped, columns, at)
-    while (at += 1; (at <= hi) && cmp_in(key, key, at, at-1) == 0) # skip dupe keys
-      @assert cmp_in(val, val, at, at-1) == 0 # no key collisions allowed
-    end
-  end
-end
-
-function Relation(columns, num_keys::Int)
-  order = collect(1:length(columns))
-  if is_unique_and_sorted(columns)
-    Relation(columns, num_keys, Dict{Vector{Int}, typeof(columns)}(order => columns))
-  else
-    quicksort!(columns)
-    deduped::typeof(columns) = map((column) -> empty(column), columns)
-    key = columns[1:num_keys]
-    val = columns[num_keys+1:1]
-    dedup_sorted!(columns, key, val, deduped)
-    Relation(deduped, num_keys, Dict{Vector{Int}, typeof(deduped)}(order => deduped))
-  end
-end
-
-function Relation(columns)
-  Relation(columns, length(columns)-1)
-end
-
-function parse_relation(expr)
-  (head, tail) = @match expr begin
-    Expr(:call, [:(=>), head, tail], _) => (head, tail)
-    head => (head, :(()))
-  end
-  (name, keys) = @match head begin
-    Expr(:call, [name, keys...], _) => (name, keys)
-    Expr(:tuple, keys, _) => ((), keys)
-    _ => error("Can't parse $expr as relation")
-  end
-  vals = @match tail begin 
-    Expr(:tuple, vals, _) => vals
-    _ => [tail]
-  end
-  (name, keys, vals)
-end
-
-function column_type{T}(_::Type{T})
-  Vector{T}
-end
-
-# TODO not useful until stack allocation of structs is improved
-# function column_type{T}(_::Type{Nullable{T}})
-#   NullableVector{T}
-# end
-
-# examples:
-# @relation (Int, Float64)
-# @relation (Int,) => Int
-# @relation height_at(Int) => Float64
-# @relation married(String, String)
-# @relation state() => (Int, Symbol)
-macro relation(expr) 
-  (name, keys, vals) = parse_relation(expr)
-  typs = [keys..., vals...]
-  order = collect(1:length(typs))
-  body = quote 
-    columns = tuple($([:(column_type($(esc(typ)))()) for typ in typs]...))
-    Relation(columns, $(length(keys)))
-  end
-  if name != ()
-    :(const $(esc(name)) = $body)
-  else
-    body
-  end
-end
-
-function foreach_diff{T <: Tuple, K <: Tuple}(old::T, new::T, old_key::K, new_key::K, old_only, new_only, old_and_new)
-  @inbounds begin
-    old_at = 1
-    new_at = 1
-    old_hi = length(old[1])
-    new_hi = length(new[1])
-    while old_at <= old_hi && new_at <= new_hi
-      c = cmp_in(old_key, new_key, old_at, new_at)
+    at_a = 1
+    at_b = 1
+    hi_a = length(a[1])
+    hi_b = length(b[1])
+    while at_a <= hi_a && at_b <= hi_b
+      c = cmp_in(a, b, at_a, at_b)
       if c == 0
-        old_and_new(old, new, old_at, new_at)
-        old_at += 1
-        new_at += 1
+        f_ab(a, b, at_a, at_b)
+        at_a += 1
+        at_b += 1
       elseif c == 1
-        new_only(new, new_at)
-        new_at += 1
+        f_b(b, at_b)
+        at_b += 1
       else 
-        old_only(old, old_at)
-        old_at += 1
+        f_a(a, at_a)
+        at_a += 1
       end
     end
-    while old_at <= old_hi
-      old_only(old, old_at)
-      old_at += 1
+    while at_a <= hi_a
+      f_a(a, at_a)
+      at_a += 1
     end
-    while new_at <= new_hi
-      new_only(new, new_at)
-      new_at += 1
+    while at_b <= hi_b
+      f_b(b, at_b)
+      at_b += 1
     end
   end
 end
 
-function diff{T}(old::Relation{T}, new::Relation{T})
-  @assert old.num_keys == new.num_keys 
-  order = collect(1:length(old.columns))
-  old_index = index(old, order)
-  new_index = index(new, order)
-  old_only_columns = tuple([empty(column) for column in old.columns]...)
-  new_only_columns = tuple([empty(column) for column in new.columns]...)
-  foreach_diff(old_index, new_index, old_index, new_index, 
-    (o, i) -> push_in!(old_only_columns, o, i),
-    (n, i) -> push_in!(new_only_columns, n, i),
-    (o, n, oi, ni) -> ())
-  (old_only_columns, new_only_columns)
+# --- columns ---
+
+@generated num_columns(::Type{Row}) where Row <: Tuple = length(Row.parameters)
+@generated columns_elem_type(::Type{Vector{T}}) where T = T
+@generated columns_data_type(::Type{Row}) where Row <: Tuple = Tuple{map((p) -> Vector{p}, Row.parameters)...}
+@generated columns_row_type(::Type{Data}) where Data <: TupleOfVectors = Tuple{map(columns_elem_type, Data.parameters)...}
+
+@generated function check_lengths(data::T) where T <: TupleOfVectors
+    quote
+        $(@splice c in 1:num_columns(T) :(@assert(length(data[$c]) == length(data[1]))))
+    end
 end
 
-function diff_ixes{T}(old::Relation{T}, new::Relation{T})::Tuple{Vector{Int64}, Vector{Int64}}
-  @assert old.num_keys == new.num_keys 
-  order = collect(1:length(old.columns))
-  old_index = index(old, order)
-  new_index = index(new, order)
-  old_only_ixes = Vector{Int64}()
-  new_only_ixes = Vector{Int64}()
-  foreach_diff(old_index, new_index, old_index, new_index, 
-    (o, i) -> push!(old_only_ixes, i),
-    (n, i) -> push!(new_only_ixes, i),
-    (o, n, oi, ni) -> ())
-  (old_only_ixes, new_only_ixes)
+struct Columns{Row <: Tuple, Data <: TupleOfVectors} <: AbstractSet{Row}
+    data::Data
+    count::Int64 # we need this because we can't tell the different between Columns([]) and Columns([()])
+    
+    function Columns{Row, Data}(data::Data, is_empty::Bool) where {Row <: Tuple, Data <: TupleOfVectors}
+        @assert columns_row_type(Data) == Row
+        if length(data) > 0
+            check_lengths(data)
+            !is_sorted(data) && quicksort!(data)
+            dedup_sorted!(data)
+            new(data, length(data[1]))
+        else
+            new(data, is_empty ? 0 : 1)
+        end
+    end
 end
 
-function Base.merge{T}(old::Relation{T}, new::Relation{T})
-  if old.num_keys != new.num_keys 
-    error("Mismatch in num_keys - $(old.num_keys) vs $(new.num_keys) in merge($old, $new)")
-  end
-  if length(old.columns[1]) == 0
-    return new
-  end
-  if length(new.columns[1]) == 0
-    return old
-  end
-  order = collect(1:length(old.columns))
-  old_index = old.indexes[order]
-  new_index = new.indexes[order]
-  result_columns::T = tuple((empty(column) for column in old.columns)...)
-  foreach_diff(old_index, new_index, old_index[1:old.num_keys], new_index[1:new.num_keys], 
-    (o, i) -> push_in!(result_columns, o, i),
-    (n, i) -> push_in!(result_columns, n, i),
-    (o, n, oi, ni) -> push_in!(result_columns, n, ni))
-  result_indexes = Dict{Vector{Int}, Tuple}(order => result_columns)
-  Relation{T}(result_columns, old.num_keys, result_indexes)
+function Columns(data::Data, is_empty::Bool) where {Data <: TupleOfVectors}
+    Columns{columns_row_type(Data), Data}(data, is_empty)
 end
 
-function replace!{T}(old::Relation{T}, new::Relation{T})
-  old.columns = new.columns
-  old.indexes = copy(new.indexes) # shallow copy of Dict
-  old
+# TODO default show should work, but io in 0.7 is totally broken atm
+function Base.show(io::IO, columns::Columns{Row}) where {Row}
+    print(io, "Imp.Columns{$Row}([")
+    for row in columns
+        print(io, row, ", ")
+    end
+    print(io, "])")
+end
+Base.display(columns::Columns) = show(columns)
+
+@generated function permute(columns::Columns{Row}, ::Type{Val{ixes}}) where {Row, ixes}
+    quote
+        @assert ixes isa (NTuple{N,Int64} where N)
+        data = tuple($(@splice i in 1:length(ixes) :(copy(columns.data[$(ixes[i])]))))
+        Columns(data, columns.count == 0)
+    end
 end
 
-function Base.merge!{T}(old::Relation{T}, new::Relation{T})
-  replace!(old, merge(old, new))
+# --- set interface ---
+# mostly unoptimized - will allocate heavily if used with !isbits types
+
+@generated function empty_data(::Type{Data}) where {Data <: TupleOfVectors}
+    quote
+        tuple($(@splice c in 1:num_columns(Data) :($(Data.parameters[c])())))
+    end
 end
 
-function Base.push!{T}(relation::Relation{T}, values)
-  merge!(relation, Relation(map((i) -> eltype(relation.columns[i])[values[i]], tuple(1:length(values)...)), relation.num_keys))
+function Columns(iter)
+    Row = eltype(iter)
+    if Row <: Tuple
+        Columns{Row}(iter)
+    else
+        # TODO probably need to deal with this case for the naive interpreter
+        error("Bad row type: $Row")
+    end
+end
+Columns{Row}(iter) where {Row} = Columns{Row, columns_data_type(Row)}(iter)
+
+function Columns{Row, Data}(iter) where {Row, Data}
+    data = empty_data(Data)
+    is_empty = true
+    state = start(iter)
+    while !done(iter, state)
+        (row, state) = next(iter, state)
+        push_in!(data, row)
+        is_empty = false
+    end
+    Columns{Row, Data}(data, is_empty)
 end
 
-@inline function Base.length(relation::Relation)
-  length(relation.columns)
+Base.eltype(::Type{Columns{Row}}) where {Row} = Row
+Base.length(columns::Columns) = columns.count
+
+Base.start(columns::Columns) = 1
+Base.done(columns::Columns, r::Int64) = r > length(columns)
+Base.next(columns::Columns, r::Int64) = (columns[r], r+1)
+
+@generated function Base.getindex(columns::Columns{Row}, r::Int64)::Row where {Row}
+    quote
+        $(Base.Expr(:meta, :inline))
+        $(Base.Expr(:meta, :propagate_inbounds))
+        @boundscheck if !(1 <= r <= columns.count)
+            throw(BoundsError(columns, r))
+        end
+        tuple($(@splice c in 1:num_columns(Row) :(columns.data[$c][r])))
+    end
 end
 
-@inline function Base.getindex(relation::Relation, ix)
-  relation.columns[ix]
+function Base.in(row::Row, columns::Columns{Row}) where {Row}
+    searchsortedfirst(columns, row) <= length(columns)
 end
 
-function empty(coll)
-  typeof(coll)()
+# don't fall back to linear search
+Base.in(row::Row1, columns::Columns{Row2}) where {Row1, Row2} = error("$Row1 in Columns{$Row2}")
+
+# == falls back to length and issubset
+function Base.issubset(columns1::Columns{Row}, columns2::Columns{Row}) where {Row}
+    result = true
+    diff!(columns1.data, columns2.data,
+          (a, a_at) -> result = false,
+          (b, b_at) -> (),
+          (a, b, a_at, b_at) -> ())
+    result
 end
 
-function empty(relation::Relation) 
-  Relation(map((c) -> empty(c), relation.columns), relation.num_keys, empty(relation.indexes))
+function Base.intersect(columns1::Columns{Row, Data}, columns2::Columns{Row, Data}) where {Row, Data}
+    data = empty_data(Data)
+    diff!(columns1.data, columns2.data,
+          (a, a_at) -> nothing,
+          (b, b_at) -> nothing,
+          (a, b, a_at, b_at) -> push_in!(data, a, a_at))
+    Columns(data, isempty(columns1) || isempty(columns2))
 end
 
-function Base.copy(relation::Relation)
-  Relation(relation.columns, relation.num_keys, copy(relation.indexes))
+function Base.union(columns1::Columns{Row, Data}, columns2::Columns{Row, Data}) where {Row, Data}
+    data = empty_data(Data)
+    diff!(columns1.data, columns2.data,
+          (a, at_a) -> push_in!(data, a, at_a),
+          (b, at_b) -> push_in!(data, b, at_b),
+          (a, b, at_a, at_b) -> push_in!(data, a, at_a))
+    Columns(data, isempty(columns1) && isempty(columns2))
+end
+    
+function Base.setdiff(columns1::Columns{Row, Data}, columns2::Columns{Row, Data}) where {Row, Data}
+    data = empty_data(Data)
+    is_empty = true
+    diff!(columns1.data, columns2.data,
+          (a, a_at) -> (is_empty = false; push_in!(data, a, a_at)),
+          (b, b_at) -> nothing,
+          (a, b, a_at, b_at) -> nothing)
+    Columns(data, is_empty)
 end
 
-export Relation, @relation, index, parse_relation, empty, diff
+# --- tmp ---
 
+function gallop(column::AbstractArray, lo::Int64, hi::Int64, value, threshold::Int64) ::Int64
+    if (lo < hi) && cmp(column[lo], value) < threshold
+        step = 1
+        while (lo + step < hi) && cmp(column[lo + step], value) < threshold
+            lo = lo + step
+            step = step << 1
+        end
+
+        step = step >> 1
+        while step > 0
+            if (lo + step < hi) && cmp(column[lo + step], value) < threshold
+                lo = lo + step
+            end
+            step = step >> 1
+        end
+
+        lo += 1
+    end
+    lo
 end
+
+export Columns

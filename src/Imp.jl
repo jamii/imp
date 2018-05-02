@@ -4,8 +4,6 @@ import MacroTools
 import MacroTools: @capture
 using Rematch
 
-include("columns.jl")
-
 # TODO remove workaround for https://github.com/JuliaLang/julia/issues/26885
 function Base.show(io::IO, set::Set)
     print(io, "Set(", collect(set), ")")
@@ -16,6 +14,8 @@ macro splice(iterator, body)
   @assert iterator.args[1] == :in
   Base.Expr(:..., :(($(esc(body)) for $(esc(iterator.args[2])) in $(esc(iterator.args[3])))))
 end
+
+include("columns.jl")
 
 # --- parse ---
 

@@ -135,7 +135,6 @@ test_imp(:( rsvp("alice", "yes") ), result=:( true ))
 test_imp(:( rsvp("bob", "yes") ), result=:( false ))
 test_imp(:( rsvp("eve", "yes") ), result=:( false ))
 
-
 # convert boolean to value
 test_imp(:( if true "yes" else "no" end ), result=:( "yes" ))
 test_imp(:( if false "yes" else "no" end ), result=:( "no" ))
@@ -156,11 +155,15 @@ test_imp(:( (p -> if person(p) rsvp(p, "no") end) ), result=:( "bob" ))
 test_imp(:( (p -> rsvp(p, "no")) ), result=:( ("bob" | "cthulu") ))
 
 # defaults via `if`
+test_imp(:( p -> if person(p) rsvp(p) else "n/a" end ), unboundable=true)
 test_imp(:( (p -> if person(p) rsvp(p) else "n/a" end)("alice") ), result=:( "yes" ))
 test_imp(:( (p -> if person(p) rsvp(p) else "n/a" end)("cthulu") ), result=:( "n/a" ))
 test_imp(:( (p -> if person(p) rsvp(p) else "n/a" end)(2) ), result=:( "n/a" ))
 test_imp(:( (p -> if person(p) rsvp(p) else (if string(p) "n/a" end) end)("cthulu") ), result=:( "n/a" ))
 test_imp(:( (p -> if person(p) rsvp(p) else (if string(p) "n/a" end) end)(2) ), result=:( false ))
+
+# TODO messy lowerings here - caused by `if exists(...)`?
+test_imp(:( p -> if rsvp(p) rsvp(p) else "n/a" end ), unboundable=true)
 
 # can do quantification via eq
 

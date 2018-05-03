@@ -126,8 +126,9 @@ function parse(ast)
         end
     elseif @capture(ast, (exprs__,))
         Primitive(:tuple, map(parse, exprs))
-    elseif @capture(ast, {expr_})
-        eval(expr)
+    elseif ast isa Expr
+        # spliced in
+        ast
     else
         error("Unknown syntax: $ast")
     end

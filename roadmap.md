@@ -33,4 +33,5 @@ Tests/docs
 * ~~basic feature tests~~
 * 100% branch coverage
 * tutorial notebook
+* internals notebook
 * kaggle notebook

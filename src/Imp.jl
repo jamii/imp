@@ -156,7 +156,7 @@ end
 
 unparse(expr::Native) = :({Native($(expr.f), $(expr.in_types), $(expr.out_types))})
 
-Base.show(io::IO, expr::Expr) = print(io, string("@imp(", unparse(expr), ")"))
+Base.show(io::IO, expr::Expr) = print(io, string("@imp(", repr(unparse(expr)), ")"))
 
 # --- scoping ---
 
@@ -635,7 +635,7 @@ end
 struct ConjunctiveQuery <: Expr
     yield_vars::Vector{Var}
     query_vars::Vector{Var}
-    query_bounds::Union{Nothing, Vector{Expr}} # nothing when not initialized yet
+    query_bounds::Vector{Expr} 
     clauses::Vector{Expr}
 end
 
@@ -649,7 +649,7 @@ function unparse(expr::Union{Permute, ConjunctiveQuery})
     @match (expr, map_expr(unparse, tuple, expr)) begin
         (_::Permute, (arg, columns, dupe_columns)) => :($arg[$(columns...), $((:($a=$b) for (a,b) in dupe_columns)...)])
         (_::ConjunctiveQuery, (yield_vars, query_vars, query_bounds, clauses)) => begin
-            body = :(if &($(clauses...)); return ($(yield_vars...)); end)
+            body = :(if &($(clauses...)); return ($(yield_vars...),); end)
             for (var, bound) in zip(reverse(query_vars), reverse(query_bounds))
                 body = :(for $var in $bound; $body; end)
             end

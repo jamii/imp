@@ -193,7 +193,6 @@ test_imp(:( (rsvp, false) ), result=:( false ))
 test_imp(:( ("alice", "yes")|("bob", "no")|("cthulu", "no") ), result=:( rsvp ))
 
 # compose
-
 test_imp(:( "alice".rsvp ), result=:( "yes" ))
 test_imp(:( ("alice" | "bob").rsvp ), result=:( "yes" | "no" ))
 test_imp(:( rsvp."yes" ), result=:( "alice" ))

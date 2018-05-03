@@ -192,6 +192,12 @@ test_imp(:( (person, rsvp) ), result=:( (a,b,c) -> person(a) & rsvp(b,c) ))
 test_imp(:( (rsvp, false) ), result=:( false ))
 test_imp(:( ("alice", "yes")|("bob", "no")|("cthulu", "no") ), result=:( rsvp ))
 
+# compose
+
+test_imp(:( "alice".rsvp ), result=:( "yes" ))
+test_imp(:( ("alice" | "bob").rsvp ), result=:( "yes" | "no" ))
+test_imp(:( rsvp."yes" ), result=:( "alice" ))
+
 # wildcards
 test_imp(:( _ ), result=:( x -> true ), unboundable=true)
 test_imp(:( r -> rsvp(_, r) ), result=:( r -> exists(p -> rsvp(p, r)) ))

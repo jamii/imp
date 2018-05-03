@@ -126,6 +126,8 @@ function parse(ast)
         end
     elseif @capture(ast, (exprs__,))
         Primitive(:tuple, map(parse, exprs))
+    elseif @capture(ast, a_.b_)
+        Primitive(:compose, [parse(a), parse(b)])
     elseif ast isa Expr
         # spliced in
         ast
@@ -144,6 +146,7 @@ function unparse(expr::Expr)
         (_::Primitive, (:iff, [cond, true_branch, False()])) => :(if $cond; $true_branch end)
         (_::Primitive, (:iff, [cond, true_branch, false_branch])) => :(if $cond; $true_branch else $false_branch end)
         (_::Primitive, (:tuple, args)) => :(($(args...),))
+        (_::Primitive, (:compose, [a, b])) => :($a.$b)
         (_::Primitive, (f, args)) => :($f($(args...),))
         (_::Abstract, ([var], value)) => :($var -> $value)
         (_::Abstract, (vars, value)) => :(($(vars...),) -> $value)
@@ -290,6 +293,7 @@ function _interpret(env::Env{Set}, expr::Primitive) ::Set
         (:tuple, args) => reduce(true_set, args) do a, b
             Set(((a_row..., b_row...) for a_row in a for b_row in b))
         end
+        (:compose, [a, b]) => Set(((a_row[1:end-1]..., b_row[2:end]...) for a_row in a for b_row in b if (length(a_row) > 0 && length(b_row) > 0) && a_row[end] == b_row[1]))
         _ => error("Unknown primitive: $expr")
     end
 end
@@ -372,6 +376,7 @@ function _interpret(env::Env{SetType}, expr::Primitive)::SetType
         (:tuple, args) => reduce(true_set, args) do a, b
             Set(((a_row..., b_row...) for a_row in a for b_row in b))
         end
+        (:compose, [a, b]) => Set(((a_row[1:end-1]..., b_row[2:end]...) for a_row in a for b_row in b if (length(a_row) > 0 && length(b_row) > 0) && a_row[end] == b_row[1]))
         _ => error("Unknown primitive: $expr")
     end
 end
@@ -427,6 +432,14 @@ function desugar(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)::Exp
                 Primitive(:&, [body, Apply(arg, arg_vars)])
             end
             Abstract(vars, body)
+        end
+        Primitive(:compose, [a, b]) => begin
+            coalesce(arity[expr], 0) == 0 && return False()
+            a_vars = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:coalesce(arity[a], 0)]
+            b_vars = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:coalesce(arity[b], 0)]
+            var = b_vars[1] = a_vars[end]
+            vars = vcat(a_vars[1:end-1], b_vars[2:end])
+            Abstract(vars, Primitive(:exists, [Abstract([var], Primitive(:&, [Apply(a, a_vars), Apply(b, b_vars)]))]))
         end
         _ => map_expr(desugar, expr)
     end

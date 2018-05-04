@@ -1,6 +1,6 @@
 # Milestone 1
 
-All basic language features. Fast enough to run simple data science examples on small datasets.
+All first-order language features. Fast enough to run simple data science examples on small datasets.
 
 Language features:
 

@@ -58,13 +58,16 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
         # @test Imp.parse(Imp.unparse(expr)) == expr
 
         expr = Imp.separate_scopes(Imp.Scope(env), expr)
+        expr = Imp.inline(expr)
+        @show :inlined expr
+        println()
         if everything != nothing
             (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
         end
 
-        expr = Imp.inline(expr)
-
         expr = Imp.lower(env, expr)
+        @show :lowered expr
+        println()
         if lowered_expr != nothing
             @test expr == imp(lowered_expr, passes=[:parse], globals=globals)
         end
@@ -77,6 +80,8 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
         # @test expr == relowered
 
         expr = Imp.bound_abstract(expr)
+        @show :bounded expr
+        println()
         (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
 
         delete!(env, Imp.Var(:everything))
@@ -197,6 +202,7 @@ test_imp(:( (1,2) ), result=:( (a,b) -> (a==1) & (b==2) ))
 test_imp(:( (person, rsvp) ), result=:( (a,b,c) -> person(a) & rsvp(b,c) ))
 test_imp(:( (rsvp, false) ), result=:( false ))
 test_imp(:( ("alice", "yes")|("bob", "no")|("cthulu", "no") ), result=:( rsvp ))
+test_imp(:( (1, "alice" | "bob") ), result=:( (1,"alice") | (1,"bob") ))
 
 # compose
 test_imp(:( "alice".rsvp ), result=:( "yes" ))
@@ -230,6 +236,7 @@ test_imp(:( string & (a -> $stringy(a)) ), result=:( string ))
 
 # higher order functions
 test_imp(:( let sum = {x} -> reduce(+, 0, x); sum{points} end ), result=:( 2 ), everything=nothing)
+test_imp(:( let tuple = {x, y} -> (x, y); let tuple1 = tuple{1}; tuple1{"alice" | "bob"} end end ), result=:( (1, "alice" | "bob") ))
 
 # --- infer_types ---
 

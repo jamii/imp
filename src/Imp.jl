@@ -232,13 +232,33 @@ end
 
 # --- inline ---
 
-function inline(expr::Expr)::Expr
-    loop(expr) = @match expr begin
-        Let(var, value, body) => loop(replace_expr(body, Dict(var => value)))
-        ApplyHigher(AbstractHigher(vars, value), args) where (length(vars) == length(args)) => loop(replace_expr(value, Dict(zip(vars, args))))
-        _ => expr
+function inline_let(expr::Expr)::Expr
+    @match expr begin
+        Let(var, value, body) => replace_expr(inline_let(body), Dict(var => inline_let(value)))
+        _ => map_expr(inline_let, expr)
     end
-    loop(map_expr(inline, expr))
+end
+
+function inline_higher(expr::Expr)::Expr
+    while true
+        expr = @match expr begin
+            ApplyHigher(f, []) => f
+            AbstractHigher([], value) => value
+            AbstractHigher(vars1, AbstractHigher(vars2, value)) => AbstractHigher(vcat(vars1, vars2), value)
+            ApplyHigher(ApplyHigher(f, args1), args2) => ApplyHigher(f, vcat(args1, args2))
+            ApplyHigher(AbstractHigher(vars, value), args) => begin
+                n = min(length(vars), length(args))
+                value = replace_expr(value, Dict(zip(vars[1:n], args[1:n])))
+                ApplyHigher(AbstractHigher(vars[n+1:end], value), args[n+1:end])
+            end
+            _ => return map_expr(inline_higher, expr)
+        end
+    end
+end
+
+function inline(expr::Expr)::Expr
+    expr = inline_let(expr)
+    expr = inline_higher(expr)
 end
 
 # --- interpret ---
@@ -582,7 +602,7 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
 
         # TODO this can't be interpreted until after bounding
         # n[slots...] => n(slots...)
-        Native(_, _, _) => Apply(expr, slots) 
+        Native(_, _, _) => Apply(expr, slots)
 
         # ((vars...) -> value)[slots...] => value[vars... = slots...]
         Abstract(vars, value) => begin
@@ -655,7 +675,7 @@ end
 struct ConjunctiveQuery <: Expr
     yield_vars::Vector{Var}
     query_vars::Vector{Var}
-    query_bounds::Vector{Expr} 
+    query_bounds::Vector{Expr}
     clauses::Vector{Expr}
 end
 
@@ -774,7 +794,7 @@ function conjunctive_query(expr::Abstract)::Expr
 
     # heuristic - solve variables in the order they are mentioned
     query_vars = unique!(vcat(used_vars, expr.vars, exists_vars))
-    
+
     ConjunctiveQuery(copy(expr.vars), query_vars, Expr[], clauses)
 end
 

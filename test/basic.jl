@@ -226,6 +226,9 @@ test_imp(:( string & (a -> $stringy(a)) ), result=:( string ))
 
 # TODO reduce +
 
+# higher order functions
+# test_imp(:( let sum = {x} -> reduce(+, 0, x); sum{points} end ), result=:( 2 ), everything=nothing)
+
 # --- infer_types ---
 
 test_imp(:( true ), inferred_type=[()])

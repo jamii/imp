@@ -19,8 +19,8 @@ include("columns.jl")
 
 # --- booleans
 
-const false_set = Set()
-const true_set = Set([()])
+const false_set = Set{Tuple{}}()
+const true_set = Set{Tuple{}}([()])
 bool_to_set(bool::Bool)::Set = bool ? true_set : false_set
 set_to_bool(set::Set)::Bool = !isempty(set)
 
@@ -29,7 +29,7 @@ set_to_bool(set::Set)::Bool = !isempty(set)
 abstract type Expr end
 
 struct Constant <: Expr
-    value::Set
+    value::Set # TODO Set{T} where T <: Tuple
 end
 
 struct Var <: Expr
@@ -45,6 +45,7 @@ struct Apply <: Expr
 end
 
 # things which operate on relations rather than on values
+# TODO could be combined with higher order apply
 struct Primitive <: Expr
     f::Symbol
     args::Vector{Expr}
@@ -65,6 +66,16 @@ struct Let <: Expr
     var::Var
     value::Expr
     body::Expr
+end
+
+struct AbstractHigher <: Expr
+    vars::Vector{Var}
+    value::Expr
+end
+
+struct ApplyHigher <: Expr
+    f::Var
+    args::Vector{Expr}
 end
 
 @generated function Base.:(==)(a::T, b::T) where {T <: Expr}
@@ -130,6 +141,10 @@ function parse(ast)
         Primitive(:tuple, map(parse, exprs))
     elseif @capture(ast, a_.b_)
         Primitive(:compose, [parse(a), parse(b)])
+    elseif @capture(ast, {vars__} -> value_)
+        AbstractHigher(map(Var, vars), parse(value))
+    elseif @capture(ast, f_Symbol{args__})
+        ApplyHigher(Var(f), map(parse, args))
     elseif ast isa Expr
         # spliced in
         ast
@@ -163,6 +178,8 @@ function unparse(expr::Expr)
         (_::Abstract, ([var], value)) => :($var -> $value)
         (_::Abstract, (vars, value)) => :(($(vars...),) -> $value)
         (_::Let, (var, value, body)) => :(let $var = $value; $body end)
+        (_::AbstractHigher, (vars, value)) => :({$(vars...),} -> $value)
+        (_::ApplyHigher, (f, args)) => :($f{$(args...),})
     end
 end
 
@@ -195,7 +212,7 @@ function separate_scopes(scope::Scope, expr::Var)
     Var(expr.name, id)
 end
 
-function separate_scopes(scope::Scope, expr::Abstract)
+function separate_scopes(scope::Scope, expr::Union{Abstract, AbstractHigher})
     scope = Scope(copy(scope.current), scope.used)
     for var in expr.vars
         scope.current[var.name] = scope.used[var.name] = get(scope.used, var.name, 0) + 1
@@ -447,6 +464,14 @@ function desugar(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)::Exp
     desugar(expr)
 end
 
+function inline_higher(expr::Expr)::Expr
+    loop(expr) = @match expr begin
+        ApplyHigher(AbstractHigher(vars, value), args) where (length(vars) == length(args)) => loop(replace_expr(value, Dict(zip(vars, args))))
+        _ => expr
+    end
+    loop(map_expr(inline_higher, expr))
+end
+
 function is_scalar(expr::Expr)
     @match expr begin
         Constant(value) => (length(value) == 1) && (length(first(value)) == 1)
@@ -609,6 +634,8 @@ function lower(env::Env{Set}, expr::Expr)::Expr
     expr_types = infer_types(env, expr)
     arities = Dict{Expr, Arity}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
     expr = desugar(arities, last_id, expr)
+
+    expr = inline_higher(expr)
 
     # TODO gross that we have to do type inference twice - that global!
     expr_types = infer_types(env, expr)

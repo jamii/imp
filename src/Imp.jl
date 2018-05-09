@@ -17,15 +17,19 @@ end
 
 include("columns.jl")
 
+# --- booleans
+
+const false_set = Set()
+const true_set = Set([()])
+bool_to_set(bool::Bool)::Set = bool ? true_set : false_set
+set_to_bool(set::Set)::Bool = !isempty(set)
+
 # --- parse ---
 
 abstract type Expr end
 
-struct False <: Expr end
-struct True <: Expr end
-
 struct Constant <: Expr
-    value # scalar
+    value::Set
 end
 
 struct Var <: Expr
@@ -94,14 +98,12 @@ map_expr(f, expr::Expr) = map_expr(f, typeof(expr), expr)
 
 function parse(ast)
     if @capture(ast, bool_Bool)
-        bool ? True() : False()
+        bool ? Constant(true_set) : Constant(false_set)
     elseif @capture(ast, constant_Int64_String)
-        Constant(constant)
+        Constant(Set([(constant,)]))
     elseif @capture(ast, name_Symbol)
         if name == :(_)
             Var(:everything)
-        elseif name == :(nothing)
-            False()
         else
             Var(name)
         end
@@ -112,7 +114,7 @@ function parse(ast)
             Apply(parse(f), map(parse, args))
         end
     elseif @capture(ast, if cond_ true_branch_ end)
-        Primitive(:iff, [parse(cond), parse(true_branch), False()])
+        Primitive(:iff, [parse(cond), parse(true_branch), Constant(false_set)])
     elseif @capture(ast, if cond_ true_branch_ else false_branch_ end)
         Primitive(:iff, [parse(cond), parse(true_branch), parse(false_branch)])
     elseif @capture(ast, var_Symbol -> value_)
@@ -136,14 +138,24 @@ function parse(ast)
     end
 end
 
+function unparse_row(row::Tuple)
+    @match length(row) begin
+        0 => true
+        1 => first(row)
+        _ => row
+    end
+end
+
 function unparse(expr::Expr)
     @match (expr, map_expr(unparse, tuple, expr)) begin
-        (_::True, ()) => true
-        (_::False, ()) => false
-        (_::Constant, (value,)) => value
+        (_::Constant, (value,)) => @match length(value) begin
+            0 => false
+            1 => unparse_row(first(value))
+            _ => :(|($(map(unparse_row, value)...)))
+        end
         (_::Var, (name, _)) => name
         (_::Apply, (f, args)) => :($f($(args...)))
-        (_::Primitive, (:iff, [cond, true_branch, False()])) => :(if $cond; $true_branch end)
+        (_::Primitive, (:iff, [cond, true_branch, Constant(value)])) where (value == false_set) => :(if $cond; $true_branch end)
         (_::Primitive, (:iff, [cond, true_branch, false_branch])) => :(if $cond; $true_branch else $false_branch end)
         (_::Primitive, (:tuple, args)) => :(($(args...),))
         (_::Primitive, (:compose, [a, b])) => :($a.$b)
@@ -259,16 +271,8 @@ end
 
 # --- interpret values ---
 
-const false_set = Set()
-const true_set = Set([()])
-bool_to_set(bool::Bool)::Set = bool ? true_set : false_set
-set_to_bool(set::Set)::Bool = !isempty(set)
-
-_interpret(env::Env{Set}, expr::False) = false_set
-_interpret(env::Env{Set}, expr::True) = true_set
-
 function _interpret(env::Env{Set}, expr::Constant) ::Set
-    Set([(expr.value,)])
+    expr.value
 end
 
 function _interpret(env::Env{Set}, expr::Primitive) ::Set
@@ -344,14 +348,15 @@ end
 const RowType = NTuple{N, Type} where N
 const SetType = Set{RowType}
 
+row_type(row::Tuple) = map(typeof, row)
+set_type(set::Set) = map(row_type, set)
+env_types(env::Env{Set}) = Env{SetType}(name => set_type(set) for (name, set) in env)
+
 const bool_type = SetType([()])
 const false_type = SetType([])
 
-_interpret(env::Env{SetType}, expr::True) = bool_type
-_interpret(env::Env{SetType}, expr::False) = false_type
-
 function _interpret(env::Env{SetType}, expr::Constant)::SetType
-    Set([(typeof(expr.value),)])
+    set_type(expr.value)
 end
 
 function _interpret(env::Env{SetType}, expr::Primitive)::SetType
@@ -384,10 +389,6 @@ end
 function _interpret(env::Env{SetType}, expr::Native) ::SetType
     SetType([(expr.in_types..., expr.out_types...)])
 end
-
-row_type(row::Tuple) = map(typeof, row)
-set_type(set::Set) = map(row_type, set)
-env_types(env::Env{Set}) = Env{SetType}(name => set_type(set) for (name, set) in env)
 
 # TODO totally gross global, pass a context instead
 const expr_types = Dict{Expr, SetType}()
@@ -426,7 +427,7 @@ function desugar(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)::Exp
         Let(var, value, body) => replace_expr(desugar(body), Dict(var => desugar(value)))
         Primitive(:tuple, args) => begin
             vars = Var[]
-            body = reduce(True(), args) do body, arg
+            body = reduce(Constant(true_set), args) do body, arg
                 arg_vars = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:coalesce(arity[arg], 0)]
                 append!(vars, arg_vars)
                 Primitive(:&, [body, Apply(arg, arg_vars)])
@@ -434,7 +435,7 @@ function desugar(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)::Exp
             Abstract(vars, body)
         end
         Primitive(:compose, [a, b]) => begin
-            coalesce(arity[expr], 0) == 0 && return False()
+            coalesce(arity[expr], 0) == 0 && return Constant(false_set)
             a_vars = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:coalesce(arity[a], 0)]
             b_vars = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:coalesce(arity[b], 0)]
             var = b_vars[1] = a_vars[end]
@@ -448,9 +449,8 @@ end
 
 function is_scalar(expr::Expr)
     @match expr begin
-        _::Constant => true
-        Var(_, 0) => false
-        Var(_, _) => true
+        Constant(value) => (length(value) == 1) && (length(first(value)) == 1)
+        Var(_, scope) => scope > 0
         _ => false
     end
 end
@@ -465,7 +465,7 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
         slots
     end
     apply(expr::Expr) = @match arity[expr] begin
-        nothing => False() # if it's provable false, why bother keeping it around?
+        nothing => Constant(false_set) # if it's provable false, why bother keeping it around?
         n => begin
             slots = make_slots(n)
             Abstract(slots, apply(expr, slots))
@@ -474,31 +474,25 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
     apply(expr::Expr, slots::Vector{Var})::Expr = @match expr begin
 
         # things that don't make sense will be hard to lower
-        _ where get(arity, expr, -1) == nothing => False()
+        _ where get(arity, expr, -1) == nothing => Constant(false_set)
 
         # false[slots...] => false
-        False() => expr
+        Constant(value) where (value == false_set) => expr
 
         # true[] => true
-        True() => begin
+        Constant(value) where (value == true_set) => begin
             @match [] = slots
             expr
         end
 
-        # 1[slot] => slot==1
-        _::Constant => begin
+        # scalar[slot] => slot==scalar
+        _ where is_scalar(expr) => begin
             @match [slot] = slots
             Primitive(:(==), [slot, expr])
-        end
+         end
 
         # f[slots...] => f(slots...)
-        Var(_, 0) =>  Apply(expr, slots)
-
-        # x[slot] => slot==x
-        Var(_, _) => begin
-            @match [slot] = slots
-            Primitive(:(==), [slot, expr])
-        end
+        Constant(_) || Var(_,_) => Apply(expr, slots)
 
         # f(x,y)[slots...] => f(x)(y)[slots...]
         Apply(f, []) => apply(f, slots)
@@ -575,11 +569,10 @@ end
 
 function negate(expr::Expr)::Expr
     @match expr begin
-        False() => True()
-        True() => False()
-        Constant(_) => False()
+        Constant(value) where (value == false_set) => Constant(true_set)
+        Constant(_) => Constant(false_set)
         # abstract vars can't be empty
-        Var(_, scope) where scope > 0 => False()
+        Var(_, scope) where scope > 0 => Constant(false_set)
         Primitive(:|, [a, b]) => Primitive(:&, [negate(a), negate(b)])
         Primitive(:&, [a, b]) => Primitive(:|, [negate(a), negate(b)])
         Primitive(:!, [arg]) => Primitive(:exists, [lower_negation(arg)])
@@ -711,7 +704,7 @@ end
 
 function is_scalar_bound(bound_vars::Vector{Var}, expr::Expr)
     @match expr begin
-        Constant(_) => true
+        Constant(value) => (length(value) == 1) && (length(first(value)) == 1)
         Var(_,_) where expr in bound_vars => true
         Primitive(:reduce, _) => true
         _ => false
@@ -724,8 +717,8 @@ function conjunctive_query(expr::Abstract)::Expr
     clauses = Expr[]
     is_false = false
     gather(expr) = @match expr begin
-        False() => (is_false = true)
-        True() => nothing
+        Constant(value) where (value == false_set) => (is_false = true)
+        Constant(value) where (value == true_set) => nothing
         Apply(f, vars) => begin
             push!(clauses, expr)
             append!(used_vars, vars)
@@ -750,7 +743,7 @@ function conjunctive_query(expr::Abstract)::Expr
         Abstract([], value) => gather(value)
     end
     gather(expr.value)
-    is_false && return False()
+    is_false && return Constant(false_set)
 
     # heuristic - solve variables in the order they are mentioned
     query_vars = unique!(vcat(used_vars, expr.vars, exists_vars))
@@ -801,7 +794,7 @@ function bound_abstract(bound_vars::Vector{Var}, expr::Expr)::Expr
     @match expr begin
         _::Abstract => begin
             query = conjunctive_query(expr)
-            query == False() && return query
+            query == Constant(false_set) && return query
             clauses = query.clauses
             bounds = Expr[]
             for i in 1:length(query.query_vars)

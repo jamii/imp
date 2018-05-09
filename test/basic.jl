@@ -62,6 +62,8 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
             (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
         end
 
+        expr = Imp.inline(expr)
+
         expr = Imp.lower(env, expr)
         if lowered_expr != nothing
             @test expr == imp(lowered_expr, passes=[:parse], globals=globals)
@@ -227,7 +229,7 @@ test_imp(:( string & (a -> $stringy(a)) ), result=:( string ))
 # TODO reduce +
 
 # higher order functions
-# test_imp(:( let sum = {x} -> reduce(+, 0, x); sum{points} end ), result=:( 2 ), everything=nothing)
+test_imp(:( let sum = {x} -> reduce(+, 0, x); sum{points} end ), result=:( 2 ), everything=nothing)
 
 # --- infer_types ---
 

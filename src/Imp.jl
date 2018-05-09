@@ -74,7 +74,7 @@ struct AbstractHigher <: Expr
 end
 
 struct ApplyHigher <: Expr
-    f::Var
+    f::Expr
     args::Vector{Expr}
 end
 
@@ -143,8 +143,8 @@ function parse(ast)
         Primitive(:compose, [parse(a), parse(b)])
     elseif @capture(ast, {vars__} -> value_)
         AbstractHigher(map(Var, vars), parse(value))
-    elseif @capture(ast, f_Symbol{args__})
-        ApplyHigher(Var(f), map(parse, args))
+    elseif @capture(ast, f_{args__})
+        ApplyHigher(parse(f), map(parse, args))
     elseif ast isa Expr
         # spliced in
         ast
@@ -228,6 +228,17 @@ function separate_scopes(scope::Scope, expr::Let)
     var = separate_scopes(scope, expr.var)
     body = separate_scopes(scope, expr.body)
     Let(var, value, body)
+end
+
+# --- inline ---
+
+function inline(expr::Expr)::Expr
+    loop(expr) = @match expr begin
+        Let(var, value, body) => loop(replace_expr(body, Dict(var => value)))
+        ApplyHigher(AbstractHigher(vars, value), args) where (length(vars) == length(args)) => loop(replace_expr(value, Dict(zip(vars, args))))
+        _ => expr
+    end
+    loop(map_expr(inline, expr))
 end
 
 # --- interpret ---
@@ -441,7 +452,6 @@ end
 
 function desugar(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)::Expr
     desugar(expr) = @match expr begin
-        Let(var, value, body) => replace_expr(desugar(body), Dict(var => desugar(value)))
         Primitive(:tuple, args) => begin
             vars = Var[]
             body = reduce(Constant(true_set), args) do body, arg
@@ -462,14 +472,6 @@ function desugar(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)::Exp
         _ => map_expr(desugar, expr)
     end
     desugar(expr)
-end
-
-function inline_higher(expr::Expr)::Expr
-    loop(expr) = @match expr begin
-        ApplyHigher(AbstractHigher(vars, value), args) where (length(vars) == length(args)) => loop(replace_expr(value, Dict(zip(vars, args))))
-        _ => expr
-    end
-    loop(map_expr(inline_higher, expr))
 end
 
 function is_scalar(expr::Expr)
@@ -634,8 +636,6 @@ function lower(env::Env{Set}, expr::Expr)::Expr
     expr_types = infer_types(env, expr)
     arities = Dict{Expr, Arity}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
     expr = desugar(arities, last_id, expr)
-
-    expr = inline_higher(expr)
 
     # TODO gross that we have to do type inference twice - that global!
     expr_types = infer_types(env, expr)
@@ -845,7 +845,7 @@ bound_abstract(expr::Expr) = bound_abstract(Var[], expr)
 
 # --- exports ---
 
-const all_passes = [:parse, :lower, :bound_abstract, :interpret]
+const all_passes = [:parse, :inline, :lower, :bound_abstract, :interpret]
 
 function imp(expr; globals=Dict{Symbol, Set}(), everything=nothing, passes=all_passes)
     env = Env{Set}(Var(name) => set for (name, set) in globals)
@@ -855,6 +855,9 @@ function imp(expr; globals=Dict{Symbol, Set}(), everything=nothing, passes=all_p
     if :parse in passes
         expr = parse(expr)
         expr = separate_scopes(Scope(env), expr)
+    end
+    if :inline in passes
+        expr = inline(expr)
     end
     if :lower in passes
         expr = lower(env, expr)

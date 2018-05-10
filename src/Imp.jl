@@ -863,7 +863,35 @@ function bound_abstract(bound_vars::Vector{Var}, expr::Expr)::Expr
 end
 bound_abstract(expr::Expr) = bound_abstract(Var[], expr)
 
-# --- exports ---
+# --- indexing ---
+# TODO this is a temporary hack until we can use more sensible data structures
+
+struct Lookup <: Expr
+    index::Dict{Tuple, Set}
+    args::Vector{Var}
+end
+
+function _interpret(env::Env, expr::Lookup)::Set
+    row = tuple((first(first(env[arg])) for arg in expr.args)...)
+    get(expr.index, row, false_set)
+end
+
+function build_indexes(env::Env, expr::Expr)::Expr
+    @match map_expr(expr -> build_indexes(env, expr), expr) begin
+        Apply(f && Permute(Var(_, 0), columns, _), args) where (length(columns) == length(args)+1) => begin
+            index = Dict{Tuple, Set}()
+            for row in interpret(env, f)
+                push!(get!(() -> Set(), index, row[1:end-1]), row[end:end])
+            end
+            Lookup(index, args)
+        end
+        other => other
+    end
+end
+
+unparse(expr::Lookup) = :({Lookup(Dict($(first(expr.index))...), $(expr.args))})
+
+# --- interface ---
 
 @enum Pass PARSE INLINE LOWER BOUND INTERPRET
 Base.:-(a::Pass, b::Pass) = Int64(a) - Int64(b)
@@ -881,7 +909,14 @@ function imp(expr; globals=nothing, env=nothing, types=nothing, everything=nothi
         env[Var(:everything)] = everything
     end
     if types == nothing
-        types = Set{Type}((typeof(val) for (_, set) in env for row in set for val in row))
+        types = Set{Type}()
+        for (_, set) in env
+            for row in set
+                for val in row
+                    push!(types, typeof(val))
+                end
+            end
+        end
     end
     if PARSE in passes
         expr = @show parse(expr)
@@ -896,6 +931,7 @@ function imp(expr; globals=nothing, env=nothing, types=nothing, everything=nothi
     if BOUND in passes
         expr = @show bound_abstract(expr)
     end
+    expr = build_indexes(env, expr)
     if INTERPRET in passes
         expr = interpret(env, expr)
     end

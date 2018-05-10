@@ -86,6 +86,10 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
         println()
         (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
 
+        # TODO can't run test_imp_pass after build_indexes because we can't infer Lookup
+        # expr = Imp.build_indexes(env, expr)
+        # (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
+
         delete!(env, Imp.Var(:everything))
         if unboundable
             @test_throws KeyError Imp.interpret(env, expr)

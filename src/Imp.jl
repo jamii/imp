@@ -479,7 +479,7 @@ function desugar(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)::Exp
                 append!(vars, arg_vars)
                 Primitive(:&, [body, Apply(arg, arg_vars)])
             end
-            Abstract(vars, body)
+            desugar(Abstract(vars, body))
         end
         Primitive(:compose, [a, b]) => begin
             coalesce(arity[expr], 0) == 0 && return Constant(false_set)
@@ -487,7 +487,7 @@ function desugar(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)::Exp
             b_vars = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:coalesce(arity[b], 0)]
             var = b_vars[1] = a_vars[end]
             vars = vcat(a_vars[1:end-1], b_vars[2:end])
-            Abstract(vars, Primitive(:exists, [Abstract([var], Primitive(:&, [Apply(a, a_vars), Apply(b, b_vars)]))]))
+            desugar(Abstract(vars, Primitive(:exists, [Abstract([var], Primitive(:&, [Apply(a, a_vars), Apply(b, b_vars)]))])))
         end
         _ => map_expr(desugar, expr)
     end
@@ -532,6 +532,11 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
             expr
         end
 
+        Var(:everything, 0) => begin
+            @match [slot] = slots
+            Constant(true_set)
+        end
+
         # scalar[slot] => slot==scalar
         _ where is_scalar(expr) => begin
             @match [slot] = slots
@@ -546,7 +551,7 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
         Apply(f, args) where (length(args) > 1) => apply(reduce((f, arg) -> Apply(f, [arg]), f, args), slots)
 
         # f(x)[slots...] => f[x, slots...]
-        Apply(f, [x && Var(name, scope)]) where ((name == :(everything)) || (scope != 0)) => apply(f, [x, slots...])
+        Apply(f, [x && Var(_, scope)]) where (scope != 0) => apply(f, [x, slots...])
 
         # f(g)[slots...] => exists((new_slots...) -> f[new_slots..., slots...] & g[new_slots...])
         Apply(f, [g]) => begin
@@ -920,7 +925,8 @@ function imp(expr; globals=nothing, env=nothing, types=nothing, everything=nothi
     end
     if PARSE in passes
         expr = @show parse(expr)
-        expr = separate_scopes(Scope(env), expr)
+        scope_env = push!(copy(env), Var(:everything) => Set())
+        expr = separate_scopes(Scope(scope_env), expr)
     end
     if INLINE in passes
         expr = @show inline(expr)

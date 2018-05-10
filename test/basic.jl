@@ -222,6 +222,8 @@ test_imp(:( rsvp(_) ), result=:( r -> exists(p -> rsvp(p, r)) ))
 
 # repeated vars
 test_imp(:( x -> likes(x, x) ), result=:( "bob" | "eve" ))
+# ... but _ is not a real var
+test_imp(:( rsvp(_, _) ), result=:( true ))
 
 test_imp(:( p -> if person(p); (r -> true) end ), unboundable=true)
 

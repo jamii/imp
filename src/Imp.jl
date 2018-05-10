@@ -865,27 +865,30 @@ bound_abstract(expr::Expr) = bound_abstract(Var[], expr)
 
 # --- exports ---
 
-const all_passes = [:parse, :inline, :lower, :bound_abstract, :interpret]
+@enum Pass PARSE INLINE LOWER BOUND INTERPRET
+Base.:-(a::Pass, b::Pass) = Int64(a) - Int64(b)
+Base.:+(a::Pass, b::Int64) = Pass(Int64(a) + b)
+Base.:-(a::Pass, b::Int64) = Pass(Int64(a) - b)
 
-function imp(expr; globals=Dict{Symbol, Set}(), everything=nothing, passes=all_passes)
+function imp(expr; globals=Dict{Symbol, Set}(), everything=nothing, passes=instances(Pass))
     env = Env{Set}(Var(name) => set for (name, set) in globals)
     if everything != nothing
         env[Var(:everything)] = everything
     end
-    if :parse in passes
+    if PARSE in passes
         expr = parse(expr)
         expr = separate_scopes(Scope(env), expr)
     end
-    if :inline in passes
+    if INLINE in passes
         expr = inline(expr)
     end
-    if :lower in passes
+    if LOWER in passes
         expr = lower(env, expr)
     end
-    if :bound_abstract in passes
+    if BOUND in passes
         expr = bound_abstract(expr)
     end
-    if :interpret in passes
+    if INTERPRET in passes
         expr = interpret(env, expr)
     end
     expr

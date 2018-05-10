@@ -22,7 +22,15 @@ const globals = Dict{Symbol, Set}(
 const everything = Set{Any}([(scalar,) for (_,set) in globals for row in set for scalar in row])
 
 function test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
-    types = Set{Type}((typeof(val) for (val,) in get(env, Imp.Var(:everything), Set())))
+    types = Set{Type}()
+        for (_, set) in env
+            for row in set
+                for val in row
+                    push!(types, typeof(val))
+                end
+            end
+        end
+    
     actual_inferred_type = Imp.infer_types(env, types, expr)[expr]
     # TODO this needs work
     # prev_inferred_type != nothing && @test prev_inferred_type == actual_inferred_type
@@ -33,7 +41,10 @@ function test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_
     expected_result != nothing && @test expected_result == actual_result
 
     actual_type = Imp.set_type(actual_result)
-    @test issubset(actual_type, actual_inferred_type)
+    if !issubset(actual_type, actual_inferred_type)
+        @show actual_type actual_inferred_type
+        @test issubset(actual_type, actual_inferred_type)
+    end
 
     (actual_inferred_type, actual_result)
 end
@@ -66,7 +77,14 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
             (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
         end
 
-        types = Set{Type}((typeof(val) for (val,) in get(env, Imp.Var(:everything), Set())))
+        types = Set{Type}()
+        for (_, set) in env
+            for row in set
+                for val in row
+                    push!(types, typeof(val))
+                end
+            end
+        end
         expr = Imp.lower(env, types, expr)
         @show :lowered expr
         println()
@@ -235,6 +253,7 @@ test_imp(:( $add(1, 1) ), result=:( 2 ), everything=nothing)
 # TODO should probably propagate constants before dnf
 test_imp(:( $add(0 | 1, 0 | 1) ), result=:( 0 | 1 | 2 ), everything=nothing)
 test_imp(:( let add = $(Imp.Native((a,b) -> (a+b)%3, (Int64, Int64), (Int64,))); let inc = add(1); inc(1) end end ), result=:( 2 ), everything=nothing)
+test_imp(:( reduce($add, 0, points) ), result=:( 2 ), everything=nothing)
 stringy = Imp.Native(a -> a isa String, (String,), ())
 test_imp(:( a -> $stringy(a) ), result=:( string ), unboundable=true)
 test_imp(:( a -> string(a) & $stringy(a) ), result=:( string ))

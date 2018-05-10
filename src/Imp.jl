@@ -324,31 +324,56 @@ function _interpret(env::Env{Set}, expr::Constant) ::Set
 end
 
 function _interpret(env::Env{Set}, expr::Primitive) ::Set
-    args = [interpret(env, arg) for arg in expr.args]
-    @match (expr.f, args) begin
-        (:|, [a, b]) => union(a,b)
-        (:&, [a, b]) => intersect(a,b)
-        (:!, [arg]) => bool_to_set(!set_to_bool(arg))
-        (:(=>), [a, b]) => bool_to_set((!set_to_bool(a) || set_to_bool(b)))
-        (:(==), [a, b]) => bool_to_set(a == b)
-        (:iff, [cond, true_branch, false_branch]) => set_to_bool(cond) ? true_branch : false_branch
-        (:reduce, [raw_op, raw_init, values]) => begin
-            op = Dict(((a,b) => c for (a,b,c) in raw_op))
+    @match (expr.f, expr.args) begin
+        (:reduce, [raw_op::ConjunctiveQuery, raw_init, raw_values]) => begin
+            # TODO this is such a mess
+            (var_a, var_b) = raw_op.query_vars[1:2]
+            raw_op = ConjunctiveQuery(setdiff(raw_op.yield_vars, [var_a, var_b]), raw_op.query_vars[3:end], raw_op.query_bounds[3:end], raw_op.clauses)
+            op(a,b) = begin
+                env[var_a] = Set([(a,)])
+                env[var_b] = Set([(b[end],)])
+                result = interpret(env, raw_op)
+                @assert length(result) == 1
+                @assert length(first(result)) == 1
+                first(first(result))
+            end
+            raw_init = interpret(env, raw_init)
             @assert length(raw_init) == 1
             @assert length(first(raw_init)) == 1
             init = first(raw_init)[1]
-            value = reduce((a,b) -> op[a,b[end]], init, values)
+            raw_values = interpret(env, raw_values)
+            value = reduce(op, init, raw_values)
             Set([(value,)])
         end
-        (:exists, [arg]) => bool_to_set(arg != false_set)
-        (:forall, [arg]) => bool_to_set(arg == env[Var(:everything)])
-        (:tuple, args) => reduce(true_set, args) do a, b
-            Set(((a_row..., b_row...) for a_row in a for b_row in b))
+        _ => begin
+            args = [interpret(env, arg) for arg in expr.args]
+            @match (expr.f, args) begin
+                (:|, [a, b]) => union(a,b)
+                (:&, [a, b]) => intersect(a,b)
+                (:!, [arg]) => bool_to_set(!set_to_bool(arg))
+                (:(=>), [a, b]) => bool_to_set((!set_to_bool(a) || set_to_bool(b)))
+                (:(==), [a, b]) => bool_to_set(a == b)
+                (:iff, [cond, true_branch, false_branch]) => set_to_bool(cond) ? true_branch : false_branch
+                (:reduce, [raw_op, raw_init, values]) => begin
+                    op = Dict(((a,b) => c for (a,b,c) in raw_op))
+                    @assert length(raw_init) == 1
+                    @assert length(first(raw_init)) == 1
+                    init = first(raw_init)[1]
+                    value = reduce((a,b) -> op[a,b[end]], init, values)
+                    Set([(value,)])
+                end
+                (:exists, [arg]) => bool_to_set(arg != false_set)
+                (:forall, [arg]) => bool_to_set(arg == env[Var(:everything)])
+                (:tuple, args) => reduce(true_set, args) do a, b
+                    Set(((a_row..., b_row...) for a_row in a for b_row in b))
+                end
+                (:compose, [a, b]) => Set(((a_row[1:end-1]..., b_row[2:end]...) for a_row in a for b_row in b if (length(a_row) > 0 && length(b_row) > 0) && a_row[end] == b_row[1]))
+                _ => error("Unknown primitive: $expr")
+            end
         end
-        (:compose, [a, b]) => Set(((a_row[1:end-1]..., b_row[2:end]...) for a_row in a for b_row in b if (length(a_row) > 0 && length(b_row) > 0) && a_row[end] == b_row[1]))
-        _ => error("Unknown primitive: $expr")
     end
 end
+
 
 # TODO these are kinda hacky - should probably depend on native.out_types
 return!(result::Set, returned::Union{Vector, Set}) = foreach(returned -> return!(result, returned), returned)
@@ -590,9 +615,9 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
                                                  Primitive(:&, [Primitive(:!, [apply(c)]), apply(f, slots)])])
 
         # reduce(...)[slot] => slot==reduce(...)
-        Primitive(:reduce, _) => begin
+        Primitive(:reduce, args) => begin
             @match [slot] = slots
-            Primitive(:(==), [slot, expr])
+            Primitive(:(==), [slot, Primitive(:reduce, map(apply, args))])
         end
 
         # E(arg)[] => E(arg[...])
@@ -798,7 +823,8 @@ function conjunctive_query(expr::Abstract)::Expr
     is_false && return Constant(false_set)
 
     # heuristic - solve variables in the order they are mentioned
-    query_vars = unique!(vcat(used_vars, expr.vars, exists_vars))
+    var_order = unique!(vcat(used_vars, expr.vars, exists_vars))
+    query_vars = intersect(var_order, vcat(expr.vars, exists_vars))
 
     ConjunctiveQuery(copy(expr.vars), query_vars, Expr[], clauses)
 end
@@ -839,6 +865,7 @@ function bound_clauses(bound_vars::Vector{Var}, var::Var, clauses::Vector{Expr})
             end
         end
     end
+    bounds = map(expr -> bound_abstract(bound_vars, expr), bounds)
     (bounds, remaining)
 end
 
@@ -903,7 +930,7 @@ Base.:-(a::Pass, b::Pass) = Int64(a) - Int64(b)
 Base.:+(a::Pass, b::Int64) = Pass(Int64(a) + b)
 Base.:-(a::Pass, b::Int64) = Pass(Int64(a) - b)
 
-function imp(expr; globals=nothing, env=nothing, types=nothing, everything=nothing, passes=instances(Pass))
+function imp(expr; globals=nothing, env=nothing, lib=nothing, types=nothing, everything=nothing, passes=instances(Pass))
     if globals != nothing
         env = Env{Set}(Var(name) => set for (name, set) in globals)
     end
@@ -925,6 +952,10 @@ function imp(expr; globals=nothing, env=nothing, types=nothing, everything=nothi
     end
     if PARSE in passes
         expr = @show parse(expr)
+        # TODO this is a hack
+        if lib != nothing
+            expr = replace_expr(expr, lib)
+        end
         scope_env = push!(copy(env), Var(:everything) => Set())
         expr = separate_scopes(Scope(scope_env), expr)
     end
@@ -945,15 +976,21 @@ function imp(expr; globals=nothing, env=nothing, types=nothing, everything=nothi
 end
 
 global_env = Env{Set}()
+global_lib = Env{Expr}()
 
 macro imp(expr)
     if @capture(expr, name_Symbol = value_)
         :(global_env[Var($(QuoteNode(name)))] = @imp $(value))
     else
-        :(imp($(QuoteNode(expr)), env=global_env))
+        :(imp($(QuoteNode(expr)), env=global_env, lib=global_lib))
     end
 end
 
-export imp, @imp
+macro lib(expr)
+    @assert @capture(expr, name_Symbol = value_)
+    :(global_lib[Var($(QuoteNode(name)))] = imp($(QuoteNode(value)), env=global_env, lib=global_lib, passes=PARSE:INLINE))
+end
+
+export imp, @imp, @lib
 
 end

@@ -41,4 +41,25 @@ Imp.global_env[Imp.Var(:train)] = train
 
 @imp embarked = (p, x) -> exists(train(p, _, _, _, _, _, _, _, _, _, _, x))
 
+# --- lib ---
+
+imp_replace(string, regex, replacement) = replace(string, Regex(regex), replacement)
+Imp.global_lib[Imp.Var(:replace)] = Imp.Native(imp_replace, (String, String, String), (String,))
+
+Imp.global_lib[Imp.Var(:+)] = Imp.Native(+, (Int64, Int64), (Int64,))
+
+@lib sum = {x} -> reduce(+, 0, x)
+
+@lib count = {x} -> sum{y -> if x(y) 1 end}
+
+# --- features ---
+
+@imp title = p -> replace(name(p), "(.*, )|(\\..*)", "")
+
+@imp table = (t, s, p) -> if title(p, t) & sex(p, s); 1 end
+@imp title_vs_sex = (t, s) -> if table(t, s); sum{table(t, s)} end
+
+# TODO need to project out _ for this to work reasonably
+# @imp title_vs_sex = (t, s) -> if title(_, t) & sex(_, s); count{p -> title(p, t) & sex(p, s)} end
+
 end

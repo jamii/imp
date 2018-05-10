@@ -446,9 +446,9 @@ function interpret(env::Env{SetType}, expr::Expr)
     union!(get!(expr_types, expr, SetType()), expr_type)
     expr_type
 end
-function infer_types(env::Env{Set}, expr::Expr)::Dict{Expr, SetType}
+function infer_types(env::Env{Set}, types::Set{Type}, expr::Expr)::Dict{Expr, SetType}
     empty!(expr_types)
-    interpret(env_types(env), expr)
+    interpret(push!(env_types(env), Var(:everything)=>Set(((typ,) for typ in types))), expr)
     copy(expr_types)
 end
 
@@ -650,15 +650,15 @@ function raise_union(expr::Expr)::Expr
     raise(map_expr(raise_union, expr))
 end
 
-function lower(env::Env{Set}, expr::Expr)::Expr
+function lower(env::Env{Set}, types::Set{Type}, expr::Expr)::Expr
     last_id = Ref(0)
 
-    expr_types = infer_types(env, expr)
+    expr_types = infer_types(env, types, expr)
     arities = Dict{Expr, Arity}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
     expr = desugar(arities, last_id, expr)
 
     # TODO gross that we have to do type inference twice - that global!
-    expr_types = infer_types(env, expr)
+    expr_types = infer_types(env, types, expr)
     arities = Dict{Expr, Arity}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
     expr = simple_apply(arities, last_id, expr)
 
@@ -870,7 +870,7 @@ Base.:-(a::Pass, b::Pass) = Int64(a) - Int64(b)
 Base.:+(a::Pass, b::Int64) = Pass(Int64(a) + b)
 Base.:-(a::Pass, b::Int64) = Pass(Int64(a) - b)
 
-function imp(expr; globals=nothing, env=nothing, everything=nothing, passes=instances(Pass))
+function imp(expr; globals=nothing, env=nothing, types=nothing, everything=nothing, passes=instances(Pass))
     if globals != nothing
         env = Env{Set}(Var(name) => set for (name, set) in globals)
     end
@@ -880,18 +880,21 @@ function imp(expr; globals=nothing, env=nothing, everything=nothing, passes=inst
     if everything != nothing
         env[Var(:everything)] = everything
     end
+    if types == nothing
+        types = Set{Type}((typeof(val) for (_, set) in env for row in set for val in row))
+    end
     if PARSE in passes
-        expr = parse(expr)
+        expr = @show parse(expr)
         expr = separate_scopes(Scope(env), expr)
     end
     if INLINE in passes
-        expr = inline(expr)
+        expr = @show inline(expr)
     end
     if LOWER in passes
-        expr = lower(env, expr)
+        expr = @show lower(env, types, expr)
     end
     if BOUND in passes
-        expr = bound_abstract(expr)
+        expr = @show bound_abstract(expr)
     end
     if INTERPRET in passes
         expr = interpret(env, expr)

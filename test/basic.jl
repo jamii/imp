@@ -22,7 +22,8 @@ const globals = Dict{Symbol, Set}(
 const everything = Set{Any}([(scalar,) for (_,set) in globals for row in set for scalar in row])
 
 function test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
-    actual_inferred_type = Imp.infer_types(env, expr)[expr]
+    types = Set{Type}((typeof(val) for (val,) in get(env, Imp.Var(:everything), Set())))
+    actual_inferred_type = Imp.infer_types(env, types, expr)[expr]
     # TODO this needs work
     # prev_inferred_type != nothing && @test prev_inferred_type == actual_inferred_type
     expected_inferred_type != nothing && @test issubset(actual_inferred_type, expected_inferred_type)
@@ -65,7 +66,8 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
             (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)
         end
 
-        expr = Imp.lower(env, expr)
+        types = Set{Type}((typeof(val) for (val,) in get(env, Imp.Var(:everything), Set())))
+        expr = Imp.lower(env, types, expr)
         @show :lowered expr
         println()
         if lowered_expr != nothing

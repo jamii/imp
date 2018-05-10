@@ -454,7 +454,17 @@ function _interpret(env::Env{SetType}, expr::Primitive)::SetType
         (:tuple, args) => reduce(true_set, args) do a, b
             Set(((a_row..., b_row...) for a_row in a for b_row in b))
         end
-        (:compose, [a, b]) => Set(((a_row[1:end-1]..., b_row[2:end]...) for a_row in a for b_row in b if (length(a_row) > 0 && length(b_row) > 0) && a_row[end] == b_row[1]))
+        (:compose, [a, b]) => begin
+            result = Set()
+            for a_row in a
+                for b_row in b
+                    if length(a_row) > 0 && length(b_row) > 0 && (a_row[end] == b_row[1])
+                        push!(result, (a_row[1:end-1]..., b_row[2:end]...))
+                    end
+                end
+            end
+            result
+        end
         _ => error("Unknown primitive: $expr")
     end
 end

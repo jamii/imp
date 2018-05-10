@@ -56,10 +56,8 @@ Imp.global_lib[Imp.Var(:+)] = Imp.Native(+, (Int64, Int64), (Int64,))
 
 @imp title = p -> replace(name(p), "(.*, )|(\\..*)", "")
 
-@imp table = (t, s, p) -> if title(p, t) & sex(p, s); 1 end
-@imp title_vs_sex = (t, s) -> if table(t, s); sum{table(t, s)} end
-
-# TODO need to project out _ for this to work reasonably
-# @imp title_vs_sex = (t, s) -> if title(_, t) & sex(_, s); count{p -> title(p, t) & sex(p, s)} end
+@imp title_vs_sex = (t, s) -> if title(_, t) & sex(_, s)
+    count{p -> title(p, t) & sex(p, s)}
+end
 
 end

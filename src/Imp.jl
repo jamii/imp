@@ -576,7 +576,7 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
         Apply(f, args) where (length(args) > 1) => apply(reduce((f, arg) -> Apply(f, [arg]), f, args), slots)
 
         # f(x)[slots...] => f[x, slots...]
-        Apply(f, [x && Var(_, scope)]) where (scope != 0) => apply(f, [x, slots...])
+        Apply(f, [x && Var(name, scope)]) where (name == :everything || (scope != 0)) => apply(f, [x, slots...])
 
         # f(g)[slots...] => exists((new_slots...) -> f[new_slots..., slots...] & g[new_slots...])
         Apply(f, [g]) => begin
@@ -759,6 +759,24 @@ function _interpret(env::Env, expr::ConjunctiveQuery)::Set
     Set((row[yield_ixes] for row in _interpret(env, expr, 1)))
 end
 
+function permute(bound_vars::Vector{Var}, expr::Apply)::Expr
+    apply_args = Var[]
+    columns = Int64[]
+    dupe_columns = Pair{Int64,Int64}[]
+    permute_column!(bound_var) = begin
+        bound_columns = findall(isequal(bound_var), expr.args)
+        if !isempty(bound_columns)
+            push!(apply_args, bound_var)
+            push!(columns, bound_columns[1])
+            for column in bound_columns[2:end]
+                push!(dupe_columns, column => bound_columns[1])
+            end
+        end
+    end
+    foreach(permute_column!, bound_vars)
+    Apply(Permute(expr.f, columns, dupe_columns), apply_args)
+end
+
 function permute(bound_vars::Vector{Var}, var::Var, expr::Apply)::Expr
     apply_args = Var[]
     columns = Int64[]
@@ -838,7 +856,7 @@ function bound_clauses(bound_vars::Vector{Var}, var::Var, clauses::Vector{Expr})
                 if var in args
                     push!(bounds, permute(bound_vars, var, clause))
                 end
-                if !issubset(args, union(bound_vars, (var, Var(:everything))))
+                if !issubset(args, union(bound_vars, [var, Var(:everything)]))
                     push!(remaining, clause)
                 end
             end
@@ -874,7 +892,12 @@ function bound_abstract(bound_vars::Vector{Var}, expr::Expr)::Expr
         _::Abstract => begin
             query = conjunctive_query(expr)
             query == Constant(false_set) && return query
-            clauses = query.clauses
+            clauses = Vector{Expr}(map(query.clauses) do clause
+                @match clause begin
+                    Apply(f, args) where issubset(args, union(bound_vars, [Var(:everything)])) => permute(bound_vars, clause)
+                    _ => clause
+                end
+            end)
             bounds = Expr[]
             for i in 1:length(query.query_vars)
                 vars = query.query_vars[1:i-1]

@@ -870,8 +870,13 @@ Base.:-(a::Pass, b::Pass) = Int64(a) - Int64(b)
 Base.:+(a::Pass, b::Int64) = Pass(Int64(a) + b)
 Base.:-(a::Pass, b::Int64) = Pass(Int64(a) - b)
 
-function imp(expr; globals=Dict{Symbol, Set}(), everything=nothing, passes=instances(Pass))
-    env = Env{Set}(Var(name) => set for (name, set) in globals)
+function imp(expr; globals=nothing, env=nothing, everything=nothing, passes=instances(Pass))
+    if globals != nothing
+        env = Env{Set}(Var(name) => set for (name, set) in globals)
+    end
+    if env == nothing
+        env = Env{Set}()
+    end
     if everything != nothing
         env[Var(:everything)] = everything
     end
@@ -894,6 +899,16 @@ function imp(expr; globals=Dict{Symbol, Set}(), everything=nothing, passes=insta
     expr
 end
 
-export imp
+global_env = Env{Set}()
+
+macro imp(expr)
+    if @capture(expr, name_Symbol = value_)
+        :(global_env[Var($(QuoteNode(name)))] = @imp $(value))
+    else
+        :(imp($(QuoteNode(expr)), env=global_env))
+    end
+end
+
+export imp, @imp
 
 end

@@ -4,6 +4,8 @@ using Imp
 using CSV
 using DataFrames
 
+# https://www.kaggle.com/mrisdal/exploring-survival-on-the-titanic/code
+
 # --- data import ---
 # NOTE needs DataStreams master
 
@@ -52,9 +54,27 @@ Imp.global_lib[Imp.Var(:+)] = Imp.Native(+, (Int64, Int64), (Int64,))
 
 @lib count = {x} -> sum{y -> if x(y) 1 end}
 
+@lib xor = {x, y} -> x ? x : y
+
+imp_split(string, delim) = collect(enumerate(split(string, delim)))
+Imp.global_lib[Imp.Var(:split)] = Imp.Native(imp_split, (String, String), (Int64, String))
+
+# TODO need to handle functions with multiple returns
+# @imp split("a b c", " ")
+
 # --- features ---
 
 @imp title = p -> replace(name(p), "(.*, )|(\\..*)", "")
+
+@imp title_vs_sex = (t, s) -> if title(_, t) & sex(_, s)
+    count{p -> title(p, t) & sex(p, s)}
+end
+
+@imp rare_title = "Dona" | "Lady" | "the Countess" |"Capt" | "Col" | "Don" | "Dr" | "Major" | "Rev" | "Sir" | "Jonkheer"
+
+@imp canonical_title = ("Mlle", "Miss") | ("Ms", "Miss") | ("Mme", "Mrs") | (rare_title, "Rare Title")
+
+@imp title = p -> xor{p.title.canonical_title, p.title}
 
 @imp title_vs_sex = (t, s) -> if title(_, t) & sex(_, s)
     count{p -> title(p, t) & sex(p, s)}

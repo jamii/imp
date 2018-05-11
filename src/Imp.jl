@@ -5,9 +5,9 @@ import MacroTools: @capture
 using Rematch
 
 # TODO remove workaround for https://github.com/JuliaLang/julia/issues/26885
-function Base.show(io::IO, set::Set)
-    print(io, "Set(", collect(set), ")")
-end
+# function Base.show(io::IO, set::Set)
+#     print(io, "Set(", collect(set), ")")
+# end
 
 macro splice(iterator, body)
   @assert iterator.head == :call

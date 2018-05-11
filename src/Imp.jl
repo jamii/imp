@@ -128,6 +128,11 @@ function parse(ast)
         Primitive(:iff, [parse(cond), parse(true_branch), Constant(false_set)])
     elseif @capture(ast, if cond_ true_branch_ else false_branch_ end)
         Primitive(:iff, [parse(cond), parse(true_branch), parse(false_branch)])
+    elseif ast.head == :elseif
+        @match ast.args begin
+            [cond, true_branch] => Primitive(:iff, [parse(cond), parse(true_branch), Constant(false_set)])
+            [cond, true_branch, false_branch] => Primitive(:iff, [parse(cond), parse(true_branch), parse(false_branch)])
+        end
     elseif @capture(ast, var_Symbol -> value_)
         Abstract([Var(var)], parse(value))
     elseif @capture(ast, (vars__,) -> value_)

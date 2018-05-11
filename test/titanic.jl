@@ -123,15 +123,14 @@ end
 @imp family = p -> p.surname.join("_").join(p.fsize.int_to_string)
 
 # TODO == is a mess
-# TODO elseif would be nice
 @imp fsized = p -> begin
     if p.fsize <= 1
         "singleton"
-    else (if p.fsize <= 4
+    elseif p.fsize <= 4
         "small"
-    else (if p.fsize # surprisingly, the expression is not bounded without this
+    elseif p.fsize # surprisingly, the expression is not bounded without this
         "large"
-    end) end) end
+    end
 end
 
 @imp deck = p -> split(p.cabin, "")(1)

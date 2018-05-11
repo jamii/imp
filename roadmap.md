@@ -11,7 +11,7 @@ Language features:
 * ~~and/or/not~~
 * ~~==/forall/exists~~
 * ~~negation~~
-* reduce (TODO reduce over native)
+* ~~reduce~~
 * ~~let~~
 * ~~tuple~~
 * ~~compose~~
@@ -26,7 +26,7 @@ Passes:
 * ~~DNF~~
 * variable ordering (TODO need to reorder for native functions)
 * ~~bounding~~
-* native functions (TODO reduce over native)
+* ~~native functions~~
 
 Tests/docs
 

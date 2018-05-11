@@ -110,7 +110,7 @@ map_expr(f, expr::Expr) = map_expr(f, typeof(expr), expr)
 function parse(ast)
     if @capture(ast, bool_Bool)
         bool ? Constant(true_set) : Constant(false_set)
-    elseif @capture(ast, constant_Int64_String)
+    elseif @capture(ast, constant_Int64_Float64_String)
         Constant(Set([(constant,)]))
     elseif @capture(ast, name_Symbol)
         if name == :(_)
@@ -517,7 +517,8 @@ function desugar(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)::Exp
             desugar(Abstract(vars, body))
         end
         Primitive(:compose, [a, b]) => begin
-            coalesce(arity[expr], 0) == 0 && return Constant(false_set)
+            coalesce(arity[a], 0) == 0 && return Constant(false_set)
+            coalesce(arity[b], 0) == 0 && return Constant(false_set)
             a_vars = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:coalesce(arity[a], 0)]
             b_vars = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:coalesce(arity[b], 0)]
             var = b_vars[1] = a_vars[end]
@@ -693,9 +694,9 @@ end
 function lower(env::Env{Set}, types::Set{Type}, expr::Expr)::Expr
     last_id = Ref(0)
 
-    expr_types = infer_types(env, types, expr)
+    @show expr_types = infer_types(env, types, expr)
     arities = Dict{Expr, Arity}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
-    expr = desugar(arities, last_id, expr)
+    expr = @show desugar(arities, last_id, expr)
 
     # TODO gross that we have to do type inference twice - that global!
     expr_types = infer_types(env, types, expr)
@@ -866,7 +867,6 @@ function bound_clauses(bound_vars::Vector{Var}, var::Var, clauses::Vector{Expr})
                 if var in args
                     push!(bounds, permute(bound_vars, var, clause))
                 end
-                @show args bound_vars var !issubset(args, union(bound_vars, [var, Var(:everything)]))
                 if !issubset(args, union(bound_vars, [var]))
                     push!(remaining, clause)
                 end

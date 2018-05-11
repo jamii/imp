@@ -957,9 +957,9 @@ function bound_abstract(bound_vars::Vector{Var}, expr::Expr)::Expr
         _::Abstract => begin
             query = conjunctive_query(expr)
             query == Constant(false_set) && return query
-            
+
             ordered_vars = order_vars(bound_vars, query.query_vars, query.clauses)
-            
+
             bounds = Expr[]
             clauses = query.clauses
             for i in 1:length(ordered_vars)

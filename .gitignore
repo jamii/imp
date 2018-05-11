@@ -11,3 +11,5 @@ lb/demo/*.logic
 **/*.rs.bk
 .vscode
 callgrind.out
+
+*.ipynb

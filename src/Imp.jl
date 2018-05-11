@@ -720,7 +720,7 @@ struct ConjunctiveQuery <: Expr
 end
 
 struct Permute <: Expr
-    arg::Var
+    arg::Expr
     columns::Vector{Int64}
     dupe_columns::Vector{Pair{Int64, Int64}}
 end
@@ -739,7 +739,7 @@ function unparse(expr::Union{Permute, ConjunctiveQuery})
 end
 
 function _interpret(env::Env, expr::Permute)::Set
-    Set((row[expr.columns] for row in env[expr.arg]
+    Set((row[expr.columns] for row in interpret(env, expr.arg)
          if all((d) -> row[d[1]] == row[d[2]], expr.dupe_columns)))
 end
 
@@ -866,16 +866,20 @@ function bound_clauses(bound_vars::Vector{Var}, var::Var, clauses::Vector{Expr})
                 if var in args
                     push!(bounds, permute(bound_vars, var, clause))
                 end
-                if !issubset(args, union(bound_vars, [var, Var(:everything)]))
+                @show args bound_vars var !issubset(args, union(bound_vars, [var, Var(:everything)]))
+                if !issubset(args, union(bound_vars, [var]))
                     push!(remaining, clause)
                 end
             end
             Apply(f::Native, args) => begin
                 if all(in(bound_vars), args[1:length(f.in_types)]) &&
-                    length(f.out_types) == 1 &&
-                    var == args[end]
-                    push!(bounds, Apply(f, args[1:length(f.in_types)]))
-                else
+                    (var in args[length(f.in_types)+1:end])
+                    inner_apply = Apply(f, args[1:length(f.in_types)])
+                    outer_apply = Apply(inner_apply, args[length(f.in_types)+1:end])
+                    push!(bounds, permute(bound_vars, var, outer_apply))
+                end
+                if !(issubset(args, union(bound_vars, [var])) &&
+                     (var in args[length(f.in_types)+1:end]))
                     push!(remaining, clause)
                 end
             end
@@ -902,13 +906,8 @@ function bound_abstract(bound_vars::Vector{Var}, expr::Expr)::Expr
         _::Abstract => begin
             query = conjunctive_query(expr)
             query == Constant(false_set) && return query
-            clauses = Vector{Expr}(map(query.clauses) do clause
-                @match clause begin
-                    Apply(f, args) where issubset(args, union(bound_vars, [Var(:everything)])) => permute(bound_vars, clause)
-                    _ => clause
-                end
-            end)
             bounds = Expr[]
+            clauses = query.clauses
             for i in 1:length(query.query_vars)
                 vars = query.query_vars[1:i-1]
                 var = query.query_vars[i]
@@ -920,6 +919,13 @@ function bound_abstract(bound_vars::Vector{Var}, expr::Expr)::Expr
                 end
             end
             clause_bound_vars = vcat(bound_vars, query.query_vars)
+            clauses = map(clauses) do clause
+                @match clause begin
+                    Apply(f::Var, args) where issubset(args, union(clause_bound_vars, [Var(:everything)])) => permute(clause_bound_vars, clause)
+                    # TODO need to handle case where f is Native
+                    _ => clause
+                end
+            end
             clauses = map(expr -> bound_abstract(clause_bound_vars, expr), clauses)
             ConjunctiveQuery(query.yield_vars, query.query_vars, bounds, clauses)
         end

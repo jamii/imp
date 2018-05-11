@@ -237,6 +237,7 @@ test_imp(:( rsvp."yes" ), result=:( "alice" ))
 test_imp(:( _ ), result=:( x -> true ), unboundable=true)
 test_imp(:( r -> rsvp(_, r) ), result=:( r -> exists(p -> rsvp(p, r)) ))
 test_imp(:( rsvp(_) ), result=:( r -> exists(p -> rsvp(p, r)) ))
+test_imp(:( x -> g(_) ), result=:( _ ), unboundable=true)
 
 # repeated vars
 test_imp(:( x -> likes(x, x) ), result=:( "bob" | "eve" ))

@@ -14,14 +14,14 @@ data = Set()
 train = Set()
 test = Set()
 
-df = CSV.read("data/titanic/train.csv", header=1, types=[Int64, Int64, Int64, String, String, Union{Float64,Missing}, Int64, Int64, String, Float64, Union{String,Missing}, Union{String,Missing}])
+df = CSV.read(joinpath(@__DIR__, "../data/titanic/train.csv"), header=1, types=[Int64, Int64, Int64, String, String, Union{Float64,Missing}, Int64, Int64, String, Float64, Union{String,Missing}, Union{String,Missing}])
 df.colindex
 for row in DataFrames.eachrow(df)
     push!(data, tuple((val for (_,val) in row)...))
     push!(train, (row[1][1],))
 end
 
-df = CSV.read("data/titanic/test.csv", header=1, types=[Int64, Int64, String, String, Union{Float64,Missing}, Int64, Int64, String, Union{Float64,Missing}, Union{String,Missing}, Union{String,Missing}])
+df = CSV.read(joinpath(@__DIR__, "../data/titanic/test.csv"), header=1, types=[Int64, Int64, String, String, Union{Float64,Missing}, Int64, Int64, String, Union{Float64,Missing}, Union{String,Missing}, Union{String,Missing}])
 df.colindex
 train = Set()
 for row in DataFrames.eachrow(df)

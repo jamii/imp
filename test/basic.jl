@@ -30,7 +30,7 @@ function test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_
                 end
             end
         end
-    
+
     actual_inferred_type = Imp.infer_types(env, types, expr)[expr]
     # TODO this needs work
     # prev_inferred_type != nothing && @test prev_inferred_type == actual_inferred_type

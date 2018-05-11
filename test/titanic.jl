@@ -120,11 +120,7 @@ end
 
 @imp fsize = p -> p.sibsp + p.parch
 
-# TODO inference is too slow on this expr
-# @imp family = p -> p.surname.join("_").join(p.fsize.int_to_string)
-@imp fsize_string = p -> string_of_int(fsize(p))
-@imp fsize_prefixed = p -> "_".join(p.fsize_string)
-@imp family = p -> join(p.surname, p.fsize_prefixed)
+@imp family = p -> p.surname.join("_").join(p.fsize.int_to_string)
 
 # TODO == is a mess
 # TODO elseif would be nice

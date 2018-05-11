@@ -490,16 +490,78 @@ function infer_types(env::Env{Set}, types::Set{Type}, expr::Expr)::Dict{Expr, Se
     copy(expr_types)
 end
 
+# --- inference ---
+
+function infer_arity(env::Env{Set{Int64}}, expr::Expr)::Dict{Expr, Set{Int64}}
+    arities = Dict{Expr, Set{Int64}}()
+    infer(expr::Expr)::Set{Int64} = begin
+        arity = @match expr begin
+            Constant(value) => Set{Int64}(length(row) for row in value)
+            Var(_, 0) => env[expr]
+            Var(_, _) => Set{Int64}(1)
+            Apply(f, args) => begin
+                result = Set{Int64}()
+                for arity_f in infer(f)
+                    for arity_args in infer(Primitive(:tuple, args))
+                        if arity_f - arity_args >= 0
+                            push!(result, arity_f - arity_args)
+                        end
+                    end
+                end
+                result
+            end
+            Primitive(f, args) => begin
+                @match (f, map(infer, args)) begin
+                    (:|, [a, b]) => union(a, b)
+                    (:&, [a, b]) => intersect(a, b)
+                    (:!, _) => Set{Int64}(0)
+                    (:(=>), _) => Set{Int64}(0)
+                    (:(==), _) => Set{Int64}(0)
+                    (:iff, [c, t, f]) => union(t, f)
+                    (:reduce, _) => Set{Int64}(1)
+                    (:exists, _) => Set{Int64}(0)
+                    (:forall, _) => Set{Int64}(0)
+                    (:tuple, args) => reduce(Set{Int64}(0), args) do a, b
+                        result = Set{Int64}()
+                        for arity_a in a
+                            for arity_b in b
+                                push!(result, arity_a + arity_b)
+                            end
+                        end
+                        result
+                    end
+                    (:compose, [a, b]) => begin
+                        result = Set{Int64}()
+                        for arity_a in a
+                            for arity_b in b
+                                if arity_a + arity_b - 2 >= 0
+                                    push!(result, arity_a + arity_b - 2)
+                                end
+                            end
+                        end
+                        result
+                    end
+                end
+            end
+            Native(f, in_types, out_types) => Set{Int64}(length(in_types) + length(out_types))
+            Abstract(vars, value) => Set{Int64}((length(vars) + av for av in infer(value)))
+        end
+        arities[expr] = arity
+        arity
+    end
+    infer(expr)
+    arities
+end
+
 # --- lower ---
 
 const Arity = Union{Int64, Nothing} # false has arity nothing
 
-function arity(set_type::SetType)::Arity
-    arities = map(length, set_type)
+function arity(arities::Set{Int64})::Arity
     @match length(arities) begin
         0 => nothing
         1 => first(arities)
-        _ => compile_error("Ill-typed: $set_type")
+        _ => compile_error("Ill-typed: $arities")
     end
 end
 
@@ -696,15 +758,17 @@ end
 
 function lower(env::Env{Set}, types::Set{Type}, expr::Expr)::Expr
     last_id = Ref(0)
+    env_arities = Env{Set{Int64}}((name => Set{Int64}(length(row) for row in set) for (name, set) in env))
+    env_arities[Var(:everything)] = Set{Int64}(1)
 
-    @show expr_types = infer_types(env, types, expr)
-    arities = Dict{Expr, Arity}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
-    expr = @show desugar(arities, last_id, expr)
+    arities = infer_arity(env_arities, expr)
+    simple_arities = Dict{Expr, Arity}((name => arity(arities) for (name, arities) in arities))
+    expr = @show desugar(simple_arities, last_id, expr)
 
-    # TODO gross that we have to do type inference twice - that global!
-    expr_types = infer_types(env, types, expr)
-    arities = Dict{Expr, Arity}(((expr, arity(set_type)) for (expr, set_type) in expr_types))
-    expr = simple_apply(arities, last_id, expr)
+    # TODO gross that we have to do inference twice
+    arities = infer_arity(env_arities, expr)
+    simple_arities = Dict{Expr, Arity}((name => arity(arities) for (name, arities) in arities))
+    expr = simple_apply(simple_arities, last_id, expr)
 
     expr = lower_negation(expr)
     expr = raise_union(expr)
@@ -986,7 +1050,7 @@ function bound_abstract(bound_vars::Vector{Var}, expr::Expr)::Expr
                 end
             end
             clauses = map(expr -> bound_abstract(clause_bound_vars, expr), clauses)
-            ConjunctiveQuery(query.yield_vars, query.query_vars, bounds, clauses)
+            ConjunctiveQuery(query.yield_vars, ordered_vars, bounds, clauses)
         end
         _ => map_expr(expr -> bound_abstract(bound_vars, expr), expr)
     end

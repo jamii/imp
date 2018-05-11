@@ -922,6 +922,11 @@ function bound_abstract(bound_vars::Vector{Var}, expr::Expr)::Expr
             clauses = map(clauses) do clause
                 @match clause begin
                     Apply(f::Var, args) where issubset(args, union(clause_bound_vars, [Var(:everything)])) => permute(clause_bound_vars, clause)
+                    Apply(f::Native, args) where issubset(args, union(clause_bound_vars, [Var(:everything)])) => begin
+                        inner_apply = Apply(f, args[1:length(f.in_types)])
+                        outer_apply = Apply(inner_apply, args[length(f.in_types)+1:end])
+                        permute(bound_vars, outer_apply)
+                    end
                     # TODO need to handle case where f is Native
                     _ => clause
                 end

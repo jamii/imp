@@ -259,6 +259,14 @@ stringy = Imp.Native(a -> a isa String, (String,), ())
 test_imp(:( a -> $stringy(a) ), result=:( string ), unboundable=true)
 test_imp(:( a -> string(a) & $stringy(a) ), result=:( string ))
 test_imp(:( string & (a -> $stringy(a)) ), result=:( string ))
+splittish = Imp.Native((string, delim) -> collect(enumerate(map(String, split(string, delim)))), (String, String), (Int64, String))
+test_imp(:( $splittish("a b c", " ") ), result=:( (1, "a") | (2, "b") | (3, "c") ), everything=nothing)
+test_imp(:( $splittish("a b c", " ")(2) ), result=:( "b" ), everything=nothing)
+test_imp(:( i -> $splittish("a b c", " ", i, "b") ), result=:( 2 ), everything=nothing)
+test_imp(:( i -> $splittish("a b c", " ", i, " ") ), result=:( false ), everything=nothing)
+# can't write this test with current universe
+# test_imp(:( i -> $splittish("a b", " ", i, _) ), result=:( 1 | 2 ), everything=nothing)
+@test imp(:(i -> $splittish("a b c", " ", i, _)), types=Set{Type}([String, Int64])) == Set([(3,), (2,), (1,)])
 
 # TODO reduce +
 

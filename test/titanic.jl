@@ -79,6 +79,7 @@ imp_split(string, regex) = collect(enumerate(map(String, split(string, Regex(reg
 Imp.global_lib[Imp.Var(:split)] = Imp.Native(imp_split, (String, String), (Int64, String))
 
 Imp.global_lib[Imp.Var(:string_of_int)] = Imp.Native(string, (Int64,), (String,))
+Imp.global_lib[Imp.Var(:int_to_string)] = Imp.Native(string, (Int64,), (String,))
 
 Imp.global_lib[Imp.Var(:join)] = Imp.Native(string, (String, String), (String,))
 
@@ -119,7 +120,7 @@ end
 
 @imp fsize = p -> p.sibsp + p.parch
 
-# TODO need variable ordering to satisfy natives
+# TODO inference is too slow on this expr
 # @imp family = p -> p.surname.join("_").join(p.fsize.int_to_string)
 @imp fsize_string = p -> string_of_int(fsize(p))
 @imp fsize_prefixed = p -> "_".join(p.fsize_string)
@@ -127,21 +128,15 @@ end
 
 # TODO == is a mess
 # TODO elseif would be nice
-# TODO variable ordering
-# @imp fsized = p -> begin
-#     if p.fsize <= 1
-#         "singleton"
-#     elseif p.fsize <= 4
-#         "small"
-#     else
-#         "large"
-#     end
-# end
-@imp fsized = p -> (
-    (if (p.fsize <= 1) "singleton" end) |
-    (if (1 < p.fsize) & (p.fsize < 5); "small" end) |
-    (if (5 <= p.fsize); "large" end)
-)
+@imp fsized = p -> begin
+    if p.fsize <= 1
+        "singleton"
+    else (if p.fsize <= 4
+        "small"
+    else (if p.fsize # surprisingly, the expression is not bounded without this
+        "large"
+    end) end) end
+end
 
 @imp deck = p -> split(p.cabin, "")(1)
 

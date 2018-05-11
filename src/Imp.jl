@@ -815,9 +815,57 @@ function is_scalar_bound(bound_vars::Vector{Var}, expr::Expr)
     @match expr begin
         Constant(value) => (length(value) == 1) && (length(first(value)) == 1)
         Var(_,_) where expr in bound_vars => true
+        # TODO only true if reduce is over bound_vars
         Primitive(:reduce, _) => true
         _ => false
     end
+end
+
+# TODO this has a lot of overlap with bound_clauses - could probably combine them
+function order_vars(bound_vars::Vector{Var}, vars::Vector{Var}, clauses::Vector{Expr})
+    supported = Set(bound_vars)
+    remaining = copy(vars)
+    ordered = Var[]
+    while !isempty(remaining)
+        for clause in clauses
+            @match clause begin
+                Apply(f::Var, args) => begin
+                    for arg in args
+                        if arg isa Var
+                            push!(supported, arg)
+                        end
+                    end
+                end
+                Apply(f::Native, args) => begin
+                    if all(in(ordered), args[1:length(f.in_types)])
+                        for arg in args
+                            if arg isa Var
+                                push!(supported, arg)
+                            end
+                        end
+                    end
+                end
+                Primitive(:(==), [a, b]) => begin
+                    if (a isa Var) && is_scalar_bound(ordered, b)
+                        push!(supported, a)
+                    elseif (b isa Var) && is_scalar_bound(ordered, a)
+                        push!(supported, b)
+                    end
+                end
+                Primitive(:!, [arg]) => nothing
+            end
+        end
+        ix = findfirst(in(supported), remaining)
+        if ix == nothing
+            # TODO can't bail here because some tests are unsupported
+            @warn "Cannot support $remaining with $clauses"
+            append!(ordered, remaining)
+            break
+        end
+        push!(ordered, remaining[ix])
+        deleteat!(remaining, ix)
+    end
+    ordered
 end
 
 function conjunctive_query(expr::Abstract)::Expr
@@ -909,11 +957,14 @@ function bound_abstract(bound_vars::Vector{Var}, expr::Expr)::Expr
         _::Abstract => begin
             query = conjunctive_query(expr)
             query == Constant(false_set) && return query
+            
+            ordered_vars = order_vars(bound_vars, query.query_vars, query.clauses)
+            
             bounds = Expr[]
             clauses = query.clauses
-            for i in 1:length(query.query_vars)
-                vars = query.query_vars[1:i-1]
-                var = query.query_vars[i]
+            for i in 1:length(ordered_vars)
+                vars = ordered_vars[1:i-1]
+                var = ordered_vars[i]
                 (bound, clauses) = bound_clauses(vcat(bound_vars, vars), var, clauses)
                 if isempty(bound)
                     push!(bounds, Var(:everything))

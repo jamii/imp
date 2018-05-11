@@ -145,6 +145,9 @@ function parse(ast)
         AbstractHigher(map(Var, vars), parse(value))
     elseif @capture(ast, f_{args__})
         ApplyHigher(parse(f), map(parse, args))
+    elseif @capture(ast, f_[ixes__])
+        @assert all(ix -> ix isa Integer, ixes) "Unknown syntax: $ast"
+        Permute(parse(f), ixes, [])
     elseif ast isa Expr
         # spliced in
         ast

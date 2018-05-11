@@ -274,6 +274,13 @@ test_imp(:( i -> $splittish("a b c", " ", i, " ") ), result=:( false ), everythi
 test_imp(:( let sum = {x} -> reduce(+, 0, x); sum{points} end ), result=:( 2 ), everything=nothing)
 test_imp(:( let tuple = {x, y} -> (x, y); let tuple1 = tuple{1}; tuple1{"alice" | "bob"} end end ), result=:( (1, "alice" | "bob") ))
 
+# permute
+# TODO needs work in lower
+# test_imp(:( rsvp[1,2] ), result=:( rsvp ))
+# test_imp(:( rsvp[2,1] ), result=:( (a,b) -> rsvp(b,a) ))
+# test_imp(:( rsvp[1] ), result=:( (a) -> exists(b -> rsvp(a,b)) ))
+# test_imp(:( rsvp[2] ), result=:( (a) -> exists(b -> rsvp(b,a)) ))
+
 # --- infer_types ---
 
 test_imp(:( true ), inferred_type=[()])

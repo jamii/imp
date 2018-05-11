@@ -187,6 +187,4 @@ median(map(first, collect(fares)))
 
 @imp s -> if (0|1)(s); count{p -> p.mother & p.survival(s)} end
 
-
-
 end

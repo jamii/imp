@@ -94,9 +94,6 @@ Imp.Native(<=, (Float64, Float64), ())
 
 Imp.global_env[Imp.Var(:missing)] = Set([(missing,)])
 
-# TODO need to handle functions with multiple returns
-# @imp split("a b c", " ")
-
 # --- features ---
 
 @imp title = p -> replace(name(p), "(.*, )|(\\..*)", "")

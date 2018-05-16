@@ -25,7 +25,6 @@ df = CSV.read(joinpath(@__DIR__, "../data/titanic/test.csv"), header=1, types=[I
 df.colindex
 train = Set()
 for row in DataFrames.eachrow(df)
-    @show row[1] row[1][1]
     push!(data, tuple(row[1][1], missing, (val for (_,val) in row[2:end])...))
     push!(test, (row[1][1],))
 end

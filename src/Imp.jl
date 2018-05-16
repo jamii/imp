@@ -1097,11 +1097,14 @@ Base.:-(a::Pass, b::Pass) = Int64(a) - Int64(b)
 Base.:+(a::Pass, b::Int64) = Pass(Int64(a) + b)
 Base.:-(a::Pass, b::Int64) = Pass(Int64(a) - b)
 
-function imp(expr; globals=nothing, env=nothing, lib=nothing, types=nothing, everything=nothing, passes=instances(Pass))
-    if globals != nothing
-        env = Env{Set}(Var(name) => set for (name, set) in globals)
-    end
+global_env = Env{Set}()
+global_lib = Env{Expr}()
+
+function imp(expr; globals=nothing, env=global_env, lib=global_lib, types=nothing, everything=nothing, passes=instances(Pass))
     if env == nothing
+        if globals != nothing
+            env = Env{Set}(Var(name) => set for (name, set) in globals)
+        end
         env = Env{Set}()
     end
     if everything != nothing
@@ -1135,15 +1138,12 @@ function imp(expr; globals=nothing, env=nothing, lib=nothing, types=nothing, eve
     if BOUND in passes
         expr = bound_abstract(expr)
     end
-    expr = build_indexes(env, expr)
     if INTERPRET in passes
+        expr = build_indexes(env, expr)
         expr = interpret(env, expr)
     end
     expr
 end
-
-global_env = Env{Set}()
-global_lib = Env{Expr}()
 
 macro imp(expr)
     if @capture(expr, name_Symbol = value_)
@@ -1153,11 +1153,25 @@ macro imp(expr)
     end
 end
 
+function show_imp(set::Set)
+    for row in sort(collect(set))
+        println(row)
+    end
+    set
+end
+
+macro imp!(expr)
+    quote
+        show_imp(@imp $(expr))
+        nothing
+    end
+end
+
 macro lib(expr)
     @assert @capture(expr, name_Symbol = value_)
     :(global_lib[Var($(QuoteNode(name)))] = imp($(QuoteNode(value)), env=global_env, lib=global_lib, passes=PARSE:INLINE))
 end
 
-export imp, @imp, @lib
+export imp, @imp, @imp!, @lib
 
 end

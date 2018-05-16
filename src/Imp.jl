@@ -769,7 +769,7 @@ function lower(env::Env{Set}, types::Set{Type}, expr::Expr)::Expr
 
     arities = infer_arity(env_arities, expr)
     simple_arities = Dict{Expr, Arity}((name => arity(arities) for (name, arities) in arities))
-    expr = @show desugar(simple_arities, last_id, expr)
+    expr = desugar(simple_arities, last_id, expr)
 
     # TODO gross that we have to do inference twice
     arities = infer_arity(env_arities, expr)
@@ -1051,7 +1051,6 @@ function bound_abstract(bound_vars::Vector{Var}, expr::Expr)::Expr
                         outer_apply = Apply(inner_apply, args[length(f.in_types)+1:end])
                         permute(bound_vars, outer_apply)
                     end
-                    # TODO need to handle case where f is Native
                     _ => clause
                 end
             end
@@ -1119,7 +1118,7 @@ function imp(expr; globals=nothing, env=nothing, lib=nothing, types=nothing, eve
         end
     end
     if PARSE in passes
-        expr = @show parse(expr)
+        expr = parse(expr)
         # TODO this is a hack
         if lib != nothing
             expr = replace_expr(expr, lib)
@@ -1128,13 +1127,13 @@ function imp(expr; globals=nothing, env=nothing, lib=nothing, types=nothing, eve
         expr = separate_scopes(Scope(scope_env), expr)
     end
     if INLINE in passes
-        expr = @show inline(expr)
+        expr = inline(expr)
     end
     if LOWER in passes
-        expr = @show lower(env, types, expr)
+        expr = lower(env, types, expr)
     end
     if BOUND in passes
-        expr = @show bound_abstract(expr)
+        expr = bound_abstract(expr)
     end
     expr = build_indexes(env, expr)
     if INTERPRET in passes

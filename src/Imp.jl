@@ -334,7 +334,8 @@ end
 function _interpret(env::Env{Set}, expr::Primitive) ::Set
     @match (expr.f, expr.args) begin
         (:reduce, [raw_op::ConjunctiveQuery, raw_init, raw_values]) => begin
-            # TODO this is such a mess
+            # TODO this is such a mess - need to at least reorder variables - not correct to assume that input vars get ordered first
+            @assert raw_op.query_vars[1:2] == raw_op.yield_vars[1:2]
             (var_a, var_b) = raw_op.query_vars[1:2]
             raw_op = ConjunctiveQuery(setdiff(raw_op.yield_vars, [var_a, var_b]), raw_op.query_vars[3:end], raw_op.query_bounds[3:end], raw_op.clauses)
             op(a,b) = begin

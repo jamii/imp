@@ -89,7 +89,7 @@ function test_imp(raw_expr; lowered_expr=nothing, inferred_type=nothing, result=
         @show :lowered expr
         println()
         if lowered_expr != nothing
-            @test expr == imp(lowered_expr, passes=[Imp.PARSE], globals=globals)
+            @test expr == imp(lowered_expr, passes=[Imp.PARSE], globals=globals, env=nothing)
         end
         if everything != nothing
             (prev_inferred_type, prev_result) = test_imp_pass(env, expr, expected_inferred_type, expected_result, prev_inferred_type, prev_result)

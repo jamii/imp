@@ -699,7 +699,7 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
         # reduce(...)[slot] => slot==reduce(...)
         Primitive(:reduce, args) => begin
             @match [slot] = slots
-            Primitive(:(==), [slot, Primitive(:reduce, map(apply, args))])
+            Apply(Primitive(:reduce, map(apply, args)), [slot])
         end
 
         # E(arg)[] => E(arg[...])
@@ -714,7 +714,10 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
 
         # TODO this can't be interpreted until after bounding
         # n[slots...] => n(slots...)
-        Native(_, _, _) => Apply(expr, slots)
+        Native(_, in_types, _) => begin
+            n = length(in_types)
+            Apply(Apply(expr, slots[1:n]), slots[n+1:end])
+        end
 
         # ((vars...) -> value)[slots...] => value[vars... = slots...]
         Abstract(vars, value) => begin
@@ -783,6 +786,19 @@ function lower(env::Env{Set}, types::Set{Type}, expr::Expr)::Expr
 end
 
 # --- bound ---
+
+function free_vars(expr::Expr)::Set{Var}
+    free_vars = Set{Var}()
+    visit!(bound_vars::Set{Var}, expr::Expr) = @match expr begin
+        Var(_, scope) => if scope > 0 && !(expr in bound_vars)
+            push!(free_vars, expr)
+        end
+        Abstract(vars, body) => visit!(union(bound_vars, vars), body)
+        _ => map_expr(expr -> visit!(bound_vars, expr), (args...) -> nothing, expr)
+    end
+    visit!(Set{Var}(), expr)
+    free_vars
+end
 
 # equivalent to (yield_vars) -> E((query_vars/yield_vars) -> &(clauses...))
 # easier to manipulate all in one place
@@ -899,15 +915,8 @@ function order_vars(bound_vars::Vector{Var}, vars::Vector{Var}, clauses::Vector{
     while !isempty(remaining)
         for clause in clauses
             @match clause begin
-                Apply(f::Var, args) => begin
-                    for arg in args
-                        if arg isa Var
-                            push!(supported, arg)
-                        end
-                    end
-                end
-                Apply(f::Native, args) => begin
-                    if all(in(ordered), args[1:length(f.in_types)])
+                Apply(f, args) => begin
+                    if all(in(ordered), free_vars(f))
                         for arg in args
                             if arg isa Var
                                 push!(supported, arg)
@@ -948,6 +957,7 @@ function conjunctive_query(expr::Abstract)::Expr
         Constant(value) where (value == true_set) => nothing
         Apply(f, vars) => begin
             push!(clauses, expr)
+            append!(used_vars, free_vars(f))
             append!(used_vars, vars)
         end
         Primitive(:(==), [a, b]) => begin
@@ -984,23 +994,11 @@ function bound_clauses(bound_vars::Vector{Var}, var::Var, clauses::Vector{Expr})
     bounds = Expr[]
     for clause in clauses
         @match clause begin
-            Apply(f::Var, args) => begin
-                if var in args
+            Apply(f, args) => begin
+                if all(in(bound_vars), free_vars(f)) && (var in args)
                     push!(bounds, permute(bound_vars, var, clause))
                 end
-                if !issubset(args, union(bound_vars, [var]))
-                    push!(remaining, clause)
-                end
-            end
-            Apply(f::Native, args) => begin
-                if all(in(bound_vars), args[1:length(f.in_types)]) &&
-                    (var in args[length(f.in_types)+1:end])
-                    inner_apply = Apply(f, args[1:length(f.in_types)])
-                    outer_apply = Apply(inner_apply, args[length(f.in_types)+1:end])
-                    push!(bounds, permute(bound_vars, var, outer_apply))
-                end
-                if !(issubset(args, union(bound_vars, [var])) &&
-                     (var in args[length(f.in_types)+1:end]))
+                if !(issubset(free_vars(f), bound_vars) && issubset(args, union(bound_vars, [var])))
                     push!(remaining, clause)
                 end
             end

@@ -265,7 +265,6 @@ test_imp(:( $splittish("a b c", " ")(2) ), result=:( "b" ), everything=nothing)
 test_imp(:( i -> $splittish("a b c", " ", i, "b") ), result=:( 2 ), everything=nothing)
 test_imp(:( i -> $splittish("a b c", " ", i, " ") ), result=:( false ), everything=nothing)
 # can't write this test with current universe
-# test_imp(:( i -> $splittish("a b", " ", i, _) ), result=:( 1 | 2 ), everything=nothing)
 @test imp(:(i -> $splittish("a b c", " ", i, _)), types=Set{Type}([String, Int64])) == Set([(3,), (2,), (1,)])
 
 # TODO reduce +
@@ -280,6 +279,11 @@ test_imp(:( let tuple = {x, y} -> (x, y); let tuple1 = tuple{1}; tuple1{"alice" 
 # test_imp(:( rsvp[2,1] ), result=:( (a,b) -> rsvp(b,a) ))
 # test_imp(:( rsvp[1] ), result=:( (a) -> exists(b -> rsvp(a,b)) ))
 # test_imp(:( rsvp[2] ), result=:( (a) -> exists(b -> rsvp(b,a)) ))
+
+# tricky lowerings
+test_imp(:( let add = $(Imp.Native((a,b) -> (a+b), (Int64, Int64), (Int64,))); let sum = {x} -> reduce(add, 0, x); let numbers = ("a", 1) | ("a", 2) | ("b", 3) | ("b", 4); x -> if numbers(x); sum{numbers(x)} end end end end ), result=:( ("a", 3) | ("b", 7) ), everything=nothing)
+# variable ordering in reduce op is broken
+@test_broken test_imp(:( let add = $(Imp.Native((a,b) -> (a+b), (Int64, Int64), (Int64,))); let sum = {x} -> reduce(add, 0, x); let numbers = ("a", 1) | ("a", 2) | ("b", 3) | ("b", 4); let sums = x -> sum{numbers(x)}; (sums("a"), sums("c")) end end end end ), result=:( (3, 0) ), everything=nothing)
 
 # --- infer_types ---
 

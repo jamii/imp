@@ -284,7 +284,7 @@ function _interpret(env::Env, expr::Apply)::Set
     f = interpret(env, expr.f)
     for arg in map((arg) -> interpret(env, arg), expr.args)
         result = Set()
-        for n in map(length, arg)
+        for n in Set{Int64}((length(row) for row in arg))
             for row in f
                 if (length(row) >= n) && (row[1:n] in arg)
                     push!(result, row[n+1:end])

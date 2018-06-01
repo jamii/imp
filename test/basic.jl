@@ -284,6 +284,8 @@ test_imp(:( let tuple = {x, y} -> (x, y); let tuple1 = tuple{1}; tuple1{"alice" 
 test_imp(:( let add = $(Imp.Native((a,b) -> (a+b), (Int64, Int64), (Int64,))); let sum = {x} -> reduce(add, 0, x); let numbers = ("a", 1) | ("a", 2) | ("b", 3) | ("b", 4); x -> if numbers(x); sum{numbers(x)} end end end end ), result=:( ("a", 3) | ("b", 7) ), everything=nothing)
 test_imp(:( let add = $(Imp.Native((a,b) -> (a+b), (Int64, Int64), (Int64,))); let sum = {x} -> reduce(add, 0, x); let numbers = ("a", 1) | ("a", 2) | ("b", 3) | ("b", 4); let sums = x -> sum{numbers(x)}; (sums("a"), sums("c")) end end end end ), result=:( (3, 0) ), everything=nothing)
 test_imp(:( reduce((a,b) -> (a + b) + 1, 0, points) ), result = :( 2 ))
+Imp.global_lib[Imp.Var(:+)] = Imp.Native((a,b) -> (a+b), (Int64, Int64), (Int64,))
+@test imp(:( reduce((a,b) -> (a + b) + 1, 0, points) ), globals=globals, env=nothing) == Set([(5,)])
 
 # --- infer_types ---
 

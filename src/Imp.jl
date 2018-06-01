@@ -787,19 +787,6 @@ end
 
 # --- bound ---
 
-function free_vars(expr::Expr)::Set{Var}
-    free_vars = Set{Var}()
-    visit!(bound_vars::Set{Var}, expr::Expr) = @match expr begin
-        Var(_, scope) => if scope > 0 && !(expr in bound_vars)
-            push!(free_vars, expr)
-        end
-        Abstract(vars, body) => visit!(union(bound_vars, vars), body)
-        _ => map_expr(expr -> visit!(bound_vars, expr), (args...) -> nothing, expr)
-    end
-    visit!(Set{Var}(), expr)
-    free_vars
-end
-
 # equivalent to (yield_vars) -> E((query_vars/yield_vars) -> &(clauses...))
 # easier to manipulate all in one place
 struct ConjunctiveQuery <: Expr
@@ -907,46 +894,6 @@ function is_scalar_bound(bound_vars::Vector{Var}, expr::Expr)
     end
 end
 
-# TODO this has a lot of overlap with bound_clauses - could probably combine them
-function order_vars(bound_vars::Vector{Var}, vars::Vector{Var}, clauses::Vector{Expr})
-    supported = Set(bound_vars)
-    remaining = copy(vars)
-    ordered = Var[]
-    while !isempty(remaining)
-        for clause in clauses
-            @match clause begin
-                Apply(f, args) => begin
-                    if all(in(ordered), free_vars(f))
-                        for arg in args
-                            if arg isa Var
-                                push!(supported, arg)
-                            end
-                        end
-                    end
-                end
-                Primitive(:(==), [a, b]) => begin
-                    if (a isa Var) && is_scalar_bound(ordered, b)
-                        push!(supported, a)
-                    elseif (b isa Var) && is_scalar_bound(ordered, a)
-                        push!(supported, b)
-                    end
-                end
-                Primitive(:!, [arg]) => nothing
-            end
-        end
-        ix = findfirst(in(supported), remaining)
-        if ix == nothing
-            # TODO can't bail here because some tests are unsupported
-            @warn "Cannot support $remaining with $clauses"
-            append!(ordered, remaining)
-            break
-        end
-        push!(ordered, remaining[ix])
-        deleteat!(remaining, ix)
-    end
-    ordered
-end
-
 function conjunctive_query(expr::Abstract)::Expr
     used_vars = Var[]
     exists_vars = Var[]
@@ -987,6 +934,59 @@ function conjunctive_query(expr::Abstract)::Expr
     query_vars = intersect(var_order, vcat(expr.vars, exists_vars))
 
     ConjunctiveQuery(copy(expr.vars), query_vars, Expr[], clauses)
+end
+
+function free_vars(expr::Expr)::Set{Var}
+    free_vars = Set{Var}()
+    visit!(bound_vars::Set{Var}, expr::Expr) = @match expr begin
+        Var(_, scope) => if scope > 0 && !(expr in bound_vars)
+            push!(free_vars, expr)
+        end
+        Abstract(vars, body) => visit!(union(bound_vars, vars), body)
+        _ => map_expr(expr -> visit!(bound_vars, expr), (args...) -> nothing, expr)
+    end
+    visit!(Set{Var}(), expr)
+    free_vars
+end
+
+# TODO this has a lot of overlap with bound_clauses - could probably combine them
+function order_vars(bound_vars::Vector{Var}, vars::Vector{Var}, clauses::Vector{Expr})
+    supported = Set(bound_vars)
+    remaining = copy(vars)
+    ordered = Var[]
+    while !isempty(remaining)
+        for clause in clauses
+            @match clause begin
+                Apply(f, args) => begin
+                    if all(in(ordered), free_vars(f))
+                        for arg in args
+                            if arg isa Var
+                                push!(supported, arg)
+                            end
+                        end
+                    end
+                end
+                Primitive(:(==), [a, b]) => begin
+                    if (a isa Var) && is_scalar_bound(ordered, b)
+                        push!(supported, a)
+                    elseif (b isa Var) && is_scalar_bound(ordered, a)
+                        push!(supported, b)
+                    end
+                end
+                Primitive(:!, [arg]) => nothing
+            end
+        end
+        ix = findfirst(in(supported), remaining)
+        if ix == nothing
+            # TODO can't bail here because some tests are unsupported
+            @warn "Cannot support $remaining with $clauses"
+            append!(ordered, remaining)
+            break
+        end
+        push!(ordered, remaining[ix])
+        deleteat!(remaining, ix)
+    end
+    ordered
 end
 
 function bound_clauses(bound_vars::Vector{Var}, var::Var, clauses::Vector{Expr})

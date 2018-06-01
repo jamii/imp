@@ -333,25 +333,22 @@ end
 
 function _interpret(env::Env{Set}, expr::Primitive) ::Set
     @match (expr.f, expr.args) begin
-        (:reduce, [raw_op::ConjunctiveQuery, raw_init, raw_values]) => begin
-            # TODO this is such a mess - need to at least reorder variables - not correct to assume that input vars get ordered first
-            @assert raw_op.query_vars[1:2] == raw_op.yield_vars[1:2]
-            (var_a, var_b) = raw_op.query_vars[1:2]
-            raw_op = ConjunctiveQuery(setdiff(raw_op.yield_vars, [var_a, var_b]), raw_op.query_vars[3:end], raw_op.query_bounds[3:end], raw_op.clauses)
+        (:reduce, [Abstract([var_a, var_b], op_expr::ConjunctiveQuery), init_expr, values_expr]) => begin
+            # TODO this is still kinda hacky
             op(a,b) = begin
                 env[var_a] = Set([(a,)])
                 env[var_b] = Set([(b[end],)])
-                result = interpret(env, raw_op)
+                result = interpret(env, op_expr)
                 @assert length(result) == 1
                 @assert length(first(result)) == 1
                 first(first(result))
             end
-            raw_init = interpret(env, raw_init)
-            @assert length(raw_init) == 1
-            @assert length(first(raw_init)) == 1
-            init = first(raw_init)[1]
-            raw_values = interpret(env, raw_values)
-            value = reduce(op, init, raw_values)
+            inits = interpret(env, init_expr)
+            @assert length(inits) == 1
+            @assert length(first(inits)) == 1
+            init = first(inits)[1]
+            values = interpret(env, values_expr)
+            value = reduce(op, init, values)
             Set([(value,)])
         end
         _ => begin
@@ -581,7 +578,6 @@ function desugar(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)::Exp
         Primitive(:tuple, args) => begin
             vars = Var[]
             body = reduce(Constant(true_set), args) do body, arg
-                @show arg arity[arg]
                 arg_vars = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:something(arity[arg], 0)]
                 append!(vars, arg_vars)
                 Primitive(:&, [body, Apply(arg, arg_vars)])
@@ -952,6 +948,7 @@ end
 
 # TODO this has a lot of overlap with bound_clauses - could probably combine them
 function order_vars(bound_vars::Vector{Var}, vars::Vector{Var}, clauses::Vector{Expr})
+    bound_vars = copy(bound_vars)
     supported = Set(bound_vars)
     remaining = copy(vars)
     ordered = Var[]
@@ -959,7 +956,7 @@ function order_vars(bound_vars::Vector{Var}, vars::Vector{Var}, clauses::Vector{
         for clause in clauses
             @match clause begin
                 Apply(f, args) => begin
-                    if all(in(ordered), free_vars(f))
+                    if all(in(bound_vars), free_vars(f))
                         for arg in args
                             if arg isa Var
                                 push!(supported, arg)
@@ -985,6 +982,7 @@ function order_vars(bound_vars::Vector{Var}, vars::Vector{Var}, clauses::Vector{
             break
         end
         push!(ordered, remaining[ix])
+        push!(bound_vars, remaining[ix])
         deleteat!(remaining, ix)
     end
     ordered
@@ -1050,6 +1048,13 @@ function bound_abstract(bound_vars::Vector{Var}, expr::Expr)::Expr
             end
             clauses = map(expr -> bound_abstract(clause_bound_vars, expr), clauses)
             ConjunctiveQuery(query.yield_vars, ordered_vars, bounds, clauses)
+        end
+        Primitive(:reduce, [Abstract(vars, body), init, values]) => begin
+            # vars[1:2] will be supplied during reduce
+            bounded_op = Abstract(vars[1:2], bound_abstract(vcat(bound_vars, vars[1:2]), Abstract(vars[3:end], body)))
+            bounded_init = bound_abstract(bound_vars, init)
+            bounded_values = bound_abstract(bound_vars, values)
+            Primitive(:reduce, [bounded_op, bounded_init, bounded_values])
         end
         _ => map_expr(expr -> bound_abstract(bound_vars, expr), expr)
     end

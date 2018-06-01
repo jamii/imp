@@ -75,7 +75,9 @@ uuid = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
 [[Rematch]]
 deps = ["MacroTools"]
-path = "/home/jamie/.julia/dev/Rematch"
+git-tree-sha1 = "82ebb97dc6912b83400b0e510d3fb5c66ddb0954"
+repo-rev = "master"
+repo-url = "https://github.com/RelationalAI-oss/Rematch.jl.git"
 uuid = "bfecab0d-fd4d-5014-a23f-56c5fae6447a"
 version = "0.1.1+"
 

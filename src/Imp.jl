@@ -581,17 +581,18 @@ function desugar(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)::Exp
         Primitive(:tuple, args) => begin
             vars = Var[]
             body = reduce(Constant(true_set), args) do body, arg
-                arg_vars = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:coalesce(arity[arg], 0)]
+                @show arg arity[arg]
+                arg_vars = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:something(arity[arg], 0)]
                 append!(vars, arg_vars)
                 Primitive(:&, [body, Apply(arg, arg_vars)])
             end
             desugar(Abstract(vars, body))
         end
         Primitive(:compose, [a, b]) => begin
-            coalesce(arity[a], 0) == 0 && return Constant(false_set)
-            coalesce(arity[b], 0) == 0 && return Constant(false_set)
-            a_vars = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:coalesce(arity[a], 0)]
-            b_vars = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:coalesce(arity[b], 0)]
+            something(arity[a], 0) == 0 && return Constant(false_set)
+            something(arity[b], 0) == 0 && return Constant(false_set)
+            a_vars = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:something(arity[a], 0)]
+            b_vars = [Var(Symbol("_$(last_id[] += 1)"), 1) for _ in 1:something(arity[b], 0)]
             var = b_vars[1] = a_vars[end]
             vars = vcat(a_vars[1:end-1], b_vars[2:end])
             desugar(Abstract(vars, Primitive(:exists, [Abstract([var], Primitive(:&, [Apply(a, a_vars), Apply(b, b_vars)]))])))

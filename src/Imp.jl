@@ -333,8 +333,8 @@ end
 
 function _interpret(env::Env{Set}, expr::Primitive) ::Set
     @match (expr.f, expr.args) begin
-        (:reduce, [Abstract([var_a, var_b], op_expr::ConjunctiveQuery), init_expr, values_expr]) => begin
-            # TODO this is still kinda hacky
+        # unlike other primitive args, we don't *need* to materialize Op
+        (:reduce, [Op([var_a, var_b], op_expr), init_expr, values_expr]) => begin
             op(a,b) = begin
                 env[var_a] = Set([(a,)])
                 env[var_b] = Set([(b[end],)])
@@ -558,6 +558,21 @@ end
 
 # --- lower ---
 
+# same semantics as Abstract, but instead of lowering to first-order we keep it in function form
+struct Op <: Expr
+    vars::Vector{Var}
+    value::Expr
+end
+
+function unparse(expr::Op)
+    @match (vars, value) = map_expr(unparse, tuple, expr)
+    :(($(vars...),) -> $value)
+end
+
+function _interpret(env::Env{SetType}, expr::Op) ::SetType
+    _interpret(env, Abstract(expr.vars, expr.value))
+end
+
 const Arity = Union{Int64, Nothing} # false has arity nothing
 
 function arity(arities::Set{Int64})::Arity
@@ -693,10 +708,12 @@ function simple_apply(arity::Dict{Expr, Arity}, last_id::Ref{Int64}, expr::Expr)
                                                 [Primitive(:&, [Primitive(:exists, [apply(c)]), apply(t, slots)]),
                                                  Primitive(:&, [Primitive(:!, [apply(c)]), apply(f, slots)])])
 
-        # reduce(...)[slot] => slot==reduce(...)
-        Primitive(:reduce, args) => begin
+        # reduce(...)[slot] => reduce(...)(slot)
+        Primitive(:reduce, [op, init, values]) => begin
             @match [slot] = slots
-            Apply(Primitive(:reduce, map(apply, args)), [slot])
+            @match Abstract([op_slot1, op_slot2, op_slots...], op_body) = apply(op)
+            simple_op = Op([op_slot1, op_slot2], Abstract(op_slots, op_body))
+            Apply(Primitive(:reduce, [simple_op, apply(init), apply(values)]), [slot])
         end
 
         # E(arg)[] => E(arg[...])
@@ -939,7 +956,8 @@ function free_vars(expr::Expr)::Set{Var}
         Var(_, scope) => if scope > 0 && !(expr in bound_vars)
             push!(free_vars, expr)
         end
-        Abstract(vars, body) => visit!(union(bound_vars, vars), body)
+        Abstract(vars, value) => visit!(union(bound_vars, vars), value)
+        Op(vars, value) => visit!(union(bound_vars, vars), value)
         _ => map_expr(expr -> visit!(bound_vars, expr), (args...) -> nothing, expr)
     end
     visit!(Set{Var}(), expr)
@@ -1049,13 +1067,7 @@ function bound_abstract(bound_vars::Vector{Var}, expr::Expr)::Expr
             clauses = map(expr -> bound_abstract(clause_bound_vars, expr), clauses)
             ConjunctiveQuery(query.yield_vars, ordered_vars, bounds, clauses)
         end
-        Primitive(:reduce, [Abstract(vars, body), init, values]) => begin
-            # vars[1:2] will be supplied during reduce
-            bounded_op = Abstract(vars[1:2], bound_abstract(vcat(bound_vars, vars[1:2]), Abstract(vars[3:end], body)))
-            bounded_init = bound_abstract(bound_vars, init)
-            bounded_values = bound_abstract(bound_vars, values)
-            Primitive(:reduce, [bounded_op, bounded_init, bounded_values])
-        end
+        Op(vars, value) => Op(vars, bound_abstract(vcat(bound_vars, vars), value))
         _ => map_expr(expr -> bound_abstract(bound_vars, expr), expr)
     end
 end

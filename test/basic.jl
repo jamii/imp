@@ -286,6 +286,7 @@ test_imp(:( let add = $(Imp.Native((a,b) -> (a+b), (Int64, Int64), (Int64,))); l
 test_imp(:( reduce((a,b) -> (a + b) + 1, 0, points) ), result = :( 2 ))
 Imp.global_lib[Imp.Var(:+)] = Imp.Native((a,b) -> (a+b), (Int64, Int64), (Int64,))
 @test imp(:( reduce((a,b) -> (a + b) + 1, 0, points) ), globals=globals, env=nothing) == Set([(5,)])
+@test imp(:( reduce((a,b) -> if (b == 0) a + 42 else a + b end, 0, points) ), globals=globals, env=nothing) == Set([(44,)])
 
 # --- infer_types ---
 

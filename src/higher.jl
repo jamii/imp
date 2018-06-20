@@ -993,10 +993,13 @@ function bound_clauses(bound_vars::Vector{Var}, var::Var, clauses::Vector{Expr})
     for clause in clauses
         @match clause begin
             Apply(f, args) => begin
-                if all(in(bound_vars), free_vars(f)) && (var in args)
+                if issubset(free_vars(f), bound_vars) && (var in args)
                     push!(bounds, permute(bound_vars, var, clause))
-                end
-                if !(issubset(free_vars(f), bound_vars) && issubset(args, union(bound_vars, [var])))
+                    if !issubset(args, union(bound_vars, [var]))
+                        # still more work to do
+                        push!(remaining, clause)
+                    end
+                else
                     push!(remaining, clause)
                 end
             end

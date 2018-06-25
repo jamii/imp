@@ -95,6 +95,6 @@ model = lm(@formula(unit_sales ~ store_nbr + item_nbr), train_data)
 actual = test_data[:unit_sales]
 predicted = predict(model, test_data)
 weight = map(p -> p ? 1.25 : 1.00, test_data[:perishable])
-score = sqrt(sum(weight .* (log.(actual .+ 1) - log.(predicted .+ 1)) .^ 2) / sum(weight))
+score = sqrt(sum(@. weight * (log(actual + 1) - log(predicted + 1)) ^ 2) / sum(weight))
 
 end

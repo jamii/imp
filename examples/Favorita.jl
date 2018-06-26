@@ -77,7 +77,9 @@ end
 #     @collect DataFrame
 # end
 
-categorical!(data, [:store_nbr, :item_nbr])
+@time begin
+    categorical!(data, [:store_nbr, :item_nbr])
+end
 
 @time begin
     data = data[data[:unit_sales] .>= 0, :] # scoring function blows up on returns
@@ -87,14 +89,42 @@ categorical!(data, [:store_nbr, :item_nbr])
     test_data = data[!sample, :]
 end
 
-using GLM
+# using GLM
 
-# TODO what does glm do with missing?
-model = lm(@formula(unit_sales ~ store_nbr + item_nbr), train_data)
+# @time begin
+#     # TODO what does glm do with missing?
+#     model = lm(@formula(unit_sales ~ store_nbr + item_nbr), train_data)
+# end
 
-actual = test_data[:unit_sales]
-predicted = predict(model, test_data)
-weight = map(p -> p ? 1.25 : 1.00, test_data[:perishable])
-score = sqrt(sum(@. weight * (log(actual + 1) - log(predicted + 1)) ^ 2) / sum(weight))
+# actual = test_data[:unit_sales]
+# redicted = predict(model, test_data)
+# weight = map(p -> p ? 1.25 : 1.00, test_data[:perishable])
+# score = sqrt(sum(@. weight * (log(actual + 1) - log(predicted + 1)) ^ 2) / sum(weight))
+
+# using FixedEffectModels
+
+# mixed_data = deepcopy(data)
+# mixed_data[:unit_sales] = Union{Float64, Missing}[s ? d : missing for (s,d) in zip(sample, mixed_data[:unit_sales])]
+# model = reg(mixed_data, @model(unit_sales ~ transactions, fe = store_nbr + item_nbr, save=true))
+# @show fes(model)
+
+# @show model.augmentdf
+
+# @time begin
+#     actual = test_data[:unit_sales]
+#     predicted = predict(model, test_data)
+#     weight = map(p -> p ? 1.25 : 1.00, test_data[:perishable])
+#     score = sqrt(sum(@. weight * (log(actual + 1) - log(predicted + 1)) ^ 2) / sum(weight))
+# end
+
+# using OnlineStats
+
+# using MixedModels
+
+# model = fit(LinearMixedModel, @formula(unit_sales ~ (1|store_nbr) + (1|item_nbr)), train_data)
+# # "At a superficial level these can be considered as the "estimates" of the random effects, with a bit of hand waving, but pursuing this analogy too far usually results in confusion."
+# params = ranef(model, named=true)
+
+# using MultivariateStats
 
 end

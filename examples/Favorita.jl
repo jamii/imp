@@ -126,9 +126,9 @@ using MixedModels
 params = ranef(model, named=true)
 
 function StatsBase.fitted(m::LinearMixedModel{T}, new_data) where T
-    ## FIXME: Create and use `effects(m) -> β, b` w/o calculating β twice
     new_m = LinearMixedModel(m.formula, new_data)
     v = Array{T}(nobs(new_m))
+    # TODO will the levels for both be the same?
     trms = new_m.trms
     A_mul_B!(vec(v), trms[end - 1], fixef(m))
     b = ranef(m)

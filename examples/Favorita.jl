@@ -1,5 +1,11 @@
 # module Favorita
 
+macro splice(iterator, body)
+  @assert iterator.head == :call
+  @assert iterator.args[1] == :in
+  Base.Expr(:..., :(($(esc(body)) for $(esc(iterator.args[2])) in $(esc(iterator.args[3])))))
+end
+
 # using Imp
 
 using JuliaDB
@@ -10,7 +16,7 @@ using JuliaDB
 #     oil = loadtable("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/oil.csv")
 #     stores = loadtable("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/stores.csv")
 #     test = loadtable("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/test.csv")
-#     train = loadtable("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/train-mini.csv")
+#     train = loadtable("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/train.csv")
 #     transactions = loadtable("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/transactions.csv")
 # end
 
@@ -26,19 +32,84 @@ using JuliaDB
 #     save(oil, "/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/oil.jdb")
 #     save(stores, "/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/stores.jdb")
 #     save(test, "/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/test.jdb")
-#     save(train, "/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/train-mini.jdb")
+#     save(train, "/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/train.jdb")
 #     save(transactions, "/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/transactions.jdb")
 # end
 
-# @time begin
-#     holidays_events = load("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/holidays_events.jdb")
-#     items = load("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/items.jdb")
-#     oil = load("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/oil.jdb")
-#     stores = load("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/stores.jdb")
-#     test = load("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/test.jdb")
-#     train = load("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/train-mini.jdb")
-#     transactions = load("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/transactions.jdb")
+@time begin
+    holidays_events = load("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/holidays_events.jdb")
+    items = load("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/items.jdb")
+    oil = load("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/oil.jdb")
+    stores = load("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/stores.jdb")
+    test = load("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/test.jdb")
+    train = load("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/train.jdb")
+    transactions = load("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/transactions.jdb")
+end
+
+mutable struct Buffer{Sorted, Unsorted}
+    sorted::Sorted
+    unsorted::Unsorted
+end
+
+function Buffer(sorted::NDSparse)
+    Buffer(sorted, map(c -> typeof(c)(), columns(sorted)))
+end
+
+@generated function add!(buffer::Buffer, k::Tuple, v)
+    n = length(k.parameters)
+    quote
+        $(@splice i in 1:n quote
+          push!(buffer.unsorted[$i], k[$i])
+          end)
+        push!(buffer.unsorted[end], v)
+        if length(buffer.unsorted[end]) > length(buffer.sorted)
+            merge!(buffer)
+        end
+        buffer
+    end
+end
+
+function add!(buffer::Buffer, k1, k2, v)
+    push!(buffer.unsorted[1], k1)
+    push!(buffer.unsorted[2], k2)
+    push!(buffer.unsorted[3], v)
+    if length(buffer.unsorted[end]) > length(buffer.sorted)
+        merge!(buffer)
+    end
+    buffer
+end
+
+@generated function Base.merge!(buffer::Buffer{Sorted, Unsorted}) where {Sorted, Unsorted <: Tuple}
+    n = length(Unsorted.parameters)
+    quote
+        merge!(buffer.sorted, NDSparse(buffer.unsorted..., agg=+), agg=+)
+        $(@splice i in 1:n quote
+          empty!(buffer.unsorted[$i])
+          end)
+        buffer
+    end
+end
+
+# @generated function factor(ks...)
+#     n = length(ks)
+#     quote
+#         # TODO NDSparse is not inferred
+#         sorted = NDSparse($(@splice i in 1:n :(Vector{ks[$i]}())), Vector{Float64}())
+#         unsorted = tuple($(@splice i in 1:n :(Vector{ks[$i]}())), Vector{Float64}())
+#         Buffer(sorted, unsorted)
+#     end
 # end
+
+Base.isless(::Void, ::Void) = false
+
+function factor(ks...)
+    Dict{Tuple{ks...}, Float64}()
+end
+
+function add!(factor::Dict, k1, k2, v)
+    k = (k1,k2)
+    factor[k] = get(factor, k, 0.0) + v
+end
 
 function get_cofactors(holidays_events, items, oil, stores, test, train, transactions)
 
@@ -53,61 +124,121 @@ function get_cofactors(holidays_events, items, oil, stores, test, train, transac
     i_item_nbr = items.columns.columns[1]::Vector{Int64}
     i_family = items.columns.columns[2]::PooledArrays.PooledArray{String,UInt8,1,Array{UInt8,1}}
 
-    store_nbr_store_nbr = Dict{Tuple{Int64, Int64}, Float64}()
+    store_nbr_store_nbr = factor(Int64, Int64)
 
-    store_nbr_item_nbr = Dict{Tuple{Int64, Int64}, Float64}()
-    item_nbr_item_nbr = Dict{Tuple{Int64, Int64}, Float64}()
+    store_nbr_item_nbr = factor(Int64, Int64)
+    item_nbr_item_nbr = factor(Int64, Int64)
 
-    store_nbr_unit_sales = Dict{Tuple{Int64, Void}, Float64}()
-    item_nbr_unit_sales = Dict{Tuple{Int64, Void}, Float64}()
-    unit_sales_unit_sales = Dict{Tuple{Void, Void}, Float64}()
+    store_nbr_unit_sales = factor(Int64, Void)
+    item_nbr_unit_sales = factor(Int64, Void)
+    unit_sales_unit_sales = factor(Void, Void)
 
-    store_nbr_type = Dict{Tuple{Int64, String}, Float64}()
-    item_nbr_type = Dict{Tuple{Int64, String}, Float64}()
-    unit_sales_type = Dict{Tuple{Void, String}, Float64}()
-    type_type = Dict{Tuple{String, String}, Float64}()
+    store_nbr_type = factor(Int64, String)
+    item_nbr_type = factor(Int64, String)
+    unit_sales_type = factor(Void, String)
+    type_type = factor(String, String)
 
-    store_nbr_family = Dict{Tuple{Int64, String}, Float64}()
-    item_nbr_family = Dict{Tuple{Int64, String}, Float64}()
-    unit_sales_family = Dict{Tuple{Void, String}, Float64}()
-    type_family = Dict{Tuple{String, String}, Float64}()
-    family_family = Dict{Tuple{String, String}, Float64}()
+    store_nbr_family = factor(Int64, String)
+    item_nbr_family = factor(Int64, String)
+    unit_sales_family = factor(Void, String)
+    type_family = factor(String, String)
+    family_family = factor(String, String)
+
+    actually_get_cofactors(holidays_events, items, oil, stores, test, train, transactions,
+
+                           t_date,
+                           t_store_nbr,
+                           t_item_nbr,
+                           t_unit_sales,
+
+                           he_date,
+                           he_type,
+
+                           i_item_nbr,
+                           i_family,
+
+                           store_nbr_store_nbr,
+                           store_nbr_item_nbr,
+                           item_nbr_item_nbr,
+                           store_nbr_unit_sales,
+                           item_nbr_unit_sales,
+                           unit_sales_unit_sales,
+                           store_nbr_type,
+                           item_nbr_type,
+                           unit_sales_type,
+                           type_type,
+                           store_nbr_family,
+                           item_nbr_family,
+                           unit_sales_family,
+                           type_family,
+                           family_family,
+                           )
+end
+
+function actually_get_cofactors(holidays_events, items, oil, stores, test, train, transactions,
+
+                           t_date,
+                           t_store_nbr,
+                           t_item_nbr,
+                           t_unit_sales,
+
+                           he_date,
+                           he_type,
+
+                           i_item_nbr,
+                                i_family,
+                                
+               store_nbr_store_nbr,
+        store_nbr_item_nbr,
+        item_nbr_item_nbr,
+        store_nbr_unit_sales,
+        item_nbr_unit_sales,
+        unit_sales_unit_sales,
+        store_nbr_type,
+        item_nbr_type,
+        unit_sales_type,
+        type_type,
+        store_nbr_family,
+        item_nbr_family,
+        unit_sales_family,
+        type_family,
+                           family_family,
+                           )
 
     for i in 1:(length(train)::Int64)
         store_nbr = t_store_nbr[i]
         item_nbr = t_item_nbr[i]
         unit_sales = t_unit_sales[i]
         
-        store_nbr_store_nbr[(store_nbr, store_nbr)] = get(store_nbr_store_nbr, (store_nbr, store_nbr), 0.0) + (1.0 * 1.0)
+        add!(store_nbr_store_nbr, store_nbr, store_nbr, 1.0 * 1.0)
 
-        store_nbr_item_nbr[(store_nbr, item_nbr)] = get(store_nbr_item_nbr, (store_nbr, item_nbr), 0.0) + (1.0 * 1.0)
-        item_nbr_item_nbr[(item_nbr, item_nbr)] = get(item_nbr_item_nbr, (item_nbr, item_nbr), 0.0) + (1.0 * 1.0)
+        add!(store_nbr_item_nbr, store_nbr, item_nbr, 1.0 * 1.0)
+        add!(item_nbr_item_nbr, item_nbr, item_nbr, 1.0 * 1.0)
         
-        store_nbr_unit_sales[(store_nbr, nothing)] = get(store_nbr_item_nbr, (store_nbr, nothing), 0.0) + (1.0 * unit_sales)
-        item_nbr_unit_sales[(item_nbr, nothing)] = get(item_nbr_item_nbr, (item_nbr, nothing), 0.0) + (1.0 * unit_sales)
-        unit_sales_unit_sales[(nothing, nothing)] = get(unit_sales_unit_sales, (nothing, nothing), 0.0) + (unit_sales * unit_sales)
+        add!(store_nbr_unit_sales, store_nbr, nothing, 1.0 * unit_sales)
+        add!(item_nbr_unit_sales, item_nbr, nothing, 1.0 * unit_sales)
+        add!(unit_sales_unit_sales, nothing, nothing, unit_sales * unit_sales)
 
         # hes = searchsorted(he_date, t_date[i])
         # for he1 in hes
-        #     store_nbr_type[(store_nbr, he_type[he1])] = get(store_nbr_type, (store_nbr, he_type[he1]), 0.0) + (1.0 * 1.0)
-        #     item_nbr_type[(item_nbr, he_type[he1])] = get(item_nbr_type, (item_nbr, he_type[he1]), 0.0) + (1.0 * 1.0)
-        #     unit_sales_type[(nothing, he_type[he1])] = get(unit_sales_type, (nothing, he_type[he1]), 0.0) + (unit_sales * 1.0)
+        #     add!(store_nbr_type, store_nbr, he_type[he1]), 1.0 * 1.0)
+        #     add!(item_nbr_type, item_nbr, he_type[he1]), 1.0 * 1.0)
+        #     add!(unit_sales_type, nothing, he_type[he1]), unit_sales * 1.0)
         
         #     for he2 in hes
-        #         type_type[(he_type[he1], he_type[he2])] = get(type_type, (he_type[he1], he_type[he2]), 0.0) + (1.0 * 1.0)
+        #         add!(type_type, he_type[he1], he_type[he2]), 1.0 * 1.0)
         #     end
         # end
 
-        # i1 = searchsortedfirst(i_item_nbr, item_nbr)
-        # @assert i1 <= length(i_family)
-        # store_nbr_family[(store_nbr, i_family[i1])] = get(store_nbr_family, (store_nbr, i_family[i1]), 0.0) + (1.0 * 1.0)
-        # item_nbr_family[(item_nbr, i_family[i1])] = get(item_nbr_family, (item_nbr, i_family[i1]), 0.0) + (1.0 * 1.0)
-        # unit_sales_family[(nothing, i_family[i1])] = get(unit_sales_family, (nothing, i_family[i1]), 0.0) + (unit_sales * 1.0)
+        i1 = searchsortedfirst(i_item_nbr, item_nbr)
+        @assert 1 <= i1 <= length(i_family)
+        add!(store_nbr_family, store_nbr, i_family[i1], 1.0 * 1.0)
+        add!(item_nbr_family, item_nbr, i_family[i1], 1.0 * 1.0)
+        add!(unit_sales_family, nothing, i_family[i1], unit_sales * 1.0)
         # for he1 in hes
-        #     type_family[(he_type[he1], i_family[i1])] = get(type_family, (he_type[he1], i_family[i1]), 0.0) + (1.0 * 1.0)
+        #     add!(type_family, he_type[he1], i_family[i1]), 1.0 * 1.0)
         # end
-        # family_family[(i_family[i1], i_family[i1])] = get(type_family, (i_family[i1], i_family[i1]), 0.0) + (1.0 * 1.0)
-
+        add!(family_family, i_family[i1], i_family[i1], 1.0 * 1.0)
         
     end
 
@@ -131,42 +262,108 @@ function get_cofactors(holidays_events, items, oil, stores, test, train, transac
 
 end
 
-@time get_cofactors(holidays_events, items, oil, stores, test, train, transactions)
+# @time get_cofactors(holidays_events, items, oil, stores, test, train, transactions);
 
 # unique_holidays_events = groupreduce((a,b) -> a, holidays_events, :date)
 
-# data = train
-# @time data = join(data, unique_holidays_events, lkey=:date, rkey=:date, how=:left)
-# @show data
+# @time begin
+#     data = train
+#     # data = join(data, unique_holidays_events, lkey=:date, rkey=:date, how=:left)
+#     data = join(data, items, lkey=:item_nbr, rkey=:item_nbr)
+#     @assert length(data) == length(train)
+# end
+
+# @time begin
+#     data = train
+#     # data = join(data, unique_holidays_events, lkey=:date, rkey=:date, how=:left)
+#     data = join(data, items, lkey=:item_nbr, rkey=:item_nbr)
+#     @assert length(data) == length(train)
+# end
+
+# @time begin
+#     data = train
+#     # data = join(data, unique_holidays_events, lkey=:date, rkey=:date, how=:left)
+#     data = join(items, data, lkey=:item_nbr, rkey=:item_nbr)
+#     @assert length(data) == length(train)
+# end
+
+# @time begin
+#     data = train
+#     # data = join(data, unique_holidays_events, lkey=:date, rkey=:date, how=:left)
+#     reindex(items, :item_nbr)
+#     data = join(data, items, lkey=:item_nbr, rkey=:item_nbr)
+#     @assert length(data) == length(train)
+# end
+
+# @time begin
+#     data = train
+#     # data = join(data, unique_holidays_events, lkey=:date, rkey=:date, how=:left)
+#     reindex(items, :item_nbr)
+#     data = join(data, items, lkey=:item_nbr, rkey=:item_nbr)
+#     @assert length(data) == length(train)
+# end
+
+# @time begin
+#     data = train
+#     # data = join(data, unique_holidays_events, lkey=:date, rkey=:date, how=:left)
+#     reindex(data, :item_nbr)
+#     reindex(items, :item_nbr)
+#     data = join(data, items, lkey=:item_nbr, rkey=:item_nbr)
+#     @assert length(data) == length(train)
+# end
 
 using DataFrames
 using CSV
 using Dates
 
-# Categorical = CSV.CategoricalArrays.CategoricalString{UInt32}
-# # Categorical = String
+Categorical = CSV.CategoricalArrays.CategoricalString{UInt32}
+Categorical = String
 
-# @time begin
-#     holidays_events = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/holidays_events.csv", types=[Date, Categorical, Categorical, Categorical, Categorical, Bool], dateformat="yyyy-mm-dd", truestring="True", falsestring="False")
-#     items = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/items.csv", types=[Int64, Categorical, Int64, Bool], truestring="1", falsestring="0")
-#     oil = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/oil.csv", types=[Date, Union{Missing, Float64}], dateformat="yyyy-mm-dd")
-#     stores = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/stores.csv", types=[Int64, Categorical, Categorical, Categorical, Int8])
-#     test = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/test.csv", types=[Int64, Date, Int8, Int64, Union{Bool, Missing}], truestring="True", falsestring="False", dateformat="yyyy-mm-dd")
-    train2 = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/train-mini.csv", types=[Int64, Date, Int8, Int64, Float64, Union{Bool, Missing}], truestring="True", falsestring="False", dateformat="yyyy-mm-dd")
-#     transactions = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/transactions.csv", types=[Date, Int8, Int64], dateformat="yyyy-mm-dd")
-# end
+@time begin
+    df_holidays_events = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/holidays_events.csv", types=[Date, Categorical, Categorical, Categorical, Categorical, Bool], dateformat="yyyy-mm-dd", truestring="True", falsestring="False")
+    df_items = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/items.csv", types=[Int64, Categorical, Int64, Bool], truestring="1", falsestring="0")
+    df_oil = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/oil.csv", types=[Date, Union{Missing, Float64}], dateformat="yyyy-mm-dd")
+    df_stores = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/stores.csv", types=[Int64, Categorical, Categorical, Categorical, Int64])
+    df_test = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/test.csv", types=[Int64, Date, Int64, Int64, Union{Bool, Missing}], truestring="True", falsestring="False", dateformat="yyyy-mm-dd")
+    df_train = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/train.csv", types=[Int64, Date, Int64, Int64, Float64, Union{Bool, Missing}], truestring="True", falsestring="False", dateformat="yyyy-mm-dd")
+    df_transactions = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/transactions.csv", types=[Date, Int64, Int64], dateformat="yyyy-mm-dd")
+end
 
-# @time begin
-#     unique_holidays_events = by(holidays_events, :date, x -> x[1, 2:end])
+@time begin
+    # unique_holidays_events = by(holidays_events, :date, x -> x[1, 2:end])
 
-#     data = train
-#     data = join(data, unique_holidays_events, on=[:date], kind=:left)
-#     data = join(data, items, on=[:item_nbr])
-#     data = join(data, oil, on=[:date], kind=:left)
-#     data = join(data, stores, on=[:store_nbr], makeunique=true)
-#     data = join(data, transactions, on=[:date, :store_nbr], kind=:left)
-#     @assert size(data)[1] == size(train)[1]
-# end
+    data = df_train
+    # data = join(data, unique_holidays_events, on=[:date], kind=:left)
+    data = join(data, df_items, on=[:item_nbr])
+    # data = join(data, oil, on=[:date], kind=:left)
+    # data = join(data, stores, on=[:store_nbr], makeunique=true)
+    # data = join(data, transactions, on=[:date, :store_nbr], kind=:left)
+    @assert size(data)[1] == size(df_train)[1]
+end
+
+@time begin
+    # unique_holidays_events = by(holidays_events, :date, x -> x[1, 2:end])
+
+    data = df_train
+    # data = join(data, unique_holidays_events, on=[:date], kind=:left)
+    data = join(data, df_items, on=[:item_nbr])
+    # data = join(data, oil, on=[:date], kind=:left)
+    # data = join(data, stores, on=[:store_nbr], makeunique=true)
+    # data = join(data, transactions, on=[:date, :store_nbr], kind=:left)
+    @assert size(data)[1] == size(df_train)[1]
+end
+
+@time begin
+    # unique_holidays_events = by(holidays_events, :date, x -> x[1, 2:end])
+
+    data = df_train
+    # data = join(data, unique_holidays_events, on=[:date], kind=:left)
+    data = join(df_items, data, on=[:item_nbr])
+    # data = join(data, oil, on=[:date], kind=:left)
+    # data = join(data, stores, on=[:store_nbr], makeunique=true)
+    # data = join(data, transactions, on=[:date, :store_nbr], kind=:left)
+    @assert size(data)[1] == size(df_train)[1]
+end
 
 # using Query
 
@@ -177,7 +374,7 @@ using Dates
 # end
 
 # @time begin
-#     categorical!(data, [:store_nbr, :item_nbr])
+    # categorical!(train2, [:store_nbr, :item_nbr])
 # end
 
 # @time begin
@@ -188,41 +385,13 @@ using Dates
 #     test_data = data[!sample, :]
 # end
 
-# using GLM
+# train_data = data
 
-# @time begin
-#     # TODO what does glm do with missing?
-#     model = lm(@formula(unit_sales ~ store_nbr + item_nbr), train_data)
-# end
+# using MixedModels
 
-# actual = test_data[:unit_sales]
-# redicted = predict(model, test_data)
-# weight = map(p -> p ? 1.25 : 1.00, test_data[:perishable])
-# score = sqrt(sum(@. weight * (log(actual + 1) - log(predicted + 1)) ^ 2) / sum(weight))
-
-# using FixedEffectModels
-
-# mixed_data = deepcopy(data)
-# mixed_data[:unit_sales] = Union{Float64, Missing}[s ? d : missing for (s,d) in zip(sample, mixed_data[:unit_sales])]
-# model = reg(mixed_data, @model(unit_sales ~ transactions, fe = store_nbr + item_nbr, save=true))
-# @show fes(model)
-
-# @show model.augmentdf
-
-# @time begin
-#     actual = test_data[:unit_sales]
-#     predicted = predict(model, test_data)
-#     weight = map(p -> p ? 1.25 : 1.00, test_data[:perishable])
-#     score = sqrt(sum(@. weight * (log(actual + 1) - log(predicted + 1)) ^ 2) / sum(weight))
-# end
-
-# using OnlineStats
-
-using MixedModels
-
-@time model = fit(LinearMixedModel, @formula(unit_sales ~ (1|store_nbr) + (1|item_nbr)), train2)
+# @time model = fit(LinearMixedModel, @formula(unit_sales ~ (1|store_nbr) + (1|item_nbr) + (1|family)), train_data)
 # # "At a superficial level these can be considered as the "estimates" of the random effects, with a bit of hand waving, but pursuing this analogy too far usually results in confusion."
-# params = ranef(model, named=true)
+# @show params = ranef(model, named=true)
 
 # function StatsBase.fitted(m::LinearMixedModel{T}, new_data) where T
 #     new_m = LinearMixedModel(m.formula, new_data)

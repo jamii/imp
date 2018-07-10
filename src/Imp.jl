@@ -1,8 +1,8 @@
 module Imp
 
-import MacroTools
-import MacroTools: @capture
-using Rematch
+# import MacroTools
+# import MacroTools: @capture
+# using Rematch
 
 macro splice(iterator, body)
   @assert iterator.head == :call

@@ -230,15 +230,15 @@ function actually_get_cofactors(holidays_events, items, oil, stores, test, train
         #     end
         # end
 
-        i1 = searchsortedfirst(i_item_nbr, item_nbr)
-        @assert 1 <= i1 <= length(i_family)
-        add!(store_nbr_family, store_nbr, i_family[i1], 1.0 * 1.0)
-        add!(item_nbr_family, item_nbr, i_family[i1], 1.0 * 1.0)
-        add!(unit_sales_family, nothing, i_family[i1], unit_sales * 1.0)
+        # i1 = searchsortedfirst(i_item_nbr, item_nbr)
+        # @assert 1 <= i1 <= length(i_family)
+        # add!(store_nbr_family, store_nbr, i_family[i1], 1.0 * 1.0)
+        # add!(item_nbr_family, item_nbr, i_family[i1], 1.0 * 1.0)
+        # add!(unit_sales_family, nothing, i_family[i1], unit_sales * 1.0)
         # for he1 in hes
         #     add!(type_family, he_type[he1], i_family[i1]), 1.0 * 1.0)
         # end
-        add!(family_family, i_family[i1], i_family[i1], 1.0 * 1.0)
+        # add!(family_family, i_family[i1], i_family[i1], 1.0 * 1.0)
         
     end
 
@@ -329,49 +329,32 @@ Categorical = String
     df_transactions = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/transactions.csv", types=[Date, Int64, Int64], dateformat="yyyy-mm-dd")
 end
 
-@time begin
-    # unique_holidays_events = by(holidays_events, :date, x -> x[1, 2:end])
+# @time begin
+#     # unique_holidays_events = by(holidays_events, :date, x -> x[1, 2:end])
 
-    data = df_train
-    # data = join(data, unique_holidays_events, on=[:date], kind=:left)
-    data = join(data, df_items, on=[:item_nbr])
-    # data = join(data, oil, on=[:date], kind=:left)
-    # data = join(data, stores, on=[:store_nbr], makeunique=true)
-    # data = join(data, transactions, on=[:date, :store_nbr], kind=:left)
-    @assert size(data)[1] == size(df_train)[1]
-end
-
-@time begin
-    # unique_holidays_events = by(holidays_events, :date, x -> x[1, 2:end])
-
-    data = df_train
-    # data = join(data, unique_holidays_events, on=[:date], kind=:left)
-    data = join(data, df_items, on=[:item_nbr])
-    # data = join(data, oil, on=[:date], kind=:left)
-    # data = join(data, stores, on=[:store_nbr], makeunique=true)
-    # data = join(data, transactions, on=[:date, :store_nbr], kind=:left)
-    @assert size(data)[1] == size(df_train)[1]
-end
-
-@time begin
-    # unique_holidays_events = by(holidays_events, :date, x -> x[1, 2:end])
-
-    data = df_train
-    # data = join(data, unique_holidays_events, on=[:date], kind=:left)
-    data = join(df_items, data, on=[:item_nbr])
-    # data = join(data, oil, on=[:date], kind=:left)
-    # data = join(data, stores, on=[:store_nbr], makeunique=true)
-    # data = join(data, transactions, on=[:date, :store_nbr], kind=:left)
-    @assert size(data)[1] == size(df_train)[1]
-end
+#     data = df_train
+#     # data = join(data, unique_holidays_events, on=[:date], kind=:left)
+#     data = join(data, df_items, on=[:item_nbr])
+#     # data = join(data, oil, on=[:date], kind=:left)
+#     # data = join(data, stores, on=[:store_nbr], makeunique=true)
+#     # data = join(data, transactions, on=[:date, :store_nbr], kind=:left)
+#     @assert size(data)[1] == size(df_train)[1]
+# end
 
 # using Query
 
-# data = @from t in train begin
-#     @left_outer_join h in holidays_events on t.date equals h.date
-#     @select {t.date}
-#     @collect DataFrame
+# function query(train, items)
+#     data = @from t in train begin
+#         # @left_outer_join h in holidays_events on t.date equals h.date
+#         @join i in items on t.item_nbr equals i.item_nbr
+#         @select {t.id, t.date, t.store_nbr, t.item_nbr, t.unit_sales, t.onpromotion, i.family, i.class, i.perishable}
+#         @collect DataFrame
+#     end
 # end
+
+# # @time q = query(train, items)
+# @time q = query(df_train, df_items)
+# # @time query()
 
 # @time begin
     # categorical!(train2, [:store_nbr, :item_nbr])
@@ -385,11 +368,11 @@ end
 #     test_data = data[!sample, :]
 # end
 
-# train_data = data
+train_data = df_train
 
-# using MixedModels
+using MixedModels
 
-# @time model = fit(LinearMixedModel, @formula(unit_sales ~ (1|store_nbr) + (1|item_nbr) + (1|family)), train_data)
+@time model = fit(LinearMixedModel, @formula(unit_sales ~ (1|store_nbr) + (1|item_nbr)), train_data)
 # # "At a superficial level these can be considered as the "estimates" of the random effects, with a bit of hand waving, but pursuing this analogy too far usually results in confusion."
 # @show params = ranef(model, named=true)
 
@@ -403,7 +386,7 @@ end
 #     for j in eachindex(b)
 #         MixedModels.unscaledre!(vec(v), trms[j], b[j])
 #     end
-#     v
+# v
 # end
 
 # @time begin
@@ -419,3 +402,4 @@ end
 # using MultivariateStats
 
 # end
+

@@ -6,12 +6,14 @@ struct Factor{Columns <: NTuple{N, Vector} where N}
     lohi::LoHi
 end
 
-Factor(columns) = Factor(columns, 1, 1:length(columns[1]))
+Factor(columns) = Factor(columns, 0, 1:length(columns[1]))
 
 function factor_first(factor::Factor)::Tuple{Any, Factor}
-    value = factor.columns[factor.column_ix][1]
-    lohi = searchsorted(factor.columns[factor.column_ix], value)
-    (value, Factor(factor.columns, factor.column_ix, lohi))
+    columns = tuple((column[factor.lohi] for column in factor.columns)...)
+    column_ix = factor.column_ix + 1
+    value = columns[column_ix][1]
+    lohi = searchsorted(columns[column_ix], value)
+    (value, Factor(columns, column_ix, lohi))
 end
 
 function factor_next(factor::Factor)::Union{Tuple{Any, Factor}, Nothing}
@@ -21,14 +23,6 @@ function factor_next(factor::Factor)::Union{Tuple{Any, Factor}, Nothing}
     (value, Factor(factor.columns, factor.column_ix, lohi))
 end
 
-function factor_down(factor::Factor)::Factor
-    @assert !isempty(factor.columns)
-    columns = tuple((column[factor.lohi] for column in factor.columns)...)
-    column_ix = factor.column_ix + 1
-    lohi = 1:(factor.lohi.stop - factor.lohi.start + 1)
-    Factor(columns, column_ix, lohi)
-end
-
 macro factor_next(f)
     quote
         n = factor_next($(esc(f)))
@@ -36,13 +30,6 @@ macro factor_next(f)
         n
     end
 end
-
-# function foreach(f, factor::Factor)
-#     for i in factor.lohi
-#         row = tuple((column[i] for column in factor.columns)...)
-#         f(row)
-#     end
-# end
 
 struct MergeJoin1{factor_ixes} end
 
@@ -60,7 +47,7 @@ function foreach(f, join::MergeJoin1{factor_ixes}, factors) where {factor_ixes}
     (va, fa) = factor_first(factors[a])
 
     while true
-        f(factors_merge(factors, a => factor_down(fa)))
+        f(factors_merge(factors, a => fa))
         (va, fa) = @factor_next(fa)
     end
 end
@@ -85,7 +72,7 @@ function foreach(f, join::MergeJoin2{factor_ixes}, factors) where {factor_ixes}
     while true
         c = cmp(va, vb)
         if c == 0
-            f(factors_merge(factors, a => factor_down(fa), b => factor_down(fb)))
+            f(factors_merge(factors, a => fa, b => fb))
             (va, fa) = @factor_next(fa)
             (vb, fb) = @factor_next(fb)
         elseif c == -1
@@ -129,17 +116,3 @@ scale = Factor((["Eng", "Sec"], ["Hi", "Lo"]))
 select(Chain(()), (dep, scale), ((1,1), (1,2), (2,2)))
 select(Chain((MergeJoin2((1,2)),)), (dep, scale), ((1,1), (1,2), (2,2)))
 select(Chain((MergeJoin2((1,2)), MergeJoin1((1,)))), (dep, scale), ((1,1), (1,2), (2,2)))
-
-# struct Product end
-
-# function foreach(f, product::Product, factors)
-#     if length(factors) == 0
-#         f(())
-#     else
-#         foreach(factors[1]) do row_left
-#             foreach(product, factors[2:end]) do row_right
-#                 f(tuple(row_left..., row_right...))
-#             end
-#         end
-#     end
-# end   

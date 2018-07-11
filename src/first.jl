@@ -59,7 +59,7 @@ function foreach(f, join::GenericJoin, factors)
         f(tuple(factors...))
 
         @label next
-        next = @factor_next(min_factor)
+        next = factor_next(min_factor)
         next == nothing && return
         (value, min_factor) = next
     end
@@ -92,9 +92,47 @@ function select(expr, factors, ixes)
     rows
 end
 
+function Imp.count(expr, factors)
+    total = Ref(0)
+    foreach(expr, factors) do factors
+        total[] += 1
+    end
+    total[]
+end
+
+# --- basic tests ---
+
 dep = Factor((["Eng", "Eng", "Sec"], ["Alice", "Bob", "Eve"]))
 scale = Factor((["Eng", "Sec"], ["Hi", "Lo"]))
 
 select(Chain(()), (dep, scale), ((1,1), (1,2), (2,2)))
 select(Chain((GenericJoin((1,2)),)), (dep, scale), ((1,1), (1,2), (2,2)))
 select(Chain((GenericJoin((1,2)), GenericJoin((1,)))), (dep, scale), ((1,1), (1,2), (2,2)))
+
+@show @time count(Chain((GenericJoin((1,2)), GenericJoin((1,)))), (dep, scale))
+@time count(Chain((GenericJoin((1,2)), GenericJoin((1,)))), (dep, scale))
+
+using DataFrames
+using CSV
+using Dates
+
+Categorical = CSV.CategoricalArrays.CategoricalString{UInt32}
+Categorical = String
+
+@time begin
+    df_holidays_events = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/holidays_events.csv", types=[Date, Categorical, Categorical, Categorical, Categorical, Bool], dateformat="yyyy-mm-dd", truestring="True", falsestring="False")
+    df_items = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/items.csv", types=[Int64, Categorical, Int64, Bool], truestring="1", falsestring="0")
+    df_oil = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/oil.csv", types=[Date, Union{Missing, Float64}], dateformat="yyyy-mm-dd")
+    df_stores = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/stores.csv", types=[Int64, Categorical, Categorical, Categorical, Int64])
+    df_test = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/test.csv", types=[Int64, Date, Int64, Int64, Union{Bool, Missing}], truestring="True", falsestring="False", dateformat="yyyy-mm-dd")
+    df_train = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/train-mini.csv", types=[Int64, Date, Int64, Int64, Float64, Union{Bool, Missing}], truestring="True", falsestring="False", dateformat="yyyy-mm-dd")
+    df_transactions = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/transactions.csv", types=[Date, Int64, Int64], dateformat="yyyy-mm-dd")
+end
+
+Factor(dataframe::DataFrames.DataFrame) = Factor(dataframe, 1:length(dataframe.columns))
+Factor(dataframe::DataFrames.DataFrame, ixes) = Factor(tuple(sort!(dataframe[ixes]).columns...))
+
+train = Factor(df_train[1:10000, :], [2,1,3])
+holidays_events = Factor(df_holidays_events)
+@time select(Chain((GenericJoin((1,2)), GenericJoin((2,)), GenericJoin((1,)))), (train, holidays_events), ((1,1),(1,2),(1,3),(2,2)))
+@time select(Chain((GenericJoin((1,2)), GenericJoin((2,)), GenericJoin((1,)))), (train, holidays_events), ((1,1),(1,2),(1,3),(2,2)))

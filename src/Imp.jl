@@ -10,7 +10,7 @@ macro splice(iterator, body)
   Base.Expr(:..., :(($(esc(body)) for $(esc(iterator.args[2])) in $(esc(iterator.args[3])))))
 end
 
-# include("columns.jl")
+include("columns.jl")
 include("first.jl")
 # include("higher.jl")
 

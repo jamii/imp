@@ -2,11 +2,11 @@ const LoHi = UnitRange{Int64}
 
 mutable struct Factor{ColumnIx, Columns <: NTuple{N, Vector} where N}
     columns::Columns # at least one column, at least one row
-    lohi::LoHi
+    bounds::LoHi
+    focus::LoHi
 end
 
-Factor(columns) = Factor(columns, 0, 1:length(columns[1]))
-Factor(columns, column_ix, lohi) = Factor{column_ix, typeof(columns)}(columns, lohi)
+Factor(columns) = Factor{0, typeof(columns)}(columns, 1:length(columns[1]), 1:length(columns[1]))
 
 function Base.getproperty(factor::Factor{column_ix}, k::Symbol) where {column_ix}
     if k == :column_ix
@@ -16,35 +16,40 @@ function Base.getproperty(factor::Factor{column_ix}, k::Symbol) where {column_ix
     end
 end
 
-function factor_down!(in_factor::Factor, out_factor::Factor)
-    out_factor.columns = tuple((column[in_factor.lohi] for column in in_factor.columns)...)
-    out_factor.lohi = 1:(in_factor.lohi.stop - in_factor.lohi.start + 1)
+function factor_next_column(in_factor::Factor)::Factor
+    Factor{in_factor.column_ix+1, typeof(in_factor.columns)}(in_factor.columns, 1:0, 1:0)
 end
 
-function factor_first!(factor::Factor)::Any
-    column = factor.columns[factor.column_ix]
-    value = column[1]
-    factor.lohi = searchsorted(column, value)
-    value
+function factor_first!(in_factor::Factor, out_factor::Factor)
+    out_factor.bounds = in_factor.focus
+    out_factor.focus = in_factor.focus.start:(in_factor.focus.start-1)
 end
 
 function factor_next!(factor::Factor)::Union{Any, Nothing}
     column = factor.columns[factor.column_ix]
-    factor.lohi.stop >= length(column) && return nothing
-    value = column[factor.lohi.stop + 1]
-    factor.lohi = searchsorted(column, value)
+    focus = factor.focus
+    bounds = factor.bounds
+    focus.stop >= bounds.stop && return nothing
+    start = focus.stop + 1
+    value = column[start]
+    stop = gallop(column, start, bounds.stop + 1, value, 1) - 1
+    factor.focus = start:stop
     value
 end
 
 function factor_seek!(factor::Factor, value)::Bool
     column = factor.columns[factor.column_ix]
-    lohi = searchsorted(column, value)
-    factor.lohi = lohi
-    lohi.start <= lohi.stop
+    focus = factor.focus
+    bounds = factor.bounds
+    start = gallop(column, focus.stop + 1, bounds.stop + 1, value, 0)
+    # TODO start + 1 ?
+    stop = gallop(column, start, bounds.stop + 1, value, 1) - 1
+    factor.focus = start:stop
+    start <= stop
 end
 
 function factor_count(factor::Factor)::Int64
-    factor.lohi.stop - factor.lohi.start + 1
+    factor.bounds.stop - factor.bounds.start + 1
 end
 
 abstract type Query end
@@ -73,14 +78,12 @@ end
 function stage(join::GenericJoin, in_factors)
     out_factors = Any[in_factors...]
     for factor_ix in join.factor_ixes
-        in_factor = in_factors[factor_ix]
-        out_factors[factor_ix] = Factor(in_factor.columns, in_factor.column_ix+1, in_factor.lohi)
+        out_factors[factor_ix] = factor_next_column(in_factors[factor_ix])
     end
     out_factors = tuple(out_factors...)
     tail = stage(join.tail, out_factors)
     StagedGenericJoin(join.factor_ixes, in_factors, out_factors, tail)
 end
-
 
 @generated function execute(join::StagedGenericJoin{factor_ixes}) where {factor_ixes}
     quote
@@ -89,7 +92,7 @@ end
         tail = join.tail
 
         $(@splice factor_ix in factor_ixes quote
-          factor_down!(in_factors[$factor_ix], out_factors[$factor_ix])
+          factor_first!(in_factors[$factor_ix], out_factors[$factor_ix])
           end)
 
         (_, min_ix) = findmin(tuple($(@splice factor_ix in factor_ixes quote
@@ -99,7 +102,7 @@ end
 
         value = @match min_ix begin
             $(@splice factor_ix in [1,2,3] :(
-                $factor_ix => factor_first!(out_factors[$factor_ix])
+                $factor_ix => factor_next!(out_factors[$factor_ix])
             ))
         end
 
@@ -153,7 +156,7 @@ end
           let
           local column = columns[$i]
           local factor = in_factors[$ix[1]]
-          local value = factor.columns[$ix[2]][factor.lohi.start]
+          local value = factor.columns[$ix[2]][factor.focus.start]
           push!(column, value)
           end
           end)
@@ -221,12 +224,14 @@ query =
 display(@benchmark run(query, (train, items)))
 out = run(query, (train, items))
 
-staged = stage(query, (train, items))
+# staged = stage(query, (train, items))
+# display(@benchmark execute(staged))
 # @code_warntype execute(staged)
 # @code_warntype execute(staged.tail.tail.tail.tail.tail.tail.tail.tail)
 
 df_test = Factor(df_out, [4,1,2,3,5,6,7,8,9])
 test = Factor(out)
 for i in 1:9
+    @show i
     @assert replace(df_test.columns[i], missing=>nothing) == replace(test.columns[i], missing=>nothing)
 end

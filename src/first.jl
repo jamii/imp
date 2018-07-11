@@ -9,14 +9,10 @@ Factor(columns) = Factor(columns, 0, 1:length(columns[1]))
 Factor(columns, column_ix, lohi) = Factor{column_ix, typeof(columns)}(columns, lohi)
 
 function Base.getproperty(factor::Factor{column_ix}, k::Symbol) where {column_ix}
-    if k == :columns
-        getfield(factor, :columns)
-    elseif k == :column_ix
+    if k == :column_ix
         column_ix
-    elseif k == :lohi
-        getfield(factor, :lohi)
     else
-        error("type $(typeof(factor)) has no field $k")
+        getfield(factor, k)
     end
 end
 
@@ -59,10 +55,19 @@ struct GenericJoin <: Query
 end
 
 struct StagedGenericJoin{FactorIxes, InFactors, OutFactors, Tail}
-    factor_ixes::FactorIxes
     in_factors::InFactors
     out_factors::OutFactors
     tail::Tail
+end
+
+StagedGenericJoin(factor_ixes, in_factors, out_factors, tail) = StagedGenericJoin{factor_ixes, typeof(in_factors), typeof(out_factors), typeof(tail)}(in_factors, out_factors, tail)
+
+function Base.getproperty(join::StagedGenericJoin{factor_ixes}, k::Symbol) where {factor_ixes}
+    if k == :factor_ixes
+        factor_ixes
+    else
+        getfield(join, k)
+    end
 end
 
 function stage(join::GenericJoin, in_factors)
@@ -76,33 +81,46 @@ function stage(join::GenericJoin, in_factors)
     StagedGenericJoin(join.factor_ixes, in_factors, out_factors, tail)
 end
 
-function execute(join::StagedGenericJoin)
-    in_factors = join.in_factors
-    out_factors = join.out_factors
-    factor_ixes = join.factor_ixes
-    tail = join.tail
 
-    for factor_ix in join.factor_ixes
-        factor_down!(in_factors[factor_ix], out_factors[factor_ix])
-    end
-    
-    (_, min_ix) = findmin([factor_count(factor) for factor in out_factors[[factor_ixes...]]])
-    min_ix = factor_ixes[min_ix]
-    
-    value = factor_first!(out_factors[min_ix])
-    while true
-        for factor_ix in factor_ixes
-            if factor_ix != min_ix
-                factor_seek!(out_factors[factor_ix], value) || @goto next
-            end
+@generated function execute(join::StagedGenericJoin{factor_ixes}) where {factor_ixes}
+    quote
+        in_factors = join.in_factors
+        out_factors = join.out_factors
+        tail = join.tail
+
+        $(@splice factor_ix in factor_ixes quote
+          factor_down!(in_factors[$factor_ix], out_factors[$factor_ix])
+          end)
+
+        (_, min_ix) = findmin(tuple($(@splice factor_ix in factor_ixes quote
+                                 factor_count(out_factors[$factor_ix])
+                                 end)))
+        min_ix = $factor_ixes[min_ix]
+
+        value = @match min_ix begin
+            $(@splice factor_ix in [1,2,3] :(
+                $factor_ix => factor_first!(out_factors[$factor_ix])
+            ))
         end
 
-        execute(tail)
+        while true
+            $(@splice factor_ix in factor_ixes quote
+              if $factor_ix != min_ix
+              factor_seek!(out_factors[$factor_ix], value) || @goto next
+              end
+              end)
 
-        @label next
-        next = factor_next!(out_factors[min_ix])
-        next == nothing && return
-        value = next
+            execute(tail)
+
+            @label next
+            next = @match min_ix begin
+                $(@splice factor_ix in [1,2,3] :(
+                    $factor_ix => factor_next!(out_factors[$factor_ix])
+                ))
+            end
+            next == nothing && return
+            value = next
+        end
     end
 end
 
@@ -153,7 +171,7 @@ scale = Factor((["Eng", "Sec"], ["Hi", "Lo"]))
 run(Select(((1,1), (1,2), (2,2))), (dep, scale))
 run(GenericJoin((1,2), Select(((1,1), (1,2), (2,2)))), (dep, scale))
 @show @time run(GenericJoin((1,2), GenericJoin((1,), Select(((1,1), (1,2), (2,2))))), (dep, scale))
-@time run(GenericJoin((1,2), GenericJoin((1,), Select(((1,1), (1,2), (2,2))))), (dep, scale)) 
+@time run(GenericJoin((1,2), GenericJoin((1,), Select(((1,1), (1,2), (2,2))))), (dep, scale))
 
 using DataFrames
 using CSV
@@ -192,9 +210,12 @@ query =
     GenericJoin((2,),
     GenericJoin((2,),
     Select(((1,1),(1,2),(1,3),(1,4),(1,5),(1,6),(2,2),(2,3),(2,4))),
-    )))))))) 
+    ))))))))
 display(@benchmark run(query, (train, items)))
 out = run(query, (train, items))
+
+staged = stage(query, (train, items))
+# @code_warntype execute(staged)
 
 df_test = Factor(df_out, [4,1,2,3,5,6,7,8,9])
 test = Factor(out)

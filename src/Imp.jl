@@ -2,7 +2,7 @@ module Imp
 
 # import MacroTools
 # import MacroTools: @capture
-# using Rematch
+using Rematch
 
 macro splice(iterator, body)
   @assert iterator.head == :call

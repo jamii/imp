@@ -133,10 +133,11 @@ struct Select <: Query
 end
 
 struct StagedSelect{Ixes, InFactors, Columns}
-    ixes::Ixes
     in_factors::InFactors
     columns::Columns
 end
+
+StagedSelect(ixes, in_factors, columns) = StagedSelect{ixes, typeof(in_factors), typeof(columns)}(in_factors, columns)
 
 function stage(select::Select, in_factors)
     ixes = select.ixes
@@ -144,12 +145,18 @@ function stage(select::Select, in_factors)
     StagedSelect(ixes, in_factors, columns)
 end
 
-function execute(select::StagedSelect)
-    in_factors = select.in_factors
-    for (ix, column) in zip(select.ixes, select.columns)
-        factor = in_factors[ix[1]]
-        value = factor.columns[ix[2]][factor.lohi.start]
-        push!(column, value)
+@generated function execute(select::StagedSelect{ixes}) where {ixes}
+    quote
+        in_factors = select.in_factors
+        columns = select.columns
+        $(@splice (i, ix) in enumerate(ixes) quote
+          let
+          local column = columns[$i]
+          local factor = in_factors[$ix[1]]
+          local value = factor.columns[$ix[2]][factor.lohi.start]
+          push!(column, value)
+          end
+          end)
     end
 end
 
@@ -195,7 +202,7 @@ Factor(dataframe::DataFrames.DataFrame, ixes) = Factor(tuple(sort(dataframe[ixes
 
 using BenchmarkTools
 
-display(@benchmark DataFrames.join(df_train, df_items, on=[:item_nbr]))
+# display(@benchmark DataFrames.join(df_train, df_items, on=[:item_nbr]))
 df_out = DataFrames.join(df_train, df_items, on=[:item_nbr])
 
 train = Factor(df_train, [4,1,2,3,5,6])
@@ -216,6 +223,7 @@ out = run(query, (train, items))
 
 staged = stage(query, (train, items))
 # @code_warntype execute(staged)
+# @code_warntype execute(staged.tail.tail.tail.tail.tail.tail.tail.tail)
 
 df_test = Factor(df_out, [4,1,2,3,5,6,7,8,9])
 test = Factor(out)

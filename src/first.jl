@@ -1,42 +1,48 @@
 const LoHi = UnitRange{Int64}
 
-mutable struct Factor{Columns <: NTuple{N, Vector} where N}
+mutable struct Factor{ColumnIx, Columns <: NTuple{N, Vector} where N}
     columns::Columns # at least one column, at least one row
-    column_ix::Int64
     lohi::LoHi
 end
 
 Factor(columns) = Factor(columns, 0, 1:length(columns[1]))
+Factor(columns, column_ix, lohi) = Factor{column_ix, typeof(columns)}(columns, lohi)
 
-Base.copy(factor::Factor) = Factor(factor.columns, factor.column_ix, factor.lohi)
+function Base.getproperty(factor::Factor{column_ix}, k::Symbol) where {column_ix}
+    if k == :columns
+        getfield(factor, :columns)
+    elseif k == :column_ix
+        column_ix
+    elseif k == :lohi
+        getfield(factor, :lohi)
+    else
+        error("type $(typeof(factor)) has no field $k")
+    end
+end
 
 function factor_down!(in_factor::Factor, out_factor::Factor)
     out_factor.columns = tuple((column[in_factor.lohi] for column in in_factor.columns)...)
-    out_factor.column_ix = in_factor.column_ix + 1
     out_factor.lohi = 1:(in_factor.lohi.stop - in_factor.lohi.start + 1)
 end
 
 function factor_first!(factor::Factor)::Any
-    columns = factor.columns
-    column_ix = factor.column_ix
-    value = columns[column_ix][1]
-    factor.lohi = searchsorted(columns[column_ix], value)
+    column = factor.columns[factor.column_ix]
+    value = column[1]
+    factor.lohi = searchsorted(column, value)
     value
 end
 
 function factor_next!(factor::Factor)::Union{Any, Nothing}
-    columns = factor.columns
-    column_ix = factor.column_ix
-    factor.lohi.stop >= length(columns[column_ix]) && return nothing
-    value = factor.columns[column_ix][factor.lohi.stop + 1]
-    factor.lohi = searchsorted(columns[column_ix], value)
+    column = factor.columns[factor.column_ix]
+    factor.lohi.stop >= length(column) && return nothing
+    value = column[factor.lohi.stop + 1]
+    factor.lohi = searchsorted(column, value)
     value
 end
 
-function factor_seek!(factor::Factor, value, output=nothing)::Bool
-    columns = factor.columns
-    column_ix = factor.column_ix
-    lohi = searchsorted(columns[column_ix], value)
+function factor_seek!(factor::Factor, value)::Bool
+    column = factor.columns[factor.column_ix]
+    lohi = searchsorted(column, value)
     factor.lohi = lohi
     lohi.start <= lohi.stop
 end
@@ -60,9 +66,10 @@ struct StagedGenericJoin{FactorIxes, InFactors, OutFactors, Tail}
 end
 
 function stage(join::GenericJoin, in_factors)
-    out_factors = [in_factors...]
+    out_factors = Any[in_factors...]
     for factor_ix in join.factor_ixes
-        out_factors[factor_ix] = copy(out_factors[factor_ix])
+        in_factor = in_factors[factor_ix]
+        out_factors[factor_ix] = Factor(in_factor.columns, in_factor.column_ix+1, in_factor.lohi)
     end
     out_factors = tuple(out_factors...)
     tail = stage(join.tail, out_factors)

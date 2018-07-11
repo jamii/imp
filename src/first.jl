@@ -1,6 +1,6 @@
 const LoHi = UnitRange{Int64}
 
-struct Factor{Columns <: NTuple{N, Vector} where N}
+mutable struct Factor{Columns <: NTuple{N, Vector} where N}
     columns::Columns # at least one column, at least one row
     column_ix::Int64
     lohi::LoHi
@@ -15,29 +15,29 @@ function factor_down(factor::Factor)::Factor
     Factor(columns, column_ix, lohi)
 end
 
-function factor_first(factor::Factor)::Tuple{Any, Factor}
+function factor_first!(factor::Factor)::Any
     columns = factor.columns
     column_ix = factor.column_ix
     value = columns[column_ix][1]
-    lohi = searchsorted(columns[column_ix], value)
-    (value, Factor(columns, column_ix, lohi))
+    factor.lohi = searchsorted(columns[column_ix], value)
+    value
 end
 
-function factor_next(factor::Factor)::Union{Tuple{Any, Factor}, Nothing}
+function factor_next!(factor::Factor)::Union{Any, Nothing}
     columns = factor.columns
     column_ix = factor.column_ix
     factor.lohi.stop >= length(columns[column_ix]) && return nothing
     value = factor.columns[column_ix][factor.lohi.stop + 1]
-    lohi = searchsorted(columns[column_ix], value)
-    (value, Factor(columns, column_ix, lohi))
+    factor.lohi = searchsorted(columns[column_ix], value)
+    value
 end
 
-function factor_seek(factor::Factor, value)::Union{Factor, Nothing}
+function factor_seek!(factor::Factor, value, output=nothing)::Bool
     columns = factor.columns
     column_ix = factor.column_ix
     lohi = searchsorted(columns[column_ix], value)
-    lohi.start > lohi.stop && return nothing
-    Factor(columns, column_ix, lohi)
+    factor.lohi = lohi
+    lohi.start <= lohi.stop
 end
 
 function factor_count(factor::Factor)::Int64
@@ -57,24 +57,20 @@ function foreach(f, join::GenericJoin, factors)
     (_, min_ix) = findmin([factor_count(factor) for factor in factors[[join.factor_ixes...]]])
     min_ix = join.factor_ixes[min_ix]
     
-    (value, min_factor) = factor_first(factors[min_ix])
-    factors[min_ix] = min_factor
+    value = factor_first!(factors[min_ix])
     while true
         for factor_ix in join.factor_ixes
             if factor_ix != min_ix
-                factor = factor_seek(factors[factor_ix], value)
-                factor == nothing && @goto next
-                factors[factor_ix] = factor
+                factor_seek!(factors[factor_ix], value) || @goto next
             end
         end
 
         f(tuple(factors...))
 
         @label next
-        next = factor_next(min_factor)
+        next = factor_next!(factors[min_ix])
         next == nothing && return
-        (value, min_factor) = next
-        factors[min_ix] = min_factor
+        value = next
     end
 end
 
@@ -146,7 +142,9 @@ end
 Factor(dataframe::DataFrames.DataFrame) = Factor(dataframe, 1:length(dataframe.columns))
 Factor(dataframe::DataFrames.DataFrame, ixes) = Factor(tuple(sort(dataframe[ixes]).columns...))
 
-@time DataFrames.join(df_train, df_items, on=[:item_nbr]); nothing
+using BenchmarkTools
+
+display(@benchmark DataFrames.join(df_train, df_items, on=[:item_nbr]))
 df_out = @time DataFrames.join(df_train, df_items, on=[:item_nbr])
 
 train = Factor(df_train, [4,1,2,3,5,6])
@@ -161,7 +159,7 @@ query = Chain((
     GenericJoin((2,)),
     GenericJoin((2,)),
 ))
-@time select(query, (train, items), ((1,1),(1,2),(1,3),(1,4),(1,5),(1,6),(2,2),(2,3),(2,4))); nothing
+display(@benchmark select(query, (train, items), ((1,1),(1,2),(1,3),(1,4),(1,5),(1,6),(2,2),(2,3),(2,4))))
 out = @time select(query, (train, items), ((1,1),(1,2),(1,3),(1,4),(1,5),(1,6),(2,2),(2,3),(2,4)))
 
 df_test = Factor(df_out, [4,1,2,3,5,6,7,8,9])

@@ -1,9 +1,7 @@
-const LoHi = UnitRange{Int64}
-
 mutable struct Factor{ColumnIx, Columns <: NTuple{N, Vector} where N}
     columns::Columns # at least one column, at least one row
-    bounds::LoHi
-    focus::LoHi
+    bounds::UnitRange{Int64}
+    focus::UnitRange{Int64}
 end
 
 Factor(columns) = Factor{0, typeof(columns)}(columns, 1:length(columns[1]), 1:length(columns[1]))

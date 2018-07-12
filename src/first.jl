@@ -113,6 +113,42 @@ function output(join::StagedGenericJoin)
     output(join.tail)
 end
 
+struct Product <: Query
+    factor_ix
+    tail::Query
+end
+
+struct StagedProduct{FactorIx, InFactors, OutFactors, Tail}
+    in_factors::InFactors
+    out_factors::OutFactors
+    tail::Tail
+end
+
+function stage(product::Product, in_factors)
+    out_factors = Any[in_factors...]
+    out_factors[product.factor_ix] = factor_next_column(out_factors[product.factor_ix])
+    out_factors = tuple(out_factors...)
+    tail = stage(product.tail, out_factors)
+    StagedProduct{product.factor_ix, typeof(in_factors), typeof(out_factors), typeof(tail)}(in_factors, out_factors, tail)
+end
+
+function execute(product::StagedProduct{Ix}) where {Ix}
+    in_factor = product.in_factors[Ix]
+    out_factor = product.out_factors[Ix]
+    tail = product.tail
+
+    factor_first!(in_factor, out_factor)
+
+    for i in out_factor.bounds
+        out_factor.focus = i:i
+        execute(tail)
+    end
+end
+
+function output(product::StagedProduct)
+    output(product.tail)
+end
+
 struct Select <: Query
     ixes
 end
@@ -160,8 +196,8 @@ scale = Factor((["Eng", "Sec"], ["Hi", "Lo"]))
 
 run(Select(((1,1), (1,2), (2,2))), (dep, scale))
 run(GenericJoin((1,2), Select(((1,1), (1,2), (2,2)))), (dep, scale))
-@show @time run(GenericJoin((1,2), GenericJoin((1,), Select(((1,1), (1,2), (2,2))))), (dep, scale))
-@time run(GenericJoin((1,2), GenericJoin((1,), Select(((1,1), (1,2), (2,2))))), (dep, scale))
+@show @time run(GenericJoin((1,2), Product(1, Select(((1,1), (1,2), (2,2))))), (dep, scale))
+@time run(GenericJoin((1,2), Product(1, Select(((1,1), (1,2), (2,2))))), (dep, scale))
 
 using DataFrames
 using CSV
@@ -203,29 +239,24 @@ using BenchmarkTools
 @time items = Factor(df_items)
 query =
     GenericJoin((1,2),
-    GenericJoin((1,),
-    GenericJoin((1,),
-    GenericJoin((1,),
-    GenericJoin((1,),
-    GenericJoin((1,),
-    GenericJoin((2,),
-    GenericJoin((2,),
+    Product(1,
+    Product(2,
     Select(((1,1),(1,2),(1,3),(1,4),(1,5),(1,6),(2,2),(2,3),(2,4))),
-    ))))))))
+    )))
 display(@benchmark run(query, (train, items)))
 out = @time run(query, (train, items))
-query =
-    GenericJoin((1,2),
-    GenericJoin((1,),
-    Select(((1,1),(1,2),(1,3),(1,4),(1,5),(1,6),(2,2),(2,3),(2,4))),
-    ))
-display(@benchmark run(query, (train, items)))
+# query =
+#     GenericJoin((1,2),
+#     GenericJoin((1,),
+#     Select(((1,1),(1,2),(1,3),(1,4),(1,5),(1,6),(2,2),(2,3),(2,4))),
+#     ))
+# display(@benchmark run(query, (train, items)))
 # # @time begin
 # #     train = Factor(df_train, [4,1,2,3,5,6])
 # #     items = Factor(df_items)
 # #     run(query, (train, items))
 # # end
-out = run(query, (train, items))
+# out = @time run(query, (train, items))
 @assert length(out[1]) == length(train.columns[1])
 
 # staged = stage(query, (train, items))

@@ -1,3 +1,5 @@
+# TODO check how missing is handled throughout. should probably just refuse to join on missing
+
 mutable struct Factor{ColumnIx, Columns <: NTuple{N, Vector} where N}
     columns::Columns # at least one column, at least one row
     bounds::UnitRange{Int64}

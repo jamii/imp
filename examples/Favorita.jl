@@ -77,19 +77,19 @@ end
 
 function df_join_items(db)
     # unique_holidays_events = by(holidays_events, :date, x -> x[1, 2:end])
-    data = db.train
-    # data = join(data, unique_holidays_events, on=[:date], kind=:left)
-    data = join(data, df_items, on=[:item_nbr])
-    @assert size(data)[1] == size(df_train)[1]
-    data
+    result = db.train
+    # result = join(result, unique_holidays_events, on=[:date], kind=:left)
+    result = join(result, db.items, on=[:item_nbr])
+    @assert size(result)[1] == size(db.train)[1]
+    result
 end
 
 function jdb_join_items(db)
     # unique_holidays_events = groupreduce((a,b) -> a, holidays_events, :date)
-    data = db.train
-    data = join(data, db.items, lkey=:item_nbr, rkey=:item_nbr)
-    @assert length(data) == length(train)
-    data
+    result = db.train
+    result = join(result, db.items, lkey=:item_nbr, rkey=:item_nbr)
+    @assert length(result) == length(train)
+    result
 end
 
 # function q_join_items(db)
@@ -108,7 +108,9 @@ function imp_join_items(db)
                             Imp.Product(2,
                                     Imp.Select(((1,1),(1,2),(1,3),(1,4),(1,5),(1,6),(2,2),(2,3),(2,4))),
                                     )))
-    Imp.run(query, (db.train, db.items))
+    result = Imp.run(query, (db.train, db.items))
+    @assert length(result[1]) == length(db.train.columns[1])
+    result
 end
 
 function prepare_data(data)
@@ -237,7 +239,7 @@ function actually_get_cofactors(holidays_events, items, oil, stores, test, train
 
                            i_item_nbr,
                                 i_family,
-                                
+
                store_nbr_store_nbr,
         store_nbr_item_nbr,
         item_nbr_item_nbr,
@@ -259,12 +261,12 @@ function actually_get_cofactors(holidays_events, items, oil, stores, test, train
         store_nbr = t_store_nbr[i]
         item_nbr = t_item_nbr[i]
         unit_sales = t_unit_sales[i]
-        
+
         add!(store_nbr_store_nbr, store_nbr, store_nbr, 1.0 * 1.0)
 
         add!(store_nbr_item_nbr, store_nbr, item_nbr, 1.0 * 1.0)
         add!(item_nbr_item_nbr, item_nbr, item_nbr, 1.0 * 1.0)
-        
+
         add!(store_nbr_unit_sales, store_nbr, nothing, 1.0 * unit_sales)
         add!(item_nbr_unit_sales, item_nbr, nothing, 1.0 * unit_sales)
         add!(unit_sales_unit_sales, nothing, nothing, unit_sales * unit_sales)
@@ -274,7 +276,7 @@ function actually_get_cofactors(holidays_events, items, oil, stores, test, train
             add!(store_nbr_type, store_nbr, he_type[he1], 1.0 * 1.0)
             add!(item_nbr_type, item_nbr, he_type[he1], 1.0 * 1.0)
             add!(unit_sales_type, nothing, he_type[he1], unit_sales * 1.0)
-        
+
             for he2 in hes
                 add!(type_type, he_type[he1], he_type[he2], 1.0 * 1.0)
             end
@@ -289,7 +291,7 @@ function actually_get_cofactors(holidays_events, items, oil, stores, test, train
             add!(type_family, he_type[he1], i_family[i1], 1.0 * 1.0)
         end
         add!(family_family, i_family[i1], i_family[i1], 1.0 * 1.0)
-        
+
     end
 
     return (
@@ -325,26 +327,35 @@ end
 
 macro show_benchmark(b)
     quote
-        println($(QuoteNode(b)))
-        display(@benchmark $(esc(b)))
+        println($(string(b)))
+        # TODO don't understand why nested macros no longer require esc
+        display(@benchmark($b))
     end
 end
 
-function bench()
-    @time df_db = df_load()
-    # @time jdb_db = jdb_load()
-    @time imp_db = imp_load(df_db)
-    
-    @show_benchmark df_join_items(df_db)
-    # @show_benchmark jdb_join_items(jdb_db)
-    # @show_benchmark q_join_items(df_db)
-    @show_benchmark imp_join_items(imp_db)
+df_db = nothing
+jdb_db = nothing
+imp_db = nothing
 
-    df_result = df_join_items(df_db)
+function bench()
+    global df_db
+    global jdb_db
+    global imp_db
+
+    df_db == nothing && (df_db = @time df_load())
+    # jdb_db == nothing && (jdb_db = @time jdb_load())
+    imp_db == nothing && (imp_db = @time imp_load(df_db))
+
+    # @show_benchmark df_join_items($df_db)
+    # @show_benchmark jdb_join_items($jdb_db)
+    # @show_benchmark q_join_items($df_db)
+    @show_benchmark imp_join_items($imp_db)
+
+    # df_result = df_join_items(df_db)
     imp_result = imp_join_items(imp_db)
-    @show_benchmark silly_copy(imp_result)
-    
-    @assert Imp.Factor(df_result.columns, [4,1,2,3,5,6,7,8,9]).columns == imp_result
+    @show_benchmark silly_copy($imp_result)
+
+    # @assert Imp.Factor(df_result.columns, [4,1,2,3,5,6,7,8,9]).columns == imp_result
 end
 
 end

@@ -6,7 +6,7 @@ using DataFrames
 using CSV
 using Dates
 # using Query
-using MixedModels
+# using MixedModels
 
 using BenchmarkTools
 
@@ -124,25 +124,25 @@ function split_data(data)
     (train_data, test_data)
 end
 
-function mixed_fit(data)
-    model = fit(LinearMixedModel, @formula(unit_sales ~ (1|store_nbr) + (1|item_nbr)), train_data)
-    # @show params = ranef(model, named=true)
-    model
-end
+# function mixed_fit(data)
+#     model = fit(LinearMixedModel, @formula(unit_sales ~ (1|store_nbr) + (1|item_nbr)), train_data)
+#     # @show params = ranef(model, named=true)
+#     model
+# end
 
-# TODO this is probably not correct
-function StatsBase.fitted(m::LinearMixedModel{T}, new_data) where T
-    new_m = LinearMixedModel(m.formula, new_data)
-    v = Array{T}(nobs(new_m))
-    # TODO will the levels for both be the same?
-    trms = new_m.trms
-    A_mul_B!(vec(v), trms[end - 1], fixef(m))
-    b = ranef(m)
-    for j in eachindex(b)
-        MixedModels.unscaledre!(vec(v), trms[j], b[j])
-    end
-v
-end
+# # TODO this is probably not correct
+# function StatsBase.fitted(m::LinearMixedModel{T}, new_data) where T
+#     new_m = LinearMixedModel(m.formula, new_data)
+#     v = Array{T}(nobs(new_m))
+#     # TODO will the levels for both be the same?
+#     trms = new_m.trms
+#     A_mul_B!(vec(v), trms[end - 1], fixef(m))
+#     b = ranef(m)
+#     for j in eachindex(b)
+#         MixedModels.unscaledre!(vec(v), trms[j], b[j])
+#     end
+# v
+# end
 
 function score(test_data, predicted)
     # TODO scoring function breaks on negative predictions
@@ -335,10 +335,10 @@ function bench()
     # @time jdb_db = jdb_load()
     @time imp_db = imp_load(df_db)
     
-    # @show_benchmark df_join_items(df_db)
+    @show_benchmark df_join_items(df_db)
     # @show_benchmark jdb_join_items(jdb_db)
     # @show_benchmark q_join_items(df_db)
-    # @show_benchmark imp_join_items(imp_db)
+    @show_benchmark imp_join_items(imp_db)
 
     df_result = df_join_items(df_db)
     imp_result = imp_join_items(imp_db)

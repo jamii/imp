@@ -8,16 +8,8 @@ end
 
 Factor(columns) = Factor{0, typeof(columns)}(columns, 1:length(columns[1]), 1:length(columns[1]))
 
-function Base.getproperty(factor::Factor{column_ix}, k::Symbol) where {column_ix}
-    if k == :column_ix
-        column_ix
-    else
-        getfield(factor, k)
-    end
-end
-
-function factor_next_column(in_factor::Factor)::Factor
-    Factor{in_factor.column_ix+1, typeof(in_factor.columns)}(in_factor.columns, 1:0, 1:0)
+function factor_next_column(in_factor::Factor{column_ix})::Factor where {column_ix}
+    Factor{column_ix+1, typeof(in_factor.columns)}(in_factor.columns, 1:0, 1:0)
 end
 
 function factor_first!(in_factor::Factor, out_factor::Factor)
@@ -25,8 +17,8 @@ function factor_first!(in_factor::Factor, out_factor::Factor)
     out_factor.focus = in_factor.focus.start:(in_factor.focus.start-1)
 end
 
-function factor_next!(factor::Factor)::Union{Any, Nothing}
-    column = factor.columns[factor.column_ix]
+function factor_next!(factor::Factor{column_ix})::Union{Any, Nothing} where {column_ix}
+    column = factor.columns[column_ix]
     focus = factor.focus
     bounds = factor.bounds
     focus.stop >= bounds.stop && return nothing
@@ -37,8 +29,8 @@ function factor_next!(factor::Factor)::Union{Any, Nothing}
     value
 end
 
-function factor_seek!(factor::Factor, value)::Bool
-    column = factor.columns[factor.column_ix]
+function factor_seek!(factor::Factor{column_ix}, value)::Bool where {column_ix}
+    column = factor.columns[column_ix]
     focus = factor.focus
     bounds = factor.bounds
     start = gallop(column, focus.stop + 1, bounds.stop + 1, value, 0)
@@ -65,16 +57,6 @@ struct StagedGenericJoin{FactorIxes, InFactors, OutFactors, Tail}
     tail::Tail
 end
 
-StagedGenericJoin(factor_ixes, in_factors, out_factors, tail) = StagedGenericJoin{factor_ixes, typeof(in_factors), typeof(out_factors), typeof(tail)}(in_factors, out_factors, tail)
-
-function Base.getproperty(join::StagedGenericJoin{factor_ixes}, k::Symbol) where {factor_ixes}
-    if k == :factor_ixes
-        factor_ixes
-    else
-        getfield(join, k)
-    end
-end
-
 function stage(join::GenericJoin, in_factors)
     out_factors = Any[in_factors...]
     for factor_ix in join.factor_ixes
@@ -82,7 +64,7 @@ function stage(join::GenericJoin, in_factors)
     end
     out_factors = tuple(out_factors...)
     tail = stage(join.tail, out_factors)
-    StagedGenericJoin(join.factor_ixes, in_factors, out_factors, tail)
+    StagedGenericJoin{join.factor_ixes, typeof(in_factors), typeof(out_factors), typeof(tail)}(in_factors, out_factors, tail)
 end
 
 @generated function execute(join::StagedGenericJoin{factor_ixes}) where {factor_ixes}
@@ -140,12 +122,10 @@ struct StagedSelect{Ixes, InFactors, Columns}
     columns::Columns
 end
 
-StagedSelect(ixes, in_factors, columns) = StagedSelect{ixes, typeof(in_factors), typeof(columns)}(in_factors, columns)
-
 function stage(select::Select, in_factors)
     ixes = select.ixes
     columns = tuple((Vector{eltype(in_factors[ix[1]].columns[ix[2]])}() for ix in ixes)...)
-    StagedSelect(ixes, in_factors, columns)
+    StagedSelect{ixes, typeof(in_factors), typeof(columns)}(in_factors, columns)
 end
 
 @generated function execute(select::StagedSelect{ixes}) where {ixes}
@@ -187,7 +167,7 @@ using DataFrames
 using CSV
 using Dates
 
-Categorical = CSV.CategoricalArrays.CategoricalString{UInt32}
+# Categorical = CSV.CategoricalArrays.CategoricalString{UInt32}
 Categorical = String
 
 @time begin
@@ -196,20 +176,31 @@ Categorical = String
     df_oil = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/oil.csv", types=[Date, Union{Missing, Float64}], dateformat="yyyy-mm-dd")
     df_stores = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/stores.csv", types=[Int64, Categorical, Categorical, Categorical, Int64])
     df_test = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/test.csv", types=[Int64, Date, Int64, Int64, Union{Bool, Missing}], truestring="True", falsestring="False", dateformat="yyyy-mm-dd")
-    df_train = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/train-mini.csv", types=[Int64, Date, Int64, Int64, Float64, Union{Bool, Missing}], truestring="True", falsestring="False", dateformat="yyyy-mm-dd")[1:1000, :]
+    df_train = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/train.csv", types=[Int64, Date, Int64, Int64, Float64, Union{Bool, Missing}], truestring="True", falsestring="False", dateformat="yyyy-mm-dd")
     df_transactions = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/transactions.csv", types=[Date, Int64, Int64], dateformat="yyyy-mm-dd")
+
+    # TODO bring Missing back when https://github.com/JuliaLang/julia/issues/28076 is fixed
+    df_oil.columns[2] = Float64[ismissing(v) ? NaN : v for v in df_oil.columns[2]]
+    df_test.columns[5] = Int8[ismissing(v) ? 3 : Int8(v) for v in df_test.columns[5]]
+    df_train.columns[6] = Int8[ismissing(v) ? 3 : Int8(v) for v in df_train.columns[6]]
 end
 
 Factor(dataframe::DataFrames.DataFrame) = Factor(dataframe, 1:length(dataframe.columns))
-Factor(dataframe::DataFrames.DataFrame, ixes) = Factor(tuple(sort(dataframe[ixes]).columns...))
+function Factor(dataframe::DataFrames.DataFrame, ixes)
+    columns = tuple(map(copy, dataframe.columns[ixes])...)
+    quicksort!(columns)
+    Factor(columns)
+end
 
 using BenchmarkTools
 
 # display(@benchmark DataFrames.join(df_train, df_items, on=[:item_nbr]))
-df_out = DataFrames.join(df_train, df_items, on=[:item_nbr])
+# df_out = DataFrames.join(df_train, df_items, on=[:item_nbr])
 
-train = Factor(df_train, [4,1,2,3,5,6])
-items = Factor(df_items)
+# display(@benchmark Factor(df_train, [4,1,2,3,5,6]))
+
+@time train = Factor(df_train, [4,1,2,3,5,6])
+@time items = Factor(df_items)
 query =
     GenericJoin((1,2),
     GenericJoin((1,),
@@ -222,16 +213,77 @@ query =
     Select(((1,1),(1,2),(1,3),(1,4),(1,5),(1,6),(2,2),(2,3),(2,4))),
     ))))))))
 display(@benchmark run(query, (train, items)))
+out = @time run(query, (train, items))
+query =
+    GenericJoin((1,2),
+    GenericJoin((1,),
+    Select(((1,1),(1,2),(1,3),(1,4),(1,5),(1,6),(2,2),(2,3),(2,4))),
+    ))
+display(@benchmark run(query, (train, items)))
+# # @time begin
+# #     train = Factor(df_train, [4,1,2,3,5,6])
+# #     items = Factor(df_items)
+# #     run(query, (train, items))
+# # end
 out = run(query, (train, items))
+@assert length(out[1]) == length(train.columns[1])
 
 # staged = stage(query, (train, items))
-# display(@benchmark execute(staged))
+# # display(@benchmark execute(staged))
 # @code_warntype execute(staged)
-# @code_warntype execute(staged.tail.tail.tail.tail.tail.tail.tail.tail)
+# @code_warntype execute(staged.tail)
+# @code_warntype execute(staged.tail.tail)
 
-df_test = Factor(df_out, [4,1,2,3,5,6,7,8,9])
-test = Factor(out)
-for i in 1:9
-    @show i
-    @assert replace(df_test.columns[i], missing=>nothing) == replace(test.columns[i], missing=>nothing)
-end
+# df_test = Factor(df_out, [4,1,2,3,5,6,7,8,9])
+# test = Factor(out)
+# for i in 1:9
+#     @show i
+#     @assert replace(df_test.columns[i], missing=>nothing) == replace(test.columns[i], missing=>nothing)
+# end
+
+# length(train.columns[1])
+
+# for i = 1:27
+#     n = 2^i
+#     x = Factor((map(x->mod(x,n), collect(1:1000000)), collect(1:1000000)))
+#     y = Factor((collect(1:1000000),))
+#     @show n
+#     @time run(GenericJoin((1,2), GenericJoin((1,), Select(((1,1),(1,2),(2,1))))), (x,y))
+# end
+
+# out = nothing
+
+# for i = 17:20
+#     n = 2^i
+#     @show n
+#     @time train = Factor(df_train[1:n, :], [4,1,2,3,5,6])
+#     @time items = Factor(df_items)
+#     query =
+#         GenericJoin((1,2),
+#                     GenericJoin((1,),
+#                                 Select(((1,1),(1,2),(1,3),(1,4),(1,5),(1,6))),
+#                                 ))
+#     global out
+#     @time out = run(query, (train, items))
+#     @show length(out[1])
+#     @show map(eltype, out)
+# end
+
+# function silly_copy(xs)
+#     ys = empty(xs)
+#     for x in xs
+#         push!(ys, x)
+#     end
+#     ys
+# end
+
+# @benchmark silly_copy($(Vector{Int64}(1:1000000)))
+# @benchmark silly_copy($(Vector{Union{Int64, Missing}}(1:1000000)))
+
+# xs = Vector{Union{Int64, Bool}}(out[1])
+# @time silly_copy(xs, Vector{eltype(xs)}()); nothing
+
+# @code_llvm silly_copy(out[1], out[1])
+# @code_llvm silly_copy(out[6], out[6])
+# @code_warntype push!(out[6], missing)
+# @code_warntype Base.arrayset

@@ -71,10 +71,11 @@ function Imp.Factor(dataframe::DataFrames.DataFrame, ixes)
 end
 
 function imp_load(db)
-    train = Imp.Factor(db.train, [3,4,1,2,5,6])
+    train = Imp.Factor(db.train, [3,4,2,1,5,6])
     stores = Imp.Factor(db.stores)
     items = Imp.Factor(db.items)
-    (train=train, stores=stores, items=items)
+    transactions = Imp.Factor(db.transactions, [2,1,3])
+    (train=train, stores=stores, items=items, transactions=transactions)
 end
 
 function df_join_items(db)
@@ -115,19 +116,33 @@ function imp_join_items(db)
     result
 end
 
+function df_join(db)
+    # unique_holidays_events = by(holidays_events, :date, x -> x[1, 2:end])
+    result = db.train
+    # result = join(result, unique_holidays_events, on=[:date], kind=:left)
+    result = join(result, db.stores, on=[:store_nbr])
+    result = join(result, db.items, on=[:item_nbr])
+    result = join(result, db.transactions, on=[:date, :store_nbr])
+    @assert size(result)[1] == size(db.train)[1]
+    result
+end
+
 function imp_join(db)
     query =
-        Imp.GenericJoin((1,2), # store_nbr
+        Imp.GenericJoin((1,2,4), # store_nbr
         Imp.GenericJoin((1,3), # item_nbr
+        Imp.GenericJoin((1,4), # date
         Imp.Product(1,
         Imp.Product(2,
         Imp.Product(3,
+        Imp.Product(4,
         Imp.Select((
             (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),
             (2,2),(2,3),(2,4),(2,5),
             (3,2),(3,3),(3,4),
-        )))))))
-    result = Imp.run(query, (db.train, db.stores, db.items))
+            (4,3),
+        )))))))))
+    result = Imp.run(query, (db.train, db.stores, db.items, db.transactions))
     @assert length(result[1]) == length(db.train.columns[1])
     result
 end
@@ -369,6 +384,7 @@ function bench()
     # @show_benchmark jdb_join_items($jdb_db)
     # @show_benchmark q_join_items($df_db)
     # @show_benchmark imp_join_items($imp_db)
+    @show_benchmark df_join($df_db)
     @show_benchmark imp_join($imp_db)
 
     # df_result = df_join_items(df_db)

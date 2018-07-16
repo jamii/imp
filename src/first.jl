@@ -83,7 +83,7 @@ end
         min_ix = $factor_ixes[min_ix]
 
         value = @match min_ix begin
-            $(@splice factor_ix in [1,2,3] :(
+            $(@splice factor_ix in factor_ixes :(
                 $factor_ix => factor_next!(out_factors[$factor_ix])
             ))
         end
@@ -99,7 +99,7 @@ end
 
             @label next
             next = @match min_ix begin
-                $(@splice factor_ix in [1,2,3] :(
+                $(@splice factor_ix in factor_ixes :(
                     $factor_ix => factor_next!(out_factors[$factor_ix])
                 ))
             end

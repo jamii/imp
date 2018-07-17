@@ -5,7 +5,7 @@ struct Finger{Columns}
     ranges::Vector{UnitRange{Int64}}
 end
 
-finger(columns) = Finger(columns, [1:length(columns[1]) for i in 1:(length(columns)+1)])
+Finger(columns) = Finger(columns, [1:length(columns[1]) for i in 1:(length(columns)+1)])
 
 function finger_first!(finger::Finger, ::Type{Val{column_ix}})::Nothing where column_ix
     bounds = finger.ranges[column_ix]

@@ -21,9 +21,9 @@ function df_load(categorical=String)
     transactions = CSV.read("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/transactions.csv", types=[Date, Int64, Int64], dateformat="yyyy-mm-dd")
 
     # TODO bring Missing back when https://github.com/JuliaLang/julia/issues/28076 is fixed
-    oil.columns[2] = Float64[ismissing(v) ? NaN : v for v in oil.columns[2]]
-    test.columns[5] = Int8[ismissing(v) ? 3 : Int8(v) for v in test.columns[5]]
-    train.columns[6] = Int8[ismissing(v) ? 3 : Int8(v) for v in train.columns[6]]
+    DataFrames.columns(oil)[2] = Float64[ismissing(v) ? NaN : v for v in DataFrames.columns(oil)[2]]
+    DataFrames.columns(test)[5] = Int8[ismissing(v) ? 3 : Int8(v) for v in DataFrames.columns(test)[5]]
+    DataFrames.columns(train)[6] = Int8[ismissing(v) ? 3 : Int8(v) for v in DataFrames.columns(train)[6]]
 
     (holidays_events=holidays_events, items=items, oil=oil, stores=stores, test=test, train=train, transactions=transactions)
 end
@@ -63,9 +63,9 @@ end
 
 
 # NOTE mutates dataframe - dont export outside examples
-Imp.Factor(dataframe::DataFrames.DataFrame) = Imp.Factor(dataframe, 1:length(dataframe.columns))
+Imp.Factor(dataframe::DataFrames.DataFrame) = Imp.Factor(dataframe, 1:length(DataFrames.columns(dataframe)))
 function Imp.Factor(dataframe::DataFrames.DataFrame, ixes)
-    columns = tuple(dataframe.columns[ixes]...)
+    columns = tuple(DataFrames.columns(dataframe)[ixes]...)
     Imp.quicksort!(columns)
     Imp.Factor(columns)
 end
@@ -104,18 +104,6 @@ end
 #     end
 # end
 
-function imp_join_items(db)
-    query =
-        Imp.GenericJoin((1,2),
-                    Imp.Product(1,
-                            Imp.Product(2,
-                                    Imp.Select(((1,1),(1,2),(1,3),(1,4),(1,5),(1,6),(2,2),(2,3),(2,4))),
-                                    )))
-    result = Imp.run(query, (db.train, db.items))
-    @assert length(result[1]) == length(db.train.columns[1])
-    result
-end
-
 function df_join(db)
     # unique_holidays_events = by(holidays_events, :date, x -> x[1, 2:end])
     result = db.train
@@ -128,22 +116,27 @@ function df_join(db)
 end
 
 function imp_join(db)
+    factors = (db.train, db.stores, db.items, db.transactions)
+    ixes = (
+        (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),
+        (2,2),(2,3),(2,4),(2,5),
+        (3,2),(3,3),(3,4),
+        (4,3),
+    )
+    result = tuple((empty(factors[factor_ix].columns[column_ix]) for (factor_ix, column_ix) in ixes)...)
     query =
-        Imp.GenericJoin((1,2,4), # store_nbr
-        Imp.GenericJoin((1,3), # item_nbr
-        Imp.GenericJoin((1,4), # date
-        Imp.Product(1,
-        Imp.Product(2,
-        Imp.Product(3,
-        Imp.Product(4,
-        Imp.Select((
-            (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),
-            (2,2),(2,3),(2,4),(2,5),
-            (3,2),(3,3),(3,4),
-            (4,3),
-        )))))))))
-    result = Imp.run(query, (db.train, db.stores, db.items, db.transactions))
-    @assert length(result[1]) == length(db.train.columns[1])
+        Imp.GenericJoin(((1,1),(2,1),(4,1)), # store_nbr
+        Imp.GenericJoin(((1,2),(3,1)), # item_nbr
+        Imp.GenericJoin(((1,3),(4,2)), # date
+        Imp.Product((1,4),
+        Imp.Product((2,2),
+        Imp.Product((3,2),
+        Imp.Product((4,3),
+        Imp.Select(ixes, result))))))))
+    Imp.execute(query, factors)
+    @show length(result[1]) length(db.train.columns[1])
+    # TODO default values
+    # @assert length(result[1]) == length(db.train.columns[1])
     result
 end
 
@@ -384,14 +377,14 @@ function bench()
     # @show_benchmark jdb_join_items($jdb_db)
     # @show_benchmark q_join_items($df_db)
     # @show_benchmark imp_join_items($imp_db)
-    @show_benchmark df_join($df_db)
+    # @show_benchmark df_join($df_db)
     @show_benchmark imp_join($imp_db)
 
     # df_result = df_join_items(df_db)
     # imp_result = imp_join_items(imp_db)
     # @show_benchmark silly_copy($imp_result)
 
-    # @assert Imp.Factor(df_result.columns, [4,1,2,3,5,6,7,8,9]).columns == imp_result
+    # @assert Imp.Factor(df_result, [4,1,2,3,5,6,7,8,9]).columns == imp_result
 end
 
 end

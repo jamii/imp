@@ -63,18 +63,18 @@ end
 
 
 # NOTE mutates dataframe - dont export outside examples
-Imp.Factor(dataframe::DataFrames.DataFrame) = Imp.Factor(dataframe, 1:length(DataFrames.columns(dataframe)))
-function Imp.Factor(dataframe::DataFrames.DataFrame, ixes)
+Imp.Finger(dataframe::DataFrames.DataFrame) = Imp.Finger(dataframe, 1:length(DataFrames.columns(dataframe)))
+function Imp.Finger(dataframe::DataFrames.DataFrame, ixes)
     columns = tuple(DataFrames.columns(dataframe)[ixes]...)
     Imp.quicksort!(columns)
-    Imp.Factor(columns)
+    Imp.Finger(columns)
 end
 
 function imp_load(db)
-    train = Imp.Factor(db.train, [3,4,2,1,5,6])
-    stores = Imp.Factor(db.stores)
-    items = Imp.Factor(db.items)
-    transactions = Imp.Factor(db.transactions, [2,1,3])
+    train = Imp.Finger(db.train, [3,4,2,1,5,6])
+    stores = Imp.Finger(db.stores)
+    items = Imp.Finger(db.items)
+    transactions = Imp.Finger(db.transactions, [2,1,3])
     (train=train, stores=stores, items=items, transactions=transactions)
 end
 
@@ -116,14 +116,14 @@ function df_join(db)
 end
 
 function imp_join(db)
-    factors = (db.train, db.stores, db.items, db.transactions)
+    fingers = (db.train, db.stores, db.items, db.transactions)
     ixes = (
         (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),
         (2,2),(2,3),(2,4),(2,5),
         (3,2),(3,3),(3,4),
         (4,3),
     )
-    result = tuple((empty(factors[factor_ix].columns[column_ix]) for (factor_ix, column_ix) in ixes)...)
+    result = tuple((empty(fingers[finger_ix].columns[column_ix]) for (finger_ix, column_ix) in ixes)...)
     query =
         Imp.GenericJoin(((1,1),(2,1),(4,1)), # store_nbr
         Imp.GenericJoin(((1,2),(3,1)), # item_nbr
@@ -133,7 +133,7 @@ function imp_join(db)
         Imp.Product((3,2),
         Imp.Product((4,3),
         Imp.Select(ixes, result))))))))
-    Imp.execute(query, factors)
+    Imp.execute(query, fingers)
     @show length(result[1]) length(db.train.columns[1])
     # TODO default values
     # @assert length(result[1]) == length(db.train.columns[1])
@@ -384,7 +384,7 @@ function bench()
     # imp_result = imp_join_items(imp_db)
     # @show_benchmark silly_copy($imp_result)
 
-    # @assert Imp.Factor(df_result, [4,1,2,3,5,6,7,8,9]).columns == imp_result
+    # @assert Imp.Finger(df_result, [4,1,2,3,5,6,7,8,9]).columns == imp_result
 end
 
 end

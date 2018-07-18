@@ -74,7 +74,8 @@ function imp_load(db)
     stores = Imp.Finger(db.stores)
     items = Imp.Finger(db.items)
     transactions = Imp.Finger(db.transactions, [2,1,3]; default=0)
-    (train=train, stores=stores, items=items, transactions=transactions)
+    oil = Imp.Finger(db.oil, [1,2]; default=0.0)
+    (train=train, stores=stores, items=items, transactions=transactions, oil=oil)
 end
 
 function df_join_items(db)
@@ -115,19 +116,22 @@ function df_join(db)
 end
 
 function imp_join(db)
-    fingers = (db.train, db.stores, db.items, db.transactions)
+    fingers = (db.train, db.stores, db.items, db.transactions, db.oil)
     query =
         Imp.GenericJoin((1,2,4), # store_nbr
         Imp.GenericJoin((1,3), # item_nbr
-        Imp.GenericJoin((1,4), # date
+        Imp.GenericJoin((1,4,5), # date
         Imp.Product(1,
         Imp.Product(2,
         Imp.Product(3,
+        # Imp.Product(4,
+        # Imp.Product(5,
         Imp.Select((
         (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),
-        # (2,2),(2,3),(2,4),(2,5),
-        # (3,2),(3,3),(3,4),
+        (2,2),(2,3),(2,4),(2,5),
+        (3,2),(3,3),(3,4),
         (4,3),
+        (5,2),
     ))))))))
     result = Imp.run(query, fingers)
     @show length(result[1]) length(db.train.columns[1])
@@ -136,20 +140,21 @@ function imp_join(db)
 end
 
 function imp_count(db)
-    fingers = (db.train, db.stores, db.items, db.transactions)
+    fingers = (db.train, db.stores, db.items, db.transactions, db.oil)
     query =
         Imp.GenericJoin((1,2,4), # store_nbr
         Imp.GenericJoin((1,3), # item_nbr
-        Imp.GenericJoin((1,4), # date
+        Imp.GenericJoin((1,4,5), # date
         Imp.Product(1,
         Imp.Product(2,
         Imp.Product(3,
         # Imp.Product(4,
+        # Imp.Product(5,
         Imp.Count()
         ))))))
     result = Imp.run(query, fingers)
     @show result length(db.train.columns[1])
-    @assert length(result[1]) == length(db.train.columns[1])
+    @assert result == length(db.train.columns[1])
     result
 end
 
@@ -388,7 +393,7 @@ function bench()
     # jdb_db = cache(:jdb_db) do
     #     @time jdb_load()
     # end
-    imp_db = cache((:imp_db, Imp)) do
+    imp_db = cache(:imp_db) do
         @time imp_load(df_db)
     end
 

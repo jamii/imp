@@ -37,7 +37,6 @@ function jdb_load_csv()
     train = loadtable("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/train.csv")
     transactions = loadtable("/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/transactions.csv")
 
-
     save(holidays_events, "/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/holidays_events.jdb")
     save(items, "/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/items.jdb")
     save(oil, "/home/jamie/.kaggle/competitions/favorita-grocery-sales-forecasting/oil.jdb")
@@ -377,18 +376,24 @@ macro show_benchmark(b)
     end
 end
 
-df_db = nothing
-jdb_db = nothing
-imp_db = nothing
+function cache(f, key)
+    try
+        task_local_storage(key)
+    catch
+        task_local_storage(key, f())
+    end
+end
 
 function bench()
-    global df_db
-    global jdb_db
-    global imp_db
-
-    df_db == nothing && (df_db = @time df_load())
-    # jdb_db == nothing && (jdb_db = @time jdb_load())
-    imp_db == nothing && (imp_db = @time imp_load(df_db))
+    df_db = cache(:df_db) do
+        @time df_load()
+    end
+    # jdb_db = cache(:jdb_db) do
+    #     @time jdb_load()
+    # end
+    imp_db = cache(:imp_db) do
+        @time imp_load(df_db)
+    end
 
     @show_benchmark imp_count($imp_db)
 

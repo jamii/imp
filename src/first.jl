@@ -1,43 +1,47 @@
 # TODO check how missing is handled throughout. should probably just refuse to join on missing
 
-struct Finger{Columns}
+mutable struct Finger{column_ix, Columns}
     columns::Columns
-    ranges::Vector{UnitRange{Int64}}
+    range::UnitRange{Int64}
 end
 
 Finger(columns) = Finger(columns, [1:length(columns[1]) for i in 1:(length(columns)+1)])
 
-function finger_first!(finger::Finger, ::Type{Val{column_ix}})::Nothing where column_ix
-    bounds = finger.ranges[column_ix]
-    finger.ranges[column_ix+1] = bounds.start:(bounds.start-1)
+function finger_next_column(finger::Finger{column_ix}) where column_ix
+    Finger{column_ix+1, typeof(finger.columns)}(finger.columns, finger.range)
+end
+
+function finger_first!(parent_finger::Finger, finger::Finger)::Nothing where column_ix
+    bounds = parent_finger.range
+    finger.range = bounds.start:(bounds.start-1)
     nothing
 end
 
-function finger_next!(finger::Finger, ::Type{Val{column_ix}})::Any where column_ix
+function finger_next!(parent_finger::Finger, finger::Finger{column_ix})::Any where column_ix
     column = finger.columns[column_ix]
-    bounds = finger.ranges[column_ix]
-    focus = finger.ranges[column_ix+1]
+    bounds = parent_finger.range
+    focus = finger.range
     focus.stop >= bounds.stop && return nothing
     start = focus.stop + 1
     value = column[start]
     stop = gallop(column, start, bounds.stop + 1, value, 1) - 1
-    finger.ranges[column_ix+1] = start:stop
+    finger.range = start:stop
     value
 end
 
-function finger_seek!(finger::Finger, ::Type{Val{column_ix}}, value)::Bool where column_ix
+function finger_seek!(parent_finger::Finger, finger::Finger{column_ix}, value)::Bool where column_ix
     column = finger.columns[column_ix]
-    bounds = finger.ranges[column_ix]
-    focus = finger.ranges[column_ix+1]
+    bounds = parent_finger.range
+    focus = finger.range
     start = gallop(column, focus.stop + 1, bounds.stop + 1, value, 0)
     # TODO start + 1, get(stop) == value?
     stop = gallop(column, start, bounds.stop + 1, value, 1) - 1
-    finger.ranges[column_ix+1] = start:stop
+    finger.range = start:stop
     start <= stop
 end
 
-function finger_count(finger::Finger, ::Type{Val{column_ix}})::Int64 where column_ix
-    bounds = finger.ranges[column_ix]
+function finger_count(parent_finger::Finger, finger::Finger)::Int64 where column_ix
+    bounds = parent_finger.range
     bounds.stop - bounds.start + 1
 end
 
@@ -50,6 +54,10 @@ struct GenericJoin{ixes, Tail}
     tail::Tail
 end
 GenericJoin(ixes, tail) = GenericJoin{ixes, typeof(tail)}(tail)
+
+function start(join::GenericJoin{ixes}, in_fingers)
+    out_fingers = Any[in_fingers...]
+    for (finger_ix, _) in ixes
 
 @generated function execute(join::GenericJoin{ixes}, fingers, state) where {ixes}
     quote

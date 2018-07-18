@@ -1,4 +1,5 @@
 # TODO check how missing is handled throughout. should probably just refuse to join on missing
+# TODO default doesn't work with Product - problematic if there are mutlitple rows
 
 mutable struct Finger{column_ix, Columns, Default}
     columns::Columns
@@ -62,8 +63,7 @@ function finger_get(finger::Finger, ::Type{Val{column_ix}}) where column_ix
         column[focus.start]
     else
         @assert finger.default !== nothing
-        @assert column_ix == length(finger.columns)
-        finger.default
+        finger.default[column_ix]
     end
 end
 

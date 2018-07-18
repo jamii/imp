@@ -60,7 +60,6 @@ function jdb_load()
     (holidays_events=holidays_events, items=items, oil=oil, stores=stores, test=test, train=train, transactions=transactions)
 end
 
-
 # NOTE mutates dataframe - dont export outside examples
 Imp.Finger(dataframe::DataFrames.DataFrame) = Imp.Finger(dataframe, 1:length(DataFrames.columns(dataframe)))
 function Imp.Finger(dataframe::DataFrames.DataFrame, ixes; default=nothing)
@@ -70,12 +69,13 @@ function Imp.Finger(dataframe::DataFrames.DataFrame, ixes; default=nothing)
 end
 
 function imp_load(db)
-    train = Imp.Finger(db.train, [3,4,2,1,5,6])
+    train = Imp.Finger(db.train, [2,3,4,1,5,6])
     stores = Imp.Finger(db.stores)
     items = Imp.Finger(db.items)
-    transactions = Imp.Finger(db.transactions, [2,1,3]; default=0)
-    oil = Imp.Finger(db.oil, [1,2]; default=0.0)
-    (train=train, stores=stores, items=items, transactions=transactions, oil=oil)
+    transactions = Imp.Finger(db.transactions, [1,2,3]; default=(Date(1,1,1), 0, 0))
+    oil = Imp.Finger(db.oil, [1,2]; default=(Date(1,1,1), 0.0))
+    holidays_events = Imp.Finger(db.holidays_events, [1,2,3,4,5,6]; default=(Date(1,1,1), "", "", "", "", false))
+    (train=train, stores=stores, items=items, transactions=transactions, oil=oil, holidays_events=holidays_events)
 end
 
 function df_join_items(db)
@@ -116,22 +116,24 @@ function df_join(db)
 end
 
 function imp_join(db)
-    fingers = (db.train, db.stores, db.items, db.transactions, db.oil)
+    fingers = (db.train, db.stores, db.items, db.transactions, db.oil, db.holidays_events)
     query =
+        Imp.GenericJoin((1,4,5,6), # date
         Imp.GenericJoin((1,2,4), # store_nbr
         Imp.GenericJoin((1,3), # item_nbr
-        Imp.GenericJoin((1,4,5), # date
         Imp.Product(1,
         Imp.Product(2,
         Imp.Product(3,
         # Imp.Product(4,
         # Imp.Product(5,
+        # Imp.Product(6, # TODO skips multiple holidays
         Imp.Select((
         (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),
         (2,2),(2,3),(2,4),(2,5),
         (3,2),(3,3),(3,4),
         (4,3),
         (5,2),
+        (6,2),(6,3),(6,4),(6,5),(6,6)
     ))))))))
     result = Imp.run(query, fingers)
     @show length(result[1]) length(db.train.columns[1])
@@ -140,16 +142,17 @@ function imp_join(db)
 end
 
 function imp_count(db)
-    fingers = (db.train, db.stores, db.items, db.transactions, db.oil)
+    fingers = (db.train, db.stores, db.items, db.transactions, db.oil, db.holidays_events)
     query =
+        Imp.GenericJoin((1,4,5,6), # date
         Imp.GenericJoin((1,2,4), # store_nbr
         Imp.GenericJoin((1,3), # item_nbr
-        Imp.GenericJoin((1,4,5), # date
         Imp.Product(1,
         Imp.Product(2,
         Imp.Product(3,
         # Imp.Product(4,
         # Imp.Product(5,
+        # Imp.Product(6, # TODO skips multiple holidays
         Imp.Count()
         ))))))
     result = Imp.run(query, fingers)

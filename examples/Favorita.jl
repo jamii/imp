@@ -117,13 +117,13 @@ end
 function imp_join(db)
     fingers = (db.train, db.stores, db.items, db.transactions)
     query =
-        Imp.GenericJoin(((1,1),(2,1),(4,1)), # store_nbr
-        Imp.GenericJoin(((1,2),(3,1)), # item_nbr
-        Imp.GenericJoin(((1,3),(4,2)), # date
-        Imp.Product((1,4),
-        Imp.Product((2,2),
-        Imp.Product((3,2),
-        Imp.Product((4,3),
+        Imp.GenericJoin((1,2,4), # store_nbr
+        Imp.GenericJoin((1,3), # item_nbr
+        Imp.GenericJoin((1,4), # date
+        Imp.Product(1,
+        Imp.Product(2,
+        Imp.Product(3,
+        Imp.Product(4,
         Imp.Select((
         (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),
         (2,2),(2,3),(2,4),(2,5),
@@ -140,13 +140,13 @@ end
 function imp_count(db)
     fingers = (db.train, db.stores, db.items, db.transactions)
     query =
-        Imp.GenericJoin(((1,1),(2,1),(4,1)), # store_nbr
-        Imp.GenericJoin(((1,2),(3,1)), # item_nbr
-        Imp.GenericJoin(((1,3),(4,2)), # date
-        Imp.Product((1,4),
-        Imp.Product((2,2),
-        Imp.Product((3,2),
-        Imp.Product((4,3),
+        Imp.GenericJoin((1,2,4), # store_nbr
+        Imp.GenericJoin((1,3), # item_nbr
+        Imp.GenericJoin((1,4), # date
+        Imp.Product(1,
+        Imp.Product(2,
+        Imp.Product(3,
+        Imp.Product(4,
         Imp.Count()
         )))))))
     result = Imp.run(query, fingers)

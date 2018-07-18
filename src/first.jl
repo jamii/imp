@@ -5,10 +5,14 @@ mutable struct Finger{column_ix, Columns}
     range::UnitRange{Int64}
 end
 
-Finger(columns) = Finger(columns, [1:length(columns[1]) for i in 1:(length(columns)+1)])
+Finger(columns) = Finger{0, typeof(columns)}(columns, 1:length(columns[1]))
 
 function finger_next_column(finger::Finger{column_ix}) where column_ix
     Finger{column_ix+1, typeof(finger.columns)}(finger.columns, finger.range)
+end
+
+function finger_last_column(finger::Finger{column_ix}) where column_ix
+    Finger{length(finger.columns), typeof(finger.columns)}(finger.columns, finger.range)
 end
 
 function finger_first!(parent_finger::Finger, finger::Finger)::Nothing where column_ix
@@ -45,52 +49,52 @@ function finger_count(parent_finger::Finger, finger::Finger)::Int64 where column
     bounds.stop - bounds.start + 1
 end
 
-# defaults
-start(query, fingers) = start(query.tail, fingers)
-execute(query, fingers, state) = execute(query.tail, fingers, state)
-finish(query, state) = finish(query.tail, state)
-
 struct GenericJoin{ixes, Tail}
     tail::Tail
 end
 GenericJoin(ixes, tail) = GenericJoin{ixes, typeof(tail)}(tail)
 
-function start(join::GenericJoin{ixes}, in_fingers)
+function start(join::GenericJoin{ixes}, in_fingers) where ixes
     out_fingers = Any[in_fingers...]
-    for (finger_ix, _) in ixes
+    for ix in ixes
+        out_fingers[ix] = finger_next_column(out_fingers[ix])
+    end
+    (tuple(out_fingers...), start(join.tail, out_fingers))
+end
 
-@generated function execute(join::GenericJoin{ixes}, fingers, state) where {ixes}
+@generated function execute(join::GenericJoin{ixes}, in_fingers, state) where ixes
     quote
         tail = join.tail
+        (out_fingers, tail_state) = state
 
-        $(@splice (finger_ix, column_ix) in ixes quote
-          finger_first!(fingers[$finger_ix], Val{$column_ix})
+        $(@splice ix in ixes quote
+          finger_first!(in_fingers[$ix], out_fingers[$ix])
           end)
 
-        (_, min_ix) = findmin(tuple($(@splice (finger_ix, column_ix) in ixes quote
-                                 finger_count(fingers[$finger_ix], Val{$column_ix})
+        (_, min_ix) = findmin(tuple($(@splice ix in ixes quote
+                                 finger_count(in_fingers[$ix], out_fingers[$ix])
                                  end)))
-        min_ix = $ixes[min_ix][1]
+        min_ix = $ixes[min_ix]
 
         value = @match min_ix begin
-            $(@splice (finger_ix, column_ix) in ixes :(
-                $finger_ix => finger_next!(fingers[$finger_ix], Val{$column_ix})
+            $(@splice ix in ixes :(
+                $ix => finger_next!(in_fingers[$ix], out_fingers[$ix])
             ))
         end
 
         while true
-            $(@splice (finger_ix, column_ix) in ixes quote
-              if $finger_ix != min_ix
-              finger_seek!(fingers[$finger_ix], Val{$column_ix}, value) || @goto next
+            $(@splice ix in ixes quote
+              if $ix != min_ix
+              finger_seek!(in_fingers[$ix], out_fingers[$ix], value) || @goto next
               end
               end)
 
-            execute(tail, fingers, state)
+            execute(tail, out_fingers, tail_state)
 
             @label next
             next = @match min_ix begin
-                $(@splice (finger_ix, column_ix) in ixes :(
-                    $finger_ix => finger_next!(fingers[$finger_ix], Val{$column_ix})
+                $(@splice ix in ixes :(
+                    $ix => finger_next!(in_fingers[$ix], out_fingers[$ix])
                 ))
             end
             next == nothing && return
@@ -99,20 +103,36 @@ function start(join::GenericJoin{ixes}, in_fingers)
     end
 end
 
+function finish(join::GenericJoin, state)
+    (out_fingers, tail_state) = state
+    finish(join.tail, tail_state)
+end
+
 struct Product{ix, Tail}
     tail::Tail
 end
 Product(ix, tail) = Product{ix, typeof(tail)}(tail)
 
-function execute(product::Product{ix}, fingers, state) where ix
-    (finger_ix, column_ix) = ix
-    finger = fingers[finger_ix]
-    tail = product.tail
+function start(product::Product{ix}, in_fingers) where ix
+    out_fingers = Any[in_fingers...]
+    out_fingers[ix] = finger_last_column(out_fingers[ix])
+    (tuple(out_fingers...), start(product.tail, out_fingers))
+end
 
-    for i in finger.ranges[column_ix]
-        finger.ranges[end] = i:i
-        execute(tail, fingers, state)
+function execute(product::Product{ix}, in_fingers, state) where ix
+    tail = product.tail
+    (out_fingers, tail_state) = state
+
+    finger = out_fingers[ix]
+    for i in in_fingers[ix].range
+        out_fingers[ix].range = i:i
+        execute(tail, out_fingers, tail_state)
     end
+end
+
+function finish(product::Product, state)
+    (out_fingers, tail_state) = state
+    finish(product.tail, tail_state)
 end
 
 struct Select{ixes} end
@@ -132,7 +152,7 @@ end
           let
           local column = state[$i]
           local finger = fingers[$finger_ix]
-          local value = finger.columns[$column_ix][finger.ranges[end].start]
+          local value = finger.columns[$column_ix][finger.range.start]
           push!(column, value)
           end
           end)

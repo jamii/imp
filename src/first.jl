@@ -1,18 +1,19 @@
 # TODO check how missing is handled throughout. should probably just refuse to join on missing
 
-mutable struct Finger{column_ix, Columns}
+mutable struct Finger{column_ix, Columns, Default}
     columns::Columns
     range::UnitRange{Int64}
+    default::Default
 end
 
-Finger(columns) = Finger{0, typeof(columns)}(columns, 1:length(columns[1]))
+Finger(columns; default=nothing) = Finger{0, typeof(columns), typeof(default)}(columns, 1:length(columns[1]), default)
 
 function finger_next_column(finger::Finger{column_ix}) where column_ix
-    Finger{column_ix+1, typeof(finger.columns)}(finger.columns, finger.range)
+    Finger{column_ix+1, typeof(finger.columns), typeof(finger.default)}(finger.columns, finger.range, finger.default)
 end
 
 function finger_last_column(finger::Finger{column_ix}) where column_ix
-    Finger{length(finger.columns), typeof(finger.columns)}(finger.columns, finger.range)
+    Finger{length(finger.columns), typeof(finger.columns), typeof(finger.default)}(finger.columns, finger.range, finger.default)
 end
 
 function finger_first!(parent_finger::Finger, finger::Finger)::Nothing where column_ix
@@ -41,7 +42,7 @@ function finger_seek!(parent_finger::Finger, finger::Finger{column_ix}, value)::
     # TODO start + 1, get(stop) == value?
     stop = gallop(column, start, bounds.stop + 1, value, 1) - 1
     finger.range = start:stop
-    start <= stop
+    (finger.default !== nothing) || (start <= stop)
 end
 
 function finger_count(parent_finger::Finger, finger::Finger)::Int64
@@ -50,8 +51,15 @@ function finger_count(parent_finger::Finger, finger::Finger)::Int64
 end
 
 function finger_get(finger::Finger, ::Type{Val{column_ix}}) where column_ix
-    column = finger.columns[column_ix]
-    column[finger.range.start]
+    focus = finger.range
+    if focus.start <= focus.stop
+        column = finger.columns[column_ix]
+        column[focus.start]
+    else
+        @assert finger.default !== nothing
+        @assert column_ix == length(finger.columns)
+        finger.default
+    end
 end
 
 struct GenericJoin{ixes, Tail}

@@ -139,6 +139,25 @@ function imp_join(db)
     result
 end
 
+function imp_count(db)
+    fingers = (db.train, db.stores, db.items, db.transactions)
+    join =
+        Imp.GenericJoin(((1,1),(2,1),(4,1)), # store_nbr
+        Imp.GenericJoin(((1,2),(3,1)), # item_nbr
+        Imp.GenericJoin(((1,3),(4,2)), # date
+        Imp.Product((1,4),
+        Imp.Product((2,2),
+        Imp.Product((3,2),
+        Imp.Product((4,3),
+        Imp.Done())))))))
+    output = Imp.Count()
+    result = Imp.run(output, join, fingers)
+    @show result length(db.train.columns[1])
+    # TODO default values
+    # @assert length(result[1]) == length(db.train.columns[1])
+    result
+end
+
 function prepare_data(data)
     categorical!(data, [:store_nbr, :item_nbr])
 end
@@ -371,6 +390,8 @@ function bench()
     df_db == nothing && (df_db = @time df_load())
     # jdb_db == nothing && (jdb_db = @time jdb_load())
     imp_db == nothing && (imp_db = @time imp_load(df_db))
+
+    @show_benchmark imp_count($imp_db)
 
     # @show_benchmark df_join_items($df_db)
     # @show_benchmark jdb_join_items($jdb_db)

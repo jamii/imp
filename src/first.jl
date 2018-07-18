@@ -141,3 +141,19 @@ end
           end)
     end
 end
+
+struct Count <: Output
+end
+mutable struct StagedCount
+    count::Int64
+end
+
+function run(count::Count, join::Join, fingers)
+    staged = StagedCount(0)
+    run_join(staged, join, fingers)
+    staged.count
+end
+
+function run_output(count::StagedCount, fingers)
+    count.count += 1
+end

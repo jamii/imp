@@ -44,9 +44,14 @@ function finger_seek!(parent_finger::Finger, finger::Finger{column_ix}, value)::
     start <= stop
 end
 
-function finger_count(parent_finger::Finger, finger::Finger)::Int64 where column_ix
+function finger_count(parent_finger::Finger, finger::Finger)::Int64
     bounds = parent_finger.range
     bounds.stop - bounds.start + 1
+end
+
+function finger_get(finger::Finger, ::Type{Val{column_ix}}) where column_ix
+    column = finger.columns[column_ix]
+    column[finger.range.start]
 end
 
 struct GenericJoin{ixes, Tail}
@@ -149,12 +154,7 @@ end
 @generated function execute(select::Select{ixes}, fingers, state) where {ixes}
     quote
         $(@splice (i, (finger_ix, column_ix)) in enumerate(ixes) quote
-          let
-          local column = state[$i]
-          local finger = fingers[$finger_ix]
-          local value = finger.columns[$column_ix][finger.range.start]
-          push!(column, value)
-          end
+          push!(state[$i], finger_get(fingers[$finger_ix], Val{$column_ix}))
           end)
     end
 end

@@ -117,7 +117,7 @@ end
 
 function imp_join(db)
     fingers = (db.train, db.stores, db.items, db.transactions)
-    join =
+    query =
         Imp.GenericJoin(((1,1),(2,1),(4,1)), # store_nbr
         Imp.GenericJoin(((1,2),(3,1)), # item_nbr
         Imp.GenericJoin(((1,3),(4,2)), # date
@@ -125,14 +125,13 @@ function imp_join(db)
         Imp.Product((2,2),
         Imp.Product((3,2),
         Imp.Product((4,3),
-        Imp.Done())))))))
-    output = Imp.Select((
+        Imp.Select((
         (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),
         (2,2),(2,3),(2,4),(2,5),
         (3,2),(3,3),(3,4),
         (4,3),
-    ))
-    result = Imp.run(output, join, fingers)
+    )))))))))
+    result = Imp.run(query, fingers)
     @show length(result[1]) length(db.train.columns[1])
     # TODO default values
     # @assert length(result[1]) == length(db.train.columns[1])
@@ -141,7 +140,7 @@ end
 
 function imp_count(db)
     fingers = (db.train, db.stores, db.items, db.transactions)
-    join =
+    query =
         Imp.GenericJoin(((1,1),(2,1),(4,1)), # store_nbr
         Imp.GenericJoin(((1,2),(3,1)), # item_nbr
         Imp.GenericJoin(((1,3),(4,2)), # date
@@ -149,9 +148,9 @@ function imp_count(db)
         Imp.Product((2,2),
         Imp.Product((3,2),
         Imp.Product((4,3),
-        Imp.Done())))))))
-    output = Imp.Count()
-    result = Imp.run(output, join, fingers)
+        Imp.Count()
+        )))))))
+    result = Imp.run(query, fingers)
     @show result length(db.train.columns[1])
     # TODO default values
     # @assert length(result[1]) == length(db.train.columns[1])

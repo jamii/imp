@@ -41,14 +41,17 @@ function finger_count(finger::Finger, ::Type{Val{column_ix}})::Int64 where colum
     bounds.stop - bounds.start + 1
 end
 
-abstract type Join end
+# defaults
+start(query, fingers) = start(query.tail, fingers)
+execute(query, fingers, state) = execute(query.tail, fingers, state)
+finish(query, state) = finish(query.tail, state)
 
-struct GenericJoin{ixes, Tail <: Join} <: Join
+struct GenericJoin{ixes, Tail}
     tail::Tail
 end
 GenericJoin(ixes, tail) = GenericJoin{ixes, typeof(tail)}(tail)
 
-@generated function run_join(output, join::GenericJoin{ixes}, fingers) where {ixes}
+@generated function execute(join::GenericJoin{ixes}, fingers, state) where {ixes}
     quote
         tail = join.tail
 
@@ -74,7 +77,7 @@ GenericJoin(ixes, tail) = GenericJoin{ixes, typeof(tail)}(tail)
               end
               end)
 
-            run_join(output, tail, fingers)
+            execute(tail, fingers, state)
 
             @label next
             next = @match min_ix begin
@@ -88,52 +91,38 @@ GenericJoin(ixes, tail) = GenericJoin{ixes, typeof(tail)}(tail)
     end
 end
 
-struct Product{ix, Tail <: Join} <: Join
+struct Product{ix, Tail}
     tail::Tail
 end
 Product(ix, tail) = Product{ix, typeof(tail)}(tail)
 
-function run_join(output, product::Product{ix}, fingers) where ix
+function execute(product::Product{ix}, fingers, state) where ix
     (finger_ix, column_ix) = ix
     finger = fingers[finger_ix]
     tail = product.tail
 
     for i in finger.ranges[column_ix]
         finger.ranges[end] = i:i
-        run_join(output, tail, fingers)
+        execute(tail, fingers, state)
     end
 end
 
-struct Done <: Join end
-run_join(output, ::Done, fingers) = run_output(output, fingers)
-
-abstract type Output end
-
-struct Select{ixes} <: Output
-end
+struct Select{ixes} end
 Select(ixes) = Select{ixes}()
 
-struct StagedSelect{ixes, Columns}
-    columns::Columns
-end
-StagedSelect(ixes, columns) = StagedSelect{ixes, typeof(columns)}(columns)
-
-@generated function run(select::Select{ixes}, join::Join, fingers) where {ixes}
+@generated function start(select::Select{ixes}, fingers) where {ixes}
     quote
-        columns = tuple($(@splice (finger_ix, column_ix) in ixes quote
-                          empty(fingers[$finger_ix].columns[$column_ix])
-                          end))
-        run_join(StagedSelect(ixes, columns), join, fingers)
-        columns
+        tuple($(@splice (finger_ix, column_ix) in ixes quote
+                empty(fingers[$finger_ix].columns[$column_ix])
+                end))
     end
 end
 
-@generated function run_output(select::StagedSelect{ixes}, fingers) where {ixes}
+@generated function execute(select::Select{ixes}, fingers, state) where {ixes}
     quote
-        columns = select.columns
         $(@splice (i, (finger_ix, column_ix)) in enumerate(ixes) quote
           let
-          local column = columns[$i]
+          local column = state[$i]
           local finger = fingers[$finger_ix]
           local value = finger.columns[$column_ix][finger.ranges[end].start]
           push!(column, value)
@@ -142,18 +131,15 @@ end
     end
 end
 
-struct Count <: Output
-end
-mutable struct StagedCount
-    count::Int64
-end
+finish(select::Select, state) = state
 
-function run(count::Count, join::Join, fingers)
-    staged = StagedCount(0)
-    run_join(staged, join, fingers)
-    staged.count
-end
+struct Count end
+start(count::Count, fingers) = Ref(0)
+execute(count::Count, fingers, state) = state[] += 1
+finish(count::Count, state) = state[]
 
-function run_output(count::StagedCount, fingers)
-    count.count += 1
+function run(query, fingers)
+    state = start(query, fingers)
+    execute(query, fingers, state)
+    finish(query, state)
 end

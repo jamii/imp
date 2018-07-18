@@ -23,6 +23,7 @@ function finger_first!(parent_finger::Finger, finger::Finger)::Nothing where col
 end
 
 function finger_next!(parent_finger::Finger, finger::Finger{column_ix})::Any where column_ix
+    @assert finger.default === nothing
     column = finger.columns[column_ix]
     bounds = parent_finger.range
     focus = finger.range
@@ -46,8 +47,12 @@ function finger_seek!(parent_finger::Finger, finger::Finger{column_ix}, value)::
 end
 
 function finger_count(parent_finger::Finger, finger::Finger)::Int64
-    bounds = parent_finger.range
-    bounds.stop - bounds.start + 1
+    if finger.default === nothing
+        bounds = parent_finger.range
+        bounds.stop - bounds.start + 1
+    else
+        typemax(Int64)
+    end
 end
 
 function finger_get(finger::Finger, ::Type{Val{column_ix}}) where column_ix
@@ -86,7 +91,7 @@ end
 
         (_, min_ix) = findmin(tuple($(@splice ix in ixes quote
                                  finger_count(in_fingers[$ix], out_fingers[$ix])
-                                 end)))
+                                      end)))
         min_ix = $ixes[min_ix]
 
         value = @match min_ix begin

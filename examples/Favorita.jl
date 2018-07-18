@@ -63,17 +63,17 @@ end
 
 # NOTE mutates dataframe - dont export outside examples
 Imp.Finger(dataframe::DataFrames.DataFrame) = Imp.Finger(dataframe, 1:length(DataFrames.columns(dataframe)))
-function Imp.Finger(dataframe::DataFrames.DataFrame, ixes)
+function Imp.Finger(dataframe::DataFrames.DataFrame, ixes; default=nothing)
     columns = tuple(DataFrames.columns(dataframe)[ixes]...)
     Imp.quicksort!(columns)
-    Imp.Finger(columns)
+    Imp.Finger(columns; default=default)
 end
 
 function imp_load(db)
     train = Imp.Finger(db.train, [3,4,2,1,5,6])
     stores = Imp.Finger(db.stores)
     items = Imp.Finger(db.items)
-    transactions = Imp.Finger(db.transactions, [2,1,3])
+    transactions = Imp.Finger(db.transactions, [2,1,3]; default=0)
     (train=train, stores=stores, items=items, transactions=transactions)
 end
 
@@ -123,17 +123,15 @@ function imp_join(db)
         Imp.Product(1,
         Imp.Product(2,
         Imp.Product(3,
-        Imp.Product(4,
         Imp.Select((
         (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),
-        (2,2),(2,3),(2,4),(2,5),
-        (3,2),(3,3),(3,4),
+        # (2,2),(2,3),(2,4),(2,5),
+        # (3,2),(3,3),(3,4),
         (4,3),
-    )))))))))
+    ))))))))
     result = Imp.run(query, fingers)
     @show length(result[1]) length(db.train.columns[1])
-    # TODO default values
-    # @assert length(result[1]) == length(db.train.columns[1])
+    @assert length(result[1]) == length(db.train.columns[1])
     result
 end
 
@@ -146,13 +144,12 @@ function imp_count(db)
         Imp.Product(1,
         Imp.Product(2,
         Imp.Product(3,
-        Imp.Product(4,
+        # Imp.Product(4,
         Imp.Count()
-        )))))))
+        ))))))
     result = Imp.run(query, fingers)
     @show result length(db.train.columns[1])
-    # TODO default values
-    # @assert length(result[1]) == length(db.train.columns[1])
+    @assert length(result[1]) == length(db.train.columns[1])
     result
 end
 
@@ -391,18 +388,18 @@ function bench()
     # jdb_db = cache(:jdb_db) do
     #     @time jdb_load()
     # end
-    imp_db = cache(:imp_db) do
+    imp_db = cache((:imp_db, Imp)) do
         @time imp_load(df_db)
     end
 
-    @show_benchmark imp_count($imp_db)
+    @time imp_count(imp_db)
 
     # @show_benchmark df_join_items($df_db)
     # @show_benchmark jdb_join_items($jdb_db)
     # @show_benchmark q_join_items($df_db)
     # @show_benchmark imp_join_items($imp_db)
     # @show_benchmark df_join($df_db)
-    @show_benchmark imp_join($imp_db)
+    @time imp_join(imp_db)
 
     # df_result = df_join_items(df_db)
     # imp_result = imp_join_items(imp_db)

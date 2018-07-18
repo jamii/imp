@@ -117,14 +117,7 @@ end
 
 function imp_join(db)
     fingers = (db.train, db.stores, db.items, db.transactions)
-    ixes = (
-        (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),
-        (2,2),(2,3),(2,4),(2,5),
-        (3,2),(3,3),(3,4),
-        (4,3),
-    )
-    result = tuple((empty(fingers[finger_ix].columns[column_ix]) for (finger_ix, column_ix) in ixes)...)
-    query =
+    join =
         Imp.GenericJoin(((1,1),(2,1),(4,1)), # store_nbr
         Imp.GenericJoin(((1,2),(3,1)), # item_nbr
         Imp.GenericJoin(((1,3),(4,2)), # date
@@ -132,8 +125,14 @@ function imp_join(db)
         Imp.Product((2,2),
         Imp.Product((3,2),
         Imp.Product((4,3),
-        Imp.Select(ixes, result))))))))
-    Imp.execute(query, fingers)
+        Imp.Done())))))))
+    output = Imp.Select((
+        (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),
+        (2,2),(2,3),(2,4),(2,5),
+        (3,2),(3,3),(3,4),
+        (4,3),
+    ))
+    result = Imp.run(output, join, fingers)
     @show length(result[1]) length(db.train.columns[1])
     # TODO default values
     # @assert length(result[1]) == length(db.train.columns[1])

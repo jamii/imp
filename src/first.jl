@@ -30,7 +30,7 @@ function finger_seek!(finger::Finger, ::Type{Val{column_ix}}, value)::Bool where
     bounds = finger.ranges[column_ix]
     focus = finger.ranges[column_ix+1]
     start = gallop(column, focus.stop + 1, bounds.stop + 1, value, 0)
-    # TODO start + 1 ?
+    # TODO start + 1, get(stop) == value?
     stop = gallop(column, start, bounds.stop + 1, value, 1) - 1
     finger.ranges[column_ix+1] = start:stop
     start <= stop
@@ -41,14 +41,14 @@ function finger_count(finger::Finger, ::Type{Val{column_ix}})::Int64 where colum
     bounds.stop - bounds.start + 1
 end
 
-abstract type Query end
+abstract type Join end
 
-struct GenericJoin{ixes, Tail <: Query} <: Query
+struct GenericJoin{ixes, Tail <: Join} <: Join
     tail::Tail
 end
 GenericJoin(ixes, tail) = GenericJoin{ixes, typeof(tail)}(tail)
 
-@generated function execute(join::GenericJoin{ixes}, fingers) where {ixes}
+@generated function run_join(output, join::GenericJoin{ixes}, fingers) where {ixes}
     quote
         tail = join.tail
 
@@ -74,7 +74,7 @@ GenericJoin(ixes, tail) = GenericJoin{ixes, typeof(tail)}(tail)
               end
               end)
 
-            execute(tail, fingers)
+            run_join(output, tail, fingers)
 
             @label next
             next = @match min_ix begin
@@ -88,28 +88,47 @@ GenericJoin(ixes, tail) = GenericJoin{ixes, typeof(tail)}(tail)
     end
 end
 
-struct Product{ix, Tail <: Query} <: Query
+struct Product{ix, Tail <: Join} <: Join
     tail::Tail
 end
 Product(ix, tail) = Product{ix, typeof(tail)}(tail)
 
-function execute(product::Product{ix}, fingers) where ix
+function run_join(output, product::Product{ix}, fingers) where ix
     (finger_ix, column_ix) = ix
     finger = fingers[finger_ix]
     tail = product.tail
 
     for i in finger.ranges[column_ix]
         finger.ranges[end] = i:i
-        execute(tail, fingers)
+        run_join(output, tail, fingers)
     end
 end
 
-struct Select{ixes, Columns} <: Query
+struct Done <: Join end
+run_join(output, ::Done, fingers) = run_output(output, fingers)
+
+abstract type Output end
+
+struct Select{ixes} <: Output
+end
+Select(ixes) = Select{ixes}()
+
+struct StagedSelect{ixes, Columns}
     columns::Columns
 end
-Select(ixes, columns) = Select{ixes, typeof(columns)}(columns)
+StagedSelect(ixes, columns) = StagedSelect{ixes, typeof(columns)}(columns)
 
-@generated function execute(select::Select{ixes}, fingers) where {ixes}
+@generated function run(select::Select{ixes}, join::Join, fingers) where {ixes}
+    quote
+        columns = tuple($(@splice (finger_ix, column_ix) in ixes quote
+                          empty(fingers[$finger_ix].columns[$column_ix])
+                          end))
+        run_join(StagedSelect(ixes, columns), join, fingers)
+        columns
+    end
+end
+
+@generated function run_output(select::StagedSelect{ixes}, fingers) where {ixes}
     quote
         columns = select.columns
         $(@splice (i, (finger_ix, column_ix)) in enumerate(ixes) quote

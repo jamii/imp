@@ -31,7 +31,7 @@ function finger_next!(parent_finger::Finger, finger::Finger{column_ix})::Any whe
     focus.stop >= bounds.stop && return nothing
     start = focus.stop + 1
     value = column[start]
-    stop = gallop(column, start, bounds.stop + 1, value, 1) - 1
+    stop = gallop(column, start+1, bounds.stop + 1, value, 1) - 1
     finger.range = start:stop
     value
 end

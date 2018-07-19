@@ -315,17 +315,17 @@ end
 
 # --- tmp ---
 
-function gallop(column::AbstractArray, lo::Int64, hi::Int64, value, threshold::Int64) ::Int64
-    if (lo < hi) && cmp(column[lo], value) < threshold
+function gallop(column::AbstractArray, lo::Int64, hi::Int64, value, f) ::Int64
+    if (lo < hi) && f(column[lo], value)
         step = 1
-        while (lo + step < hi) && cmp(column[lo + step], value) < threshold
+        while (lo + step < hi) && f(column[lo + step], value)
             lo = lo + step
             step = step << 1
         end
 
         step = step >> 1
         while step > 0
-            if (lo + step < hi) && cmp(column[lo + step], value) < threshold
+            if (lo + step < hi) && f(column[lo + step], value)
                 lo = lo + step
             end
             step = step >> 1

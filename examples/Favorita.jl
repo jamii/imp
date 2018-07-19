@@ -389,6 +389,33 @@ function cache(f, key)
     end
 end
 
+function dump()
+    df_db = cache(:df_db) do
+        @time df_load()
+    end
+    imp_db = cache(:imp_db) do
+        @time imp_load(df_db)
+    end
+    result = cache(:result) do
+        @time imp_join(imp_db)
+    end
+    # @time CSV.write("result.csv", df)
+    file = open("result.csv", "w")
+    for c in 1:length(result)
+        print(file, "abcdefghijklmnopqrstuvwxyz"[c])
+        print(file, "\t")
+    end
+    print(file, "\n")
+    for r in 1:length(result[1])
+        for c in 1:length(result)
+            print(file, result[c][r])
+            print(file, "\t")
+        end
+        print(file, "\n")
+    end
+    close(file)
+end
+
 function bench()
     df_db = cache(:df_db) do
         @time df_load()
@@ -414,6 +441,30 @@ function bench()
     # @show_benchmark silly_copy($imp_result)
 
     # @assert Imp.Finger(df_result, [4,1,2,3,5,6,7,8,9]).columns == imp_result
+end
+
+function bench2()
+    result = cache(:result) do
+        # db = @time CSV.read("result.csv", delim='\t', types=[Date, Int64, Int64, Int64, Float64, Int64, String, String, String, Int64, String, Int64, Bool, Int64, Float64, String, String, String, String, Bool], allowmissing=:none)
+        # db = @time loadtable("result.csv", output="/home/jamie/tmp", delim='\t')
+        cs = Any[db.columns.columns...]
+        pop!(cs)
+        cs[15] = cs[15].values
+        df = DataFrame(cs, map(Symbol, collect("abcdefghijklmnopqrst")))
+        for i in 1:20
+            if eltype(df.columns[i]) == String
+                categorical!(df, i)
+            end
+        end
+        df
+
+        # 2013-01-01 | 25 | 103665 | 0 | 7.0 | 3 | Salinas | Santa Elena | D | 1 | BREAD/BAKERY | 2712 | true | 770 | NaN | Holiday | National | Ecuador | Primer dia del ano | false
+
+    end
+
+    model = @time fit(LinearMixedModel, @formula(e ~ (1|a) + (1|b) + (1|c) + (1|f) + (1|g) + (1|h) + (1|i) + (1|j) + (1|k) + (1|l) + (1|m) + (1|n) + o + p + (1|q) + (1|r) + (1|s) + (1|t)), result)
+    # @show params = ranef(model, named=true)
+    model
 end
 
 end

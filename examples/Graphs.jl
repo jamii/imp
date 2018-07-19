@@ -13,8 +13,9 @@ function cache(f, key)
     end
 end
 
-function load_pokec()
-    df = CSV.read("../soc-pokec-relationships.txt", delim='\t', header=["a","b"])
+function load()
+    # df = CSV.read("../soc-pokec-relationships.txt", delim='\t', header=["a","b"])
+    df = CSV.read("../soc-LiveJournal1.txt", delim='\t', header=["a","b"])
     cs = DataFrames.columns(df)
     as = Int32[]
     bs = Int32[]
@@ -71,11 +72,12 @@ macro show_benchmark(b)
 end
 
 function bench()
-    data = @time load_pokec()
+    data = @time load()
     fingers = @time index(data)
     result = @time join(fingers)
     result = @time join(fingers)
-    @test result == 32557458
+    # @test result == 32557458
+    @test result == 285730264
 end
 
 bench()

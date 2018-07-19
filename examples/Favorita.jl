@@ -441,6 +441,8 @@ function bench()
     # @show_benchmark silly_copy($imp_result)
 
     # @assert Imp.Finger(df_result, [4,1,2,3,5,6,7,8,9]).columns == imp_result
+
+    nothing
 end
 
 # function bench2()

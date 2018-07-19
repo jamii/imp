@@ -1,20 +1,23 @@
 # TODO check how missing is handled throughout. should probably just refuse to join on missing
 # TODO default doesn't work with Product - problematic if there are mutlitple rows
 
-mutable struct Finger{column_ix, Columns, Default}
+mutable struct Finger{column_ix, Column, Columns, Default}
+    column::Column
     columns::Columns
     range::UnitRange{Int64}
     default::Default
 end
 
-Finger(columns; default=nothing) = Finger{0, typeof(columns), typeof(default)}(columns, 1:length(columns[1]), default)
+Finger(columns; default=nothing) = Finger{0, typeof(columns[1]), typeof(columns), typeof(default)}(columns[1], columns, 1:length(columns[1]), default)
+
+Base.copy(finger::Finger) = typeof(finger)(finger.column, finger.columns, finger.range, finger.default)
 
 function finger_next_column(finger::Finger{column_ix}) where column_ix
-    Finger{column_ix+1, typeof(finger.columns), typeof(finger.default)}(finger.columns, finger.range, finger.default)
+    Finger{column_ix+1, typeof(finger.columns[column_ix+1]), typeof(finger.columns), typeof(finger.default)}(finger.columns[column_ix+1], finger.columns, finger.range, finger.default)
 end
 
 function finger_last_column(finger::Finger{column_ix}) where column_ix
-    Finger{length(finger.columns), typeof(finger.columns), typeof(finger.default)}(finger.columns, finger.range, finger.default)
+    Finger{length(finger.columns), typeof(finger.columns[end]), typeof(finger.columns), typeof(finger.default)}(finger.columns[end], finger.columns, finger.range, finger.default)
 end
 
 function finger_first!(parent_finger::Finger, finger::Finger)::Nothing where column_ix
@@ -25,7 +28,7 @@ end
 
 function finger_next!(parent_finger::Finger, finger::Finger{column_ix})::Any where column_ix
     @assert finger.default === nothing
-    column = finger.columns[column_ix]
+    column = finger.column
     bounds = parent_finger.range
     focus = finger.range
     focus.stop >= bounds.stop && return nothing
@@ -37,7 +40,7 @@ function finger_next!(parent_finger::Finger, finger::Finger{column_ix})::Any whe
 end
 
 function finger_seek!(parent_finger::Finger, finger::Finger{column_ix}, value)::Bool where column_ix
-    column = finger.columns[column_ix]
+    column = finger.column
     bounds = parent_finger.range
     focus = finger.range
     start = gallop(column, focus.stop + 1, bounds.stop + 1, value, isless)

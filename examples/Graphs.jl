@@ -13,9 +13,8 @@ function cache(f, key)
     end
 end
 
-function load()
-    # df = CSV.read("../soc-pokec-relationships.txt", delim='\t', header=["a","b"])
-    df = CSV.read("../soc-LiveJournal1.txt", delim='\t', header=["a","b"])
+function load(filename)
+    df = CSV.read(filename, delim='\t', header=["a","b"])
     cs = DataFrames.columns(df)
     as = Int32[]
     bs = Int32[]
@@ -32,8 +31,8 @@ end
 
 function index((as, bs))
     x = Imp.Finger((as , bs))
-    y = typeof(x)(x.columns, x.range, x.default)
-    z = typeof(x)(x.columns, x.range, x.default)
+    y = copy(x)
+    z = copy(y)
     Imp.quicksort!(x.columns)
     (x,y,z)
 end
@@ -71,15 +70,16 @@ macro show_benchmark(b)
     end
 end
 
-function bench()
-    data = @time load()
+function bench(filename, count)
+    @show filename
+    data = @time load(filename)
     fingers = @time index(data)
     result = @time join(fingers)
     result = @time join(fingers)
-    # @test result == 32557458
-    @test result == 285730264
+    @test result == count
 end
-
-bench()
+bench("../Brightkite_edges.txt", 494728)
+bench("../soc-pokec-relationships.txt", 32557458)
+bench("../soc-LiveJournal1.txt", 285730264)
 
 end

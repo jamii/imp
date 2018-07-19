@@ -30,7 +30,7 @@ function finger_next!(parent_finger::Finger, finger::Finger{column_ix})::Any whe
     focus = finger.range
     focus.stop >= bounds.stop && return nothing
     start = focus.stop + 1
-    value = column[start]
+    value = @inbounds column[start]
     stop = gallop(column, start + 1, bounds.stop + 1, value, (a,b) -> !(isless(b,a))) - 1
     finger.range = start:stop
     value
@@ -57,11 +57,10 @@ end
 
 function finger_get(finger::Finger, ::Type{Val{column_ix}}) where column_ix
     focus = finger.range
-    if focus.start <= focus.stop
+    if (finger.default === nothing) || (focus.start <= focus.stop)
         column = finger.columns[column_ix]
-        column[focus.start]
+        @inbounds column[focus.start]
     else
-        @assert finger.default !== nothing
         finger.default[column_ix]
     end
 end

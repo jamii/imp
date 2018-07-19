@@ -316,24 +316,26 @@ end
 # --- tmp ---
 
 function gallop(column::AbstractArray, lo::Int64, hi::Int64, value, f) ::Int64
-    if (lo < hi) && f(column[lo], value)
-        step = 1
-        while (lo + step < hi) && f(column[lo + step], value)
-            lo = lo + step
-            step = step << 1
-        end
-
-        step = step >> 1
-        while step > 0
-            if (lo + step < hi) && f(column[lo + step], value)
+    @inbounds begin
+        if (lo < hi) && f(column[lo], value)
+            step = 1
+            while (lo + step < hi) && f(column[lo + step], value)
                 lo = lo + step
+                step = step << 1
             end
-            step = step >> 1
-        end
 
-        lo += 1
+            step = step >> 1
+            while step > 0
+                if (lo + step < hi) && f(column[lo + step], value)
+                    lo = lo + step
+                end
+                step = step >> 1
+            end
+
+            lo += 1
+        end
+        lo
     end
-    lo
 end
 
 export Columns

@@ -226,7 +226,7 @@ struct Cofactor{c1, c2, K1, K2, T1, T2}
 end
 Cofactor(c1, c2, K1, K2, T1, T2) = Cofactor{c1, c2, K1, K2, T1, T2}(Dict{Tuple{T1, T2}, Float64}())
 
-function add!(cofactor::Cofactor{c1, c2, K1, K2}, columns, r) where {c1, c2, K1, K2}
+@inline function add!(cofactor::Cofactor{c1, c2, K1, K2}, columns, r) where {c1, c2, K1, K2}
     (k1, v1) = cofactor_action(K1, columns[c1][r])
     (k2, v2) = cofactor_action(K2, columns[c2][r])
 
@@ -259,6 +259,7 @@ end
               add!(cofactors[$j], columns, r)
             end)
         end
+        cofactors
     end
 end
 
@@ -337,9 +338,10 @@ function bench()
     # @show_benchmark df_join($df_db)
     # @time imp_join(imp_db)
 
-    columns = imp_db.train.columns[[1,2,3,5,6]]
-    # @code_warntype actually_get_cofactors(columns, make_cofactors(columns, [Categorical, Categorical, Categorical, Continuous, Categorical]))
-    @time get_cofactors(columns, [Categorical, Categorical, Categorical, Continuous, Categorical])
+    columns = imp_db.train.columns[[2,3,5]]
+    @code_warntype actually_get_cofactors(columns, make_cofactors(columns, [Categorical, Categorical, Continuous]))
+    cofactors = @time get_cofactors(columns, [Categorical, Categorical, Continuous])
+    @show [length(c.data) for c in cofactors]
 
     # df_result = df_join_items(df_db)
     # imp_result = imp_join_items(imp_db)

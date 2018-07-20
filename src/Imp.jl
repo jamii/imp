@@ -14,6 +14,7 @@ include("columns.jl")
 include("first.jl")
 # include("higher.jl")
 
+export @splice
 # export imp, @imp, @imp!, @lib
 
 end

@@ -7,6 +7,7 @@ using CSV
 using Dates
 # using Query
 # using MixedModels
+using Rematch
 
 using BenchmarkTools
 
@@ -202,163 +203,63 @@ function score(test_data, predicted)
     score = sqrt(sum(@. weight * (log(actual + 1) - log(predicted + 1)) ^ 2) / sum(weight))
 end
 
-function cofactor(ks...)
-    Dict{Tuple{ks...}, Float64}()
+@enum CofactorKind Continuous Categorical
+
+function cofactor_key(::Vector{T}, kind::CofactorKind) where T
+    if kind == Continuous
+        Nothing
+    elseif kind == Categorical
+        T
+    end
 end
 
-function add!(cofactor::Dict, k1, k2, v)
+@inline function cofactor_action(kind::CofactorKind, value)
+    if kind == Continuous
+        (nothing, Float64(value))
+    elseif kind == Categorical
+        (value, 1.0)
+    end
+end
+
+struct Cofactor{c1, c2, K1, K2, T1, T2}
+    data::Dict{Tuple{T1, T2}, Float64}
+end
+Cofactor(c1, c2, K1, K2, T1, T2) = Cofactor{c1, c2, K1, K2, T1, T2}(Dict{Tuple{T1, T2}, Float64}())
+
+function add!(cofactor::Cofactor{c1, c2, K1, K2}, columns, r) where {c1, c2, K1, K2}
+    (k1, v1) = cofactor_action(K1, columns[c1][r])
+    (k2, v2) = cofactor_action(K2, columns[c2][r])
+
     k = (k1,k2)
-    cofactor[k] = get(cofactor, k, 0.0) + v
+    v = v1 * v2
+    data = cofactor.data
+    data[k] = get(data, k, 0.0) + v
 end
 
-function get_cofactors(holidays_events, items, oil, stores, test, train, transactions)
-
-    t_date = train.columns.columns[2]::Vector{Date}
-    t_store_nbr = train.columns.columns[3]::Vector{Int64}
-    t_item_nbr = train.columns.columns[4]::Vector{Int64}
-    t_unit_sales = train.columns.columns[5]::Vector{Float64}
-
-    he_date = holidays_events.columns.columns[1]::Vector{Date}
-    he_type = holidays_events.columns.columns[2]::PooledArrays.PooledArray{String,UInt8,1,Array{UInt8,1}}
-
-    i_item_nbr = items.columns.columns[1]::Vector{Int64}
-    i_family = items.columns.columns[2]::PooledArrays.PooledArray{String,UInt8,1,Array{UInt8,1}}
-
-    store_nbr_store_nbr = cofactor(Int64, Int64)
-
-    store_nbr_item_nbr = cofactor(Int64, Int64)
-    item_nbr_item_nbr = cofactor(Int64, Int64)
-
-    store_nbr_unit_sales = cofactor(Int64, Void)
-    item_nbr_unit_sales = cofactor(Int64, Void)
-    unit_sales_unit_sales = cofactor(Void, Void)
-
-    store_nbr_type = cofactor(Int64, String)
-    item_nbr_type = cofactor(Int64, String)
-    unit_sales_type = cofactor(Void, String)
-    type_type = cofactor(String, String)
-
-    store_nbr_family = cofactor(Int64, String)
-    item_nbr_family = cofactor(Int64, String)
-    unit_sales_family = cofactor(Void, String)
-    type_family = cofactor(String, String)
-    family_family = cofactor(String, String)
-
-    actually_get_cofactors(holidays_events, items, oil, stores, test, train, transactions,
-
-                           t_date,
-                           t_store_nbr,
-                           t_item_nbr,
-                           t_unit_sales,
-
-                           he_date,
-                           he_type,
-
-                           i_item_nbr,
-                           i_family,
-
-                           store_nbr_store_nbr,
-                           store_nbr_item_nbr,
-                           item_nbr_item_nbr,
-                           store_nbr_unit_sales,
-                           item_nbr_unit_sales,
-                           unit_sales_unit_sales,
-                           store_nbr_type,
-                           item_nbr_type,
-                           unit_sales_type,
-                           type_type,
-                           store_nbr_family,
-                           item_nbr_family,
-                           unit_sales_family,
-                           type_family,
-                           family_family,
-                           )
-end
-
-function actually_get_cofactors(holidays_events, items, oil, stores, test, train, transactions,
-
-                           t_date,
-                           t_store_nbr,
-                           t_item_nbr,
-                           t_unit_sales,
-
-                           he_date,
-                           he_type,
-
-                           i_item_nbr,
-                                i_family,
-
-               store_nbr_store_nbr,
-        store_nbr_item_nbr,
-        item_nbr_item_nbr,
-        store_nbr_unit_sales,
-        item_nbr_unit_sales,
-        unit_sales_unit_sales,
-        store_nbr_type,
-        item_nbr_type,
-        unit_sales_type,
-        type_type,
-        store_nbr_family,
-        item_nbr_family,
-        unit_sales_family,
-        type_family,
-                           family_family,
-                           )
-
-    for i in 1:(length(train)::Int64)
-        store_nbr = t_store_nbr[i]
-        item_nbr = t_item_nbr[i]
-        unit_sales = t_unit_sales[i]
-
-        add!(store_nbr_store_nbr, store_nbr, store_nbr, 1.0 * 1.0)
-
-        add!(store_nbr_item_nbr, store_nbr, item_nbr, 1.0 * 1.0)
-        add!(item_nbr_item_nbr, item_nbr, item_nbr, 1.0 * 1.0)
-
-        add!(store_nbr_unit_sales, store_nbr, nothing, 1.0 * unit_sales)
-        add!(item_nbr_unit_sales, item_nbr, nothing, 1.0 * unit_sales)
-        add!(unit_sales_unit_sales, nothing, nothing, unit_sales * unit_sales)
-
-        hes = searchsorted(he_date, t_date[i])
-        for he1 in hes
-            add!(store_nbr_type, store_nbr, he_type[he1], 1.0 * 1.0)
-            add!(item_nbr_type, item_nbr, he_type[he1], 1.0 * 1.0)
-            add!(unit_sales_type, nothing, he_type[he1], unit_sales * 1.0)
-
-            for he2 in hes
-                add!(type_type, he_type[he1], he_type[he2], 1.0 * 1.0)
+function make_cofactors(columns, kinds)
+    cofactors = []
+    for i in 1:length(columns)
+        for j in 1:length(columns)
+            if i <= j
+                push!(cofactors, Cofactor(i, j, kinds[i], kinds[j], cofactor_key(columns[i], kinds[i]), cofactor_key(columns[j], kinds[j])))
             end
         end
-
-        i1 = searchsortedfirst(i_item_nbr, item_nbr)
-        @assert 1 <= i1 <= length(i_family)
-        add!(store_nbr_family, store_nbr, i_family[i1], 1.0 * 1.0)
-        add!(item_nbr_family, item_nbr, i_family[i1], 1.0 * 1.0)
-        add!(unit_sales_family, nothing, i_family[i1], unit_sales * 1.0)
-        for he1 in hes
-            add!(type_family, he_type[he1], i_family[i1], 1.0 * 1.0)
-        end
-        add!(family_family, i_family[i1], i_family[i1], 1.0 * 1.0)
-
     end
+    tuple(cofactors...)
+end
 
-    return (
-        store_nbr_store_nbr,
-        store_nbr_item_nbr,
-        item_nbr_item_nbr,
-        store_nbr_unit_sales,
-        item_nbr_unit_sales,
-        unit_sales_unit_sales,
-        store_nbr_type,
-        item_nbr_type,
-        unit_sales_type,
-        type_type,
-        store_nbr_family,
-        item_nbr_family,
-        unit_sales_family,
-        type_family,
-        family_family,
-    )
+function get_cofactors(columns, kinds)
+    actually_get_cofactors(columns, make_cofactors(columns, kinds))
+end
+
+@generated function actually_get_cofactors(columns, cofactors)
+    quote
+        for r in 1:length(columns[1])
+            $(@splice j in 1:length(cofactors.parameters) quote
+              add!(cofactors[$j], columns, r)
+            end)
+        end
+    end
 end
 
 function silly_copy(xs::Vector)
@@ -427,14 +328,18 @@ function bench()
         @time imp_load(df_db)
     end
 
-    @time imp_count(imp_db)
+    # @time imp_count(imp_db)
 
     # @show_benchmark df_join_items($df_db)
     # @show_benchmark jdb_join_items($jdb_db)
     # @show_benchmark q_join_items($df_db)
     # @show_benchmark imp_join_items($imp_db)
     # @show_benchmark df_join($df_db)
-    @time imp_join(imp_db)
+    # @time imp_join(imp_db)
+
+    columns = imp_db.train.columns[[1,2,3,5,6]]
+    # @code_warntype actually_get_cofactors(columns, make_cofactors(columns, [Categorical, Categorical, Categorical, Continuous, Categorical]))
+    @time get_cofactors(columns, [Categorical, Categorical, Categorical, Continuous, Categorical])
 
     # df_result = df_join_items(df_db)
     # imp_result = imp_join_items(imp_db)
@@ -468,5 +373,7 @@ end
 #     # @show params = ranef(model, named=true)
 #     model
 # end
+
+bench()
 
 end

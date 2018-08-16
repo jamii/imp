@@ -1,6 +1,6 @@
 module Favorita
 
-using ..Imp
+using Imp
 # using JuliaDB
 using DataFrames
 using CSV
@@ -82,7 +82,7 @@ end
 function df_join_items(db)
     # unique_holidays_events = by(holidays_events, :date, x -> x[1, 2:end])
     result = db.train
-    # result = join(result, unique_holidays_events, on=[:date], kind=:left)
+    # result = join(result, db.unique_holidays_events, on=[:date], kind=:left)
     result = join(result, db.items, on=[:item_nbr])
     @assert size(result)[1] == size(db.train)[1]
     result
@@ -106,13 +106,13 @@ end
 # end
 
 function df_join(db)
-    # unique_holidays_events = by(holidays_events, :date, x -> x[1, 2:end])
+    unique_holidays_events = by(db.holidays_events, :date, x -> x[1, 2:end])
     result = db.train
-    # result = join(result, unique_holidays_events, on=[:date], kind=:left)
+    result = join(result, unique_holidays_events, on=[:date], kind=:left)
     result = join(result, db.stores, on=[:store_nbr])
     result = join(result, db.items, on=[:item_nbr])
     result = join(result, db.transactions, on=[:date, :store_nbr])
-    @assert size(result)[1] == size(db.train)[1]
+    result = join(result, db.oil, on=[:date], kind=:left)
     result
 end
 
@@ -318,6 +318,11 @@ function dump()
     close(file)
 end
 
+# TODO is this valid?
+Base.hash(date::Date, h::UInt) = hash(date.instant.periods.value, h)
+const hash_nothing = hash(nothing)
+Base.hash(::Nothing, h::UInt) = hash(hash_nothing, h)
+
 function bench()
     df_db = cache(:df_db) do
         @time df_load()
@@ -335,13 +340,15 @@ function bench()
     # @show_benchmark jdb_join_items($jdb_db)
     # @show_benchmark q_join_items($df_db)
     # @show_benchmark imp_join_items($imp_db)
-    # @show_benchmark df_join($df_db)
-    # @time imp_join(imp_db)
+    @show_benchmark df_join($df_db)
+    @show_benchmark imp_count($imp_db)
+    @show_benchmark imp_join($imp_db)
 
-    columns = imp_db.train.columns[[2,3,5]]
-    @code_warntype actually_get_cofactors(columns, make_cofactors(columns, [Categorical, Categorical, Continuous]))
-    cofactors = @time get_cofactors(columns, [Categorical, Categorical, Continuous])
-    @show [length(c.data) for c in cofactors]
+    # columns = [imp_db.train.columns[[1,2,3,5,6]]...]
+    # columns[1] = Int64[d.instant.periods.value for d in columns[1]]
+    # columns = tuple(columns...)
+    # cofactors = @time get_cofactors(columns, [Categorical, Categorical, Categorical, Continuous, Categorical])
+    # @show [length(c.data) for c in cofactors]
 
     # df_result = df_join_items(df_db)
     # imp_result = imp_join_items(imp_db)

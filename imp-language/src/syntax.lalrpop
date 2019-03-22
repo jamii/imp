@@ -1,0 +1,42 @@
+use std::str::FromStr;
+use super::{Expression, Value};
+
+grammar;
+
+pub Expression0: Expression = {
+  <e1:Expression1> "=" <e2:Expression1> => Expression::Equals(box e1, box e2),
+  Expression1,
+}
+
+pub Expression1: Expression = {
+  <e1:Expression1> "|" <e2:Expression2> => Expression::Union(box e1, box e2),
+  <e1:Expression1> "&" <e2:Expression2> => Expression::Intersection(box e1, box e2),
+  Expression2,
+}
+
+pub Expression2: Expression = {
+  "!" <e:Expression3> => Expression::Negation(box e),
+  Expression3,
+}
+
+pub Expression3: Expression = {
+  "nothing" => Expression::Nothing,
+  "something" => Expression::Something,
+  "everything" => Expression::Everything,
+  "_" => Expression::Everything,
+  <v:Value> => Expression::Value(v),
+  <e: Expression3> "(" <es: Comma<Expression0>> ")" => Expression::Application(box e, box Expression::Tuple(es)),
+  "(" <es: Comma<Expression0>> ")" => Expression::Tuple(es),
+}
+
+pub Value: Value = {
+    <s:r#""(\.|[^"])*""#> => Value::String(s[1..(s.len()-1)].to_owned()),
+    <n:r"[0-9]+"> => Value::Number(i64::from_str(n).unwrap()),
+}
+
+Comma<Rule>: Vec<Rule> =
+    <rules: (<Rule> ",")*> <last: Rule?> => {
+        let mut rules = rules;
+        rules.extend(last);
+        rules
+};

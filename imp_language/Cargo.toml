@@ -1,5 +1,5 @@
 [package]
-name = "imp-language"
+name = "imp_language"
 version = "0.1.0"
 authors = ["Jamie Brandon <jamie@scattered-thoughts.net>"]
 edition = "2018"

@@ -1,0 +1,33 @@
+[package]
+name = "imp_demo"
+version = "0.1.0"
+authors = ["Jamie Brandon <jamie@scattered-thoughts.net>"]
+edition = "2018"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+imp_language = { path = "../imp_language" }
+wasm-bindgen = "0.2.33"
+console_error_panic_hook = "0.1.5"
+
+[dependencies.js-sys]
+version = "0.3.10"
+# features = []
+
+[dependencies.web-sys]
+version = "0.3.10"
+features = [
+  "console",
+  "Document",
+  "Window",
+  "HtmlElement",
+  "Element",
+  "CssStyleDeclaration",
+  "Node",
+  "Text",
+  "Location",
+  "Event",
+  "EventTarget",
+]

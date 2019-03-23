@@ -1,5 +1,6 @@
 [workspace]
 
 members = [
-  "imp-language",
+  "imp_language",
+  "imp_demo",
 ]

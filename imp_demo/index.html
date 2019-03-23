@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type"/>
+    <title>Imp</title>
+    <link rel="stylesheet" href="./index.css">
+  </head>
+  <body>
+
+    <script>
+      delete WebAssembly.instantiateStreaming;
+    </script>
+
+    <script src='./target/imp_demo.js'></script>
+    <script src='./index.js'></script>
+
+    <script>
+      window.addEventListener('load', async () => {
+        await wasm_bindgen('./target/imp_demo_bg.wasm');
+        init();
+      });
+    </script>
+
+  </body>
+</html>

@@ -4,6 +4,7 @@
 use lalrpop_util::lalrpop_mod;
 use std::collections::HashSet;
 use std::iter::FromIterator;
+use std::fmt;
 
 lalrpop_mod!(pub syntax);
 
@@ -30,6 +31,73 @@ pub enum Expression {
     Equals(Box<Expression>, Box<Expression>),
     Application(Box<Expression>, Box<Expression>),
     Relation(Relation),
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Value::String(string) => write!(f, "{:?}", string),
+            Value::Number(number) => write!(f, "{:?}", number),
+        }
+    }
+}
+
+impl fmt::Display for Expression {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use Expression::*;
+        match self {
+            Nothing => write!(f, "nothing"),
+            Something => write!(f, "something"),
+            Everything => write!(f, "everything"),
+            Value(value) => write!(f, "{}", value),
+            Tuple(expressions) => {
+                write!(f, "(")?;
+                for (i, expression) in expressions.iter().enumerate() {
+                    write!(f, "{}", expression)?;
+                    if i != expressions.len() - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                if expressions.len() > 0 {
+                    write!(f, "{}", expressions[expressions.len()-1])?;
+                }
+                write!(f, ")")
+            }
+            Negation(expression) => write!(f, "!{}", expression),
+            Union(expression1, expression2) => write!(f, "{} | {}", expression1, expression2),
+            Intersection(expression1, expression2) => write!(f, "{} & {}", expression1, expression2),
+            Equals(expression1, expression2) => write!(f, "{} = {}", expression1, expression2),
+            Application(expression1, expression2) => {
+                if let box Tuple(_) = expression2 {
+                    write!(f, "{}{}", expression1, expression2)
+                } else {
+                    panic!()
+                }
+            }
+            Relation(relation) => {
+                if relation.len() == 0 {
+                    write!(f, "nothing")
+                } else {
+                    let mut tuples = relation.iter().collect::<Vec<_>>();
+                    tuples.sort();
+                    for (i, tuple) in tuples.iter().enumerate() {
+                        write!(f, "(")?;
+                        for (j, value) in tuple.iter().enumerate() {
+                            write!(f, "{}", value)?;
+                            if j != tuple.len() - 1 {
+                                write!(f, ", ")?;
+                            }
+                        }
+                        write!(f, ")")?;
+                        if i != relation.len() - 1 {
+                            write!(f, " | ")?;
+                        }
+                    }
+                    Ok(())
+                }
+            }
+        }
+    }
 }
 
 impl Expression {
@@ -145,7 +213,10 @@ mod tests {
 
     macro_rules! assert_eq_run {
         ( $code1:expr, $($code2:expr),* $(,)? ) => {{
-            $( assert_eq!(run($code1), run($code2), "{:?} = {:?}", $code1, $code2); )+
+            $(
+                println!("{} = {}, {} = {}", $code1, $code2, run($code1), run($code2));
+                assert_eq!(run($code1), run($code2), "{:?} = {:?}", $code1, $code2);
+            )+
         }};
     }
 
@@ -167,6 +238,7 @@ mod tests {
         assert_eq_run!("nothing | something", "something");
         assert_eq_run!("nothing & something", "nothing");
         assert_eq_run!("(1 | 2) & (2 | 3)", "2");
+        assert_eq_run!("1 | (2 | 3)", "(1 | 2) | 3");
 
         assert_eq_run!("1 = 1", "something");
         assert_eq_run!("1 = 2", "nothing");

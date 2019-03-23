@@ -86,7 +86,7 @@ impl Expression {
                     }
                 }
                 match outputs.len() {
-                    0 => Nothing.evaluate(),
+                    0 => Something.evaluate(),
                     1 => outputs.into_iter().next().unwrap(),
                     _ => Tuple(outputs),
                 }
@@ -153,7 +153,9 @@ mod tests {
     fn basic() {
         assert_eq!(run("1"), Expression::Relation(Relation::from_iter(vec![vec![Value::Number(1)]])));
         assert_eq!(run(r#""foo""#), Expression::Relation(Relation::from_iter(vec![vec![Value::String("foo".to_owned())]])));
-        
+
+        assert_eq_run!("()", "something");
+        assert_eq_run!("(nothing,)", "nothing");
         assert_eq_run!("(nothing,something)", "nothing");
         assert_eq_run!("(something,something)", "something");
         assert_eq_run!("(1,(2,3))", "((1,2),3)", "(1,2,3)");

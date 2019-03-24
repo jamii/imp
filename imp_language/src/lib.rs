@@ -189,12 +189,20 @@ impl Expression {
             Materialized(relation) => Materialized(relation),
         }
     }
+
+    fn replace(mut self, old: &Expression, new: &Expression) -> Self {
+        if self == *old {
+            self = new.clone();
+        }
+        self.map(|e| e.replace(old, new))
+    }
 }
 
 impl Expression {
-    fn evaluate_step(self) -> Expression {
+    fn evaluate(mut self) -> Expression {
         use crate::Name::*;
         use Expression::*;
+        self = self.map(|e| e.evaluate());
         match self {
             Nothing => Materialized(Relation::from_iter(vec![])),
             Something => Materialized(Relation::from_iter(vec![vec![]])),
@@ -217,6 +225,9 @@ impl Expression {
                     .collect(),
             ),
 
+            ApplyHigher(box AbstractHigher(box name, box body), box arg) => {
+                body.replace(&Reference(name), &arg).evaluate()
+            }
             ApplyHigher(
                 box ApplyHigher(box Reference(Tuple), box Materialized(relation1)),
                 box Materialized(relation2),
@@ -263,10 +274,6 @@ impl Expression {
 
             other => other,
         }
-    }
-
-    fn evaluate(self) -> Expression {
-        self.map(|e| e.evaluate()).evaluate_step()
     }
 }
 

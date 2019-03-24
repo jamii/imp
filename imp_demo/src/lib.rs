@@ -22,9 +22,10 @@ fn update(node: &HtmlElement) {
         .unwrap()
         .value();
     let result = format!(
-        "{}\n{}",
+        "{}\n\n{}\n\n{:#?}",
         &imp_language::parse(&code),
-        imp_language::run(&code)
+        imp_language::run(&code),
+        imp_language::run(&code),
     );
     node.last_element_child()
         .unwrap()

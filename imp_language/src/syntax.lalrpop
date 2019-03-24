@@ -8,7 +8,7 @@ grammar;
 
 pub Expression0: Expression = {
     <n:Name> "->" <e: Expression0> => AbstractFirst(box n, box e),
-    // <n:Name> "=>" <e: Expression0> => AbstractHigher(vec![n], e),
+    <n:Name> "=>" <e: Expression0> => AbstractHigher(box n, box e),
     Expression1,
 }
 

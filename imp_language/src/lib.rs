@@ -50,8 +50,10 @@ pub enum Expression {
     Everything,
     Literal(Value),
 
-    // abstractions
     Reference(Name),
+    If(Box<Expression>, Box<Expression>, Box<Expression>),
+
+    // abstractions
     Let(Name, Box<Expression>, Box<Expression>),
     AbstractFirst(Name, Box<Expression>),
     AbstractHigher(Name, Box<Expression>),
@@ -117,6 +119,11 @@ impl fmt::Display for Expression {
             Literal(value) => write!(f, "{}", value),
 
             Reference(name) => write!(f, "{}", name),
+            If(condition, true_branch, false_branch) => write!(
+                f,
+                "(if {} then {} else {})",
+                condition, true_branch, false_branch
+            ),
             Let(name, value, body) => write!(f, "(let {} = {} in {})", name, value, body),
             AbstractFirst(arg, body) => write!(f, "({} -> {})", arg, body),
             AbstractHigher(arg, body) => write!(f, "({} => {})", arg, body),
@@ -182,6 +189,9 @@ impl Expression {
             Literal(value) => Literal(value),
 
             Reference(name) => Reference(name),
+            If(condition, true_branch, false_branch) => {
+                If(box f(*condition), box f(*true_branch), box f(*false_branch))
+            }
             Let(name, value, body) => Let(name, box f(*value), box f(*body)),
             AbstractFirst(args, body) => AbstractFirst(args, box f(*body)),
             AbstractHigher(args, body) => AbstractHigher(args, box f(*body)),
@@ -258,6 +268,13 @@ impl Expression {
             Something => Materialized(Relation::from_iter(vec![vec![]])),
             Literal(value) => Materialized(Relation::from_iter(vec![vec![value.clone()]])),
 
+            If(box Materialized(relation), box true_branch, box false_branch) => {
+                if relation.is_empty() {
+                    false_branch
+                } else {
+                    true_branch
+                }
+            }
             Let(name, value, body) => body.replace(&Reference(name), &value).evaluate(),
 
             ApplyFirst(box Materialized(relation1), box Materialized(relation2)) => Materialized(
@@ -393,5 +410,11 @@ mod tests {
 
         // assert!(run("(1, _, 3)"))
         assert_eq_run!("(1, 2, _, 3, 4)", "((1, 2), _, 3, 4)");
+
+        //         run("
+        // let fixpoint_loop = f => old => new => if old = new then new else fixpoint_loop{f, new, f{old}} in
+        // let fixpoint = f => old => fixpoint_loop{f, new, f{old}} in
+        // fixpoint{x => x, 1}
+        // ");
     }
 }

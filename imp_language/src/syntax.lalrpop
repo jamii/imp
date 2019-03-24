@@ -11,6 +11,7 @@ pub Expression0: Expression = {
     <n:Name> "=>" <e: Expression0> => AbstractHigher(n, box e),
     "let" <n: Name> "=" <e1: Expression0> "in" <e2: Expression0> => Let(n, box e1, box e2),
     Expression1,
+    "if" <c: Expression0> "then" <t:Expression0> "else" <f:Expression0> => If(box c, box t, box f),
 }
 
 pub Expression1: Expression = {

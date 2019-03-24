@@ -7,8 +7,9 @@ use Expression::*;
 grammar;
 
 pub Expression0: Expression = {
-    <n:Name> "->" <e: Expression0> => AbstractFirst(box n, box e),
-    <n:Name> "=>" <e: Expression0> => AbstractHigher(box n, box e),
+    <n:Name> "->" <e: Expression0> => AbstractFirst(n, box e),
+    <n:Name> "=>" <e: Expression0> => AbstractHigher(n, box e),
+    "let" <n: Name> "=" <e1: Expression0> "in" <e2: Expression0> => Let(n, box e1, box e2),
     Expression1,
 }
 
@@ -34,6 +35,9 @@ pub Expression4: Expression = {
     "everything" => Everything,
     "_" => Everything,
     <l:Literal> => Literal(l),
+
+    
+    <n: Name> => Reference(n),
     "(" <es: Comma<Expression0>> ")" => {
         let mut es = es;
         if es.len() > 0 {
@@ -45,13 +49,12 @@ pub Expression4: Expression = {
     },
     <f:Expression4> "[" <args: Comma<Expression0>> "]" => Expression::apply_first(f, args),
     <f:Expression4> "{" <args: Comma<Expression0>> "}" => Expression::apply_higher(f, args),
-    <n: Name> => Reference(n),
     
     ! => SyntaxError(format!("{:?}", <>)),
 }
 
 pub Name: Name = {
-    <n:r"[[:alpha:]]([[:alnum:]]|[-_\?!])*"> => super::Name::Name{name: n.to_owned(), scope: None},
+    <n:r"[[:alpha:]]([[:alnum:]]|[-_\?!])*"> => super::Name::Name{name: n.to_owned(), id: None},
 }
 
 pub Literal: Value = {

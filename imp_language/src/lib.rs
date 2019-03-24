@@ -2,6 +2,7 @@
 #![feature(box_patterns)]
 
 use lalrpop_util::lalrpop_mod;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::iter::FromIterator;
@@ -37,7 +38,7 @@ pub enum Name {
     Tuple,
     Name {
         name: String,
-        scope: Option<u64>, // None after parsing, filled in later
+        id: Option<u64>, // None after parsing, filled in later
     },
 }
 
@@ -51,8 +52,9 @@ pub enum Expression {
 
     // abstractions
     Reference(Name),
-    AbstractFirst(Box<Name>, Box<Expression>),
-    AbstractHigher(Box<Name>, Box<Expression>),
+    Let(Name, Box<Expression>, Box<Expression>),
+    AbstractFirst(Name, Box<Expression>),
+    AbstractHigher(Name, Box<Expression>),
     ApplyFirst(Box<Expression>, Box<Expression>),
     ApplyHigher(Box<Expression>, Box<Expression>),
 
@@ -115,6 +117,7 @@ impl fmt::Display for Expression {
             Literal(value) => write!(f, "{}", value),
 
             Reference(name) => write!(f, "{}", name),
+            Let(name, value, body) => write!(f, "(let {} = {} in {})", name, value, body),
             AbstractFirst(arg, body) => write!(f, "({} -> {})", arg, body),
             AbstractHigher(arg, body) => write!(f, "({} => {})", arg, body),
             ApplyFirst(function, arg) => write!(f, "{}[{}]", function, arg),
@@ -170,7 +173,7 @@ impl Expression {
             .fold(f, |f, arg| Expression::ApplyFirst(box f, box arg))
     }
 
-    fn map<F: Fn(Expression) -> Expression>(self, f: F) -> Expression {
+    fn map<F: FnMut(Expression) -> Expression>(self, mut f: F) -> Expression {
         use Expression::*;
         match self {
             Nothing => Nothing,
@@ -179,6 +182,7 @@ impl Expression {
             Literal(value) => Literal(value),
 
             Reference(name) => Reference(name),
+            Let(name, value, body) => Let(name, box f(*value), box f(*body)),
             AbstractFirst(args, body) => AbstractFirst(args, box f(*body)),
             AbstractHigher(args, body) => AbstractHigher(args, box f(*body)),
             ApplyFirst(function, arg) => ApplyFirst(box f(*function), box f(*arg)),
@@ -199,7 +203,53 @@ impl Expression {
 }
 
 impl Expression {
-    fn evaluate(mut self) -> Expression {
+    fn separate_scopes(self, scope: &HashMap<String, u64>, next_id: &mut u64) -> Self {
+        use crate::Name::*;
+        use Expression::*;
+        match self {
+            Reference(Name { name, .. }) => match scope.get(&name) {
+                Some(id) => Reference(Name {
+                    name,
+                    id: Some(*id),
+                }),
+                None => Reference(Name { name, id: None }),
+            },
+            Let(Name { name, .. }, value, body) => {
+                let id = *next_id;
+                *next_id += 1;
+                let mut scope = scope.clone();
+                scope.insert(name.clone(), id);
+                Let(
+                    Name { name, id: Some(id) },
+                    box value.separate_scopes(&scope, next_id),
+                    box body.separate_scopes(&scope, next_id),
+                )
+            }
+            AbstractFirst(Name { name, .. }, body) => {
+                let id = *next_id;
+                *next_id += 1;
+                let mut scope = scope.clone();
+                scope.insert(name.clone(), id);
+                AbstractFirst(
+                    Name { name, id: Some(id) },
+                    box body.separate_scopes(&scope, next_id),
+                )
+            }
+            AbstractHigher(Name { name, .. }, body) => {
+                let id = *next_id;
+                *next_id += 1;
+                let mut scope = scope.clone();
+                scope.insert(name.clone(), id);
+                AbstractHigher(
+                    Name { name, id: Some(id) },
+                    box body.separate_scopes(&scope, next_id),
+                )
+            }
+            other => other.map(|e| e.separate_scopes(scope, next_id)),
+        }
+    }
+
+    fn evaluate(mut self) -> Self {
         use crate::Name::*;
         use Expression::*;
         self = self.map(|e| e.evaluate());
@@ -207,6 +257,8 @@ impl Expression {
             Nothing => Materialized(Relation::from_iter(vec![])),
             Something => Materialized(Relation::from_iter(vec![vec![]])),
             Literal(value) => Materialized(Relation::from_iter(vec![vec![value.clone()]])),
+
+            Let(name, value, body) => body.replace(&Reference(name), &value).evaluate(),
 
             ApplyFirst(box Materialized(relation1), box Materialized(relation2)) => Materialized(
                 relation1
@@ -225,7 +277,7 @@ impl Expression {
                     .collect(),
             ),
 
-            ApplyHigher(box AbstractHigher(box name, box body), box arg) => {
+            ApplyHigher(box AbstractHigher(name, box body), arg) => {
                 body.replace(&Reference(name), &arg).evaluate()
             }
             ApplyHigher(
@@ -285,7 +337,9 @@ pub fn parse(code: &str) -> Expression {
 }
 
 pub fn run(code: &str) -> Expression {
-    parse(code).evaluate()
+    parse(code)
+        .separate_scopes(&HashMap::new(), &mut 0)
+        .evaluate()
 }
 
 #[cfg(test)]

@@ -1,71 +1,65 @@
 use std::str::FromStr;
 use super::{Name, Expression, Value};
 
-use super::Name::*;
-use Expression::*;
-
 grammar;
 
 pub Expression0: Expression = {
-    <n:Name> "->" <e: Expression0> => AbstractFirst(n, box e),
-    <n:Name> "=>" <e: Expression0> => AbstractHigher(n, box e),
-    "let" <n: Name> "=" <e1: Expression0> "in" <e2: Expression0> => Let(n, box e1, box e2),
+    "\\" <ns:Name+> "->" <e: Expression0> => Expression::_abstract(ns, e),
+    "let" <n: Name> "=" <e1: Expression0> "in" <e2: Expression0> => Expression::Let(n, box e1, box e2),
+    // Expression1,
+    // "if" <c: Expression0> "then" <t:Expression0> "else" <f:Expression0> => If(box c, box t, box f),
     Expression1,
-    "if" <c: Expression0> "then" <t:Expression0> "else" <f:Expression0> => If(box c, box t, box f),
 }
 
 pub Expression1: Expression = {
-    <e1:Expression2> "=" <e2:Expression2> => Expression::apply_higher(Reference(Equals), vec![e1, e2]),
+    <e1:Expression2> "=" <e2:Expression2> => Expression::primitive("=", vec![e1, e2]),
     Expression2,
 }
 
 pub Expression2: Expression = {
-    <e1:Expression2> "|" <e2:Expression3> => Expression::apply_higher(Reference(Union), vec![e1, e2]),
-    <e1:Expression2> "&" <e2:Expression3> => Expression::apply_higher(Reference(Intersect), vec![e1, e2]),
+    <e1:Expression2> "|" <e2:Expression3> => Expression::primitive("|", vec![e1, e2]),
+    <e1:Expression2> "&" <e2:Expression3> => Expression::primitive("&", vec![e1, e2]),
     Expression3,
 }
 
 pub Expression3: Expression = {
-    "!" <e:Expression3> => ApplyHigher(box Reference(Negate), box e),
+    <e1:Expression3> "x" <e2:Expression4> => Expression::primitive("x", vec![e1, e2]),
     Expression4,
 }
 
 pub Expression4: Expression = {
-    "nothing" => Nothing,
-    "something" => Something,
-    "everything" => Everything,
-    "_" => Everything,
-    <l:Literal> => Literal(l),
+    <f:Expression4> <arg:Expression5> => Expression::Apply(box f, box arg),
+    Expression5,
+}
 
+pub Expression5: Expression = {
+    "!" <e:Expression5> => Expression::primitive("!", vec![e]),
+    Expression6,
+}
+
+pub Expression6: Expression = {
+    "nothing" => Expression::nothing(),
+    "something" => Expression::something(),
+    "everything" => Expression::Everything,
+    <v:Value> => Expression::Value(v),
+    <n:Name> => Expression::Name(n),
     
-    <n: Name> => Reference(n),
-    "(" <es: Comma<Expression0>> ")" => {
-        let mut es = es;
-        if es.len() > 0 {
-            let e = es.remove(0);
-            es.into_iter().fold(e, |e1, e2| Expression::apply_higher(Reference(Tuple), vec![e1, e2]))
-        } else {
-            Something
-        }
-    },
-    <f:Expression4> "[" <args: Comma<Expression0>> "]" => Expression::apply_first(f, args),
-    <f:Expression4> "{" <args: Comma<Expression0>> "}" => Expression::apply_higher(f, args),
-    
-    ! => SyntaxError(format!("{:?}", <>)),
+    "(" <e:Expression0> ")" => e,
+    "{" <e:Expression0> "}" => Expression::Solve(box e),
 }
 
 pub Name: Name = {
-    <n:r"[[:alpha:]]([[:alnum:]]|[-_\?!])*"> => super::Name::Name{name: n.to_owned(), id: None},
+    <n:r"[[:alpha:]]([[:alnum:]]|[-_\?!])*"> => n.to_owned(),
 }
 
-pub Literal: Value = {
+pub Value: Value = {
     <s:r#""(\.|[^"])*""#> => Value::String(s[1..(s.len()-1)].to_owned()),
     <n:r"[0-9]+"> => Value::Number(i64::from_str(n).unwrap()),
 }
 
-Comma<Rule>: Vec<Rule> =
-    <rules: (<Rule> ",")*> <last: Rule?> => {
-        let mut rules = rules;
-        rules.extend(last);
-        rules
-    };
+// Comma<Rule>: Vec<Rule> =
+//     <rules: (<Rule> ",")*> <last: Rule?> => {
+//         let mut rules = rules;
+//         rules.extend(last);
+//         rules
+//     };

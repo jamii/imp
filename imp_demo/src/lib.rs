@@ -21,17 +21,22 @@ fn update(node: &HtmlElement) {
         .dyn_into::<HtmlTextAreaElement>()
         .unwrap()
         .value();
-    let result = format!(
-        "{}\n\n{}\n\n{:#?}",
-        &imp_language::parse(&code),
-        imp_language::run(&code),
-        imp_language::run(&code),
-    );
+    let mut outputs = vec![];
+    match imp_language::parse(&code) {
+        Err(error) => outputs.push(format!("Error: {}", error)),
+        Ok(expr) => {
+            outputs.push(format!("Parsed: {}", expr));
+            match imp_language::run(&code) {
+                Err(error) => outputs.push(format!("Error: {}", error)),
+                Ok(value) => outputs.push(format!("Evalled: {}", value)),
+            }
+        }
+    }
     node.last_element_child()
         .unwrap()
         .dyn_into::<HtmlElement>()
         .unwrap()
-        .set_inner_text(&result);
+        .set_inner_text(&outputs.join("\n\n"));
 }
 
 #[wasm_bindgen(start)]

@@ -2,419 +2,296 @@
 #![feature(box_patterns)]
 
 use lalrpop_util::lalrpop_mod;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::iter::FromIterator;
 
-macro_rules! iflet {
-    ( $p:pat = $e:expr ) => {{
-        if let $o = $e {
-            true
-        } else {
-            false
-        }
-    }};
-}
+// macro_rules! iflet {
+//     ( $p:pat = $e:expr ) => {{
+//         if let $o = $e {
+//             true
+//         } else {
+//             false
+//         }
+//     }};
+// }
 
 lalrpop_mod!(pub syntax);
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Value {
     String(String),
     Number(i64),
+    Set(BTreeSet<Vec<Value>>),
+    Closure(Name, Box<Expression>, Environment),
 }
 
-pub type Tuple = Vec<Value>;
+pub type Environment = Vec<(Name, Value)>;
 
-pub type Relation = HashSet<Tuple>;
+pub type Name = String; // non-empty
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Name {
-    Equals,
-    Union,
-    Intersect,
-    Negate,
-    Tuple,
-    Name {
-        name: String,
-        id: Option<u64>, // None after parsing, filled in later
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Expression {
-    // literals
-    Nothing,
-    Something,
     Everything,
-    Literal(Value),
-
-    Reference(Name),
-    If(Box<Expression>, Box<Expression>, Box<Expression>),
-
-    // abstractions
+    Value(Value),
+    Name(Name),
     Let(Name, Box<Expression>, Box<Expression>),
-    AbstractFirst(Name, Box<Expression>),
-    AbstractHigher(Name, Box<Expression>),
-    ApplyFirst(Box<Expression>, Box<Expression>),
-    ApplyHigher(Box<Expression>, Box<Expression>),
-
-    SyntaxError(String),
-
-    // used for partial evaluation
-    Materialized(Relation),
+    Abstract(Name, Box<Expression>),
+    Apply(Box<Expression>, Box<Expression>),
+    Solve(Box<Expression>),
 }
 
-impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Value::String(string) => write!(f, "{:?}", string),
-            Value::Number(number) => write!(f, "{:?}", number),
-        }
+impl Expression {
+    fn nothing() -> Self {
+        Expression::Value(Value::Set(BTreeSet::from_iter(vec![])))
+    }
+
+    fn something() -> Self {
+        Expression::Value(Value::Set(BTreeSet::from_iter(vec![vec![]])))
+    }
+
+    fn _abstract(mut args: Vec<Name>, body: Expression) -> Self {
+        args.reverse();
+        args.into_iter()
+            .fold(body, |body, arg| Expression::Abstract(arg, box body))
+    }
+
+    fn apply(fun: Expression, args: Vec<Expression>) -> Self {
+        args.into_iter()
+            .fold(fun, |f, arg| Expression::Apply(box f, box arg))
+    }
+
+    fn primitive(name: &str, args: Vec<Expression>) -> Self {
+        Expression::apply(Expression::Name(name.to_owned()), args)
     }
 }
 
-fn write_delimited<T, F: Fn(&mut fmt::Formatter, &T) -> fmt::Result>(
+fn write_delimited<T, TS: IntoIterator<Item = T>, F: Fn(&mut fmt::Formatter, T) -> fmt::Result>(
     f: &mut fmt::Formatter,
     delimiter: &str,
-    things: &[T],
+    things: TS,
     write: F,
 ) -> fmt::Result {
-    for (i, thing) in things.iter().enumerate() {
+    let mut iter = things.into_iter().enumerate().peekable();
+    while let Some((_i, thing)) = iter.next() {
         write(f, thing)?;
-        if i != things.len() - 1 {
+        if let Some(_) = iter.peek() {
             write!(f, "{}", delimiter)?;
         }
     }
     Ok(())
 }
 
-impl fmt::Display for Name {
+impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use crate::Name::*;
-        write!(
-            f,
-            "{}",
-            match self {
-                Equals => "=",
-                Union => "|",
-                Intersect => "&",
-                Negate => "!",
-                Tuple => panic!(),
-                Name { name, .. } => name,
+        match self {
+            Value::String(string) => write!(f, "{:?}", string)?,
+            Value::Number(number) => write!(f, "{:?}", number)?,
+            Value::Set(set) => {
+                write!(f, "{{")?;
+                write_delimited(f, " | ", set, |f, vs| {
+                    write_delimited(f, " x ", vs, |f, v| write!(f, "{}", v))
+                })?;
+                write!(f, "}}")?;
             }
-        )
+            Value::Closure(name, body, env) => {
+                write!(f, "(")?;
+                for (name, value) in env {
+                    write!(f, "let {} = {} in ", name, value)?;
+                }
+                write!(f, "\\ {} -> {}", name, body)?;
+                write!(f, ")")?;
+            }
+        }
+        Ok(())
     }
 }
 
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use crate::Name::*;
         use Expression::*;
         match self {
-            Nothing => write!(f, "nothing"),
-            Something => write!(f, "something"),
-            Everything => write!(f, "everything"),
-            Literal(value) => write!(f, "{}", value),
-
-            Reference(name) => write!(f, "{}", name),
-            If(condition, true_branch, false_branch) => write!(
-                f,
-                "(if {} then {} else {})",
-                condition, true_branch, false_branch
-            ),
-            Let(name, value, body) => write!(f, "(let {} = {} in {})", name, value, body),
-            AbstractFirst(arg, body) => write!(f, "({} -> {})", arg, body),
-            AbstractHigher(arg, body) => write!(f, "({} => {})", arg, body),
-            ApplyFirst(function, arg) => write!(f, "{}[{}]", function, arg),
-            ApplyHigher(box ApplyHigher(box Reference(Equals), e1), e2) => {
-                write!(f, "{} = {}", e1, e2)
-            }
-            ApplyHigher(box ApplyHigher(box Reference(Union), e1), e2) => {
-                write!(f, "{} | {}", e1, e2)
-            }
-            ApplyHigher(box ApplyHigher(box Reference(Intersect), e1), e2) => {
-                write!(f, "{} & {}", e1, e2)
-            }
-            ApplyHigher(box Reference(Negate), e) => write!(f, "!{}", e),
-            ApplyHigher(box ApplyHigher(box Reference(Tuple), e1), e2) => {
-                write!(f, "({}, {})", e1, e2)
-            }
-
-            ApplyHigher(function, arg) => write!(f, "{}{{{}}}", function, arg),
-
-            SyntaxError(_error) => write!(f, "syntax_error"),
-
-            Materialized(relation) => {
-                if relation.len() == 0 {
-                    write!(f, "nothing")?;
+            Everything => write!(f, "everything")?,
+            Value(value) => write!(f, "{}", value)?,
+            Name(name) => {
+                if (*name == "!")
+                    || (*name == "=")
+                    || (*name == "|")
+                    || (*name == "&")
+                    || (*name == "x")
+                {
+                    write!(f, "({})", name)?;
                 } else {
-                    let mut tuples = relation.iter().collect::<Vec<_>>();
-                    tuples.sort();
-                    write_delimited(f, " | ", &*tuples, |f, tuple| {
-                        if tuple.len() == 1 {
-                            write!(f, "{}", &tuple[0])?;
-                        } else {
-                            write!(f, "(")?;
-                            write_delimited(f, ", ", &*tuple, |f, value| write!(f, "{}", value))?;
-                            write!(f, ")")?;
-                        }
-                        Ok(())
-                    })?;
+                    write!(f, "{}", name)?;
                 }
-                Ok(())
             }
+            Abstract(arg, body) => {
+                write!(f, "({} -> {})", arg, body)?;
+            }
+            // arity 1 primitives
+            Apply(box Name(name), arg) if (*name == "!") => write!(f, "{}{}", name, arg)?,
+            // arity 2 primitives
+            Apply(box Apply(box Name(name), arg1), arg2)
+                if (*name == "=") || (*name == "|") || (*name == "&") || (*name == "x") =>
+            {
+                write!(f, "({} {} {})", arg1, name, arg2)?
+            }
+            Apply(fun, arg) => write!(f, "({} {})", fun, arg)?,
+            Solve(def) => write!(f, "{{{}}}", def)?,
+
+            Let(name, value, body) => write!(f, "let {} = {} in {}", name, value, body)?,
         }
+        Ok(())
     }
 }
 
 impl Expression {
-    fn apply_higher(f: Expression, args: Vec<Expression>) -> Self {
-        args.into_iter()
-            .fold(f, |f, arg| Expression::ApplyHigher(box f, box arg))
-    }
-
-    fn apply_first(f: Expression, args: Vec<Expression>) -> Self {
-        args.into_iter()
-            .fold(f, |f, arg| Expression::ApplyFirst(box f, box arg))
-    }
-
     fn map<F: FnMut(Expression) -> Expression>(self, mut f: F) -> Expression {
         use Expression::*;
         match self {
-            Nothing => Nothing,
-            Something => Something,
             Everything => Everything,
-            Literal(value) => Literal(value),
+            Value(value) => Value(value),
+            Name(name) => Name(name),
+            Abstract(arg, box body) => Abstract(arg, box f(body)),
+            Apply(box fun, box arg) => Apply(box f(fun), box f(arg)),
+            Solve(box def) => Solve(box f(def)),
 
-            Reference(name) => Reference(name),
-            If(condition, true_branch, false_branch) => {
-                If(box f(*condition), box f(*true_branch), box f(*false_branch))
-            }
-            Let(name, value, body) => Let(name, box f(*value), box f(*body)),
-            AbstractFirst(args, body) => AbstractFirst(args, box f(*body)),
-            AbstractHigher(args, body) => AbstractHigher(args, box f(*body)),
-            ApplyFirst(function, arg) => ApplyFirst(box f(*function), box f(*arg)),
-            ApplyHigher(function, arg) => ApplyHigher(box f(*function), box f(*arg)),
-
-            SyntaxError(error) => SyntaxError(error),
-
-            Materialized(relation) => Materialized(relation),
+            Let(name, box value, box body) => Let(name, box f(value), box f(body)),
         }
     }
 
-    fn replace(mut self, old: &Expression, new: &Expression) -> Self {
-        if self == *old {
-            self = new.clone();
-        }
-        self.map(|e| e.replace(old, new))
-    }
-}
-
-impl Expression {
-    fn separate_scopes(self, scope: &HashMap<String, u64>, next_id: &mut u64) -> Self {
-        use crate::Name::*;
+    fn desugar(self) -> Self {
         use Expression::*;
-        match self {
-            Reference(Name { name, .. }) => match scope.get(&name) {
-                Some(id) => Reference(Name {
-                    name,
-                    id: Some(*id),
-                }),
-                None => Reference(Name { name, id: None }),
-            },
-            Let(Name { name, .. }, value, body) => {
-                let id = *next_id;
-                *next_id += 1;
-                let mut scope = scope.clone();
-                scope.insert(name.clone(), id);
-                Let(
-                    Name { name, id: Some(id) },
-                    box value.separate_scopes(&scope, next_id),
-                    box body.separate_scopes(&scope, next_id),
-                )
-            }
-            AbstractFirst(Name { name, .. }, body) => {
-                let id = *next_id;
-                *next_id += 1;
-                let mut scope = scope.clone();
-                scope.insert(name.clone(), id);
-                AbstractFirst(
-                    Name { name, id: Some(id) },
-                    box body.separate_scopes(&scope, next_id),
-                )
-            }
-            AbstractHigher(Name { name, .. }, body) => {
-                let id = *next_id;
-                *next_id += 1;
-                let mut scope = scope.clone();
-                scope.insert(name.clone(), id);
-                AbstractHigher(
-                    Name { name, id: Some(id) },
-                    box body.separate_scopes(&scope, next_id),
-                )
-            }
-            other => other.map(|e| e.separate_scopes(scope, next_id)),
-        }
-    }
-
-    fn evaluate(mut self) -> Self {
-        use crate::Name::*;
-        use Expression::*;
-        self = self.map(|e| e.evaluate());
-        match self {
-            Nothing => Materialized(Relation::from_iter(vec![])),
-            Something => Materialized(Relation::from_iter(vec![vec![]])),
-            Literal(value) => Materialized(Relation::from_iter(vec![vec![value.clone()]])),
-
-            If(box Materialized(relation), box true_branch, box false_branch) => {
-                if relation.is_empty() {
-                    false_branch
-                } else {
-                    true_branch
-                }
-            }
-            Let(name, value, body) => body.replace(&Reference(name), &value).evaluate(),
-
-            ApplyFirst(box Materialized(relation1), box Materialized(relation2)) => Materialized(
-                relation1
-                    .into_iter()
-                    .flat_map(|tuple1| {
-                        relation2.iter().cloned().filter_map(move |tuple2| {
-                            if (tuple1.len() >= tuple2.len())
-                                && (&tuple1[0..tuple2.len()] == &*tuple2)
-                            {
-                                Some(tuple1[tuple2.len()..tuple1.len()].to_vec())
-                            } else {
-                                None
-                            }
-                        })
-                    })
-                    .collect(),
-            ),
-
-            ApplyHigher(box AbstractHigher(name, box body), arg) => {
-                body.replace(&Reference(name), &arg).evaluate()
-            }
-            ApplyHigher(
-                box ApplyHigher(box Reference(Tuple), box Materialized(relation1)),
-                box Materialized(relation2),
-            ) => {
-                let mut output = Relation::new();
-                for tuple1 in &relation1 {
-                    for tuple2 in &relation2 {
-                        output.insert(
-                            tuple1
-                                .iter()
-                                .cloned()
-                                .chain(tuple2.iter().cloned())
-                                .collect(),
-                        );
-                    }
-                }
-                Materialized(output)
-            }
-            ApplyHigher(box Reference(Negate), box Materialized(relation)) => {
-                if Materialized(relation) == Nothing.evaluate() {
-                    Something.evaluate()
-                } else {
-                    Nothing.evaluate()
-                }
-            }
-            ApplyHigher(
-                box ApplyHigher(box Reference(Union), box Materialized(relation1)),
-                box Materialized(relation2),
-            ) => Materialized(relation1.union(&relation2).cloned().collect()),
-            ApplyHigher(
-                box ApplyHigher(box Reference(Intersect), box Materialized(relation1)),
-                box Materialized(relation2),
-            ) => Materialized(relation1.intersection(&relation2).cloned().collect()),
-            ApplyHigher(
-                box ApplyHigher(box Reference(Equals), box Materialized(relation1)),
-                box Materialized(relation2),
-            ) => {
-                if relation1 == relation2 {
-                    Something.evaluate()
-                } else {
-                    Nothing.evaluate()
-                }
-            }
-
+        match self.map(|e| e.desugar()) {
+            Let(name, value, body) => Apply(box Abstract(name, value), body),
             other => other,
         }
     }
-}
 
-pub fn parse(code: &str) -> Expression {
-    match syntax::Expression0Parser::new().parse(code) {
-        Ok(expression) => expression,
-        Err(error) => Expression::SyntaxError(format!("{:?}", error)),
+    fn evaluate(self, env: &Environment, everything: &Option<Vec<Value>>) -> Result<Value, String> {
+        use crate::Value::*;
+        use Expression::*;
+        Ok(match self {
+            Everything => {
+                if let Some(everything) = everything {
+                    Set(BTreeSet::from_iter(
+                        everything.clone().into_iter().map(|e| vec![e]),
+                    ))
+                } else {
+                    Err(format!("everything"))?
+                }
+            }
+            Value(value) => value,
+            Name(name) => {
+                if let Some((_, value)) = env.iter().find(|(n, _)| *n == name) {
+                    value.clone()
+                } else {
+                    Err(format!("{}", name))?
+                }
+            }
+            Abstract(name, body) => Closure(name, body, env.clone()),
+            Apply(box fun, box arg) => {
+                let fun = fun.evaluate(env, everything)?;
+                let arg = arg.evaluate(env, everything)?;
+                match fun {
+                    Set(set) => {
+                        if set.is_empty() || !set.iter().next().unwrap().is_empty() {
+                            let mut result = BTreeSet::new();
+                            for tuple in set {
+                                if tuple[0] == arg {
+                                    result.insert(tuple[1..].to_vec());
+                                }
+                            }
+                            Set(result)
+                        } else {
+                            Err(format!("{} {}", Set(set), arg))?
+                        }
+                    }
+                    Closure(name, body, closure_env) => {
+                        let mut new_env = vec![(name, arg)];
+                        new_env.extend_from_slice(&closure_env);
+                        body.clone().evaluate(&new_env, everything)?
+                    }
+                    fun => Err(format!("{} {}", fun, arg))?,
+                }
+            }
+            Solve(def) => unimplemented!(),
+
+            // sugar
+            Let(_, _, _) => unimplemented!(),
+        })
     }
 }
 
-pub fn run(code: &str) -> Expression {
-    parse(code)
-        .separate_scopes(&HashMap::new(), &mut 0)
-        .evaluate()
+pub fn parse(code: &str) -> Result<Expression, String> {
+    syntax::Expression0Parser::new()
+        .parse(code)
+        .map_err(|error| format!("{:?}", error))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    macro_rules! assert_eq_run {
-        ( $code1:expr, $($code2:expr),* $(,)? ) => {{
-            $(
-                println!("{} = {}, {} = {}", $code1, $code2, run($code1), run($code2));
-                assert_eq!(run($code1), run($code2), "{:?} = {:?}", $code1, $code2);
-            )+
-        }};
-    }
-
-    #[test]
-    fn basic() {
-        assert_eq!(
-            run("1"),
-            Expression::Materialized(Relation::from_iter(vec![vec![Value::Number(1)]]))
-        );
-        assert_eq!(
-            run(r#""foo""#),
-            Expression::Materialized(Relation::from_iter(vec![vec![Value::String(
-                "foo".to_owned()
-            )]]))
-        );
-
-        assert_eq_run!("()", "something");
-        assert_eq_run!("(nothing,)", "nothing");
-        assert_eq_run!("(nothing,something)", "nothing");
-        assert_eq_run!("(something,something)", "something");
-        assert_eq_run!("(1,(2,3))", "((1,2),3)", "(1,2,3)");
-
-        assert_eq_run!("!nothing", "something");
-        assert_eq_run!("!something", "nothing");
-        assert_eq_run!("!3", "nothing");
-
-        assert_eq_run!("nothing | something", "something");
-        assert_eq_run!("nothing & something", "nothing");
-        assert_eq_run!("(1 | 2) & (2 | 3)", "2");
-        assert_eq_run!("1 | (2 | 3)", "(1 | 2) | 3");
-
-        assert_eq_run!("1 = 1", "something");
-        assert_eq_run!("1 = 2", "nothing");
-        assert_eq_run!("(1 | 2) = (2 | 1)", "something");
-
-        assert_eq_run!("1[1]", "something");
-        assert_eq_run!("1[2]", "nothing");
-        assert_eq_run!(r#"((1, "one") | (2, "two"))[2]"#, r#""two""#);
-
-        // assert!(run("(1, _, 3)"))
-        assert_eq_run!("(1, 2, _, 3, 4)", "((1, 2), _, 3, 4)");
-
-        //         run("
-        // let fixpoint_loop = f => old => new => if old = new then new else fixpoint_loop{f, new, f{old}} in
-        // let fixpoint = f => old => fixpoint_loop{f, new, f{old}} in
-        // fixpoint{x => x, 1}
-        // ");
-    }
+pub fn run(code: &str) -> Result<Value, String> {
+    parse(code)?.evaluate(
+        &vec![],
+        &Some(vec![Value::Number(0), Value::Number(1), Value::Number(2)]),
+    )
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+
+//     macro_rules! assert_eq_run {
+//         ( $code1:expr, $($code2:expr),* $(,)? ) => {{
+//             $(
+//                 println!("{} = {}, {} = {}", $code1, $code2, run($code1), run($code2));
+//                 assert_eq!(run($code1), run($code2), "{:?} = {:?}", $code1, $code2);
+//             )+
+//         }};
+//     }
+
+//     #[test]
+//     fn basic() {
+//         assert_eq!(
+//             run("1"),
+//             Expression::Materialized(Relation::from_iter(vec![vec![Value::Number(1)]]))
+//         );
+//         assert_eq!(
+//             run(r#""foo""#),
+//             Expression::Materialized(Relation::from_iter(vec![vec![Value::String(
+//                 "foo".to_owned()
+//             )]]))
+//         );
+
+//         assert_eq_run!("()", "something");
+//         assert_eq_run!("(nothing,)", "nothing");
+//         assert_eq_run!("(nothing,something)", "nothing");
+//         assert_eq_run!("(something,something)", "something");
+//         assert_eq_run!("(1,(2,3))", "((1,2),3)", "(1,2,3)");
+
+//         assert_eq_run!("!nothing", "something");
+//         assert_eq_run!("!something", "nothing");
+//         assert_eq_run!("!3", "nothing");
+
+//         assert_eq_run!("nothing | something", "something");
+//         assert_eq_run!("nothing & something", "nothing");
+//         assert_eq_run!("(1 | 2) & (2 | 3)", "2");
+//         assert_eq_run!("1 | (2 | 3)", "(1 | 2) | 3");
+
+//         assert_eq_run!("1 = 1", "something");
+//         assert_eq_run!("1 = 2", "nothing");
+//         assert_eq_run!("(1 | 2) = (2 | 1)", "something");
+
+//         assert_eq_run!("1[1]", "something");
+//         assert_eq_run!("1[2]", "nothing");
+//         assert_eq_run!(r#"((1, "one") | (2, "two"))[2]"#, r#""two""#);
+
+//         // assert!(run("(1, _, 3)"))
+//         assert_eq_run!("(1, 2, _, 3, 4)", "((1, 2), _, 3, 4)");
+
+//         //         run("
+//         // let fixpoint_loop = f => old => new => if old = new then new else fixpoint_loop{f, new, f{old}} in
+//         // let fixpoint = f => old => fixpoint_loop{f, new, f{old}} in
+//         // fixpoint{x => x, 1}
+//         // ");
+//     }
+// }

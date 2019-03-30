@@ -160,15 +160,19 @@ impl Expression {
         }
     }
 
-    fn desugar(self) -> Self {
+    pub fn desugar(self) -> Self {
         use Expression::*;
         match self.map(|e| e.desugar()) {
-            Let(name, value, body) => Apply(box Abstract(name, value), body),
+            Let(name, value, body) => Apply(box Abstract(name, body), value),
             other => other,
         }
     }
 
-    fn evaluate(self, env: &Environment, everything: &Option<Vec<Value>>) -> Result<Value, String> {
+    pub fn evaluate(
+        self,
+        env: &Environment,
+        everything: &Option<Vec<Value>>,
+    ) -> Result<Value, String> {
         use crate::Value::*;
         use Expression::*;
         Ok(match self {
@@ -215,11 +219,41 @@ impl Expression {
                     fun => Err(format!("{} {}", fun, arg))?,
                 }
             }
-            Solve(def) => unimplemented!(),
+            Solve(def) => Set(def.evaluate(env, everything)?.solve_naive(everything)?),
 
             // sugar
             Let(_, _, _) => unimplemented!(),
         })
+    }
+}
+
+impl Value {
+    fn solve_naive(self, everything: &Option<Vec<Value>>) -> Result<BTreeSet<Vec<Value>>, String> {
+        use Value::*;
+        if let None = everything {
+            Err(format!("{{...}}"))?
+        } else {
+            Ok(match self {
+                Set(set) => set,
+                Closure(name, body, closure_env) => {
+                    let mut result = BTreeSet::new();
+                    for input in everything.as_ref().unwrap() {
+                        let mut new_env = vec![(name.clone(), input.clone())];
+                        new_env.extend_from_slice(&closure_env);
+                        for mut output in body
+                            .clone()
+                            .evaluate(&new_env, everything)?
+                            .solve_naive(everything)?
+                        {
+                            output.insert(0, input.clone());
+                            result.insert(output);
+                        }
+                    }
+                    result
+                }
+                other => Err(format!("{{{}}}", other))?,
+            })
+        }
     }
 }
 
@@ -229,16 +263,16 @@ pub fn parse(code: &str) -> Result<Expression, String> {
         .map_err(|error| format!("{:?}", error))
 }
 
-pub fn run(code: &str) -> Result<Value, String> {
-    parse(code)?.evaluate(
-        &vec![],
-        &Some(vec![Value::Number(0), Value::Number(1), Value::Number(2)]),
-    )
-}
-
 // #[cfg(test)]
 // mod tests {
 //     use super::*;
+
+// fn run(code: &str) -> Result<Value, String> {
+//     parse(code)?.desugar().evaluate(
+//         &vec![],
+//         &Some(vec![Value::Number(0), Value::Number(1), Value::Number(2)]),
+//     )
+// }
 
 //     macro_rules! assert_eq_run {
 //         ( $code1:expr, $($code2:expr),* $(,)? ) => {{

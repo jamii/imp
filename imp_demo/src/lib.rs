@@ -5,8 +5,6 @@ use wasm_bindgen::JsCast;
 use web_sys::HtmlElement;
 use web_sys::HtmlTextAreaElement;
 
-use imp_language::Value;
-
 #[allow(unused_macros)]
 macro_rules! dbg {
     ($e:expr) => {{
@@ -30,12 +28,9 @@ fn update(node: &HtmlElement) {
             outputs.push(format!("Parsed: {}", expr));
             let expr = expr.desugar();
             outputs.push(format!("Desugared: {}", expr));
-            match expr.evaluate(
-                &vec![],
-                &Some(vec![Value::Number(0), Value::Number(1), Value::Number(2)]),
-            ) {
+            match imp_language::eval(expr) {
                 Err(error) => outputs.push(format!("Error: {}", error)),
-                Ok(value) => outputs.push(format!("Evalled: {}", value)),
+                Ok(value) => outputs.push(format!("Evalled: {}\n{:?}", value, value)),
             }
         }
     }

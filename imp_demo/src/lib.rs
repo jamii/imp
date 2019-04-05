@@ -26,7 +26,7 @@ fn update(node: &HtmlElement) {
         Err(error) => outputs.push(format!("Error: {}", error)),
         Ok(expr) => {
             outputs.push(format!("Parsed: {}", expr));
-            let expr = expr.desugar();
+            let expr = expr.desugar().with_natives(&imp_language::Native::stdlib());
             outputs.push(format!("Desugared: {}", expr));
             match imp_language::eval(expr) {
                 Err(error) => outputs.push(format!("Error: {}", error)),

@@ -29,6 +29,7 @@ pub Expression3: Expression = {
 
 pub Expression4: Expression = {
     <f:Expression4> <arg:Expression5> => Expression::Apply(box f, box arg),
+    <e1:Expression4> "+" <e2:Expression5> => Expression::apply("+", vec![e1, e2]),
     Expression5,
 }
 

@@ -2,8 +2,10 @@
 #![feature(box_patterns)]
 
 use lalrpop_util::lalrpop_mod;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::iter::FromIterator;
 
 // macro_rules! iflet {
 //     ( $p:pat = $e:expr ) => {{
@@ -26,6 +28,14 @@ lalrpop_mod!(pub syntax);
 pub type Name = String; // non-empty
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+// TODO Eq/Ord for fn are dubious - should implement on name instead
+pub struct Native {
+    name: Name,
+    arity: u64,
+    fun: fn(Vec<Value>) -> Result<Value, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Expression {
     Nothing,
     Something,
@@ -36,6 +46,7 @@ pub enum Expression {
     Name(Name),
     Abstract(Name, Box<Expression>),
     Apply(Box<Expression>, Box<Expression>),
+    ApplyNative(Native, Vec<Name>),
     Seal(Box<Expression>),
     Unseal(Box<Expression>),
 }
@@ -140,10 +151,40 @@ impl fmt::Display for Expression {
                 write!(f, "({} -> {})", arg, body)?;
             }
             Apply(fun, arg) => write!(f, "({} {})", fun, arg)?,
+            ApplyNative(fun, args) => {
+                write!(f, "(<{}> ", fun.name)?;
+                write_delimited(f, " ", args, |f, arg| write!(f, "{}", arg))?;
+                write!(f, ")")?;
+            }
             Seal(e) => write!(f, "{{{}}}", e)?,
             Unseal(e) => write!(f, "~{}", e)?,
         }
         Ok(())
+    }
+}
+
+impl Native {
+    fn add(values: Vec<Value>) -> Result<Value, String> {
+        match &*values {
+            [v1, v2] => match (v1.as_scalar(), v2.as_scalar()) {
+                (Some(Scalar::Number(n1)), Some(Scalar::Number(n2))) => {
+                    Ok(Value::scalar(Scalar::Number(n1 + n2)))
+                }
+                _ => Err(format!("{} + {}", v1, v2)),
+            },
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn stdlib() -> BTreeMap<Name, Native> {
+        BTreeMap::from_iter(vec![(
+            "+".to_owned(),
+            Native {
+                name: "+".to_owned(),
+                arity: 2,
+                fun: Native::add,
+            },
+        )])
     }
 }
 
@@ -208,6 +249,19 @@ impl Value {
             Value::Set(set) if set.len() == 1 => set.iter().next().unwrap().is_empty(),
             _ => false,
         }
+    }
+
+    fn as_scalar(&self) -> Option<Scalar> {
+        if let Value::Set(set) = self {
+            if set.len() == 1 {
+                let tuple = set.iter().next().unwrap();
+                if tuple.len() == 1 {
+                    let scalar = tuple.iter().next().unwrap();
+                    return Some(scalar.clone());
+                }
+            }
+        }
+        None
     }
 
     fn union(val1: Value, val2: Value) -> Result<Value, String> {
@@ -285,18 +339,10 @@ impl Value {
     }
 
     fn unseal(val: Value) -> Result<Value, String> {
-        if let Value::Set(set) = &val {
-            if set.len() == 1 {
-                let tuple = set.iter().next().unwrap();
-                if tuple.len() == 1 {
-                    let value = tuple.iter().next().unwrap();
-                    if let Scalar::Sealed(expr, env) = value {
-                        return expr.clone().eval(env);
-                    }
-                }
-            }
+        match val.as_scalar() {
+            Some(Scalar::Sealed(expr, env)) => expr.clone().eval(&env),
+            _ => Err(format!("~{}", val)),
         }
-        Err(format!("~{}", val))
     }
 }
 
@@ -305,6 +351,13 @@ impl Expression {
         args.reverse();
         args.into_iter()
             .fold(body, |body, arg| Expression::Abstract(arg, box body))
+    }
+
+    fn apply(fun: &str, args: Vec<Expression>) -> Expression {
+        args.into_iter()
+            .fold(Expression::Name(fun.to_owned()), |fun, arg| {
+                Expression::Apply(box fun, box arg)
+            })
     }
 
     fn visit<F: FnMut(&Expression)>(&self, f: &mut F) {
@@ -328,25 +381,29 @@ impl Expression {
                 f(fun);
                 f(arg);
             }
+            ApplyNative(_, _) => (),
             Seal(box e) => f(e),
             Unseal(box e) => f(e),
         }
     }
 
-    // fn map<F: FnMut(Expression) -> Expression>(self, mut f: F) -> Expression {
-    //     use Expression::*;
-    //     match self {
-    //         Nothing => Nothing,
-    //         Something => Something,
-    //         Scalar(scalar) => Scalar(scalar),
-    //         Union(box e1, box e2) => Union(box f(e1), box f(e2)),
-    //         Product(box e1, box e2) => Product(box f(e1), box f(e2)),
-    //         // Negate(box e) => Negate(box f(e)),
-    //         Name(name) => Name(name),
-    //         Abstract(arg, box body) => Abstract(arg, box f(body)),
-    //         Apply(box fun, box arg) => Apply(box f(fun), box f(arg)),
-    //     }
-    // }
+    fn map<F: FnMut(Expression) -> Expression>(self, mut f: F) -> Expression {
+        use Expression::*;
+        match self {
+            Nothing => Nothing,
+            Something => Something,
+            Scalar(scalar) => Scalar(scalar),
+            Union(box e1, box e2) => Union(box f(e1), box f(e2)),
+            Product(box e1, box e2) => Product(box f(e1), box f(e2)),
+            // Negate(box e) => Negate(box f(e)),
+            Name(name) => Name(name),
+            Abstract(arg, box body) => Abstract(arg, box f(body)),
+            Apply(box fun, box arg) => Apply(box f(fun), box f(arg)),
+            ApplyNative(fun, args) => ApplyNative(fun, args),
+            Seal(box e) => Seal(box f(e)),
+            Unseal(box e) => Unseal(box f(e)),
+        }
+    }
 
     pub fn desugar(self) -> Expression {
         // use Expression::*;
@@ -357,28 +414,63 @@ impl Expression {
         self
     }
 
-    fn collect_free_names(&self, names: &mut BTreeSet<Name>, ignore: &BTreeSet<Name>) {
-        match self {
-            Expression::Name(name) => {
-                if !ignore.contains(name) {
-                    names.insert(name.clone());
+    pub fn with_natives(self, natives: &BTreeMap<Name, Native>) -> Expression {
+        fn mapper(
+            expr: Expression,
+            natives: &BTreeMap<Name, Native>,
+            bound: &BTreeSet<Name>,
+        ) -> Expression {
+            use Expression::*;
+            match expr {
+                Name(name) => {
+                    if let (false, Some(native)) = (bound.contains(&name), natives.get(&name)) {
+                        let args = (0..native.arity)
+                            .map(|i| format!("a{}", i))
+                            .collect::<Vec<_>>();
+                        Expression::_abstract(args.clone(), ApplyNative(native.clone(), args))
+                    } else {
+                        Name(name)
+                    }
                 }
-            }
-            Expression::Abstract(name, body) => {
-                let mut ignore = ignore.clone();
-                ignore.insert(name.clone());
-                body.collect_free_names(names, &ignore);
-            }
-            _ => {
-                self.visit(&mut |e| e.collect_free_names(names, ignore));
+                Abstract(arg, box body) => {
+                    let mut bound = bound.clone();
+                    bound.insert(arg.clone());
+                    Abstract(arg, box mapper(body, natives, &bound))
+                }
+                expr => expr.map(|e| mapper(e, natives, bound)),
             }
         }
+        mapper(self, natives, &BTreeSet::new())
     }
 
     pub fn free_names(&self) -> BTreeSet<Name> {
-        let mut names = BTreeSet::new();
-        self.collect_free_names(&mut names, &BTreeSet::new());
-        names
+        fn mapper(expr: &Expression, free_names: &mut BTreeSet<Name>, bound: &BTreeSet<Name>) {
+            match expr {
+                Expression::Name(name) => {
+                    if !bound.contains(name) {
+                        free_names.insert(name.clone());
+                    }
+                }
+                Expression::ApplyNative(_, args) => {
+                    for arg in args {
+                        if !bound.contains(arg) {
+                            free_names.insert(arg.clone());
+                        }
+                    }
+                }
+                Expression::Abstract(name, body) => {
+                    let mut bound = bound.clone();
+                    bound.insert(name.clone());
+                    mapper(body, free_names, &bound);
+                }
+                _ => {
+                    expr.visit(&mut |e| mapper(e, free_names, bound));
+                }
+            }
+        }
+        let mut free_names = BTreeSet::new();
+        mapper(self, &mut free_names, &BTreeSet::new());
+        free_names
     }
 
     pub fn eval(self, env: &Environment) -> Result<Value, String> {
@@ -399,6 +491,11 @@ impl Expression {
                 Closure(arg, body, closure_env)
             }
             Apply(fun, arg) => Value::apply(fun.eval(env)?, arg.eval(env)?)?,
+            ApplyNative(native, args) => (native.fun)(
+                args.into_iter()
+                    .map(|arg| env.lookup(&arg).unwrap().clone())
+                    .collect(),
+            )?,
             Seal(e) => {
                 let seal_env = env.close_over(e.free_names());
                 Value::scalar(crate::Scalar::Sealed(e, seal_env))

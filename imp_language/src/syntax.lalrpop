@@ -34,6 +34,7 @@ pub Expression4: Expression = {
 
 pub Expression5: Expression = {
     // "!" <e:Expression5> => Expression::Negate(box e),
+    "~" <e:Expression5> => Expression::Unseal(box e),
     Expression6,
 }
 
@@ -44,7 +45,7 @@ pub Expression6: Expression = {
     <n:Name> => Expression::Name(n),
     
     "(" <e:Expression0> ")" => e,
-    // "{" <e:Expression0> "}" => Expression::Solve(box e),
+    "{" <e:Expression0> "}" => Expression::Seal(box e),
 }
 
 pub Name: Name = {

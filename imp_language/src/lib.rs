@@ -36,12 +36,15 @@ pub enum Expression {
     Name(Name),
     Abstract(Name, Box<Expression>),
     Apply(Box<Expression>, Box<Expression>),
+    Seal(Box<Expression>),
+    Unseal(Box<Expression>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Scalar {
     String(String),
     Number(i64),
+    Sealed(Box<Expression>, Environment),
 }
 
 pub type Set = BTreeSet<Vec<Scalar>>;
@@ -73,11 +76,24 @@ fn write_delimited<T, TS: IntoIterator<Item = T>, F: Fn(&mut fmt::Formatter, T) 
     Ok(())
 }
 
+fn write_environment(f: &mut fmt::Formatter, env: &Environment) -> fmt::Result {
+    for (var, value) in &env.bindings {
+        write!(f, "let {} = {} in ", var, value)?;
+    }
+    Ok(())
+}
+
 impl fmt::Display for Scalar {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Scalar::String(string) => write!(f, "{:?}", string)?,
             Scalar::Number(number) => write!(f, "{:?}", number)?,
+            Scalar::Sealed(expr, env) => {
+                write!(f, "{{")?;
+                write_environment(f, env)?;
+                write!(f, "{}", expr)?;
+                write!(f, "}}")?;
+            }
         }
         Ok(())
     }
@@ -89,17 +105,19 @@ impl fmt::Display for Value {
             v if v.is_nothing() => write!(f, "nothing")?,
             v if v.is_something() => write!(f, "something")?,
             Value::Set(set) => {
-                write!(f, "(")?;
+                if set.len() > 1 || (set.len() == 1 && set.iter().next().unwrap().len() > 1) {
+                    write!(f, "(")?;
+                }
                 write_delimited(f, " | ", set, |f, value| {
                     write_delimited(f, " x ", value, |f, scalar| write!(f, "{}", scalar))
                 })?;
-                write!(f, ")")?;
+                if set.len() > 1 || (set.len() == 1 && set.iter().next().unwrap().len() > 1) {
+                    write!(f, ")")?;
+                }
             }
             Value::Closure(name, body, env) => {
                 write!(f, "({} -> ", name)?;
-                for (var, value) in &env.bindings {
-                    write!(f, "let {} = {} in ", var, value)?;
-                }
+                write_environment(f, env)?;
                 write!(f, "{})", body)?;
             }
         }
@@ -122,6 +140,8 @@ impl fmt::Display for Expression {
                 write!(f, "({} -> {})", arg, body)?;
             }
             Apply(fun, arg) => write!(f, "({} {})", fun, arg)?,
+            Seal(e) => write!(f, "{{{}}}", e)?,
+            Unseal(e) => write!(f, "~{}", e)?,
         }
         Ok(())
     }
@@ -263,6 +283,21 @@ impl Value {
             (v1, v2) => Err(format!("Type error: {} {}", v1, v2))?,
         })
     }
+
+    fn unseal(val: Value) -> Result<Value, String> {
+        if let Value::Set(set) = &val {
+            if set.len() == 1 {
+                let tuple = set.iter().next().unwrap();
+                if tuple.len() == 1 {
+                    let value = tuple.iter().next().unwrap();
+                    if let Scalar::Sealed(expr, env) = value {
+                        return expr.clone().eval(env);
+                    }
+                }
+            }
+        }
+        Err(format!("~{}", val))
+    }
 }
 
 impl Expression {
@@ -293,6 +328,8 @@ impl Expression {
                 f(fun);
                 f(arg);
             }
+            Seal(box e) => f(e),
+            Unseal(box e) => f(e),
         }
     }
 
@@ -362,6 +399,11 @@ impl Expression {
                 Closure(arg, body, closure_env)
             }
             Apply(fun, arg) => Value::apply(fun.eval(env)?, arg.eval(env)?)?,
+            Seal(e) => {
+                let seal_env = env.close_over(e.free_names());
+                Value::scalar(crate::Scalar::Sealed(e, seal_env))
+            }
+            Unseal(e) => Value::unseal(e.eval(env)?)?,
         })
     }
 }

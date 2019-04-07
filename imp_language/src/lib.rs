@@ -265,6 +265,7 @@ impl Value {
     }
 
     fn union(val1: Value, val2: Value) -> Result<Value, String> {
+        use Expression::*;
         use Value::*;
         Ok(if val1.is_nothing() {
             val2
@@ -273,7 +274,15 @@ impl Value {
         } else {
             match (val1, val2) {
                 (Set(set1), Set(set2)) => Value::set(set1.union(&set2).cloned()),
-                (v1, v2) => Err(format!("Type error: {} | {}", v1, v2))?,
+                (v1, v2) => {
+                    // (f | g) => (a -> (f a) | (g a))
+                    let env = Environment::from(vec![("v1".to_owned(), v1), ("v2".to_owned(), v2)]);
+                    let expr = Union(
+                        box Apply(box Name("v1".to_owned()), box Name("a".to_owned())),
+                        box Apply(box Name("v2".to_owned()), box Name("a".to_owned())),
+                    );
+                    Closure("a".to_owned(), expr, env)
+                }
             }
         })
     }
@@ -519,21 +528,21 @@ pub fn eval(expr: Expression) -> Result<Value, String> {
 mod tests {
     use super::*;
 
-    // fn run(code: &str) -> Result<Value, String> {
-    //     parse(code)?.desugar().evaluate(
-    //         &vec![],
-    //         &Some(vec![Value::Number(0), Value::Number(1), Value::Number(2)]),
-    //     )
-    // }
+    fn run(code: &str) -> Result<Value, String> {
+        parse(code)?
+            .desugar()
+            .with_natives(&Native::stdlib())
+            .eval(&Environment::new())
+    }
 
-    // macro_rules! assert_eq_run {
-    //     ( $code1:expr, $($code2:expr),* $(,)? ) => {{
-    //         $(
-    //             println!("{} = {}, {} = {}", $code1, $code2, run($code1), run($code2));
-    //             assert_eq!(run($code1), run($code2), "{:?} = {:?}", $code1, $code2);
-    //         )+
-    //     }};
-    // }
+    macro_rules! assert_eq_run {
+        ( $code1:expr, $($code2:expr),* $(,)? ) => {{
+            $(
+                println!("{} = {}, {:?} = {:?}", $code1, $code2, run($code1), run($code2));
+                assert_eq!(run($code1), run($code2), "{:?} = {:?}", $code1, $code2);
+            )+
+        }};
+    }
 
     #[test]
     fn basic() {
@@ -548,7 +557,9 @@ mod tests {
         assert_eq!(
             parse("\\ a -> a | b").unwrap().free_names(),
             vec!["b".to_owned()].into_iter().collect()
-        )
+        );
+
+        assert_eq_run!("(1 | 2) + 3", "3 + (1 | 2)", "4 | 5");
 
         // assert_eq!(
         //     run("1"),

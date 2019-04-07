@@ -176,15 +176,12 @@ impl Native {
         }
     }
 
-    pub fn stdlib() -> BTreeMap<Name, Native> {
-        BTreeMap::from_iter(vec![(
-            "+".to_owned(),
-            Native {
-                name: "+".to_owned(),
-                arity: 2,
-                fun: Native::add,
-            },
-        )])
+    pub fn stdlib() -> Vec<Native> {
+        vec![Native {
+            name: "+".to_owned(),
+            arity: 2,
+            fun: Native::add,
+        }]
     }
 }
 
@@ -423,10 +420,10 @@ impl Expression {
         self
     }
 
-    pub fn with_natives(self, natives: &BTreeMap<Name, Native>) -> Expression {
+    pub fn with_natives(self, natives: &[Native]) -> Expression {
         fn mapper(
             expr: Expression,
-            natives: &BTreeMap<Name, Native>,
+            natives: &BTreeMap<Name, &Native>,
             bound: &BTreeSet<Name>,
         ) -> Expression {
             use Expression::*;
@@ -436,7 +433,7 @@ impl Expression {
                         let args = (0..native.arity)
                             .map(|i| format!("a{}", i))
                             .collect::<Vec<_>>();
-                        Expression::_abstract(args.clone(), ApplyNative(native.clone(), args))
+                        Expression::_abstract(args.clone(), ApplyNative((*native).clone(), args))
                     } else {
                         Name(name)
                     }
@@ -449,7 +446,8 @@ impl Expression {
                 expr => expr.map(|e| mapper(e, natives, bound)),
             }
         }
-        mapper(self, natives, &BTreeSet::new())
+        let natives = BTreeMap::from_iter(natives.into_iter().map(|n| (n.name.clone(), n)));
+        mapper(self, &natives, &BTreeSet::new())
     }
 
     pub fn free_names(&self) -> BTreeSet<Name> {

@@ -32,7 +32,7 @@ pub type Name = String; // non-empty
 pub struct Native {
     name: Name,
     arity: u64,
-    fun: fn(Vec<Value>) -> Result<Value, String>,
+    fun: fn(Vec<Scalar>) -> Result<Value, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -164,14 +164,9 @@ impl fmt::Display for Expression {
 }
 
 impl Native {
-    fn add(values: Vec<Value>) -> Result<Value, String> {
-        match &*values {
-            [v1, v2] => match (v1.as_scalar(), v2.as_scalar()) {
-                (Some(Scalar::Number(n1)), Some(Scalar::Number(n2))) => {
-                    Ok(Value::scalar(Scalar::Number(n1 + n2)))
-                }
-                _ => Err(format!("{} + {}", v1, v2)),
-            },
+    fn add(scalars: Vec<Scalar>) -> Result<Value, String> {
+        match &*scalars {
+            [Scalar::Number(n1), Scalar::Number(n2)] => Ok(Value::scalar(Scalar::Number(n1 + n2))),
             _ => unimplemented!(),
         }
     }
@@ -500,7 +495,8 @@ impl Expression {
             Apply(fun, arg) => Value::apply(fun.eval(env)?, arg.eval(env)?)?,
             ApplyNative(native, args) => (native.fun)(
                 args.into_iter()
-                    .map(|arg| env.lookup(&arg).unwrap().clone())
+                    // with_natives wraps ApplyNative in a function so by this point we know all the args exist and are scalars
+                    .map(|arg| env.lookup(&arg).unwrap().clone().as_scalar().unwrap())
                     .collect(),
             )?,
             Seal(e) => {

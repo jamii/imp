@@ -30,7 +30,7 @@ fn update(node: &HtmlElement) {
             outputs.push(format!("Desugared: {}", expr));
             match imp_language::eval(expr) {
                 Err(error) => outputs.push(format!("Error: {}", error)),
-                Ok(value) => outputs.push(format!("Evalled: {}\n{:?}", value, value)),
+                Ok(value) => outputs.push(format!("Evalled: {}", value)),
             }
         }
     }

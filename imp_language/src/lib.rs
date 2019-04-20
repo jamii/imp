@@ -42,6 +42,7 @@ pub enum Expression {
     Scalar(Scalar),
     Union(Box<Expression>, Box<Expression>),
     Product(Box<Expression>, Box<Expression>),
+    Equals(Box<Expression>, Box<Expression>),
     // Negate(Box<Expression>),
     Name(Name),
     Abstract(Name, Box<Expression>),
@@ -145,6 +146,7 @@ impl fmt::Display for Expression {
             Scalar(scalar) => write!(f, "{}", scalar)?,
             Union(e1, e2) => write!(f, "({} | {})", e1, e2)?,
             Product(e1, e2) => write!(f, "({} x {})", e1, e2)?,
+            Equals(e1, e2) => write!(f, "({} = {})", e1, e2)?,
             // Negate(e) => write!(f, "!{}", e)?,
             Name(name) => write!(f, "{}", name)?,
             Abstract(arg, body) => {
@@ -293,6 +295,14 @@ impl Value {
         })
     }
 
+    fn equals(val1: Value, val2: Value) -> Value {
+        if val1 == val2 {
+            Value::something()
+        } else {
+            Value::nothing()
+        }
+    }
+
     fn apply(val1: Value, val2: Value) -> Result<Value, String> {
         use Value::*;
         Ok(match (val1, val2) {
@@ -375,6 +385,10 @@ impl Expression {
                 f(e1);
                 f(e2);
             }
+            Equals(box e1, box e2) => {
+                f(e1);
+                f(e2);
+            }
             // Negate(box e) => Negate(box f(e)),
             Name(_) => (),
             Abstract(_, box body) => f(body),
@@ -396,6 +410,7 @@ impl Expression {
             Scalar(scalar) => Scalar(scalar),
             Union(box e1, box e2) => Union(box f(e1), box f(e2)),
             Product(box e1, box e2) => Product(box f(e1), box f(e2)),
+            Equals(box e1, box e2) => Equals(box f(e1), box f(e2)),
             // Negate(box e) => Negate(box f(e)),
             Name(name) => Name(name),
             Abstract(arg, box body) => Abstract(arg, box f(body)),
@@ -484,6 +499,7 @@ impl Expression {
             Scalar(scalar) => Value::scalar(scalar),
             Union(box e1, box e2) => Value::union(e1.eval(env)?, e2.eval(env)?)?,
             Product(box e1, box e2) => Value::product(e1.eval(env)?, e2.eval(env)?)?,
+            Equals(box e1, box e2) => Value::equals(e1.eval(env)?, e2.eval(env)?),
             Name(name) => match env.lookup(&name) {
                 Some(value) => value.clone(),
                 None => Err(format!("Undefined: {}", name))?,

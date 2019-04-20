@@ -12,7 +12,7 @@ pub Expression0: Expression = {
 }
 
 pub Expression1: Expression = {
-    // <e1:Expression2> "=" <e2:Expression2> => Expression::primitive("=", vec![e1, e2]),
+    <e1:Expression1> "=" <e2:Expression2> => Expression::Equals(box e1, box e2),
     Expression2,
 }
 

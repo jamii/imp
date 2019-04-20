@@ -8,7 +8,7 @@ build = "build.rs"
 [dependencies]
 lalrpop-util = "0.16.3"
 regex = "0.2.0"
+unescape = "*"
 
-# Add a build-time dependency on the lalrpop library:
 [build-dependencies]
 lalrpop = "0.16.3"

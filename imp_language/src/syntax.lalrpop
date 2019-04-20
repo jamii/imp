@@ -53,6 +53,6 @@ pub Name: Name = {
 }
 
 pub Scalar: Scalar = {
-    <s:r#""(\.|[^"])*""#> => Scalar::String(s[1..(s.len()-1)].to_owned()),
+    <s:r#""(\\.|[^"])*""#> => Scalar::String(unescape::unescape(&s[1..(s.len()-1)]).unwrap()),
     <n:r"[0-9]+"> => Scalar::Number(i64::from_str(n).unwrap()),
 }

@@ -44,8 +44,9 @@ pub enum Expression {
     Intersection(Box<Expression>, Box<Expression>),
     Product(Box<Expression>, Box<Expression>),
     Equals(Box<Expression>, Box<Expression>),
-    // Negate(Box<Expression>),
+    Negation(Box<Expression>),
     Name(Name),
+    Let(Name, Box<Expression>, Box<Expression>),
     Abstract(Name, Box<Expression>),
     Apply(Box<Expression>, Box<Expression>),
     ApplyNative(Native, Vec<Name>),
@@ -149,8 +150,9 @@ impl fmt::Display for Expression {
             Intersection(e1, e2) => write!(f, "({} & {})", e1, e2)?,
             Product(e1, e2) => write!(f, "({} x {})", e1, e2)?,
             Equals(e1, e2) => write!(f, "({} = {})", e1, e2)?,
-            // Negate(e) => write!(f, "!{}", e)?,
+            Negation(e) => write!(f, "!{}", e)?,
             Name(name) => write!(f, "{}", name)?,
+            Let(name, value, body) => write!(f, "let {} = {} in {}", name, value, body)?,
             Abstract(arg, body) => {
                 write!(f, "({} -> {})", arg, body)?;
             }
@@ -328,6 +330,26 @@ impl Value {
         }
     }
 
+    fn negation(val: Value) -> Value {
+        use Expression::*;
+        use Value::*;
+        if val.is_nothing() {
+            Value::something()
+        } else if val.is_something() {
+            Value::nothing()
+        } else {
+            // !f => (a -> !(f a))
+            Closure(
+                "a".to_owned(),
+                Negation(box Apply(
+                    box Name("v".to_owned()),
+                    box Name("a".to_owned()),
+                )),
+                Environment::from(vec![("v".to_owned(), val)]),
+            )
+        }
+    }
+
     fn apply(val1: Value, val2: Value) -> Result<Value, String> {
         use Value::*;
         Ok(match (val1, val2) {
@@ -418,8 +440,12 @@ impl Expression {
                 f(e1);
                 f(e2);
             }
-            // Negate(box e) => Negate(box f(e)),
+            Negation(box e) => f(e),
             Name(_) => (),
+            Let(name, box value, box body) => {
+                f(value);
+                f(body);
+            }
             Abstract(_, box body) => f(body),
             Apply(box fun, box arg) => {
                 f(fun);
@@ -441,8 +467,9 @@ impl Expression {
             Intersection(box e1, box e2) => Intersection(box f(e1), box f(e2)),
             Product(box e1, box e2) => Product(box f(e1), box f(e2)),
             Equals(box e1, box e2) => Equals(box f(e1), box f(e2)),
-            // Negate(box e) => Negate(box f(e)),
+            Negation(box e) => Negation(box f(e)),
             Name(name) => Name(name),
+            Let(name, box value, box body) => Let(name, box f(value), box f(body)),
             Abstract(arg, box body) => Abstract(arg, box f(body)),
             Apply(box fun, box arg) => Apply(box f(fun), box f(arg)),
             ApplyNative(fun, args) => ApplyNative(fun, args),
@@ -531,10 +558,16 @@ impl Expression {
             Intersection(box e1, box e2) => Value::intersection(e1.eval(env)?, e2.eval(env)?)?,
             Product(box e1, box e2) => Value::product(e1.eval(env)?, e2.eval(env)?)?,
             Equals(box e1, box e2) => Value::equals(e1.eval(env)?, e2.eval(env)?),
+            Negation(box e) => Value::negation(e.eval(env)?),
             Name(name) => match env.lookup(&name) {
                 Some(value) => value.clone(),
                 None => Err(format!("Undefined: {}", name))?,
             },
+            Let(name, box value, box body) => {
+                let mut env = env.clone();
+                env.bind(name, value.eval(&env)?);
+                body.eval(&env)?
+            }
             Abstract(arg, box body) => {
                 let closure_env = env.close_over(body.free_names());
                 Closure(arg, body, closure_env)

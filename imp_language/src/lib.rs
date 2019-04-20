@@ -41,6 +41,7 @@ pub enum Expression {
     Something,
     Scalar(Scalar),
     Union(Box<Expression>, Box<Expression>),
+    Intersection(Box<Expression>, Box<Expression>),
     Product(Box<Expression>, Box<Expression>),
     Equals(Box<Expression>, Box<Expression>),
     // Negate(Box<Expression>),
@@ -145,6 +146,7 @@ impl fmt::Display for Expression {
             Something => write!(f, "something")?,
             Scalar(scalar) => write!(f, "{}", scalar)?,
             Union(e1, e2) => write!(f, "({} | {})", e1, e2)?,
+            Intersection(e1, e2) => write!(f, "({} & {})", e1, e2)?,
             Product(e1, e2) => write!(f, "({} x {})", e1, e2)?,
             Equals(e1, e2) => write!(f, "({} = {})", e1, e2)?,
             // Negate(e) => write!(f, "!{}", e)?,
@@ -281,6 +283,29 @@ impl Value {
         })
     }
 
+    fn intersection(val1: Value, val2: Value) -> Result<Value, String> {
+        use Expression::*;
+        use Value::*;
+        Ok(if val1.is_nothing() {
+            Value::nothing()
+        } else if val2.is_nothing() {
+            Value::nothing()
+        } else {
+            match (val1, val2) {
+                (Set(set1), Set(set2)) => Value::set(set1.intersection(&set2).cloned()),
+                (v1, v2) => {
+                    // (f & g) => (a -> (f a) & (g a))
+                    let env = Environment::from(vec![("v1".to_owned(), v1), ("v2".to_owned(), v2)]);
+                    let expr = Intersection(
+                        box Apply(box Name("v1".to_owned()), box Name("a".to_owned())),
+                        box Apply(box Name("v2".to_owned()), box Name("a".to_owned())),
+                    );
+                    Closure("a".to_owned(), expr, env)
+                }
+            }
+        })
+    }
+
     fn product(val1: Value, val2: Value) -> Result<Value, String> {
         use Value::*;
         Ok(match (val1, val2) {
@@ -381,6 +406,10 @@ impl Expression {
                 f(e1);
                 f(e2);
             }
+            Intersection(box e1, box e2) => {
+                f(e1);
+                f(e2);
+            }
             Product(box e1, box e2) => {
                 f(e1);
                 f(e2);
@@ -409,6 +438,7 @@ impl Expression {
             Something => Something,
             Scalar(scalar) => Scalar(scalar),
             Union(box e1, box e2) => Union(box f(e1), box f(e2)),
+            Intersection(box e1, box e2) => Intersection(box f(e1), box f(e2)),
             Product(box e1, box e2) => Product(box f(e1), box f(e2)),
             Equals(box e1, box e2) => Equals(box f(e1), box f(e2)),
             // Negate(box e) => Negate(box f(e)),
@@ -498,6 +528,7 @@ impl Expression {
             Something => Value::something(),
             Scalar(scalar) => Value::scalar(scalar),
             Union(box e1, box e2) => Value::union(e1.eval(env)?, e2.eval(env)?)?,
+            Intersection(box e1, box e2) => Value::intersection(e1.eval(env)?, e2.eval(env)?)?,
             Product(box e1, box e2) => Value::product(e1.eval(env)?, e2.eval(env)?)?,
             Equals(box e1, box e2) => Value::equals(e1.eval(env)?, e2.eval(env)?),
             Name(name) => match env.lookup(&name) {

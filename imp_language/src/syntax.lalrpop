@@ -18,7 +18,7 @@ pub Expression1: Expression = {
 
 pub Expression2: Expression = {
     <e1:Expression2> "|" <e2:Expression3> => Expression::Union(box e1, box e2),
-    // <e1:Expression2> "&" <e2:Expression3> => Expression::primitive("&", vec![e1, e2]),
+    <e1:Expression2> "&" <e2:Expression3> => Expression::Intersection(box e1, box e2),
     Expression3,
 }
 

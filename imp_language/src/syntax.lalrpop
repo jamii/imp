@@ -6,8 +6,7 @@ grammar;
 pub Expression0: Expression = {
     "\\" <ns:Name+> "->" <e: Expression0> => Expression::_abstract(ns, e),
     "let" <n: Name> "=" <e1: Expression0> "in" <e2: Expression0> => Expression::Let(n, box e1, box e2),
-    // Expression1,
-    // "if" <c: Expression0> "then" <t:Expression0> "else" <f:Expression0> => If(box c, box t, box f),
+    "if" <c: Expression0> "then" <t:Expression0> "else" <f:Expression0> => Expression::If(box c, box t, box f),
     Expression1,
 }
 

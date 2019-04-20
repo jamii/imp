@@ -47,6 +47,7 @@ pub enum Expression {
     Negation(Box<Expression>),
     Name(Name),
     Let(Name, Box<Expression>, Box<Expression>),
+    If(Box<Expression>, Box<Expression>, Box<Expression>),
     Abstract(Name, Box<Expression>),
     Apply(Box<Expression>, Box<Expression>),
     ApplyNative(Native, Vec<Name>),
@@ -153,6 +154,9 @@ impl fmt::Display for Expression {
             Negation(e) => write!(f, "!{}", e)?,
             Name(name) => write!(f, "{}", name)?,
             Let(name, value, body) => write!(f, "let {} = {} in {}", name, value, body)?,
+            If(cond, if_true, if_false) => {
+                write!(f, "if {} then {} else {}", cond, if_true, if_false)?
+            }
             Abstract(arg, body) => {
                 write!(f, "({} -> {})", arg, body)?;
             }
@@ -442,9 +446,14 @@ impl Expression {
             }
             Negation(box e) => f(e),
             Name(_) => (),
-            Let(name, box value, box body) => {
+            Let(_, box value, box body) => {
                 f(value);
                 f(body);
+            }
+            If(box cond, box if_true, box if_false) => {
+                f(cond);
+                f(if_true);
+                f(if_false);
             }
             Abstract(_, box body) => f(body),
             Apply(box fun, box arg) => {
@@ -470,6 +479,9 @@ impl Expression {
             Negation(box e) => Negation(box f(e)),
             Name(name) => Name(name),
             Let(name, box value, box body) => Let(name, box f(value), box f(body)),
+            If(box cond, box if_true, box if_false) => {
+                If(box f(cond), box f(if_true), box f(if_false))
+            }
             Abstract(arg, box body) => Abstract(arg, box f(body)),
             Apply(box fun, box arg) => Apply(box f(fun), box f(arg)),
             ApplyNative(fun, args) => ApplyNative(fun, args),
@@ -567,6 +579,13 @@ impl Expression {
                 let mut env = env.clone();
                 env.bind(name, value.eval(&env)?);
                 body.eval(&env)?
+            }
+            If(box cond, box if_true, box if_false) => {
+                if !cond.eval(env)?.is_nothing() {
+                    if_true.eval(env)?
+                } else {
+                    if_false.eval(env)?
+                }
             }
             Abstract(arg, box body) => {
                 let closure_env = env.close_over(body.free_names());

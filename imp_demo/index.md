@@ -33,12 +33,13 @@ Start with a strict lambda calculus where every expression returns a relation or
   * (ie this rule only applies to scalars like "foo")
 
 * Solving
-  * `[f]` returns a finite set which behaves exactly like `f` in application
+  * `[f]` returns a finite relation which behaves exactly like `f` in application
   * or returns an error __at compile time__ if the compiler can't rewrite `f`
   * eg `[a -> a 1 | a 2]` => `(1 | 2)`
   * eg `[a -> foo a | bar a]` => `foo | bar`
   * eg `[a -> a > 1]` => `error`
-  * this provides declarative set comprehensions whilst limiting failure to a lexical region
+  * eg `[a c -> exists(b -> parent a b & parent b c)]` => ...
+  * this provides declarative relation comprehensions whilst limiting failure to a lexical region
 
 * Boxing
   * `{expr}` is a scalar containing a thunk which evaluates to `expr`

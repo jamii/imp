@@ -114,6 +114,22 @@ impl fmt::Display for Scalar {
     }
 }
 
+impl Scalar {
+    fn as_integer(&self) -> Result<i64, String> {
+        match self {
+            Scalar::Number(i) => Ok(*i),
+            _ => Err(format!("Not an integer: {}", self)),
+        }
+    }
+
+    fn unseal(&self) -> Result<Value, String> {
+        match self {
+            Scalar::Sealed(expr, env) => expr.clone().eval(&env),
+            _ => Err(format!("~{}", self)),
+        }
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -177,16 +193,57 @@ impl Native {
     fn add(scalars: Vec<Scalar>) -> Result<Value, String> {
         match &*scalars {
             [Scalar::Number(n1), Scalar::Number(n2)] => Ok(Value::scalar(Scalar::Number(n1 + n2))),
-            _ => unimplemented!(),
+            [a, b] => Err(format!("{} + {}", a, b)),
+            _ => unreachable!(),
+        }
+    }
+
+    fn permute(scalars: Vec<Scalar>) -> Result<Value, String> {
+        match &*scalars {
+            [set @ Scalar::Sealed(_, _), permutations @ Scalar::Sealed(_, _)] => {
+                match (set.unseal()?, permutations.unseal()?) {
+                    (Value::Set(set), Value::Set(permutations)) => {
+                        let mut result = Set::new();
+                        for permutation in permutations {
+                            for row in &set {
+                                result.insert(
+                                    permutation
+                                        .iter()
+                                        .map(|i| {
+                                            let i = i.as_integer()? - 1;
+                                            if 0 <= i && i < (row.len() as i64) {
+                                                Ok(row[i as usize].clone())
+                                            } else {
+                                                Err(format!("Out of bounds: {}", i))
+                                            }
+                                        })
+                                        .collect::<Result<Vec<_>, _>>()?,
+                                );
+                            }
+                        }
+                        Ok(Value::Set(result))
+                    }
+                    (a, b) => Err(format!("permute {{{}}} {{{}}}", a, b)),
+                }
+            }
+            [a, b] => Err(format!("permute {} {}", a, b)),
+            _ => unreachable!(),
         }
     }
 
     pub fn stdlib() -> Vec<Native> {
-        vec![Native {
-            name: "+".to_owned(),
-            arity: 2,
-            fun: Native::add,
-        }]
+        vec![
+            Native {
+                name: "+".to_owned(),
+                arity: 2,
+                fun: Native::add,
+            },
+            Native {
+                name: "permute".to_owned(),
+                arity: 2,
+                fun: Native::permute,
+            },
+        ]
     }
 }
 
@@ -253,17 +310,17 @@ impl Value {
         }
     }
 
-    fn as_scalar(&self) -> Option<Scalar> {
+    fn as_scalar(&self) -> Result<Scalar, String> {
         if let Value::Set(set) = self {
             if set.len() == 1 {
                 let tuple = set.iter().next().unwrap();
                 if tuple.len() == 1 {
                     let scalar = tuple.iter().next().unwrap();
-                    return Some(scalar.clone());
+                    return Ok(scalar.clone());
                 }
             }
         }
-        None
+        Err(format!("Not a scalar: {}", self))
     }
 
     fn union(val1: Value, val2: Value) -> Result<Value, String> {
@@ -401,10 +458,7 @@ impl Value {
     }
 
     fn unseal(val: Value) -> Result<Value, String> {
-        match val.as_scalar() {
-            Some(Scalar::Sealed(expr, env)) => expr.clone().eval(&env),
-            _ => Err(format!("~{}", val)),
-        }
+        val.as_scalar()?.unseal()
     }
 }
 

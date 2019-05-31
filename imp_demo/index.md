@@ -8,9 +8,8 @@ Start with a strict lambda calculus where every expression returns a relation or
   * numbers - `42.7`
   * strings - `"foo"`
 
-* Union (commutative, associative)
-  * `nothing | a` => `nothing`
-  * `something | a` => `a`
+* Union (commutative, associative, idempotent)
+  * `nothing | a` => `a`
 
 * Product (associative)
   * `nothing x a` => `nothing`

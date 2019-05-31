@@ -200,9 +200,9 @@ impl Native {
 
     fn permute(scalars: Vec<Scalar>) -> Result<Value, String> {
         match &*scalars {
-            [set @ Scalar::Sealed(_, _), permutations @ Scalar::Sealed(_, _)] => {
-                match (set.unseal()?, permutations.unseal()?) {
-                    (Value::Set(set), Value::Set(permutations)) => {
+            [permutations @ Scalar::Sealed(..), set @ Scalar::Sealed(..)] => {
+                match (permutations.unseal()?, set.unseal()?) {
+                    (Value::Set(permutations), Value::Set(set)) => {
                         let mut result = Set::new();
                         for permutation in permutations {
                             for row in &set {
@@ -231,6 +231,37 @@ impl Native {
         }
     }
 
+    fn reduce(scalars: Vec<Scalar>) -> Result<Value, String> {
+        match &*scalars {
+            [init, fun @ Scalar::Sealed(..), set @ Scalar::Sealed(..)] => {
+                match (fun.unseal()?, set.unseal()?) {
+                    (fun, Value::Set(set)) => {
+                        let mut result = Value::Set(Set::from_iter(vec![vec![init.clone()]]));
+                        for row in set {
+                            let env = Environment::from(vec![
+                                ("fun".to_owned(), fun.clone()),
+                                ("result".to_owned(), result),
+                                ("row".to_owned(), Value::Set(Set::from_iter(vec![row]))),
+                            ]);
+                            let expr = Expression::Apply(
+                                box Expression::Apply(
+                                    box Expression::Name("fun".to_owned()),
+                                    box Expression::Name("result".to_owned()),
+                                ),
+                                box Expression::Name("row".to_owned()),
+                            );
+                            result = expr.eval(&env)?;
+                        }
+                        Ok(result)
+                    }
+                    (a, b) => Err(format!("reduce {} {{{}}} {{{}}}", init, a, b)),
+                }
+            }
+            [a, b, c] => Err(format!("reduce {} {} {}", a, b, c)),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn stdlib() -> Vec<Native> {
         vec![
             Native {
@@ -242,6 +273,11 @@ impl Native {
                 name: "permute".to_owned(),
                 arity: 2,
                 fun: Native::permute,
+            },
+            Native {
+                name: "reduce".to_owned(),
+                arity: 3,
+                fun: Native::reduce,
             },
         ]
     }

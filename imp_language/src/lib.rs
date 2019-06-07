@@ -31,7 +31,8 @@ pub type Name = String; // non-empty
 // TODO Eq/Ord for fn are dubious - should implement on name instead
 pub struct Native {
     name: Name,
-    arity: u64,
+    input_arity: u64,
+    output_arity: u64,
     fun: fn(Vec<Scalar>) -> Result<Value, String>,
 }
 
@@ -59,7 +60,7 @@ pub enum Expression {
 pub enum Scalar {
     String(String),
     Number(i64),
-    Sealed(Box<Expression>, Environment),
+    Sealed(Box<Expression>, Environment<Value>),
 }
 
 pub type Set = BTreeSet<Vec<Scalar>>;
@@ -67,12 +68,12 @@ pub type Set = BTreeSet<Vec<Scalar>>;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Value {
     Set(Set),
-    Closure(Name, Expression, Environment),
+    Closure(Name, Expression, Environment<Value>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Environment {
-    bindings: Vec<(Name, Value)>,
+pub struct Environment<T> {
+    bindings: Vec<(Name, T)>,
 }
 
 fn write_delimited<T, TS: IntoIterator<Item = T>, F: Fn(&mut fmt::Formatter, T) -> fmt::Result>(
@@ -91,7 +92,10 @@ fn write_delimited<T, TS: IntoIterator<Item = T>, F: Fn(&mut fmt::Formatter, T) 
     Ok(())
 }
 
-fn write_environment(f: &mut fmt::Formatter, env: &Environment) -> fmt::Result {
+fn write_environment<T>(f: &mut fmt::Formatter, env: &Environment<T>) -> fmt::Result
+where
+    T: std::fmt::Display,
+{
     for (var, value) in &env.bindings {
         write!(f, "let {} = {} in ", var, value)?;
     }
@@ -266,33 +270,36 @@ impl Native {
         vec![
             Native {
                 name: "+".to_owned(),
-                arity: 2,
+                input_arity: 2,
+                output_arity: 1,
                 fun: Native::add,
             },
             Native {
                 name: "permute".to_owned(),
-                arity: 2,
+                input_arity: 2,
+                output_arity: 1,
                 fun: Native::permute,
             },
             Native {
                 name: "reduce".to_owned(),
-                arity: 3,
+                input_arity: 3,
+                output_arity: 1,
                 fun: Native::reduce,
             },
         ]
     }
 }
 
-impl Environment {
-    fn new() -> Environment {
+impl<T> Environment<T> {
+    pub fn new() -> Self {
         Environment { bindings: vec![] }
     }
 
-    fn from(bindings: Vec<(Name, Value)>) -> Environment {
+    fn from(bindings: Vec<(Name, T)>) -> Self {
         Environment { bindings: bindings }
     }
 
-    fn lookup(&self, name: &Name) -> Option<&Value> {
+    fn lookup(&self, name: &Name) -> Option<&T> {
         self.bindings
             .iter()
             .rev()
@@ -300,11 +307,16 @@ impl Environment {
             .map(|(_, e)| e)
     }
 
-    fn bind(&mut self, name: Name, value: Value) {
+    fn bind(&mut self, name: Name, value: T) {
         self.bindings.push((name, value));
     }
+}
 
-    fn close_over(&self, names: BTreeSet<Name>) -> Environment {
+impl<T> Environment<T>
+where
+    T: Clone,
+{
+    fn close_over(&self, names: BTreeSet<Name>) -> Self {
         Environment::from(
             self.bindings
                 .iter()
@@ -599,7 +611,7 @@ impl Expression {
             match expr {
                 Name(name) => {
                     if let (false, Some(native)) = (bound.contains(&name), natives.get(&name)) {
-                        let args = (0..native.arity)
+                        let args = (0..native.input_arity)
                             .map(|i| format!("a{}", i))
                             .collect::<Vec<_>>();
                         Expression::_abstract(args.clone(), ApplyNative((*native).clone(), args))
@@ -649,7 +661,7 @@ impl Expression {
         free_names
     }
 
-    pub fn eval(self, env: &Environment) -> Result<Value, String> {
+    pub fn eval(self, env: &Environment<Value>) -> Result<Value, String> {
         use Expression::*;
         use Value::*;
         Ok(match self {
@@ -693,6 +705,63 @@ impl Expression {
                 Value::scalar(crate::Scalar::Sealed(e, seal_env))
             }
             Unseal(e) => Value::unseal(e.eval(env)?)?,
+        })
+    }
+
+    pub fn arity(&self, env: &Environment<Option<u64>>) -> Result<Option<u64>, String> {
+        use Expression::*;
+        fn unify(a1: Option<u64>, a2: Option<u64>) -> Result<Option<u64>, String> {
+            match (a1, a2) {
+                (None, None) => Ok(None),
+                (Some(a), None) | (None, Some(a)) => Ok(Some(a)),
+                (Some(a1), Some(a2)) => {
+                    if a1 == a2 {
+                        Ok(Some(a1))
+                    } else {
+                        Err(format!("Can't unify arities {} and {}", a1, a2))
+                    }
+                }
+            }
+        }
+        Ok(match self {
+            Nothing => None,
+            Something => Some(0),
+            Scalar(_) => Some(1),
+            Union(box e1, box e2) => unify(e1.arity(env)?, e2.arity(env)?)?,
+            Intersection(box e1, box e2) => unify(e1.arity(env)?, e2.arity(env)?)?,
+            Product(box e1, box e2) => match (e1.arity(env)?, e2.arity(env)?) {
+                (Some(a1), Some(a2)) => Some(a1 + a2),
+                _ => None,
+            },
+            Equals(_, _) => Some(0),
+            Negation(box e) => e.arity(&env)?,
+            Name(name) => env
+                .lookup(name)
+                .ok_or_else(|| format!("Unbound name: {}", name))?
+                .clone(),
+            Let(name, box value, box body) => {
+                let mut env = env.clone();
+                env.bind(name.clone(), value.arity(&env)?);
+                body.arity(&env)?
+            }
+            If(box _cond, box if_true, box if_false) => {
+                unify(if_true.arity(env)?, if_false.arity(env)?)?
+            }
+            Abstract(arg, box body) => {
+                let mut env = env.clone();
+                env.bind(arg.clone(), Some(1));
+                body.arity(&env)?
+            }
+            Apply(fun, arg) => match (fun.arity(env)?, arg.arity(env)?) {
+                (Some(a1), Some(a2)) => Some(a1.max(a2) - a1.min(a2)),
+                _ => None,
+            },
+            ApplyNative(native, args) => {
+                assert_eq!(native.input_arity, args.len() as u64);
+                Some(native.output_arity)
+            }
+            Seal(_) => Some(1),
+            Unseal(_) => return Err(format!("Can't infer arity of: {}", self)),
         })
     }
 }

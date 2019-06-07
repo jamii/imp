@@ -28,6 +28,8 @@ fn update(node: &HtmlElement) {
             outputs.push(format!("Parsed: {}", expr));
             let expr = expr.desugar().with_natives(&imp_language::Native::stdlib());
             outputs.push(format!("Desugared: {}", expr));
+            let arity = expr.arity(&imp_language::Environment::new());
+            outputs.push(format!("Inferred arity: {:?}", arity));
             match imp_language::eval(expr) {
                 Err(error) => outputs.push(format!("Error: {}", error)),
                 Ok(value) => outputs.push(format!("Evalled: {}", value)),

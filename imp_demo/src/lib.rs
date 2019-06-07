@@ -1,4 +1,5 @@
 #![feature(box_syntax)]
+#![feature(result_map_or_else)]
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -28,8 +29,15 @@ fn update(node: &HtmlElement) {
             outputs.push(format!("Parsed: {}", expr));
             let expr = expr.desugar().with_natives(&imp_language::Native::stdlib());
             outputs.push(format!("Desugared: {}", expr));
-            let arity = expr.arity(&imp_language::Environment::new());
-            outputs.push(format!("Inferred arity: {:?}", arity));
+            let mut arity_cache = imp_language::Cache::new();
+            let arity1 = expr.arity(&imp_language::Environment::new(), &mut arity_cache);
+            let arity2 = arity_cache.get(&expr);
+            outputs.push(format!("Inferred arity: {:?} {:?}", arity1, arity2));
+            let lowered = expr.lower(&arity_cache);
+            outputs.push(format!(
+                "Lowered: {}",
+                lowered.map_or_else(|a| format!("{}", a), |a| format!("{}", a))
+            ));
             match imp_language::eval(expr) {
                 Err(error) => outputs.push(format!("Error: {}", error)),
                 Ok(value) => outputs.push(format!("Evalled: {}", value)),

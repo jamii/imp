@@ -4,6 +4,7 @@
 use lalrpop_util::lalrpop_mod;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::fmt;
 use std::iter::FromIterator;
 
@@ -31,8 +32,8 @@ pub type Name = String; // non-empty
 // TODO Eq/Ord for fn are dubious - should implement on name instead
 pub struct Native {
     name: Name,
-    input_arity: u64,
-    output_arity: u64,
+    input_arity: usize,
+    output_arity: usize,
     fun: fn(Vec<Scalar>) -> Result<Value, String>,
 }
 
@@ -54,6 +55,7 @@ pub enum Expression {
     ApplyNative(Native, Vec<Name>),
     Seal(Box<Expression>),
     Unseal(Box<Expression>),
+    Exists(Vec<Name>, Box<Expression>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -74,6 +76,27 @@ pub enum Value {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Environment<T> {
     bindings: Vec<(Name, T)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Cache<T> {
+    cache: HashMap<*const Expression, T>,
+}
+
+impl<T> Cache<T> {
+    pub fn new() -> Self {
+        Cache {
+            cache: HashMap::new(),
+        }
+    }
+
+    fn insert(&mut self, expr: &Expression, value: T) {
+        self.cache.insert(expr as *const Expression, value);
+    }
+
+    pub fn get(&self, expr: &Expression) -> Option<&T> {
+        self.cache.get(&(expr as *const Expression))
+    }
 }
 
 fn write_delimited<T, TS: IntoIterator<Item = T>, F: Fn(&mut fmt::Formatter, T) -> fmt::Result>(
@@ -115,22 +138,6 @@ impl fmt::Display for Scalar {
             }
         }
         Ok(())
-    }
-}
-
-impl Scalar {
-    fn as_integer(&self) -> Result<i64, String> {
-        match self {
-            Scalar::Number(i) => Ok(*i),
-            _ => Err(format!("Not an integer: {}", self)),
-        }
-    }
-
-    fn unseal(&self) -> Result<Value, String> {
-        match self {
-            Scalar::Sealed(expr, env) => expr.clone().eval(&env),
-            _ => Err(format!("${}", self)),
-        }
     }
 }
 
@@ -188,8 +195,33 @@ impl fmt::Display for Expression {
             }
             Seal(e) => write!(f, "{{{}}}", e)?,
             Unseal(e) => write!(f, "${}", e)?,
+            Exists(args, body) => {
+                write!(f, "exists(")?;
+                write_delimited(f, " ", args, |f, arg| write!(f, "{}", arg))?;
+                write!(f, " -> {})", body)?;
+            }
         }
         Ok(())
+    }
+}
+
+fn gensym() -> Name {
+    format!("tmp_{}", rand::random::<usize>())
+}
+
+impl Scalar {
+    fn as_integer(&self) -> Result<i64, String> {
+        match self {
+            Scalar::Number(i) => Ok(*i),
+            _ => Err(format!("Not an integer: {}", self)),
+        }
+    }
+
+    fn unseal(&self) -> Result<Value, String> {
+        match self {
+            Scalar::Sealed(expr, env) => expr.clone().eval(&env),
+            _ => Err(format!("${}", self)),
+        }
     }
 }
 
@@ -565,6 +597,7 @@ impl Expression {
             ApplyNative(_, _) => (),
             Seal(box e) => f(e),
             Unseal(box e) => f(e),
+            Exists(_, box body) => f(body),
         }
     }
 
@@ -589,6 +622,7 @@ impl Expression {
             ApplyNative(fun, args) => ApplyNative(fun, args),
             Seal(box e) => Seal(box f(e)),
             Unseal(box e) => Unseal(box f(e)),
+            Exists(args, box body) => Exists(args, box f(body)),
         }
     }
 
@@ -705,12 +739,17 @@ impl Expression {
                 Value::scalar(crate::Scalar::Sealed(e, seal_env))
             }
             Unseal(e) => Value::unseal(e.eval(env)?)?,
+            Exists(_, _) => return Err(format!("Unimplemented: {}", self)),
         })
     }
 
-    pub fn arity(&self, env: &Environment<Option<u64>>) -> Result<Option<u64>, String> {
+    pub fn arity(
+        &self,
+        env: &Environment<Option<usize>>,
+        cache: &mut Cache<Option<usize>>,
+    ) -> Result<Option<usize>, String> {
         use Expression::*;
-        fn unify(a1: Option<u64>, a2: Option<u64>) -> Result<Option<u64>, String> {
+        fn unify(a1: Option<usize>, a2: Option<usize>) -> Result<Option<usize>, String> {
             match (a1, a2) {
                 (None, None) => Ok(None),
                 (Some(a), None) | (None, Some(a)) => Ok(Some(a)),
@@ -723,46 +762,148 @@ impl Expression {
                 }
             }
         }
-        Ok(match self {
+        let arity = match self {
             Nothing => None,
             Something => Some(0),
             Scalar(_) => Some(1),
-            Union(box e1, box e2) => unify(e1.arity(env)?, e2.arity(env)?)?,
-            Intersection(box e1, box e2) => unify(e1.arity(env)?, e2.arity(env)?)?,
-            Product(box e1, box e2) => match (e1.arity(env)?, e2.arity(env)?) {
+            Union(box e1, box e2) => unify(e1.arity(env, cache)?, e2.arity(env, cache)?)?,
+            Intersection(box e1, box e2) => unify(e1.arity(env, cache)?, e2.arity(env, cache)?)?,
+            Product(box e1, box e2) => match (e1.arity(env, cache)?, e2.arity(env, cache)?) {
                 (Some(a1), Some(a2)) => Some(a1 + a2),
                 _ => None,
             },
             Equals(_, _) => Some(0),
-            Negation(box e) => e.arity(&env)?,
+            Negation(box e) => e.arity(&env, cache)?,
             Name(name) => env
                 .lookup(name)
                 .ok_or_else(|| format!("Unbound name: {}", name))?
                 .clone(),
             Let(name, box value, box body) => {
                 let mut env = env.clone();
-                env.bind(name.clone(), value.arity(&env)?);
-                body.arity(&env)?
+                env.bind(name.clone(), value.arity(&env, cache)?);
+                body.arity(&env, cache)?
             }
             If(box _cond, box if_true, box if_false) => {
-                unify(if_true.arity(env)?, if_false.arity(env)?)?
+                unify(if_true.arity(env, cache)?, if_false.arity(env, cache)?)?
             }
             Abstract(arg, box body) => {
                 let mut env = env.clone();
                 env.bind(arg.clone(), Some(1));
-                body.arity(&env)?
+                body.arity(&env, cache)?.map(|a| a + 1)
             }
-            Apply(fun, arg) => match (fun.arity(env)?, arg.arity(env)?) {
+            Apply(fun, arg) => match (fun.arity(env, cache)?, arg.arity(env, cache)?) {
                 (Some(a1), Some(a2)) => Some(a1.max(a2) - a1.min(a2)),
                 _ => None,
             },
             ApplyNative(native, args) => {
-                assert_eq!(native.input_arity, args.len() as u64);
+                assert_eq!(native.input_arity, args.len() as usize);
                 Some(native.output_arity)
             }
             Seal(_) => Some(1),
             Unseal(_) => return Err(format!("Can't infer arity of: {}", self)),
+            Exists(_, _) => Some(0),
+        };
+        cache.insert(self, arity);
+        Ok(arity)
+    }
+
+    pub fn contains(
+        &self,
+        args: &[Name],
+        arity_cache: &Cache<Option<usize>>,
+    ) -> Result<Self, String> {
+        use Expression::*;
+        Ok(match self {
+            Nothing => Nothing,
+            Something => {
+                assert_eq!(args.len(), 0);
+                Something
+            }
+            Scalar(scalar) => {
+                assert_eq!(args.len(), 1);
+                Apply(box Scalar(scalar.clone()), box Name(args[0].clone()))
+            }
+            Union(box e1, box e2) => Union(
+                box e1.contains(args, arity_cache)?,
+                box e2.contains(args, arity_cache)?,
+            ),
+            Intersection(box e1, box e2) => Intersection(
+                box e1.contains(args, arity_cache)?,
+                box e2.contains(args, arity_cache)?,
+            ),
+            Product(box e1, box e2) => {
+                let a1 = arity_cache.get(e1).unwrap().unwrap_or(0);
+                Intersection(
+                    box e1.contains(&args[0..a1], arity_cache)?,
+                    box e2.contains(&args[a1..], arity_cache)?,
+                )
+            }
+            Equals(box e1, box e2) => {
+                assert_eq!(args.len(), 0);
+                Equals(box e1.clone(), box e2.clone())
+            }
+            Negation(box e) => Negation(box e.contains(args, arity_cache)?),
+            Name(name) => {
+                Expression::apply(name, args.iter().map(|name| Name(name.clone())).collect())
+            }
+            // Let(name, box value, box body) => Let(
+            //     name.clone(),
+            //     box value.exists(arity_cache)?,
+            //     box body.contains(args, arity_cache)?,
+            // ),
+            If(box cond, box if_true, box if_false) => If(
+                box cond.contains(&[], arity_cache)?,
+                box if_true.contains(args, arity_cache)?,
+                box if_false.contains(args, arity_cache)?,
+            ),
+            Abstract(arg, box body) => {
+                assert!(args.len() >= 1);
+                Let(
+                    arg.clone(),
+                    box Name(args[0].clone()),
+                    box body.contains(&args[1..], arity_cache)?,
+                )
+            }
+            Apply(left, right) => {
+                let left_arity = arity_cache.get(left).unwrap().unwrap_or(0);
+                let right_arity = arity_cache.get(right).unwrap().unwrap_or(0);
+                let new_args = (0..left_arity.min(right_arity))
+                    .map(|_| gensym())
+                    .collect::<Vec<_>>();
+                let mut left_args = new_args.clone();
+                let mut right_args = new_args.clone();
+                if left_arity < right_arity {
+                    right_args.extend_from_slice(args);
+                } else {
+                    left_args.extend_from_slice(args);
+                }
+                Exists(
+                    new_args,
+                    box Intersection(
+                        box left.contains(&left_args, arity_cache)?,
+                        box right.contains(&right_args, arity_cache)?,
+                    ),
+                )
+            }
+            ApplyNative(native, native_args) => {
+                assert_eq!(args.len(), 0);
+                ApplyNative(native.clone(), native_args.clone())
+            }
+            Seal(e) => {
+                assert_eq!(args.len(), 1);
+                Apply(box Seal(e.clone()), box Name(args[0].clone()))
+            }
+            _ => return Err(format!("Can't lower {}", self)),
         })
+    }
+
+    pub fn lower(&self, arity_cache: &Cache<Option<usize>>) -> Result<Self, String> {
+        let arity = arity_cache.get(&self).unwrap().unwrap_or(0);
+        let args = (0..arity).map(|_| gensym()).collect::<Vec<_>>();
+        Ok(Expression::_abstract(
+            args.clone(),
+            self.contains(&args, arity_cache)?,
+        ))
     }
 }
 

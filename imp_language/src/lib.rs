@@ -125,7 +125,7 @@ impl Scalar {
     fn unseal(&self) -> Result<Value, String> {
         match self {
             Scalar::Sealed(expr, env) => expr.clone().eval(&env),
-            _ => Err(format!("~{}", self)),
+            _ => Err(format!("${}", self)),
         }
     }
 }
@@ -183,7 +183,7 @@ impl fmt::Display for Expression {
                 write!(f, ")")?;
             }
             Seal(e) => write!(f, "{{{}}}", e)?,
-            Unseal(e) => write!(f, "~{}", e)?,
+            Unseal(e) => write!(f, "${}", e)?,
         }
         Ok(())
     }
@@ -468,7 +468,7 @@ impl Value {
                 match set_iter.next() {
                     None => Value::nothing(),
                     Some(tuple) => {
-                        // fun (scalar, tuple | tail) => (fun scalar, tuple | fun tail)
+                        // fun (scalar x tuple | tail) => (fun scalar tuple | fun tail)
                         let head = {
                             let mut tuple_iter = tuple.into_iter();
                             match tuple_iter.next() {

@@ -34,7 +34,7 @@ pub Expression4: Expression = {
 
 pub Expression5: Expression = {
     "!" <e:Expression5> => Expression::Negation(box e),
-    "~" <e:Expression5> => Expression::Unseal(box e),
+    "$" <e:Expression5> => Expression::Unseal(box e),
     Expression6,
 }
 

@@ -94,8 +94,10 @@ impl<T> Cache<T> {
         self.cache.insert(expr as *const Expression, value);
     }
 
-    pub fn get(&self, expr: &Expression) -> Option<&T> {
-        self.cache.get(&(expr as *const Expression))
+    pub fn get(&self, expr: &Expression) -> &T {
+        self.cache
+            .get(&(expr as *const Expression))
+            .unwrap_or_else(|| panic!("Not in cache: {:?}", expr))
     }
 }
 
@@ -670,25 +672,25 @@ impl Expression {
         f(self)
     }
 
-    fn map1<F>(self, mut f: F) -> Result<Self, String>
+    fn map1<F>(mut self, mut f: F) -> Result<Self, String>
     where
         F: FnMut(Expression) -> Result<Expression, String>,
     {
         self.visit1_mut(&mut |e| {
-            *e = f(*e)?;
+            *e = f(std::mem::replace(e, Expression::Nothing))?;
             Ok(())
-        });
+        })?;
         Ok(self)
     }
 
-    fn map<F>(self, mut f: F) -> Result<Self, String>
+    fn map<F>(mut self, mut f: F) -> Result<Self, String>
     where
         F: FnMut(Expression) -> Result<Expression, String>,
     {
         self.visit_mut(&mut |e| {
-            *e = f(*e)?;
+            *e = f(std::mem::replace(e, Expression::Nothing))?;
             Ok(())
-        });
+        })?;
         Ok(self)
     }
 
@@ -826,11 +828,16 @@ impl Expression {
                 env.bind(name.clone(), value.scalar(&env, cache)?);
                 body.scalar(&env, cache)?
             }
+            Abstract(arg, body) => {
+                let mut env = env.clone();
+                env.bind(arg.clone(), true);
+                body.scalar(&env, cache)?
+            }
             _ => {
                 self.visit1(&mut |e| {
                     e.scalar(env, cache)?;
                     Ok(())
-                });
+                })?;
                 false
             }
         };
@@ -900,12 +907,12 @@ impl Expression {
                 Some(native.output_arity)
             }
             Seal(box e) => {
-                e.arity(env, cache);
+                e.arity(env, cache)?;
                 Some(1)
             }
-            Unseal(box e) => return Err(format!("Can't infer arity of: {}", self)),
-            Exists(names, box e) => {
-                e.arity(env, cache);
+            Unseal(_) => return Err(format!("Can't infer arity of: {}", self)),
+            Exists(_names, box e) => {
+                e.arity(env, cache)?;
                 Some(0)
             }
         };
@@ -913,11 +920,44 @@ impl Expression {
         Ok(arity)
     }
 
+    pub fn replace(self, old: &Name, new: &Expression) -> Self {
+        use Expression::*;
+        match self {
+            Name(name) => {
+                if name == *old {
+                    new.clone()
+                } else {
+                    Name(name)
+                }
+            }
+            Let(name, value, body) => {
+                if name == *old {
+                    Let(name, box value.replace(old, new), body)
+                } else {
+                    Let(
+                        name,
+                        box value.replace(old, new),
+                        box body.replace(old, new),
+                    )
+                }
+            }
+            Abstract(arg, body) => {
+                if arg == *old {
+                    Abstract(arg, body)
+                } else {
+                    Abstract(arg, box body.replace(old, new))
+                }
+            }
+            _ => self.map1(|expr| Ok(expr.replace(old, new))).unwrap(),
+        }
+    }
+
     pub fn contains(
         &self,
         args: &[Name],
         scalar_cache: &Cache<bool>,
         arity_cache: &Cache<Option<usize>>,
+        next_tmp: &mut usize,
     ) -> Result<Self, String> {
         use Expression::*;
         Ok(match self {
@@ -931,51 +971,58 @@ impl Expression {
                 Apply(box Scalar(scalar.clone()), box Name(args[0].clone()))
             }
             Union(box e1, box e2) => Union(
-                box e1.contains(args, scalar_cache, arity_cache)?,
-                box e2.contains(args, scalar_cache, arity_cache)?,
+                box e1.contains(args, scalar_cache, arity_cache, next_tmp)?,
+                box e2.contains(args, scalar_cache, arity_cache, next_tmp)?,
             ),
             Intersection(box e1, box e2) => Intersection(
-                box e1.contains(args, scalar_cache, arity_cache)?,
-                box e2.contains(args, scalar_cache, arity_cache)?,
+                box e1.contains(args, scalar_cache, arity_cache, next_tmp)?,
+                box e2.contains(args, scalar_cache, arity_cache, next_tmp)?,
             ),
             Product(box e1, box e2) => {
-                let a1 = arity_cache.get(e1).unwrap().unwrap_or(0);
+                let a1 = arity_cache.get(e1).unwrap_or(0);
                 Intersection(
-                    box e1.contains(&args[0..a1], scalar_cache, arity_cache)?,
-                    box e2.contains(&args[a1..], scalar_cache, arity_cache)?,
+                    box e1.contains(&args[0..a1], scalar_cache, arity_cache, next_tmp)?,
+                    box e2.contains(&args[a1..], scalar_cache, arity_cache, next_tmp)?,
                 )
             }
             Equals(box e1, box e2) => {
                 assert_eq!(args.len(), 0);
-                Equals(box e1.clone(), box e2.clone())
+                if *scalar_cache.get(e1) && *scalar_cache.get(e2) {
+                    Apply(box e1.clone(), box e2.clone())
+                } else {
+                    Equals(box e1.clone(), box e2.clone())
+                }
             }
-            Negation(box e) => Negation(box e.contains(args, scalar_cache, arity_cache)?),
+            Negation(box e) => {
+                Negation(box e.contains(args, scalar_cache, arity_cache, next_tmp)?)
+            }
             Name(name) => {
                 Expression::apply(name, args.iter().map(|name| Name(name.clone())).collect())
             }
             // Let(name, box value, box body) => Let(
             //     name.clone(),
             //     box value.exists(arity_cache)?,
-            //     box body.contains(args, scalar_cache, arity_cache)?,
+            //     box body.contains(args, scalar_cache, arity_cache, next_tmp)?,
             // ),
             If(box cond, box if_true, box if_false) => If(
-                box cond.contains(&[], scalar_cache, arity_cache)?,
-                box if_true.contains(args, scalar_cache, arity_cache)?,
-                box if_false.contains(args, scalar_cache, arity_cache)?,
+                box cond.contains(&[], scalar_cache, arity_cache, next_tmp)?,
+                box if_true.contains(args, scalar_cache, arity_cache, next_tmp)?,
+                box if_false.contains(args, scalar_cache, arity_cache, next_tmp)?,
             ),
             Abstract(arg, box body) => {
                 assert!(args.len() >= 1);
-                Let(
-                    arg.clone(),
-                    box Name(args[0].clone()),
-                    box body.contains(&args[1..], scalar_cache, arity_cache)?,
-                )
+                body.contains(&args[1..], scalar_cache, arity_cache, next_tmp)?
+                    .replace(arg, &Name(args[0].clone()))
             }
             Apply(box left, box right) => {
-                let left_arity = arity_cache.get(left).unwrap().unwrap_or(0);
-                let right_arity = arity_cache.get(right).unwrap().unwrap_or(0);
+                let left_arity = arity_cache.get(left).unwrap_or(0);
+                let right_arity = arity_cache.get(right).unwrap_or(0);
                 let new_args = (0..left_arity.min(right_arity))
-                    .map(|_| gensym())
+                    .map(|_| {
+                        let name = format!("tmp_{}", next_tmp);
+                        *next_tmp += 1;
+                        name
+                    })
                     .collect::<Vec<_>>();
                 let mut left_args = new_args.clone();
                 let mut right_args = new_args.clone();
@@ -987,8 +1034,8 @@ impl Expression {
                 Exists(
                     new_args,
                     box Intersection(
-                        box left.contains(&left_args, scalar_cache, arity_cache)?,
-                        box right.contains(&right_args, scalar_cache, arity_cache)?,
+                        box left.contains(&left_args, scalar_cache, arity_cache, next_tmp)?,
+                        box right.contains(&right_args, scalar_cache, arity_cache, next_tmp)?,
                     ),
                 )
             }
@@ -1009,11 +1056,18 @@ impl Expression {
         scalar_cache: &Cache<bool>,
         arity_cache: &Cache<Option<usize>>,
     ) -> Result<Self, String> {
-        let arity = arity_cache.get(&self).unwrap().unwrap_or(0);
-        let args = (0..arity).map(|_| gensym()).collect::<Vec<_>>();
+        let mut next_tmp = 0;
+        let arity = arity_cache.get(&self).unwrap_or(0);
+        let args = (0..arity)
+            .map(|_| {
+                let name = format!("tmp_{}", next_tmp);
+                next_tmp += 1;
+                name
+            })
+            .collect::<Vec<_>>();
         Ok(Expression::_abstract(
             args.clone(),
-            self.contains(&args, scalar_cache, arity_cache)?,
+            self.contains(&args, scalar_cache, arity_cache, &mut next_tmp)?,
         ))
     }
 }

@@ -556,7 +556,57 @@ impl Expression {
             })
     }
 
-    fn visit<F: FnMut(&Expression)>(&self, f: &mut F) {
+    fn visit1<'a, F: FnMut(&'a Expression)>(&'a self, f: &mut F) {
+        use Expression::*;
+        match self {
+            Nothing => (),
+            Something => (),
+            Scalar(_) => (),
+            Union(e1, e2) => {
+                f(&*e1);
+                f(&*e2);
+            }
+            Intersection(e1, e2) => {
+                f(&*e1);
+                f(&*e2);
+            }
+            Product(e1, e2) => {
+                f(&*e1);
+                f(&*e2);
+            }
+            Equals(e1, e2) => {
+                f(&*e1);
+                f(&*e2);
+            }
+            Negation(e) => f(&*e),
+            Name(_) => (),
+            Let(_, value, body) => {
+                f(&*value);
+                f(&*body);
+            }
+            If(cond, if_true, if_false) => {
+                f(&*cond);
+                f(&*if_true);
+                f(&*if_false);
+            }
+            Abstract(_, body) => f(&*body),
+            Apply(fun, arg) => {
+                f(&*fun);
+                f(&*arg);
+            }
+            ApplyNative(_, _) => (),
+            Seal(e) => f(&*e),
+            Unseal(e) => f(&*e),
+            Exists(_, body) => f(&*body),
+        }
+    }
+
+    fn visit<'a, F: FnMut(&'a Expression)>(&'a self, f: &mut F) {
+        self.visit1(&mut |e| e.visit(f));
+        f(self);
+    }
+
+    fn visit1_mut<F: FnMut(&mut Expression)>(&mut self, f: &mut F) {
         use Expression::*;
         match self {
             Nothing => (),
@@ -601,29 +651,14 @@ impl Expression {
         }
     }
 
-    fn map<F: FnMut(Expression) -> Expression>(self, mut f: F) -> Expression {
-        use Expression::*;
-        match self {
-            Nothing => Nothing,
-            Something => Something,
-            Scalar(scalar) => Scalar(scalar),
-            Union(box e1, box e2) => Union(box f(e1), box f(e2)),
-            Intersection(box e1, box e2) => Intersection(box f(e1), box f(e2)),
-            Product(box e1, box e2) => Product(box f(e1), box f(e2)),
-            Equals(box e1, box e2) => Equals(box f(e1), box f(e2)),
-            Negation(box e) => Negation(box f(e)),
-            Name(name) => Name(name),
-            Let(name, box value, box body) => Let(name, box f(value), box f(body)),
-            If(box cond, box if_true, box if_false) => {
-                If(box f(cond), box f(if_true), box f(if_false))
-            }
-            Abstract(arg, box body) => Abstract(arg, box f(body)),
-            Apply(box fun, box arg) => Apply(box f(fun), box f(arg)),
-            ApplyNative(fun, args) => ApplyNative(fun, args),
-            Seal(box e) => Seal(box f(e)),
-            Unseal(box e) => Unseal(box f(e)),
-            Exists(args, box body) => Exists(args, box f(body)),
-        }
+    fn visit_mut<F: FnMut(&mut Expression)>(&mut self, f: &mut F) {
+        self.visit1_mut(&mut |e| e.visit_mut(f));
+        f(self);
+    }
+
+    fn map<F: FnMut(Expression) -> Expression>(self, mut f: F) -> Self {
+        self.visit_mut(&mut |e| *e = f(*e));
+        self
     }
 
     pub fn desugar(self) -> Expression {
@@ -686,7 +721,7 @@ impl Expression {
                     mapper(body, free_names, &bound);
                 }
                 _ => {
-                    expr.visit(&mut |e| mapper(e, free_names, bound));
+                    expr.visit1(&mut |e| mapper(e, free_names, bound));
                 }
             }
         }
@@ -743,6 +778,28 @@ impl Expression {
         })
     }
 
+    pub fn scalar(&self, env: &Environment<bool>, cache: &mut Cache<bool>) -> Result<bool, String> {
+        use Expression::*;
+        let scalar = match self {
+            Scalar(_) => true,
+            Name(name) => env
+                .lookup(name)
+                .ok_or_else(|| format!("Unbound name: {}", name))?
+                .clone(),
+            Let(name, value, body) => {
+                let mut env = env.clone();
+                env.bind(name.clone(), value.scalar(&env, cache)?);
+                body.scalar(&env, cache)?
+            }
+            _ => {
+                self.visit1(&mut |e| e.scalar(env, cache));
+                false
+            }
+        };
+        cache.insert(self, scalar);
+        Ok(scalar)
+    }
+
     pub fn arity(
         &self,
         env: &Environment<Option<usize>>,
@@ -772,7 +829,11 @@ impl Expression {
                 (Some(a1), Some(a2)) => Some(a1 + a2),
                 _ => None,
             },
-            Equals(_, _) => Some(0),
+            Equals(e1, e2) => {
+                e1.arity(env, cache)?;
+                e2.arity(env, cache)?;
+                Some(0)
+            }
             Negation(box e) => e.arity(&env, cache)?,
             Name(name) => env
                 .lookup(name)
@@ -783,7 +844,8 @@ impl Expression {
                 env.bind(name.clone(), value.arity(&env, cache)?);
                 body.arity(&env, cache)?
             }
-            If(box _cond, box if_true, box if_false) => {
+            If(box cond, box if_true, box if_false) => {
+                cond.arity(env, cache)?;
                 unify(if_true.arity(env, cache)?, if_false.arity(env, cache)?)?
             }
             Abstract(arg, box body) => {
@@ -799,9 +861,15 @@ impl Expression {
                 assert_eq!(native.input_arity, args.len() as usize);
                 Some(native.output_arity)
             }
-            Seal(_) => Some(1),
-            Unseal(_) => return Err(format!("Can't infer arity of: {}", self)),
-            Exists(_, _) => Some(0),
+            Seal(e) => {
+                e.arity(env, cache);
+                Some(1)
+            }
+            Unseal(e) => return Err(format!("Can't infer arity of: {}", self)),
+            Exists(names, e) => {
+                e.arity(env, cache);
+                Some(0)
+            }
         };
         cache.insert(self, arity);
         Ok(arity)

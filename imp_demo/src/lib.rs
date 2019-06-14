@@ -26,21 +26,8 @@ fn update(node: &HtmlElement) {
     match imp_language::parse(&code) {
         Err(error) => outputs.push(format!("Error: {}", error)),
         Ok(expr) => {
+            let expr = expr.with_natives(&imp_language::Native::stdlib());
             outputs.push(format!("Parsed: {}", expr));
-            let expr = expr.desugar().with_natives(&imp_language::Native::stdlib());
-            outputs.push(format!("Desugared: {}", expr));
-            let mut scalar_cache = imp_language::Cache::new();
-            let mut arity_cache = imp_language::Cache::new();
-            expr.scalar(&imp_language::Environment::new(), &mut scalar_cache)
-                .unwrap();
-            let arity1 = expr.arity(&imp_language::Environment::new(), &mut arity_cache);
-            let arity2 = arity_cache.get(&expr);
-            outputs.push(format!("Inferred arity: {:?} {:?}", arity1, arity2));
-            let lowered = expr.lower(&scalar_cache, &arity_cache);
-            outputs.push(format!(
-                "Lowered: {}",
-                lowered.map_or_else(|a| format!("{}", a), |a| format!("{}", a))
-            ));
             match imp_language::eval(expr) {
                 Err(error) => outputs.push(format!("Error: {}", error)),
                 Ok(value) => outputs.push(format!("Evalled: {}", value)),
@@ -51,7 +38,7 @@ fn update(node: &HtmlElement) {
         .unwrap()
         .dyn_into::<HtmlElement>()
         .unwrap()
-        .set_inner_text(&outputs.join("\n\n"));
+        .set_inner_text(&outputs.join("\r\n\r\n"));
 }
 
 #[wasm_bindgen(start)]

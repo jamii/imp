@@ -2,9 +2,7 @@
 #![feature(box_patterns)]
 
 use lalrpop_util::lalrpop_mod;
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::iter::FromIterator;
 
@@ -300,6 +298,37 @@ impl Native {
         }
     }
 
+    fn solve(scalars: Vec<Scalar>) -> Result<Value, String> {
+        match &*scalars {
+            [Scalar::Sealed(box expr, env)] => {
+                // TODO scalar_env?
+                let scalar_env = Environment::from(
+                    env.bindings
+                        .iter()
+                        .map(|(name, value)| (name.clone(), false))
+                        .collect::<Vec<(String, bool)>>(),
+                );
+                let arity_env = Environment::from(
+                    env.bindings
+                        .iter()
+                        .map(|(name, value)| Ok((name.clone(), value.arity()?)))
+                        .collect::<Result<Vec<(String, Option<usize>)>, String>>()?,
+                );
+                let mut scalar_cache = Cache::new();
+                let mut arity_cache = Cache::new();
+                expr.scalar(&scalar_env, &mut scalar_cache).unwrap();
+                expr.arity(&arity_env, &mut arity_cache).unwrap();
+                let lowered = expr.lower(&scalar_cache, &arity_cache).unwrap();
+                Ok(Value::Set(Set::from_iter(vec![vec![Scalar::Sealed(
+                    box lowered,
+                    env.clone(),
+                )]])))
+            }
+            [a] => Err(format!("solve {}", a)),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn stdlib() -> Vec<Native> {
         vec![
             Native {
@@ -319,6 +348,12 @@ impl Native {
                 input_arity: 3,
                 output_arity: 1,
                 fun: Native::reduce,
+            },
+            Native {
+                name: "solve".to_owned(),
+                input_arity: 1,
+                output_arity: 1,
+                fun: Native::solve,
             },
         ]
     }
@@ -541,6 +576,35 @@ impl Value {
 
     fn unseal(val: Value) -> Result<Value, String> {
         val.as_scalar()?.unseal()
+    }
+
+    fn arity(&self) -> Result<Option<usize>, String> {
+        use Value::*;
+        Ok(match self {
+            Set(set) => {
+                let mut arities = set
+                    .iter()
+                    .map(|row| row.len())
+                    .collect::<HashSet<_>>()
+                    .into_iter();
+                match (arities.next(), arities.next()) {
+                    (None, None) => None,
+                    (Some(a), None) => Some(a),
+                    (_, Some(_)) => return Err(format!("Mismatched arities in: {}", self)),
+                }
+            }
+            Closure(name, body, env) => {
+                let mut arity_env = Environment::from(
+                    env.bindings
+                        .iter()
+                        .map(|(name, value)| Ok((name.clone(), value.arity()?)))
+                        .collect::<Result<Vec<(String, Option<usize>)>, String>>()?,
+                );
+                arity_env.bind(name.clone(), Some(1));
+                let mut arity_cache = Cache::new();
+                body.arity(&arity_env, &mut arity_cache)?.map(|a| a + 1)
+            }
+        })
     }
 }
 
@@ -828,6 +892,13 @@ impl Expression {
                 env.bind(name.clone(), value.scalar(&env, cache)?);
                 body.scalar(&env, cache)?
             }
+            Exists(names, box body) => {
+                let mut env = env.clone();
+                for name in names {
+                    env.bind(name.clone(), true);
+                }
+                body.scalar(&env, cache)?
+            }
             Abstract(arg, body) => {
                 let mut env = env.clone();
                 env.bind(arg.clone(), true);
@@ -911,8 +982,12 @@ impl Expression {
                 Some(1)
             }
             Unseal(_) => return Err(format!("Can't infer arity of: {}", self)),
-            Exists(_names, box e) => {
-                e.arity(env, cache)?;
+            Exists(names, box e) => {
+                let mut env = env.clone();
+                for name in names {
+                    env.bind(name.clone(), Some(1));
+                }
+                e.arity(&env, cache)?;
                 Some(0)
             }
         };
@@ -999,11 +1074,12 @@ impl Expression {
             Name(name) => {
                 Expression::apply(name, args.iter().map(|name| Name(name.clone())).collect())
             }
-            // Let(name, box value, box body) => Let(
-            //     name.clone(),
-            //     box value.exists(arity_cache)?,
-            //     box body.contains(args, scalar_cache, arity_cache, next_tmp)?,
-            // ),
+            // Let(name, box value, box body) => {
+            //     // TODO this will make caches blow up
+            //     // use an env instead?
+            //     body.replace(name, value)
+            //         .contains(args, scalar_cache, arity_cache, next_tmp)
+            // }
             If(box cond, box if_true, box if_false) => If(
                 box cond.contains(&[], scalar_cache, arity_cache, next_tmp)?,
                 box if_true.contains(args, scalar_cache, arity_cache, next_tmp)?,

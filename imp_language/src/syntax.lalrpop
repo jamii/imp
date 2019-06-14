@@ -11,13 +11,13 @@ pub Expression0: Expression = {
 }
 
 pub Expression1: Expression = {
-    <e1:Expression1> "=" <e2:Expression2> => Expression::Equals(box e1, box e2),
+    <e1:Expression1> "|" <e2:Expression2> => Expression::Union(box e1, box e2),
+    <e1:Expression1> "&" <e2:Expression2> => Expression::Intersection(box e1, box e2),
     Expression2,
 }
 
 pub Expression2: Expression = {
-    <e1:Expression2> "|" <e2:Expression3> => Expression::Union(box e1, box e2),
-    <e1:Expression2> "&" <e2:Expression3> => Expression::Intersection(box e1, box e2),
+    <e1:Expression2> "=" <e2:Expression3> => Expression::Equals(box e1, box e2),
     Expression3,
 }
 
@@ -43,7 +43,7 @@ pub Expression6: Expression = {
     "something" => Expression::Something,
     <s:Scalar> => Expression::Scalar(s),
     <n:Name> => Expression::Name(n),
-    
+
     "(" <e:Expression0> ")" => e,
     "{" <e:Expression0> "}" => Expression::Seal(box e),
 }

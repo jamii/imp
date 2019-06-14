@@ -556,109 +556,140 @@ impl Expression {
             })
     }
 
-    fn visit1<'a, F: FnMut(&'a Expression)>(&'a self, f: &mut F) {
+    fn visit1<'a, F>(&'a self, f: &mut F) -> Result<(), String>
+    where
+        F: FnMut(&'a Expression) -> Result<(), String>,
+    {
         use Expression::*;
         match self {
             Nothing => (),
             Something => (),
             Scalar(_) => (),
             Union(e1, e2) => {
-                f(&*e1);
-                f(&*e2);
+                f(&*e1)?;
+                f(&*e2)?;
             }
             Intersection(e1, e2) => {
-                f(&*e1);
-                f(&*e2);
+                f(&*e1)?;
+                f(&*e2)?;
             }
             Product(e1, e2) => {
-                f(&*e1);
-                f(&*e2);
+                f(&*e1)?;
+                f(&*e2)?;
             }
             Equals(e1, e2) => {
-                f(&*e1);
-                f(&*e2);
+                f(&*e1)?;
+                f(&*e2)?;
             }
-            Negation(e) => f(&*e),
+            Negation(e) => f(&*e)?,
             Name(_) => (),
             Let(_, value, body) => {
-                f(&*value);
-                f(&*body);
+                f(&*value)?;
+                f(&*body)?;
             }
             If(cond, if_true, if_false) => {
-                f(&*cond);
-                f(&*if_true);
-                f(&*if_false);
+                f(&*cond)?;
+                f(&*if_true)?;
+                f(&*if_false)?;
             }
-            Abstract(_, body) => f(&*body),
+            Abstract(_, body) => f(&*body)?,
             Apply(fun, arg) => {
-                f(&*fun);
-                f(&*arg);
+                f(&*fun)?;
+                f(&*arg)?;
             }
             ApplyNative(_, _) => (),
-            Seal(e) => f(&*e),
-            Unseal(e) => f(&*e),
-            Exists(_, body) => f(&*body),
+            Seal(e) => f(&*e)?,
+            Unseal(e) => f(&*e)?,
+            Exists(_, body) => f(&*body)?,
         }
+        Ok(())
     }
 
-    fn visit<'a, F: FnMut(&'a Expression)>(&'a self, f: &mut F) {
-        self.visit1(&mut |e| e.visit(f));
-        f(self);
+    fn visit<'a, F>(&'a self, f: &mut F) -> Result<(), String>
+    where
+        F: FnMut(&'a Expression) -> Result<(), String>,
+    {
+        self.visit1(&mut |e| e.visit(f))?;
+        f(self)
     }
 
-    fn visit1_mut<F: FnMut(&mut Expression)>(&mut self, f: &mut F) {
+    fn visit1_mut<F>(&mut self, f: &mut F) -> Result<(), String>
+    where
+        F: FnMut(&mut Expression) -> Result<(), String>,
+    {
         use Expression::*;
         match self {
             Nothing => (),
             Something => (),
             Scalar(_) => (),
             Union(box e1, box e2) => {
-                f(e1);
-                f(e2);
+                f(e1)?;
+                f(e2)?;
             }
             Intersection(box e1, box e2) => {
-                f(e1);
-                f(e2);
+                f(e1)?;
+                f(e2)?;
             }
             Product(box e1, box e2) => {
-                f(e1);
-                f(e2);
+                f(e1)?;
+                f(e2)?;
             }
             Equals(box e1, box e2) => {
-                f(e1);
-                f(e2);
+                f(e1)?;
+                f(e2)?;
             }
-            Negation(box e) => f(e),
+            Negation(box e) => f(e)?,
             Name(_) => (),
             Let(_, box value, box body) => {
-                f(value);
-                f(body);
+                f(value)?;
+                f(body)?;
             }
             If(box cond, box if_true, box if_false) => {
-                f(cond);
-                f(if_true);
-                f(if_false);
+                f(cond)?;
+                f(if_true)?;
+                f(if_false)?;
             }
-            Abstract(_, box body) => f(body),
+            Abstract(_, box body) => f(body)?,
             Apply(box fun, box arg) => {
-                f(fun);
-                f(arg);
+                f(fun)?;
+                f(arg)?;
             }
             ApplyNative(_, _) => (),
-            Seal(box e) => f(e),
-            Unseal(box e) => f(e),
-            Exists(_, box body) => f(body),
+            Seal(box e) => f(e)?,
+            Unseal(box e) => f(e)?,
+            Exists(_, box body) => f(body)?,
         }
+        Ok(())
     }
 
-    fn visit_mut<F: FnMut(&mut Expression)>(&mut self, f: &mut F) {
-        self.visit1_mut(&mut |e| e.visit_mut(f));
-        f(self);
+    fn visit_mut<F>(&mut self, f: &mut F) -> Result<(), String>
+    where
+        F: FnMut(&mut Expression) -> Result<(), String>,
+    {
+        self.visit1_mut(&mut |e| e.visit_mut(f))?;
+        f(self)
     }
 
-    fn map<F: FnMut(Expression) -> Expression>(self, mut f: F) -> Self {
-        self.visit_mut(&mut |e| *e = f(*e));
-        self
+    fn map1<F>(self, mut f: F) -> Result<Self, String>
+    where
+        F: FnMut(Expression) -> Result<Expression, String>,
+    {
+        self.visit1_mut(&mut |e| {
+            *e = f(*e)?;
+            Ok(())
+        });
+        Ok(self)
+    }
+
+    fn map<F>(self, mut f: F) -> Result<Self, String>
+    where
+        F: FnMut(Expression) -> Result<Expression, String>,
+    {
+        self.visit_mut(&mut |e| {
+            *e = f(*e)?;
+            Ok(())
+        });
+        Ok(self)
     }
 
     pub fn desugar(self) -> Expression {
@@ -671,7 +702,7 @@ impl Expression {
     }
 
     pub fn with_natives(self, natives: &[Native]) -> Expression {
-        fn mapper(
+        fn map(
             expr: Expression,
             natives: &BTreeMap<Name, &Native>,
             bound: &BTreeSet<Name>,
@@ -691,17 +722,17 @@ impl Expression {
                 Abstract(arg, box body) => {
                     let mut bound = bound.clone();
                     bound.insert(arg.clone());
-                    Abstract(arg, box mapper(body, natives, &bound))
+                    Abstract(arg, box map(body, natives, &bound))
                 }
-                expr => expr.map(|e| mapper(e, natives, bound)),
+                expr => expr.map1(|e| Ok(map(e, natives, bound))).unwrap(),
             }
         }
         let natives = BTreeMap::from_iter(natives.into_iter().map(|n| (n.name.clone(), n)));
-        mapper(self, &natives, &BTreeSet::new())
+        map(self, &natives, &BTreeSet::new())
     }
 
     pub fn free_names(&self) -> BTreeSet<Name> {
-        fn mapper(expr: &Expression, free_names: &mut BTreeSet<Name>, bound: &BTreeSet<Name>) {
+        fn visit(expr: &Expression, free_names: &mut BTreeSet<Name>, bound: &BTreeSet<Name>) {
             match expr {
                 Expression::Name(name) => {
                     if !bound.contains(name) {
@@ -718,15 +749,19 @@ impl Expression {
                 Expression::Abstract(name, body) => {
                     let mut bound = bound.clone();
                     bound.insert(name.clone());
-                    mapper(body, free_names, &bound);
+                    visit(body, free_names, &bound);
                 }
                 _ => {
-                    expr.visit1(&mut |e| mapper(e, free_names, bound));
+                    expr.visit1(&mut |e| {
+                        visit(e, free_names, bound);
+                        Ok(())
+                    })
+                    .unwrap();
                 }
             }
         }
         let mut free_names = BTreeSet::new();
-        mapper(self, &mut free_names, &BTreeSet::new());
+        visit(self, &mut free_names, &BTreeSet::new());
         free_names
     }
 
@@ -786,13 +821,16 @@ impl Expression {
                 .lookup(name)
                 .ok_or_else(|| format!("Unbound name: {}", name))?
                 .clone(),
-            Let(name, value, body) => {
+            Let(name, box value, box body) => {
                 let mut env = env.clone();
                 env.bind(name.clone(), value.scalar(&env, cache)?);
                 body.scalar(&env, cache)?
             }
             _ => {
-                self.visit1(&mut |e| e.scalar(env, cache));
+                self.visit1(&mut |e| {
+                    e.scalar(env, cache)?;
+                    Ok(())
+                });
                 false
             }
         };
@@ -829,7 +867,7 @@ impl Expression {
                 (Some(a1), Some(a2)) => Some(a1 + a2),
                 _ => None,
             },
-            Equals(e1, e2) => {
+            Equals(box e1, box e2) => {
                 e1.arity(env, cache)?;
                 e2.arity(env, cache)?;
                 Some(0)
@@ -853,7 +891,7 @@ impl Expression {
                 env.bind(arg.clone(), Some(1));
                 body.arity(&env, cache)?.map(|a| a + 1)
             }
-            Apply(fun, arg) => match (fun.arity(env, cache)?, arg.arity(env, cache)?) {
+            Apply(box fun, box arg) => match (fun.arity(env, cache)?, arg.arity(env, cache)?) {
                 (Some(a1), Some(a2)) => Some(a1.max(a2) - a1.min(a2)),
                 _ => None,
             },
@@ -861,12 +899,12 @@ impl Expression {
                 assert_eq!(native.input_arity, args.len() as usize);
                 Some(native.output_arity)
             }
-            Seal(e) => {
+            Seal(box e) => {
                 e.arity(env, cache);
                 Some(1)
             }
-            Unseal(e) => return Err(format!("Can't infer arity of: {}", self)),
-            Exists(names, e) => {
+            Unseal(box e) => return Err(format!("Can't infer arity of: {}", self)),
+            Exists(names, box e) => {
                 e.arity(env, cache);
                 Some(0)
             }
@@ -878,6 +916,7 @@ impl Expression {
     pub fn contains(
         &self,
         args: &[Name],
+        scalar_cache: &Cache<bool>,
         arity_cache: &Cache<Option<usize>>,
     ) -> Result<Self, String> {
         use Expression::*;
@@ -892,47 +931,47 @@ impl Expression {
                 Apply(box Scalar(scalar.clone()), box Name(args[0].clone()))
             }
             Union(box e1, box e2) => Union(
-                box e1.contains(args, arity_cache)?,
-                box e2.contains(args, arity_cache)?,
+                box e1.contains(args, scalar_cache, arity_cache)?,
+                box e2.contains(args, scalar_cache, arity_cache)?,
             ),
             Intersection(box e1, box e2) => Intersection(
-                box e1.contains(args, arity_cache)?,
-                box e2.contains(args, arity_cache)?,
+                box e1.contains(args, scalar_cache, arity_cache)?,
+                box e2.contains(args, scalar_cache, arity_cache)?,
             ),
             Product(box e1, box e2) => {
                 let a1 = arity_cache.get(e1).unwrap().unwrap_or(0);
                 Intersection(
-                    box e1.contains(&args[0..a1], arity_cache)?,
-                    box e2.contains(&args[a1..], arity_cache)?,
+                    box e1.contains(&args[0..a1], scalar_cache, arity_cache)?,
+                    box e2.contains(&args[a1..], scalar_cache, arity_cache)?,
                 )
             }
             Equals(box e1, box e2) => {
                 assert_eq!(args.len(), 0);
                 Equals(box e1.clone(), box e2.clone())
             }
-            Negation(box e) => Negation(box e.contains(args, arity_cache)?),
+            Negation(box e) => Negation(box e.contains(args, scalar_cache, arity_cache)?),
             Name(name) => {
                 Expression::apply(name, args.iter().map(|name| Name(name.clone())).collect())
             }
             // Let(name, box value, box body) => Let(
             //     name.clone(),
             //     box value.exists(arity_cache)?,
-            //     box body.contains(args, arity_cache)?,
+            //     box body.contains(args, scalar_cache, arity_cache)?,
             // ),
             If(box cond, box if_true, box if_false) => If(
-                box cond.contains(&[], arity_cache)?,
-                box if_true.contains(args, arity_cache)?,
-                box if_false.contains(args, arity_cache)?,
+                box cond.contains(&[], scalar_cache, arity_cache)?,
+                box if_true.contains(args, scalar_cache, arity_cache)?,
+                box if_false.contains(args, scalar_cache, arity_cache)?,
             ),
             Abstract(arg, box body) => {
                 assert!(args.len() >= 1);
                 Let(
                     arg.clone(),
                     box Name(args[0].clone()),
-                    box body.contains(&args[1..], arity_cache)?,
+                    box body.contains(&args[1..], scalar_cache, arity_cache)?,
                 )
             }
-            Apply(left, right) => {
+            Apply(box left, box right) => {
                 let left_arity = arity_cache.get(left).unwrap().unwrap_or(0);
                 let right_arity = arity_cache.get(right).unwrap().unwrap_or(0);
                 let new_args = (0..left_arity.min(right_arity))
@@ -948,8 +987,8 @@ impl Expression {
                 Exists(
                     new_args,
                     box Intersection(
-                        box left.contains(&left_args, arity_cache)?,
-                        box right.contains(&right_args, arity_cache)?,
+                        box left.contains(&left_args, scalar_cache, arity_cache)?,
+                        box right.contains(&right_args, scalar_cache, arity_cache)?,
                     ),
                 )
             }
@@ -965,12 +1004,16 @@ impl Expression {
         })
     }
 
-    pub fn lower(&self, arity_cache: &Cache<Option<usize>>) -> Result<Self, String> {
+    pub fn lower(
+        &self,
+        scalar_cache: &Cache<bool>,
+        arity_cache: &Cache<Option<usize>>,
+    ) -> Result<Self, String> {
         let arity = arity_cache.get(&self).unwrap().unwrap_or(0);
         let args = (0..arity).map(|_| gensym()).collect::<Vec<_>>();
         Ok(Expression::_abstract(
             args.clone(),
-            self.contains(&args, arity_cache)?,
+            self.contains(&args, scalar_cache, arity_cache)?,
         ))
     }
 }

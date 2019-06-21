@@ -1119,7 +1119,7 @@ impl Expression {
                         let right_arity = arity_cache.get(right).unwrap_or(0);
                         let new_arg_names = (0..left_arity.min(right_arity))
                             .map(|_| {
-                                let name = format!("tmp{}", next_tmp);
+                                let name = format!("extra_var{}", next_tmp);
                                 *next_tmp += 1;
                                 name
                             })
@@ -1187,7 +1187,7 @@ impl Expression {
                 args.insert(0, e2.clone());
             }
             let name = {
-                let name = format!("tmp{}", next_tmp);
+                let name = format!("index{}", next_tmp);
                 *next_tmp += 1;
                 name
             };
@@ -1212,7 +1212,7 @@ impl Expression {
         let arity = arity_cache.get(&self).unwrap_or(0);
         let arg_names = (0..arity)
             .map(|_| {
-                let name = format!("tmp{}", next_tmp);
+                let name = format!("var{}", next_tmp);
                 next_tmp += 1;
                 name
             })

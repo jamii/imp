@@ -147,13 +147,14 @@ impl fmt::Display for Value {
             v if v.is_nothing() => write!(f, "nothing")?,
             v if v.is_something() => write!(f, "something")?,
             Value::Set(set) => {
-                if set.len() > 1 || (set.len() == 1 && set.iter().next().unwrap().len() > 1) {
+                let is_something = self.is_something();
+                if is_something {
                     write!(f, "(")?;
                 }
                 write_delimited(f, " | ", set, |f, value| {
                     write_delimited(f, " x ", value, |f, scalar| write!(f, "{}", scalar))
                 })?;
-                if set.len() > 1 || (set.len() == 1 && set.iter().next().unwrap().len() > 1) {
+                if is_something {
                     write!(f, ")")?;
                 }
             }
@@ -206,7 +207,7 @@ impl fmt::Display for Expression {
 }
 
 fn gensym() -> Name {
-    format!("tmp_{}", rand::random::<usize>())
+    format!("tmp{}", rand::random::<usize>())
 }
 
 impl Scalar {
@@ -316,9 +317,9 @@ impl Native {
                 );
                 let mut scalar_cache = Cache::new();
                 let mut arity_cache = Cache::new();
-                expr.scalar(&scalar_env, &mut scalar_cache).unwrap();
-                expr.arity(&arity_env, &mut arity_cache).unwrap();
-                let lowered = expr.lower(&scalar_cache, &arity_cache).unwrap();
+                expr.scalar(&scalar_env, &mut scalar_cache)?;
+                expr.arity(&arity_env, &mut arity_cache)?;
+                let lowered = expr.lower(&scalar_cache, &arity_cache)?;
                 Ok(Value::Set(Set::from_iter(vec![vec![Scalar::Sealed(
                     box lowered,
                     env.clone(),
@@ -1095,7 +1096,7 @@ impl Expression {
                 let right_arity = arity_cache.get(right).unwrap_or(0);
                 let new_args = (0..left_arity.min(right_arity))
                     .map(|_| {
-                        let name = format!("tmp_{}", next_tmp);
+                        let name = format!("tmp{}", next_tmp);
                         *next_tmp += 1;
                         name
                     })
@@ -1136,7 +1137,7 @@ impl Expression {
         let arity = arity_cache.get(&self).unwrap_or(0);
         let args = (0..arity)
             .map(|_| {
-                let name = format!("tmp_{}", next_tmp);
+                let name = format!("tmp{}", next_tmp);
                 next_tmp += 1;
                 name
             })

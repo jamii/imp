@@ -1034,6 +1034,7 @@ impl Expression {
         scalar_cache: &Cache<bool>,
         arity_cache: &Cache<Option<usize>>,
         next_tmp: &mut usize,
+        extra_args: &mut Vec<Name>,
     ) -> Result<Self, String> {
         use Expression::*;
         Ok(match self {
@@ -1047,63 +1048,71 @@ impl Expression {
                 Apply(box Scalar(scalar.clone()), box args[0].clone())
             }
             Union(box e1, box e2) => Union(
-                box e1.contains(args, scalar_cache, arity_cache, next_tmp)?,
-                box e2.contains(args, scalar_cache, arity_cache, next_tmp)?,
+                box e1.contains(args, scalar_cache, arity_cache, next_tmp, extra_args)?,
+                box e2.contains(args, scalar_cache, arity_cache, next_tmp, extra_args)?,
             ),
             Intersection(box e1, box e2) => Intersection(
-                box e1.contains(args, scalar_cache, arity_cache, next_tmp)?,
-                box e2.contains(args, scalar_cache, arity_cache, next_tmp)?,
+                box e1.contains(args, scalar_cache, arity_cache, next_tmp, extra_args)?,
+                box e2.contains(args, scalar_cache, arity_cache, next_tmp, extra_args)?,
             ),
             Product(box e1, box e2) => {
                 let a1 = arity_cache.get(e1).unwrap_or(0);
                 Intersection(
-                    box e1.contains(&args[0..a1], scalar_cache, arity_cache, next_tmp)?,
-                    box e2.contains(&args[a1..], scalar_cache, arity_cache, next_tmp)?,
+                    box e1.contains(
+                        &args[0..a1],
+                        scalar_cache,
+                        arity_cache,
+                        next_tmp,
+                        extra_args,
+                    )?,
+                    box e2.contains(
+                        &args[a1..],
+                        scalar_cache,
+                        arity_cache,
+                        next_tmp,
+                        extra_args,
+                    )?,
                 )
             }
             Equals(box e1, box e2) => {
                 assert_eq!(args.len(), 0);
-                if *scalar_cache.get(e1) && *scalar_cache.get(e2) {
-                    Apply(box e1.clone(), box e2.clone())
-                } else {
-                    Equals(box e1.clone(), box e2.clone())
-                }
+                Equals(box e1.clone(), box e2.clone())
             }
             Negation(box e) => {
-                Negation(box e.contains(args, scalar_cache, arity_cache, next_tmp)?)
+                Negation(box e.contains(args, scalar_cache, arity_cache, next_tmp, extra_args)?)
             }
             Name(name) => Expression::apply(name, args.to_vec()),
             // Let(name, box value, box body) => {
             //     // TODO this will make caches blow up
             //     // use an env instead?
             //     body.replace(name, value)
-            //         .contains(args, scalar_cache, arity_cache, next_tmp)
+            //         .contains(args, scalar_cache, arity_cache, next_tmp, extra_args)
             // }
             If(box cond, box if_true, box if_false) => If(
-                box cond.contains(&[], scalar_cache, arity_cache, next_tmp)?,
-                box if_true.contains(args, scalar_cache, arity_cache, next_tmp)?,
-                box if_false.contains(args, scalar_cache, arity_cache, next_tmp)?,
+                box cond.contains(&[], scalar_cache, arity_cache, next_tmp, extra_args)?,
+                box if_true.contains(args, scalar_cache, arity_cache, next_tmp, extra_args)?,
+                box if_false.contains(args, scalar_cache, arity_cache, next_tmp, extra_args)?,
             ),
             Abstract(arg, box body) => {
                 assert!(args.len() >= 1);
-                body.contains(&args[1..], scalar_cache, arity_cache, next_tmp)?
+                body.contains(&args[1..], scalar_cache, arity_cache, next_tmp, extra_args)?
                     .replace(arg, &args[0].clone())
             }
             Apply(box left, box right) => {
                 match (*scalar_cache.get(left), *scalar_cache.get(right)) {
                     (true, true) => {
                         assert_eq!(args.len(), 0);
-                        Apply(box left.clone(), box right.clone())
+                        Equals(box left.clone(), box right.clone())
                     }
                     (true, false) => {
                         let mut args = args.to_vec();
                         args.insert(0, left.clone());
-                        right.contains(&args, scalar_cache, arity_cache, next_tmp)?
+                        right.contains(&args, scalar_cache, arity_cache, next_tmp, extra_args)?
                     }
                     (false, true) => {
                         let mut args = args.to_vec();
                         args.insert(0, right.clone());
-                        left.contains(&args, scalar_cache, arity_cache, next_tmp)?
+                        left.contains(&args, scalar_cache, arity_cache, next_tmp, extra_args)?
                     }
                     (false, false) => {
                         let left_arity = arity_cache.get(left).unwrap_or(0);
@@ -1115,6 +1124,7 @@ impl Expression {
                                 name
                             })
                             .collect::<Vec<_>>();
+                        extra_args.extend(new_arg_names.clone());
                         let mut left_args = new_arg_names
                             .iter()
                             .map(|name| Name(name.clone()))
@@ -1136,12 +1146,14 @@ impl Expression {
                                     scalar_cache,
                                     arity_cache,
                                     next_tmp,
+                                    extra_args,
                                 )?,
                                 box right.contains(
                                     &right_args,
                                     scalar_cache,
                                     arity_cache,
                                     next_tmp,
+                                    extra_args,
                                 )?,
                             ),
                         )
@@ -1160,11 +1172,42 @@ impl Expression {
         })
     }
 
+    pub fn reorder(
+        self,
+        ordering: &[Expression],
+        indexes: &mut Vec<(Name, Expression, Vec<usize>)>,
+        next_tmp: &mut usize,
+    ) -> Expression {
+        use Expression::*;
+        if let Apply(..) = self {
+            let mut f = self;
+            let mut args: Vec<Expression> = vec![];
+            while let Apply(box e1, box e2) = f {
+                f = e1;
+                args.insert(0, e2.clone());
+            }
+            let name = {
+                let name = format!("tmp{}", next_tmp);
+                *next_tmp += 1;
+                name
+            };
+            let mut permutation = args.into_iter().enumerate().collect::<Vec<_>>();
+            permutation.sort_by_key(|(_, arg)| ordering.iter().position(|o| o == arg));
+            let (permutation, args) = permutation.into_iter().unzip();
+            indexes.push((name.clone(), f, permutation));
+            Expression::apply(&name, args)
+        } else {
+            self.map1(|e| Ok(e.reorder(ordering, indexes, next_tmp)))
+                .unwrap()
+        }
+    }
+
     pub fn lower(
         &self,
         scalar_cache: &Cache<bool>,
         arity_cache: &Cache<Option<usize>>,
     ) -> Result<Self, String> {
+        use Expression::*;
         let mut next_tmp = 0;
         let arity = arity_cache.get(&self).unwrap_or(0);
         let arg_names = (0..arity)
@@ -1176,12 +1219,52 @@ impl Expression {
             .collect::<Vec<_>>();
         let args = arg_names
             .iter()
-            .map(|name| Expression::Name(name.clone()))
+            .map(|name| Name(name.clone()))
             .collect::<Vec<_>>();
-        Ok(Expression::_abstract(
-            arg_names,
-            self.contains(&args, scalar_cache, arity_cache, &mut next_tmp)?,
-        ))
+        let mut extra_args = vec![];
+        let predicate = self.contains(
+            &args,
+            scalar_cache,
+            arity_cache,
+            &mut next_tmp,
+            &mut extra_args,
+        )?;
+        let mut indexes = vec![];
+        let mut ordering = args.clone();
+        ordering.extend(extra_args.iter().map(|name| Name(name.clone())));
+        // TODO smarter ordering
+        let predicate = predicate.reorder(&ordering, &mut indexes, &mut next_tmp);
+        let mut expr = Expression::_abstract(arg_names, predicate);
+        for (name, source, permutation) in indexes.into_iter().rev() {
+            expr = Let(
+                name,
+                box Apply(
+                    box Apply(
+                        box Abstract(
+                            "tmp0".to_owned(),
+                            box Abstract(
+                                "tmp1".to_owned(),
+                                box ApplyNative(
+                                    Native {
+                                        name: "permute".to_owned(),
+                                        input_arity: 2,
+                                        output_arity: 1,
+                                        fun: Native::permute,
+                                    },
+                                    vec!["tmp0".to_owned(), "tmp1".to_owned()],
+                                ),
+                            ),
+                        ),
+                        box Seal(box permutation.into_iter().fold(Something, |expr, i| {
+                            Product(box expr, box Scalar(self::Scalar::Number((i + 1) as i64)))
+                        })),
+                    ),
+                    box Seal(box source),
+                ),
+                box expr,
+            );
+        }
+        Ok(expr)
     }
 }
 

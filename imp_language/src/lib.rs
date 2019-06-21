@@ -306,7 +306,7 @@ impl Native {
                 let scalar_env = Environment::from(
                     env.bindings
                         .iter()
-                        .map(|(name, value)| (name.clone(), false))
+                        .map(|(name, _value)| (name.clone(), false))
                         .collect::<Vec<(String, bool)>>(),
                 );
                 let arity_env = Environment::from(
@@ -1030,7 +1030,7 @@ impl Expression {
 
     pub fn contains(
         &self,
-        args: &[Name],
+        args: &[Expression],
         scalar_cache: &Cache<bool>,
         arity_cache: &Cache<Option<usize>>,
         next_tmp: &mut usize,
@@ -1044,7 +1044,7 @@ impl Expression {
             }
             Scalar(scalar) => {
                 assert_eq!(args.len(), 1);
-                Apply(box Scalar(scalar.clone()), box Name(args[0].clone()))
+                Apply(box Scalar(scalar.clone()), box args[0].clone())
             }
             Union(box e1, box e2) => Union(
                 box e1.contains(args, scalar_cache, arity_cache, next_tmp)?,
@@ -1072,9 +1072,7 @@ impl Expression {
             Negation(box e) => {
                 Negation(box e.contains(args, scalar_cache, arity_cache, next_tmp)?)
             }
-            Name(name) => {
-                Expression::apply(name, args.iter().map(|name| Name(name.clone())).collect())
-            }
+            Name(name) => Expression::apply(name, args.to_vec()),
             // Let(name, box value, box body) => {
             //     // TODO this will make caches blow up
             //     // use an env instead?
@@ -1089,32 +1087,66 @@ impl Expression {
             Abstract(arg, box body) => {
                 assert!(args.len() >= 1);
                 body.contains(&args[1..], scalar_cache, arity_cache, next_tmp)?
-                    .replace(arg, &Name(args[0].clone()))
+                    .replace(arg, &args[0].clone())
             }
             Apply(box left, box right) => {
-                let left_arity = arity_cache.get(left).unwrap_or(0);
-                let right_arity = arity_cache.get(right).unwrap_or(0);
-                let new_args = (0..left_arity.min(right_arity))
-                    .map(|_| {
-                        let name = format!("tmp{}", next_tmp);
-                        *next_tmp += 1;
-                        name
-                    })
-                    .collect::<Vec<_>>();
-                let mut left_args = new_args.clone();
-                let mut right_args = new_args.clone();
-                if left_arity < right_arity {
-                    right_args.extend_from_slice(args);
-                } else {
-                    left_args.extend_from_slice(args);
+                match (*scalar_cache.get(left), *scalar_cache.get(right)) {
+                    (true, true) => {
+                        assert_eq!(args.len(), 0);
+                        Apply(box left.clone(), box right.clone())
+                    }
+                    (true, false) => {
+                        let mut args = args.to_vec();
+                        args.insert(0, left.clone());
+                        right.contains(&args, scalar_cache, arity_cache, next_tmp)?
+                    }
+                    (false, true) => {
+                        let mut args = args.to_vec();
+                        args.insert(0, right.clone());
+                        left.contains(&args, scalar_cache, arity_cache, next_tmp)?
+                    }
+                    (false, false) => {
+                        let left_arity = arity_cache.get(left).unwrap_or(0);
+                        let right_arity = arity_cache.get(right).unwrap_or(0);
+                        let new_arg_names = (0..left_arity.min(right_arity))
+                            .map(|_| {
+                                let name = format!("tmp{}", next_tmp);
+                                *next_tmp += 1;
+                                name
+                            })
+                            .collect::<Vec<_>>();
+                        let mut left_args = new_arg_names
+                            .iter()
+                            .map(|name| Name(name.clone()))
+                            .collect::<Vec<_>>();
+                        let mut right_args = new_arg_names
+                            .iter()
+                            .map(|name| Name(name.clone()))
+                            .collect::<Vec<_>>();
+                        if left_arity < right_arity {
+                            right_args.extend_from_slice(args);
+                        } else {
+                            left_args.extend_from_slice(args);
+                        }
+                        Exists(
+                            new_arg_names,
+                            box Intersection(
+                                box left.contains(
+                                    &left_args,
+                                    scalar_cache,
+                                    arity_cache,
+                                    next_tmp,
+                                )?,
+                                box right.contains(
+                                    &right_args,
+                                    scalar_cache,
+                                    arity_cache,
+                                    next_tmp,
+                                )?,
+                            ),
+                        )
+                    }
                 }
-                Exists(
-                    new_args,
-                    box Intersection(
-                        box left.contains(&left_args, scalar_cache, arity_cache, next_tmp)?,
-                        box right.contains(&right_args, scalar_cache, arity_cache, next_tmp)?,
-                    ),
-                )
             }
             ApplyNative(native, native_args) => {
                 assert_eq!(args.len(), 0);
@@ -1122,7 +1154,7 @@ impl Expression {
             }
             Seal(e) => {
                 assert_eq!(args.len(), 1);
-                Apply(box Seal(e.clone()), box Name(args[0].clone()))
+                Apply(box Seal(e.clone()), box args[0].clone())
             }
             _ => return Err(format!("Can't lower {}", self)),
         })
@@ -1135,15 +1167,19 @@ impl Expression {
     ) -> Result<Self, String> {
         let mut next_tmp = 0;
         let arity = arity_cache.get(&self).unwrap_or(0);
-        let args = (0..arity)
+        let arg_names = (0..arity)
             .map(|_| {
                 let name = format!("tmp{}", next_tmp);
                 next_tmp += 1;
                 name
             })
             .collect::<Vec<_>>();
+        let args = arg_names
+            .iter()
+            .map(|name| Expression::Name(name.clone()))
+            .collect::<Vec<_>>();
         Ok(Expression::_abstract(
-            args.clone(),
+            arg_names,
             self.contains(&args, scalar_cache, arity_cache, &mut next_tmp)?,
         ))
     }

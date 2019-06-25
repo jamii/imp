@@ -1178,7 +1178,7 @@ impl Expression {
                 }
             }
             ApplyNative(native, native_args) => {
-                assert_eq!(args.len(), 0);
+                assert_eq!(args.len(), native.output_arity);
                 ApplyNative(native.clone(), native_args.clone())
             }
             Seal(e) => {

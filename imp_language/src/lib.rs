@@ -1031,6 +1031,22 @@ impl Expression {
                     Abstract(arg, box body.replace(old, new))
                 }
             }
+            ApplyNative(f, mut args) => {
+                for arg in &mut args {
+                    if arg == old {
+                        if let Name(new) = new {
+                            *arg = new.clone();
+                        } else {
+                            // TODO reabstract?
+                            panic!(
+                                "Replacing name with expr in ApplyNative: {:?} {:?}",
+                                old, new
+                            )
+                        }
+                    }
+                }
+                ApplyNative(f, args)
+            }
             _ => self.map1(|expr| Ok(expr.replace(old, new))).unwrap(),
         }
     }
@@ -1099,7 +1115,7 @@ impl Expression {
                 box if_false.contains(args, scalar_cache, arity_cache, next_tmp, ordering)?,
             ),
             Abstract(arg, box body) => {
-                assert!(args.len() >= 1);
+                assert!(args.len() >= 1); // TODO otherwise replace with nothing
                 let expr = body
                     .contains(&args[1..], scalar_cache, arity_cache, next_tmp, ordering)?
                     .replace(arg, &args[0].clone());
@@ -1297,7 +1313,6 @@ impl Expression {
             ordering.retain(|name| seen.insert(name.clone()));
         }
         let mut indexes = vec![];
-        // TODO smarter ordering
         let predicate = predicate.reorder(
             &ordering
                 .iter()

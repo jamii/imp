@@ -1,8 +1,10 @@
 #![feature(box_syntax)]
 #![feature(result_map_or_else)]
 
+use log::{error, info, warn};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen_console_logger::DEFAULT_LOGGER;
 use web_sys::HtmlElement;
 use web_sys::HtmlTextAreaElement;
 
@@ -44,6 +46,8 @@ fn update(node: &HtmlElement) {
 #[wasm_bindgen(start)]
 pub fn init() -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
+    log::set_logger(&DEFAULT_LOGGER).unwrap();
+    log::set_max_level(log::LevelFilter::Info);
 
     let document = web_sys::window().unwrap().document().unwrap();
 

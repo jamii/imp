@@ -2,9 +2,16 @@
 #![feature(box_patterns)]
 
 use lalrpop_util::lalrpop_mod;
+use log::{error, info, warn};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::iter::FromIterator;
+
+macro_rules! d {
+    ( $tt:tt ) => {{
+        info!("{:?}", $tt);
+    }};
+}
 
 // macro_rules! iflet {
 //     ( $p:pat = $e:expr ) => {{
@@ -1034,7 +1041,7 @@ impl Expression {
         scalar_cache: &Cache<bool>,
         arity_cache: &Cache<Option<usize>>,
         next_tmp: &mut usize,
-        extra_args: &mut Vec<Name>,
+        ordering: &mut Vec<Name>,
     ) -> Result<Self, String> {
         use Expression::*;
         Ok(match self {
@@ -1045,33 +1052,24 @@ impl Expression {
             }
             Scalar(scalar) => {
                 assert_eq!(args.len(), 1);
+                if let Name(name) = &args[0] {
+                    ordering.push(name.clone());
+                }
                 Apply(box Scalar(scalar.clone()), box args[0].clone())
             }
             Union(box e1, box e2) => Union(
-                box e1.contains(args, scalar_cache, arity_cache, next_tmp, extra_args)?,
-                box e2.contains(args, scalar_cache, arity_cache, next_tmp, extra_args)?,
+                box e1.contains(args, scalar_cache, arity_cache, next_tmp, ordering)?,
+                box e2.contains(args, scalar_cache, arity_cache, next_tmp, ordering)?,
             ),
             Intersection(box e1, box e2) => Intersection(
-                box e1.contains(args, scalar_cache, arity_cache, next_tmp, extra_args)?,
-                box e2.contains(args, scalar_cache, arity_cache, next_tmp, extra_args)?,
+                box e1.contains(args, scalar_cache, arity_cache, next_tmp, ordering)?,
+                box e2.contains(args, scalar_cache, arity_cache, next_tmp, ordering)?,
             ),
             Product(box e1, box e2) => {
                 let a1 = arity_cache.get(e1).unwrap_or(0);
                 Intersection(
-                    box e1.contains(
-                        &args[0..a1],
-                        scalar_cache,
-                        arity_cache,
-                        next_tmp,
-                        extra_args,
-                    )?,
-                    box e2.contains(
-                        &args[a1..],
-                        scalar_cache,
-                        arity_cache,
-                        next_tmp,
-                        extra_args,
-                    )?,
+                    box e1.contains(&args[0..a1], scalar_cache, arity_cache, next_tmp, ordering)?,
+                    box e2.contains(&args[a1..], scalar_cache, arity_cache, next_tmp, ordering)?,
                 )
             }
             Equals(box e1, box e2) => {
@@ -1079,24 +1077,40 @@ impl Expression {
                 Equals(box e1.clone(), box e2.clone())
             }
             Negation(box e) => {
-                Negation(box e.contains(args, scalar_cache, arity_cache, next_tmp, extra_args)?)
+                Negation(box e.contains(args, scalar_cache, arity_cache, next_tmp, ordering)?)
             }
-            Name(name) => Expression::apply(name, args.to_vec()),
+            Name(name) => {
+                for arg in args {
+                    if let Name(name) = arg {
+                        ordering.push(name.clone());
+                    }
+                }
+                Expression::apply(name, args.to_vec())
+            }
             // Let(name, box value, box body) => {
             //     // TODO this will make caches blow up
             //     // use an env instead?
             //     body.replace(name, value)
-            //         .contains(args, scalar_cache, arity_cache, next_tmp, extra_args)
+            //         .contains(args, scalar_cache, arity_cache, next_tmp, ordering)
             // }
             If(box cond, box if_true, box if_false) => If(
-                box cond.contains(&[], scalar_cache, arity_cache, next_tmp, extra_args)?,
-                box if_true.contains(args, scalar_cache, arity_cache, next_tmp, extra_args)?,
-                box if_false.contains(args, scalar_cache, arity_cache, next_tmp, extra_args)?,
+                box cond.contains(&[], scalar_cache, arity_cache, next_tmp, ordering)?,
+                box if_true.contains(args, scalar_cache, arity_cache, next_tmp, ordering)?,
+                box if_false.contains(args, scalar_cache, arity_cache, next_tmp, ordering)?,
             ),
             Abstract(arg, box body) => {
                 assert!(args.len() >= 1);
-                body.contains(&args[1..], scalar_cache, arity_cache, next_tmp, extra_args)?
-                    .replace(arg, &args[0].clone())
+                let expr = body
+                    .contains(&args[1..], scalar_cache, arity_cache, next_tmp, ordering)?
+                    .replace(arg, &args[0].clone());
+                if let Name(name0) = &args[0] {
+                    for name in ordering {
+                        if name == arg {
+                            *name = name0.clone()
+                        }
+                    }
+                }
+                expr
             }
             Apply(box left, box right) => {
                 match (*scalar_cache.get(left), *scalar_cache.get(right)) {
@@ -1106,13 +1120,19 @@ impl Expression {
                     }
                     (true, false) => {
                         let mut args = args.to_vec();
+                        if let Name(name) = left {
+                            ordering.push(name.clone());
+                        }
                         args.insert(0, left.clone());
-                        right.contains(&args, scalar_cache, arity_cache, next_tmp, extra_args)?
+                        right.contains(&args, scalar_cache, arity_cache, next_tmp, ordering)?
                     }
                     (false, true) => {
                         let mut args = args.to_vec();
                         args.insert(0, right.clone());
-                        left.contains(&args, scalar_cache, arity_cache, next_tmp, extra_args)?
+                        if let Name(name) = right {
+                            ordering.push(name.clone());
+                        }
+                        left.contains(&args, scalar_cache, arity_cache, next_tmp, ordering)?
                     }
                     (false, false) => {
                         let left_arity = arity_cache.get(left).unwrap_or(0);
@@ -1124,7 +1144,7 @@ impl Expression {
                                 name
                             })
                             .collect::<Vec<_>>();
-                        extra_args.extend(new_arg_names.clone());
+                        ordering.extend(new_arg_names.clone());
                         let mut left_args = new_arg_names
                             .iter()
                             .map(|name| Name(name.clone()))
@@ -1146,14 +1166,14 @@ impl Expression {
                                     scalar_cache,
                                     arity_cache,
                                     next_tmp,
-                                    extra_args,
+                                    ordering,
                                 )?,
                                 box right.contains(
                                     &right_args,
                                     scalar_cache,
                                     arity_cache,
                                     next_tmp,
-                                    extra_args,
+                                    ordering,
                                 )?,
                             ),
                         )
@@ -1166,6 +1186,9 @@ impl Expression {
             }
             Seal(e) => {
                 assert_eq!(args.len(), 1);
+                if let Name(name) = &args[0] {
+                    ordering.push(name.clone());
+                }
                 Apply(box Seal(e.clone()), box args[0].clone())
             }
             _ => return Err(format!("Can't lower {}", self)),
@@ -1221,19 +1244,28 @@ impl Expression {
             .iter()
             .map(|name| Name(name.clone()))
             .collect::<Vec<_>>();
-        let mut extra_args = vec![];
+        let mut ordering = vec![];
         let predicate = self.contains(
             &args,
             scalar_cache,
             arity_cache,
             &mut next_tmp,
-            &mut extra_args,
+            &mut ordering,
         )?;
+        {
+            let mut seen = HashSet::new();
+            ordering.retain(|name| seen.insert(name.clone()));
+        }
         let mut indexes = vec![];
-        let mut ordering = args.clone();
-        ordering.extend(extra_args.iter().map(|name| Name(name.clone())));
         // TODO smarter ordering
-        let predicate = predicate.reorder(&ordering, &mut indexes, &mut next_tmp);
+        let predicate = predicate.reorder(
+            &ordering
+                .into_iter()
+                .map(|name| Name(name))
+                .collect::<Vec<_>>(),
+            &mut indexes,
+            &mut next_tmp,
+        );
         let mut expr = Expression::_abstract(arg_names, predicate);
         for (name, source, permutation) in indexes.into_iter().rev() {
             expr = Let(

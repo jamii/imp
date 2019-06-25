@@ -10,6 +10,7 @@ lalrpop-util = "0.16.3"
 regex = "0.2.0"
 unescape = "*"
 rand = { version = "*", features = ["wasm-bindgen"] }
+log = "*"
 
 [build-dependencies]
 lalrpop = "0.16.3"

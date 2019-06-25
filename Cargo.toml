@@ -4,3 +4,6 @@ members = [
   "imp_language",
   "imp_demo",
 ]
+
+[profile.release]
+debug = true

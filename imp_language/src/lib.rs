@@ -8,8 +8,8 @@ use std::fmt;
 use std::iter::FromIterator;
 
 macro_rules! d {
-    ( $tt:tt ) => {{
-        info!("{:?}", $tt);
+    ( $e:expr ) => {{
+        info!("{:?}", $e);
     }};
 }
 
@@ -1158,24 +1158,21 @@ impl Expression {
                         } else {
                             left_args.extend_from_slice(args);
                         }
-                        Exists(
-                            new_arg_names,
-                            box Intersection(
-                                box left.contains(
-                                    &left_args,
-                                    scalar_cache,
-                                    arity_cache,
-                                    next_tmp,
-                                    ordering,
-                                )?,
-                                box right.contains(
-                                    &right_args,
-                                    scalar_cache,
-                                    arity_cache,
-                                    next_tmp,
-                                    ordering,
-                                )?,
-                            ),
+                        Intersection(
+                            box left.contains(
+                                &left_args,
+                                scalar_cache,
+                                arity_cache,
+                                next_tmp,
+                                ordering,
+                            )?,
+                            box right.contains(
+                                &right_args,
+                                scalar_cache,
+                                arity_cache,
+                                next_tmp,
+                                ordering,
+                            )?,
                         )
                     }
                 }
@@ -1225,6 +1222,49 @@ impl Expression {
         }
     }
 
+    pub fn bound(&self, name: &Name) -> Option<Expression> {
+        use Expression::*;
+        match self {
+            Intersection(e1, e2) => match (e1.bound(name), e2.bound(name)) {
+                (Some(b1), Some(b2)) => Some(Intersection(box b1, box b2)),
+                (Some(b), None) | (None, Some(b)) => Some(b),
+                (None, None) => None,
+            },
+            Apply(box f, box arg) => {
+                if let Name(arg) = arg {
+                    if arg == name {
+                        return Some(
+                            Apply(
+                                box Apply(
+                                    box Name("permute".to_owned()),
+                                    box Seal(box Scalar(crate::Scalar::Number(1))),
+                                ),
+                                box Seal(box f.clone()),
+                            )
+                            .with_natives(&Native::stdlib()),
+                        );
+                    }
+                }
+                f.bound(name)
+            }
+            Equals(box e1, box e2) => {
+                if let Name(e1) = e1 {
+                    if e1 == name {
+                        return Some(e2.clone());
+                    }
+                }
+                if let Name(e2) = e2 {
+                    if e2 == name {
+                        return Some(e1.clone());
+                    }
+                }
+                None
+            }
+            Exists(_, box e) => e.bound(name),
+            _ => None,
+        }
+    }
+
     pub fn lower(
         &self,
         scalar_cache: &Cache<bool>,
@@ -1260,13 +1300,25 @@ impl Expression {
         // TODO smarter ordering
         let predicate = predicate.reorder(
             &ordering
-                .into_iter()
-                .map(|name| Name(name))
+                .iter()
+                .map(|name| Name(name.clone()))
                 .collect::<Vec<_>>(),
             &mut indexes,
             &mut next_tmp,
         );
-        let mut expr = Expression::_abstract(arg_names, predicate);
+        let mut expr = If(
+            box predicate.clone(),
+            box args
+                .into_iter()
+                .fold(Something, |a, b| Product(box a, box b)),
+            box Nothing,
+        );
+        for name in ordering.iter().rev() {
+            expr = Apply(
+                box predicate.bound(name).unwrap_or(Name("panic".to_owned())),
+                box Abstract(name.clone(), box expr),
+            );
+        }
         for (name, source, permutation) in indexes.into_iter().rev() {
             expr = Let(
                 name,

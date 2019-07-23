@@ -29,7 +29,11 @@ fn update(node: &HtmlElement) {
         Err(error) => outputs.push(format!("Error: {}", error)),
         Ok(expr) => {
             let expr = expr.with_natives(&imp_language::Native::stdlib());
-            outputs.push(format!("Parsed: {}", expr));
+            // outputs.push(format!("Parsed: {}", expr));
+            let type_env = imp_language::Environment::new();
+            let mut type_cache = imp_language::Cache::new();
+            let typ = expr.typecheck(&type_env, &mut type_cache);
+            outputs.push(format!("Type: {:?}", typ));
             match imp_language::eval(expr) {
                 Err(error) => outputs.push(format!("Error: {}", error)),
                 Ok(value) => outputs.push(format!("Evalled: {}", value)),

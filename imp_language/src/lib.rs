@@ -78,6 +78,25 @@ pub enum Value {
     Closure(Name, Expression, Environment<Value>),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScalarType {
+    Any,
+}
+
+#[derive(Debug, Clone)]
+pub enum ValueType {
+    Nothing,
+    Something,
+    Product(ScalarType, Box<ValueType>), // no Abstract inside Product
+    Abstract(ScalarType, Box<ValueType>),
+}
+
+#[derive(Debug, Clone)]
+pub enum Arity {
+    Exactly(usize),
+    AtLeast(usize),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Environment<T> {
     bindings: Vec<(Name, T)>,
@@ -217,6 +236,109 @@ fn gensym() -> Name {
     format!("tmp{}", rand::random::<usize>())
 }
 
+impl ScalarType {
+    fn union(self, _other: Self) -> Result<Self, String> {
+        Ok(ScalarType::Any)
+    }
+
+    fn intersection(self, _other: Self) -> Result<Self, String> {
+        Ok(ScalarType::Any)
+    }
+
+    fn product(self, tail: ValueType) -> ValueType {
+        if tail.is_function() {
+            ValueType::Abstract(self, box tail)
+        } else {
+            ValueType::Product(self, box tail)
+        }
+    }
+
+    fn abstract_(self, tail: ValueType) -> ValueType {
+        ValueType::Abstract(self, box tail)
+    }
+}
+
+impl ValueType {
+    fn is_function(&self) -> bool {
+        match self {
+            ValueType::Abstract(..) => true,
+            _ => false,
+        }
+    }
+
+    fn arity(&self) -> Arity {
+        match self {
+            ValueType::Nothing => Arity::AtLeast(0),
+            ValueType::Something => Arity::Exactly(0),
+            ValueType::Product(_, tail) | ValueType::Abstract(_, tail) => match tail.arity() {
+                Arity::AtLeast(a) => Arity::AtLeast(a + 1),
+                Arity::Exactly(a) => Arity::Exactly(a + 1),
+            },
+        }
+    }
+
+    fn union(self, other: Self) -> Result<Self, String> {
+        use ValueType::*;
+        Ok(match (self, other) {
+            (Nothing, t) | (t, Nothing) => t,
+            (Something, Something) => Something,
+            (Product(s1, t1), Product(s2, t2)) => Product(s1.union(s2)?, box t1.union(*t2)?),
+            (Abstract(s1, t1), Abstract(s2, t2))
+            | (Abstract(s1, t1), Product(s2, t2))
+            | (Product(s1, t1), Abstract(s2, t2)) => Abstract(s1.union(s2)?, box t1.union(*t2)?),
+            (t1, t2) => return Err(format!("Can't unify {:?} and {:?}", t1, t2)),
+        })
+    }
+
+    fn intersection(self, other: Self) -> Result<Self, String> {
+        use ValueType::*;
+        Ok(match (self, other) {
+            (Nothing, _) | (_, Nothing) => Nothing,
+            (Something, Something) => Something,
+            (Product(s1, t1), Product(s2, t2)) => {
+                Product(s1.intersection(s2)?, box t1.intersection(*t2)?)
+            }
+            (Abstract(s1, t1), Abstract(s2, t2))
+            | (Abstract(s1, t1), Product(s2, t2))
+            | (Product(s1, t1), Abstract(s2, t2)) => {
+                Abstract(s1.intersection(s2)?, box t1.intersection(*t2)?)
+            }
+            (t1, t2) => return Err(format!("Can't unify {:?} and {:?}", t1, t2)),
+        })
+    }
+
+    fn product(self, other: Self) -> Result<Self, String> {
+        use ValueType::*;
+        Ok(match self {
+            Nothing => Nothing,
+            Something => match other {
+                Abstract(..) => return Err(format!("Product of function: {:?}", other)),
+                _ => other,
+            },
+            Product(s1, t1) => ValueType::Product(s1, box t1.product(other)?),
+            Abstract(..) => return Err(format!("Product of function: {:?}", self)),
+        })
+    }
+
+    fn apply(self, other: Self) -> Result<Self, String> {
+        use ValueType::*;
+        Ok(match (self, other) {
+            (Nothing, _) | (_, Nothing) => Nothing,
+            (Something, t) | (t, Something) => t,
+            (Product(s1, t1), Product(s2, t2))
+            | (Abstract(s1, t1), Product(s2, t2))
+            | (Product(s1, t1), Abstract(s2, t2)) => {
+                // TODO intersection is fine for now, but may want to think more carefully about this once we have real scalar types
+                s1.intersection(s2)?;
+                t1.apply(*t2)?
+            }
+            (t1 @ Abstract(..), t2 @ Abstract(..)) => {
+                return Err(format!("Applied function to function: {:?} {:?}", t1, t2));
+            }
+        })
+    }
+}
+
 impl Scalar {
     fn as_integer(&self) -> Result<i64, String> {
         match self {
@@ -316,17 +438,17 @@ impl Native {
                         .map(|(name, _value)| (name.clone(), false))
                         .collect::<Vec<(String, bool)>>(),
                 );
-                let arity_env = Environment::from(
+                let type_env = Environment::from(
                     env.bindings
                         .iter()
-                        .map(|(name, value)| Ok((name.clone(), value.arity()?)))
-                        .collect::<Result<Vec<(String, Option<usize>)>, String>>()?,
+                        .map(|(name, value)| Ok((name.clone(), value.typ()?)))
+                        .collect::<Result<Vec<(String, ValueType)>, String>>()?,
                 );
                 let mut scalar_cache = Cache::new();
-                let mut arity_cache = Cache::new();
+                let mut type_cache = Cache::new();
                 expr.scalar(&scalar_env, &mut scalar_cache)?;
-                expr.arity(&arity_env, &mut arity_cache)?;
-                let lowered = expr.lower(&scalar_cache, &arity_cache)?;
+                expr.typecheck(&type_env, &mut type_cache)?;
+                let lowered = expr.lower(&scalar_cache, &type_cache)?;
                 Ok(Value::Set(Set::from_iter(vec![vec![Scalar::Sealed(
                     box lowered,
                     env.clone(),
@@ -586,7 +708,8 @@ impl Value {
         val.as_scalar()?.unseal()
     }
 
-    fn arity(&self) -> Result<Option<usize>, String> {
+    fn typ(&self) -> Result<ValueType, String> {
+        // TODO this method is fishy - should seal capture checked types instead? might mess with staging
         use Value::*;
         Ok(match self {
             Set(set) => {
@@ -596,21 +719,30 @@ impl Value {
                     .collect::<HashSet<_>>()
                     .into_iter();
                 match (arities.next(), arities.next()) {
-                    (None, None) => None,
-                    (Some(a), None) => Some(a),
+                    (None, None) => ValueType::Nothing,
+                    (Some(arity), None) => {
+                        let mut typ = ValueType::Something;
+                        for _ in 0..arity {
+                            typ = ValueType::Product(ScalarType::Any, box ValueType::Something);
+                        }
+                        typ
+                    }
                     (_, Some(_)) => return Err(format!("Mismatched arities in: {}", self)),
                 }
             }
             Closure(name, body, env) => {
-                let mut arity_env = Environment::from(
+                let mut type_env = Environment::from(
                     env.bindings
                         .iter()
-                        .map(|(name, value)| Ok((name.clone(), value.arity()?)))
-                        .collect::<Result<Vec<(String, Option<usize>)>, String>>()?,
+                        .map(|(name, value)| Ok((name.clone(), value.typ()?)))
+                        .collect::<Result<Vec<(String, ValueType)>, String>>()?,
                 );
-                arity_env.bind(name.clone(), Some(1));
-                let mut arity_cache = Cache::new();
-                body.arity(&arity_env, &mut arity_cache)?.map(|a| a + 1)
+                type_env.bind(
+                    name.clone(),
+                    ValueType::Product(ScalarType::Any, box ValueType::Something),
+                );
+                let mut type_cache = Cache::new();
+                body.typecheck(&type_env, &mut type_cache)?
             }
         })
     }
@@ -924,83 +1056,72 @@ impl Expression {
         Ok(scalar)
     }
 
-    pub fn arity(
+    pub fn typecheck(
         &self,
-        env: &Environment<Option<usize>>,
-        cache: &mut Cache<Option<usize>>,
-    ) -> Result<Option<usize>, String> {
+        env: &Environment<ValueType>,
+        cache: &mut Cache<ValueType>,
+    ) -> Result<ValueType, String> {
         use Expression::*;
-        fn unify(a1: Option<usize>, a2: Option<usize>) -> Result<Option<usize>, String> {
-            match (a1, a2) {
-                (None, None) => Ok(None),
-                (Some(a), None) | (None, Some(a)) => Ok(Some(a)),
-                (Some(a1), Some(a2)) => {
-                    if a1 == a2 {
-                        Ok(Some(a1))
-                    } else {
-                        Err(format!("Can't unify arities {} and {}", a1, a2))
-                    }
-                }
+        let typ = match self {
+            Nothing => ValueType::Nothing,
+            Something => ValueType::Something,
+            Scalar(_) => ValueType::Product(ScalarType::Any, box ValueType::Something),
+            Union(e1, e2) => e1.typecheck(env, cache)?.union(e2.typecheck(env, cache)?)?,
+            Intersection(e1, e2) => e1
+                .typecheck(env, cache)?
+                .intersection(e2.typecheck(env, cache)?)?,
+            Product(e1, e2) => e1
+                .typecheck(env, cache)?
+                .product(e2.typecheck(env, cache)?)?,
+            Equals(e1, e2) => {
+                // TODO intersection is fine for now, but may want to think more carefully about this once we have real scalar types
+                e1.typecheck(env, cache)?
+                    .intersection(e2.typecheck(env, cache)?)?;
+                ValueType::Something
             }
-        }
-        let arity = match self {
-            Nothing => None,
-            Something => Some(0),
-            Scalar(_) => Some(1),
-            Union(box e1, box e2) => unify(e1.arity(env, cache)?, e2.arity(env, cache)?)?,
-            Intersection(box e1, box e2) => unify(e1.arity(env, cache)?, e2.arity(env, cache)?)?,
-            Product(box e1, box e2) => match (e1.arity(env, cache)?, e2.arity(env, cache)?) {
-                (Some(a1), Some(a2)) => Some(a1 + a2),
-                _ => None,
-            },
-            Equals(box e1, box e2) => {
-                e1.arity(env, cache)?;
-                e2.arity(env, cache)?;
-                Some(0)
-            }
-            Negation(box e) => e.arity(&env, cache)?,
+            Negation(e) => e.typecheck(env, cache)?,
             Name(name) => env
                 .lookup(name)
-                .ok_or_else(|| format!("Unbound name: {}", name))?
+                .ok_or_else(|| format!("Unbound variable: {:?}", name))?
                 .clone(),
-            Let(name, box value, box body) => {
+            Let(name, value, body) => {
                 let mut env = env.clone();
-                env.bind(name.clone(), value.arity(&env, cache)?);
-                body.arity(&env, cache)?
+                env.bind(name.clone(), value.typecheck(&env, cache)?);
+                body.typecheck(&env, cache)?
             }
-            If(box cond, box if_true, box if_false) => {
-                cond.arity(env, cache)?;
-                unify(if_true.arity(env, cache)?, if_false.arity(env, cache)?)?
-            }
-            Abstract(arg, box body) => {
-                let mut env = env.clone();
-                env.bind(arg.clone(), Some(1));
-                body.arity(&env, cache)?.map(|a| a + 1)
-            }
-            Apply(box fun, box arg) => match (fun.arity(env, cache)?, arg.arity(env, cache)?) {
-                (Some(a1), Some(a2)) => Some(a1.max(a2) - a1.min(a2)),
-                _ => None,
-            },
-            ApplyNative(native, args) => {
-                assert_eq!(native.input_arity, args.len() as usize);
-                Some(native.output_arity)
-            }
-            Seal(box e) => {
-                e.arity(env, cache)?;
-                Some(1)
-            }
-            Unseal(_) => return Err(format!("Can't infer arity of: {}", self)),
-            Exists(names, box e) => {
-                let mut env = env.clone();
-                for name in names {
-                    env.bind(name.clone(), Some(1));
+            If(c, t, f) => {
+                match c.typecheck(env, cache)? {
+                    ValueType::Nothing | ValueType::Something => (),
+                    other => return Err(format!("Non-boolean condition in `if`: {:?}", other)),
                 }
-                e.arity(&env, cache)?;
-                Some(0)
+                t.typecheck(env, cache)?.union(f.typecheck(env, cache)?)?
             }
+            Abstract(arg, body) => {
+                let mut env = env.clone();
+                env.bind(
+                    arg.clone(),
+                    ValueType::Product(ScalarType::Any, box ValueType::Something),
+                );
+                ValueType::Abstract(ScalarType::Any, box body.typecheck(&env, cache)?)
+            }
+            Apply(e1, e2) => e1.typecheck(env, cache)?.apply(e2.typecheck(env, cache)?)?,
+            ApplyNative(f, args) => {
+                assert_eq!(f.input_arity, args.len());
+                let mut t = ValueType::Something;
+                for _ in 0..f.output_arity {
+                    t = ValueType::Product(ScalarType::Any, box t)
+                }
+                t
+            }
+            Seal(e) => {
+                e.typecheck(env, cache)?;
+                ValueType::Product(ScalarType::Any, box ValueType::Something)
+            }
+            Unseal(..) => return Err(format!("Can't type unseal")),
+            Exists(..) => return Err(format!("Can't type exists")),
         };
-        cache.insert(self, arity);
-        Ok(arity)
+        cache.insert(self, typ.clone());
+        Ok(typ)
     }
 
     pub fn replace(self, old: &Name, new: &Expression) -> Self {
@@ -1055,7 +1176,7 @@ impl Expression {
         &self,
         args: &[Expression],
         scalar_cache: &Cache<bool>,
-        arity_cache: &Cache<Option<usize>>,
+        type_cache: &Cache<ValueType>,
         next_tmp: &mut usize,
         ordering: &mut Vec<Name>,
     ) -> Result<Self, String> {
@@ -1074,18 +1195,21 @@ impl Expression {
                 Apply(box Scalar(scalar.clone()), box args[0].clone())
             }
             Union(box e1, box e2) => Union(
-                box e1.contains(args, scalar_cache, arity_cache, next_tmp, ordering)?,
-                box e2.contains(args, scalar_cache, arity_cache, next_tmp, ordering)?,
+                box e1.contains(args, scalar_cache, type_cache, next_tmp, ordering)?,
+                box e2.contains(args, scalar_cache, type_cache, next_tmp, ordering)?,
             ),
             Intersection(box e1, box e2) => Intersection(
-                box e1.contains(args, scalar_cache, arity_cache, next_tmp, ordering)?,
-                box e2.contains(args, scalar_cache, arity_cache, next_tmp, ordering)?,
+                box e1.contains(args, scalar_cache, type_cache, next_tmp, ordering)?,
+                box e2.contains(args, scalar_cache, type_cache, next_tmp, ordering)?,
             ),
             Product(box e1, box e2) => {
-                let a1 = arity_cache.get(e1).unwrap_or(0);
+                let a1 = match type_cache.get(e1).arity() {
+                    Arity::Exactly(a) => a,
+                    Arity::AtLeast(_) => 0,
+                };
                 Intersection(
-                    box e1.contains(&args[0..a1], scalar_cache, arity_cache, next_tmp, ordering)?,
-                    box e2.contains(&args[a1..], scalar_cache, arity_cache, next_tmp, ordering)?,
+                    box e1.contains(&args[0..a1], scalar_cache, type_cache, next_tmp, ordering)?,
+                    box e2.contains(&args[a1..], scalar_cache, type_cache, next_tmp, ordering)?,
                 )
             }
             Equals(box e1, box e2) => {
@@ -1093,7 +1217,7 @@ impl Expression {
                 Equals(box e1.clone(), box e2.clone())
             }
             Negation(box e) => {
-                Negation(box e.contains(args, scalar_cache, arity_cache, next_tmp, ordering)?)
+                Negation(box e.contains(args, scalar_cache, type_cache, next_tmp, ordering)?)
             }
             Name(name) => {
                 for arg in args {
@@ -1107,17 +1231,17 @@ impl Expression {
             //     // TODO this will make caches blow up
             //     // use an env instead?
             //     body.replace(name, value)
-            //         .contains(args, scalar_cache, arity_cache, next_tmp, ordering)
+            //         .contains(args, scalar_cache, type_cache, next_tmp, ordering)
             // }
             If(box cond, box if_true, box if_false) => If(
-                box cond.contains(&[], scalar_cache, arity_cache, next_tmp, ordering)?,
-                box if_true.contains(args, scalar_cache, arity_cache, next_tmp, ordering)?,
-                box if_false.contains(args, scalar_cache, arity_cache, next_tmp, ordering)?,
+                box cond.contains(&[], scalar_cache, type_cache, next_tmp, ordering)?,
+                box if_true.contains(args, scalar_cache, type_cache, next_tmp, ordering)?,
+                box if_false.contains(args, scalar_cache, type_cache, next_tmp, ordering)?,
             ),
             Abstract(arg, box body) => {
                 assert!(args.len() >= 1); // TODO otherwise replace with nothing
                 let expr = body
-                    .contains(&args[1..], scalar_cache, arity_cache, next_tmp, ordering)?
+                    .contains(&args[1..], scalar_cache, type_cache, next_tmp, ordering)?
                     .replace(arg, &args[0].clone());
                 if let Name(name0) = &args[0] {
                     for name in ordering {
@@ -1140,7 +1264,7 @@ impl Expression {
                             ordering.push(name.clone());
                         }
                         args.insert(0, left.clone());
-                        right.contains(&args, scalar_cache, arity_cache, next_tmp, ordering)?
+                        right.contains(&args, scalar_cache, type_cache, next_tmp, ordering)?
                     }
                     (false, true) => {
                         let mut args = args.to_vec();
@@ -1148,11 +1272,17 @@ impl Expression {
                         if let Name(name) = right {
                             ordering.push(name.clone());
                         }
-                        left.contains(&args, scalar_cache, arity_cache, next_tmp, ordering)?
+                        left.contains(&args, scalar_cache, type_cache, next_tmp, ordering)?
                     }
                     (false, false) => {
-                        let left_arity = arity_cache.get(left).unwrap_or(0);
-                        let right_arity = arity_cache.get(right).unwrap_or(0);
+                        let left_arity = match type_cache.get(left).arity() {
+                            Arity::Exactly(a) => a,
+                            Arity::AtLeast(_) => 0,
+                        };
+                        let right_arity = match type_cache.get(right).arity() {
+                            Arity::Exactly(a) => a,
+                            Arity::AtLeast(_) => 0,
+                        };
                         let new_arg_names = (0..left_arity.min(right_arity))
                             .map(|_| {
                                 let name = format!("extra_var{}", next_tmp);
@@ -1178,14 +1308,14 @@ impl Expression {
                             box left.contains(
                                 &left_args,
                                 scalar_cache,
-                                arity_cache,
+                                type_cache,
                                 next_tmp,
                                 ordering,
                             )?,
                             box right.contains(
                                 &right_args,
                                 scalar_cache,
-                                arity_cache,
+                                type_cache,
                                 next_tmp,
                                 ordering,
                             )?,
@@ -1284,11 +1414,14 @@ impl Expression {
     pub fn lower(
         &self,
         scalar_cache: &Cache<bool>,
-        arity_cache: &Cache<Option<usize>>,
+        type_cache: &Cache<ValueType>,
     ) -> Result<Self, String> {
         use Expression::*;
         let mut next_tmp = 0;
-        let arity = arity_cache.get(&self).unwrap_or(0);
+        let arity = match type_cache.get(self).arity() {
+            Arity::Exactly(a) => a,
+            Arity::AtLeast(_) => 0,
+        };
         let arg_names = (0..arity)
             .map(|_| {
                 let name = format!("var{}", next_tmp);
@@ -1304,7 +1437,7 @@ impl Expression {
         let predicate = self.contains(
             &args,
             scalar_cache,
-            arity_cache,
+            type_cache,
             &mut next_tmp,
             &mut ordering,
         )?;

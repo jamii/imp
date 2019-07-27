@@ -7,6 +7,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::iter::FromIterator;
 
+mod lower;
+
 macro_rules! d {
     ( $e:expr ) => {{
         info!("{:?}", $e);
@@ -107,6 +109,18 @@ pub struct Cache<T> {
     cache: HashMap<*const Expression, T>,
 }
 
+#[derive(Debug, Clone)]
+enum LowerAction {
+    Refer(Vec<Name>),
+    Inline(Expression),
+}
+#[derive(Debug, Clone)]
+pub struct Scope {
+    vars: Vec<Option<Name>>,
+}
+
+enum Lowered {}
+
 impl<T> Cache<T> {
     pub fn new() -> Self {
         Cache {
@@ -122,6 +136,16 @@ impl<T> Cache<T> {
         self.cache
             .get(&(expr as *const Expression))
             .unwrap_or_else(|| panic!("Not in cache: {:?}", expr))
+    }
+}
+
+impl Scope {
+    fn push(&mut self, var: Option<Name>) {
+        self.vars.push(var);
+    }
+
+    fn resolve(&mut self, var: &Name) -> Option<usize> {
+        self.vars.iter().position(|var2| var2.as_ref() == Some(var))
     }
 }
 
@@ -428,36 +452,36 @@ impl Native {
         }
     }
 
-    fn solve(scalars: Vec<Scalar>) -> Result<Value, String> {
-        match &*scalars {
-            [Scalar::Sealed(box expr, env)] => {
-                // TODO scalar_env?
-                let scalar_env = Environment::from(
-                    env.bindings
-                        .iter()
-                        .map(|(name, _value)| (name.clone(), false))
-                        .collect::<Vec<(String, bool)>>(),
-                );
-                let type_env = Environment::from(
-                    env.bindings
-                        .iter()
-                        .map(|(name, value)| Ok((name.clone(), value.typ()?)))
-                        .collect::<Result<Vec<(String, ValueType)>, String>>()?,
-                );
-                let mut scalar_cache = Cache::new();
-                let mut type_cache = Cache::new();
-                expr.scalar(&scalar_env, &mut scalar_cache)?;
-                expr.typecheck(&type_env, &mut type_cache)?;
-                let lowered = expr.lower(&scalar_cache, &type_cache)?;
-                Ok(Value::Set(Set::from_iter(vec![vec![Scalar::Sealed(
-                    box lowered,
-                    env.clone(),
-                )]])))
-            }
-            [a] => Err(format!("solve {}", a)),
-            _ => unreachable!(),
-        }
-    }
+    // fn solve(scalars: Vec<Scalar>) -> Result<Value, String> {
+    //     match &*scalars {
+    //         [Scalar::Sealed(box expr, env)] => {
+    //             // TODO scalar_env?
+    //             let scalar_env = Environment::from(
+    //                 env.bindings
+    //                     .iter()
+    //                     .map(|(name, _value)| (name.clone(), false))
+    //                     .collect::<Vec<(String, bool)>>(),
+    //             );
+    //             let type_env = Environment::from(
+    //                 env.bindings
+    //                     .iter()
+    //                     .map(|(name, value)| Ok((name.clone(), value.typ()?)))
+    //                     .collect::<Result<Vec<(String, ValueType)>, String>>()?,
+    //             );
+    //             let mut scalar_cache = Cache::new();
+    //             let mut type_cache = Cache::new();
+    //             expr.scalar(&scalar_env, &mut scalar_cache)?;
+    //             expr.typecheck(&type_env, &mut type_cache)?;
+    //             let lowered = expr.lower(&scalar_cache, &type_cache)?;
+    //             Ok(Value::Set(Set::from_iter(vec![vec![Scalar::Sealed(
+    //                 box lowered,
+    //                 env.clone(),
+    //             )]])))
+    //         }
+    //         [a] => Err(format!("solve {}", a)),
+    //         _ => unreachable!(),
+    //     }
+    // }
 
     pub fn stdlib() -> Vec<Native> {
         vec![
@@ -479,12 +503,12 @@ impl Native {
                 output_arity: 1,
                 fun: Native::reduce,
             },
-            Native {
-                name: "solve".to_owned(),
-                input_arity: 1,
-                output_arity: 1,
-                fun: Native::solve,
-            },
+            // Native {
+            //     name: "solve".to_owned(),
+            //     input_arity: 1,
+            //     output_arity: 1,
+            //     fun: Native::solve,
+            // },
         ]
     }
 }
@@ -1124,61 +1148,52 @@ impl Expression {
         Ok(typ)
     }
 
-    pub fn replace(self, old: &Name, new: &Expression) -> Self {
+    pub fn rename(self, old: &Name, new: &Name) -> Self {
         use Expression::*;
         match self {
             Name(name) => {
                 if name == *old {
-                    new.clone()
+                    Name(new.clone())
                 } else {
                     Name(name)
                 }
             }
             Let(name, value, body) => {
-                if name == *old {
-                    Let(name, box value.replace(old, new), body)
+                let body = if name == *old {
+                    body
                 } else {
-                    Let(
-                        name,
-                        box value.replace(old, new),
-                        box body.replace(old, new),
-                    )
-                }
+                    box body.rename(old, new)
+                };
+                Let(name, box value.rename(old, new), body)
             }
             Abstract(arg, body) => {
-                if arg == *old {
-                    Abstract(arg, body)
+                let body = if arg == *old {
+                    body
                 } else {
-                    Abstract(arg, box body.replace(old, new))
-                }
+                    box body.rename(old, new)
+                };
+                Abstract(arg, body)
             }
             ApplyNative(f, mut args) => {
                 for arg in &mut args {
                     if arg == old {
-                        if let Name(new) = new {
-                            *arg = new.clone();
-                        } else {
-                            // TODO reabstract?
-                            panic!(
-                                "Replacing name with expr in ApplyNative: {:?} {:?}",
-                                old, new
-                            )
-                        }
+                        *arg = new.clone();
                     }
                 }
                 ApplyNative(f, args)
             }
-            _ => self.map1(|expr| Ok(expr.replace(old, new))).unwrap(),
+            _ => self.map1(|expr| Ok(expr.rename(old, new))).unwrap(),
         }
     }
 
-    pub fn contains(
+    fn contains(
         &self,
-        args: &[Expression],
+        args: &[Name],
+        actions: &Environment<LowerAction>,
         scalar_cache: &Cache<bool>,
         type_cache: &Cache<ValueType>,
         next_tmp: &mut usize,
-        ordering: &mut Vec<Name>,
+        lets: &mut Vec<(Name, Vec<Name>, Expression)>,
     ) -> Result<Self, String> {
         use Expression::*;
         Ok(match self {
@@ -1189,18 +1204,15 @@ impl Expression {
             }
             Scalar(scalar) => {
                 assert_eq!(args.len(), 1);
-                if let Name(name) = &args[0] {
-                    ordering.push(name.clone());
-                }
-                Apply(box Scalar(scalar.clone()), box args[0].clone())
+                Apply(box Scalar(scalar.clone()), box Name(args[0].clone()))
             }
             Union(box e1, box e2) => Union(
-                box e1.contains(args, scalar_cache, type_cache, next_tmp, ordering)?,
-                box e2.contains(args, scalar_cache, type_cache, next_tmp, ordering)?,
+                box e1.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?,
+                box e2.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?,
             ),
             Intersection(box e1, box e2) => Intersection(
-                box e1.contains(args, scalar_cache, type_cache, next_tmp, ordering)?,
-                box e2.contains(args, scalar_cache, type_cache, next_tmp, ordering)?,
+                box e1.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?,
+                box e2.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?,
             ),
             Product(box e1, box e2) => {
                 let a1 = match type_cache.get(e1).arity() {
@@ -1208,8 +1220,22 @@ impl Expression {
                     Arity::AtLeast(_) => 0,
                 };
                 Intersection(
-                    box e1.contains(&args[0..a1], scalar_cache, type_cache, next_tmp, ordering)?,
-                    box e2.contains(&args[a1..], scalar_cache, type_cache, next_tmp, ordering)?,
+                    box e1.contains(
+                        &args[0..a1],
+                        actions,
+                        scalar_cache,
+                        type_cache,
+                        next_tmp,
+                        lets,
+                    )?,
+                    box e2.contains(
+                        &args[a1..],
+                        actions,
+                        scalar_cache,
+                        type_cache,
+                        next_tmp,
+                        lets,
+                    )?,
                 )
             }
             Equals(box e1, box e2) => {
@@ -1217,39 +1243,52 @@ impl Expression {
                 Equals(box e1.clone(), box e2.clone())
             }
             Negation(box e) => {
-                Negation(box e.contains(args, scalar_cache, type_cache, next_tmp, ordering)?)
+                Negation(box e.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?)
             }
             Name(name) => {
-                for arg in args {
-                    if let Name(name) = arg {
-                        ordering.push(name.clone());
+                Expression::apply(name, args.iter().map(|arg| Name(arg.clone())).collect())
+            }
+            Let(name, value, box body) => {
+                let mut actions = actions.clone();
+                match type_cache.get(&value) {
+                    ValueType::Abstract(..) => {
+                        actions.bind(name.clone(), LowerAction::Inline((**value).clone()));
+                        body.contains(args, &actions, scalar_cache, type_cache, next_tmp, lets)?
+                    }
+                    _ => {
+                        let value = value.contains(
+                            args,
+                            &actions,
+                            scalar_cache,
+                            type_cache,
+                            next_tmp,
+                            lets,
+                        )?;
+                        let new_name = format!("{}_{}", name, next_tmp);
+                        *next_tmp += 1;
+                        lets.push((new_name, args.to_vec(), value));
+                        actions.bind(name.clone(), LowerAction::Refer(args.to_vec()));
+                        body.contains(args, &actions, scalar_cache, type_cache, next_tmp, lets)?
                     }
                 }
-                Expression::apply(name, args.to_vec())
             }
-            // Let(name, box value, box body) => {
-            //     // TODO this will make caches blow up
-            //     // use an env instead?
-            //     body.replace(name, value)
-            //         .contains(args, scalar_cache, type_cache, next_tmp, ordering)
-            // }
             If(box cond, box if_true, box if_false) => If(
-                box cond.contains(&[], scalar_cache, type_cache, next_tmp, ordering)?,
-                box if_true.contains(args, scalar_cache, type_cache, next_tmp, ordering)?,
-                box if_false.contains(args, scalar_cache, type_cache, next_tmp, ordering)?,
+                box cond.contains(&[], actions, scalar_cache, type_cache, next_tmp, lets)?,
+                box if_true.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?,
+                box if_false.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?,
             ),
             Abstract(arg, box body) => {
                 assert!(args.len() >= 1); // TODO otherwise replace with nothing
                 let expr = body
-                    .contains(&args[1..], scalar_cache, type_cache, next_tmp, ordering)?
-                    .replace(arg, &args[0].clone());
-                if let Name(name0) = &args[0] {
-                    for name in ordering {
-                        if name == arg {
-                            *name = name0.clone()
-                        }
-                    }
-                }
+                    .contains(
+                        &args[1..],
+                        actions,
+                        scalar_cache,
+                        type_cache,
+                        next_tmp,
+                        lets,
+                    )?
+                    .rename(arg, &args[0]);
                 expr
             }
             Apply(box left, box right) => {
@@ -1260,19 +1299,21 @@ impl Expression {
                     }
                     (true, false) => {
                         let mut args = args.to_vec();
-                        if let Name(name) = left {
-                            ordering.push(name.clone());
-                        }
-                        args.insert(0, left.clone());
-                        right.contains(&args, scalar_cache, type_cache, next_tmp, ordering)?
+                        let left_name = match left {
+                            Name(name) => name,
+                            _ => unreachable!(),
+                        };
+                        args.insert(0, left_name.clone());
+                        right.contains(&args, actions, scalar_cache, type_cache, next_tmp, lets)?
                     }
                     (false, true) => {
                         let mut args = args.to_vec();
-                        args.insert(0, right.clone());
-                        if let Name(name) = right {
-                            ordering.push(name.clone());
-                        }
-                        left.contains(&args, scalar_cache, type_cache, next_tmp, ordering)?
+                        let right_name = match right {
+                            Name(name) => name,
+                            _ => unreachable!(),
+                        };
+                        args.insert(0, right_name.clone());
+                        left.contains(&args, actions, scalar_cache, type_cache, next_tmp, lets)?
                     }
                     (false, false) => {
                         let left_arity = match type_cache.get(left).arity() {
@@ -1290,15 +1331,8 @@ impl Expression {
                                 name
                             })
                             .collect::<Vec<_>>();
-                        ordering.extend(new_arg_names.clone());
-                        let mut left_args = new_arg_names
-                            .iter()
-                            .map(|name| Name(name.clone()))
-                            .collect::<Vec<_>>();
-                        let mut right_args = new_arg_names
-                            .iter()
-                            .map(|name| Name(name.clone()))
-                            .collect::<Vec<_>>();
+                        let mut left_args = new_arg_names.clone();
+                        let mut right_args = new_arg_names;
                         if left_arity < right_arity {
                             right_args.extend_from_slice(args);
                         } else {
@@ -1307,17 +1341,19 @@ impl Expression {
                         Intersection(
                             box left.contains(
                                 &left_args,
+                                actions,
                                 scalar_cache,
                                 type_cache,
                                 next_tmp,
-                                ordering,
+                                lets,
                             )?,
                             box right.contains(
                                 &right_args,
+                                actions,
                                 scalar_cache,
                                 type_cache,
                                 next_tmp,
-                                ordering,
+                                lets,
                             )?,
                         )
                     }
@@ -1327,177 +1363,212 @@ impl Expression {
                 assert_eq!(args.len(), native.output_arity);
                 ApplyNative(native.clone(), native_args.clone())
             }
-            Seal(e) => {
-                assert_eq!(args.len(), 1);
-                if let Name(name) = &args[0] {
-                    ordering.push(name.clone());
-                }
-                Apply(box Seal(e.clone()), box args[0].clone())
-            }
+            // Seal(e) => {
+            //     assert_eq!(args.len(), 1);
+            //     Apply(box Seal(e.clone()), box Name(args[0].clone()))
+            // }
             _ => return Err(format!("Can't lower {}", self)),
         })
     }
 
-    pub fn reorder(
-        self,
-        ordering: &[Expression],
-        indexes: &mut Vec<(Name, Expression, Vec<usize>)>,
-        next_tmp: &mut usize,
-    ) -> Expression {
+    fn applied_to(&self, outer: Lowered, outer_scope: Scope) -> Result<Lowered, String> {
         use Expression::*;
-        if let Apply(..) = self {
-            let mut f = self;
-            let mut args: Vec<Expression> = vec![];
-            while let Apply(box e1, box e2) = f {
-                f = e1;
-                args.insert(0, e2.clone());
-            }
-            let name = {
-                let name = format!("index{}", next_tmp);
-                *next_tmp += 1;
-                name
-            };
-            let mut permutation = args.into_iter().enumerate().collect::<Vec<_>>();
-            permutation.sort_by_key(|(_, arg)| ordering.iter().position(|o| o == arg));
-            let (permutation, args) = permutation.into_iter().unzip();
-            indexes.push((name.clone(), f, permutation));
-            Expression::apply(&name, args)
-        } else {
-            self.map1(|e| Ok(e.reorder(ordering, indexes, next_tmp)))
-                .unwrap()
-        }
-    }
-
-    pub fn bound(&self, name: &Name) -> Option<Expression> {
-        use Expression::*;
-        match self {
-            Intersection(e1, e2) => match (e1.bound(name), e2.bound(name)) {
-                (Some(b1), Some(b2)) => Some(Intersection(box b1, box b2)),
-                (Some(b), None) | (None, Some(b)) => Some(b),
-                (None, None) => None,
-            },
-            Apply(box f, box arg) => {
-                if let Name(arg) = arg {
-                    if arg == name {
-                        return Some(
-                            Apply(
-                                box Apply(
-                                    box Name("permute".to_owned()),
-                                    box Seal(box Scalar(crate::Scalar::Number(1))),
-                                ),
-                                box Seal(box f.clone()),
-                            )
-                            .with_natives(&Native::stdlib()),
-                        );
-                    }
-                }
-                f.bound(name)
-            }
-            Equals(box e1, box e2) => {
-                if let Name(e1) = e1 {
-                    if e1 == name {
-                        return Some(e2.clone());
-                    }
-                }
-                if let Name(e2) = e2 {
-                    if e2 == name {
-                        return Some(e1.clone());
-                    }
-                }
-                None
-            }
-            Exists(_, box e) => e.bound(name),
-            _ => None,
-        }
+        use Lowered::*;
+        match self {}
     }
 
     pub fn lower(
         &self,
         scalar_cache: &Cache<bool>,
         type_cache: &Cache<ValueType>,
-    ) -> Result<Self, String> {
-        use Expression::*;
+    ) -> Result<Vec<(Name, Vec<Name>, Expression)>, String> {
+        let scope = Environment::new();
         let mut next_tmp = 0;
         let arity = match type_cache.get(self).arity() {
             Arity::Exactly(a) => a,
             Arity::AtLeast(_) => 0,
         };
-        let arg_names = (0..arity)
+        let args = (0..arity)
             .map(|_| {
                 let name = format!("var{}", next_tmp);
                 next_tmp += 1;
                 name
             })
             .collect::<Vec<_>>();
-        let args = arg_names
-            .iter()
-            .map(|name| Name(name.clone()))
-            .collect::<Vec<_>>();
-        let mut ordering = vec![];
+        let mut lets = vec![];
         let predicate = self.contains(
             &args,
+            &scope,
             scalar_cache,
             type_cache,
             &mut next_tmp,
-            &mut ordering,
+            &mut lets,
         )?;
-        {
-            let mut seen = HashSet::new();
-            ordering.retain(|name| seen.insert(name.clone()));
-        }
-        let mut indexes = vec![];
-        let predicate = predicate.reorder(
-            &ordering
-                .iter()
-                .map(|name| Name(name.clone()))
-                .collect::<Vec<_>>(),
-            &mut indexes,
-            &mut next_tmp,
-        );
-        let mut expr = If(
-            box predicate.clone(),
-            box args
-                .into_iter()
-                .fold(Something, |a, b| Product(box a, box b)),
-            box Nothing,
-        );
-        for name in ordering.iter().rev() {
-            expr = Apply(
-                box predicate.bound(name).unwrap_or(Name("panic".to_owned())),
-                box Abstract(name.clone(), box expr),
-            );
-        }
-        for (name, source, permutation) in indexes.into_iter().rev() {
-            expr = Let(
-                name,
-                box Apply(
-                    box Apply(
-                        box Abstract(
-                            "tmp0".to_owned(),
-                            box Abstract(
-                                "tmp1".to_owned(),
-                                box ApplyNative(
-                                    Native {
-                                        name: "permute".to_owned(),
-                                        input_arity: 2,
-                                        output_arity: 1,
-                                        fun: Native::permute,
-                                    },
-                                    vec!["tmp0".to_owned(), "tmp1".to_owned()],
-                                ),
-                            ),
-                        ),
-                        box Seal(box permutation.into_iter().fold(Something, |expr, i| {
-                            Product(box expr, box Scalar(self::Scalar::Number((i + 1) as i64)))
-                        })),
-                    ),
-                    box Seal(box source),
-                ),
-                box expr,
-            );
-        }
-        Ok(expr)
+        lets.push((format!("result{}", next_tmp), args, predicate));
+        Ok(lets)
     }
+
+    // pub fn reorder(
+    //     self,
+    //     ordering: &[Expression],
+    //     indexes: &mut Vec<(Name, Expression, Vec<usize>)>,
+    //     next_tmp: &mut usize,
+    // ) -> Expression {
+    //     use Expression::*;
+    //     if let Apply(..) = self {
+    //         let mut f = self;
+    //         let mut args: Vec<Expression> = vec![];
+    //         while let Apply(box e1, box e2) = f {
+    //             f = e1;
+    //             args.insert(0, e2.clone());
+    //         }
+    //         let name = {
+    //             let name = format!("index{}", next_tmp);
+    //             *next_tmp += 1;
+    //             name
+    //         };
+    //         let mut permutation = args.into_iter().enumerate().collect::<Vec<_>>();
+    //         permutation.sort_by_key(|(_, arg)| ordering.iter().position(|o| o == arg));
+    //         let (permutation, args) = permutation.into_iter().unzip();
+    //         indexes.push((name.clone(), f, permutation));
+    //         Expression::apply(&name, args)
+    //     } else {
+    //         self.map1(|e| Ok(e.reorder(lets, indexes, next_tmp)))
+    //             .unwrap()
+    //     }
+    // }
+
+    // pub fn bound(&self, name: &Name, type_cache: &Cache<ValueType>) -> Option<Expression> {
+    //     use Expression::*;
+    //     match self {
+    //         Intersection(e1, e2) => {
+    //             match (e1.bound(name, type_cache), e2.bound(name, type_cache)) {
+    //                 (Some(b1), Some(b2)) => Some(Intersection(box b1, box b2)),
+    //                 (Some(b), None) | (None, Some(b)) => Some(b),
+    //                 (None, None) => None,
+    //             }
+    //         }
+    //         Apply(box f, box arg) => {
+    //             if let Name(arg) = arg {
+    //                 if arg == name {
+    //                     // TODO want to check
+    //                     // && !type_cache.get(f).is_function() {
+    //                     // but we don't have types for indexes because we permuted them
+    //                     return Some(
+    //                         Apply(
+    //                             box Apply(
+    //                                 box Name("permute".to_owned()),
+    //                                 box Seal(box Scalar(crate::Scalar::Number(1))),
+    //                             ),
+    //                             box Seal(box f.clone()),
+    //                         )
+    //                         .with_natives(&Native::stdlib()),
+    //                     );
+    //                 }
+    //             }
+    //             f.bound(name, type_cache)
+    //         }
+    //         Equals(box e1, box e2) => {
+    //             if let Name(e1) = e1 {
+    //                 if e1 == name {
+    //                     return Some(e2.clone());
+    //                 }
+    //             }
+    //             if let Name(e2) = e2 {
+    //                 if e2 == name {
+    //                     return Some(e1.clone());
+    //                 }
+    //             }
+    //             None
+    //         }
+    //         Exists(_, box e) => e.bound(name, type_cache),
+    //         _ => None,
+    //     }
+    // }
+
+    // pub fn lower2(
+    //     &self,
+    //     scalar_cache: &Cache<bool>,
+    //     type_cache: &Cache<ValueType>,
+    // ) -> Result<Self, String> {
+    //     use Expression::*;
+    //     let mut next_tmp = 0;
+    //     let arity = match type_cache.get(self).arity() {
+    //         Arity::Exactly(a) => a,
+    //         Arity::AtLeast(_) => 0,
+    //     };
+    //     let arg_names = (0..arity)
+    //         .map(|_| {
+    //             let name = format!("var{}", next_tmp);
+    //             next_tmp += 1;
+    //             name
+    //         })
+    //         .collect::<Vec<_>>();
+    //     let args = arg_names
+    //         .iter()
+    //         .map(|name| Name(name.clone()))
+    //         .collect::<Vec<_>>();
+    //     let mut ordering = vec![];
+    //     let predicate = self.contains(&args, scalar_cache, type_cache, &mut next_tmp, &mut lets)?;
+    //     {
+    //         let mut seen = HashSet::new();
+    //         ordering.retain(|name| seen.insert(name.clone()));
+    //     }
+    //     let mut indexes = vec![];
+    //     let predicate = predicate.reorder(
+    //         &ordering
+    //             .iter()
+    //             .map(|name| Name(name.clone()))
+    //             .collect::<Vec<_>>(),
+    //         &mut indexes,
+    //         &mut next_tmp,
+    //     );
+    //     let mut expr = If(
+    //         box predicate.clone(),
+    //         box args
+    //             .into_iter()
+    //             .fold(Something, |a, b| Product(box a, box b)),
+    //         box Nothing,
+    //     );
+    //     for name in ordering.iter().rev() {
+    //         expr = Apply(
+    //             box predicate
+    //                 .bound(name, type_cache)
+    //                 .unwrap_or(Name("panic".to_owned())),
+    //             box Abstract(name.clone(), box expr),
+    //         );
+    //     }
+    //     for (name, source, permutation) in indexes.into_iter().rev() {
+    //         expr = Let(
+    //             name,
+    //             box Apply(
+    //                 box Apply(
+    //                     box Abstract(
+    //                         "tmp0".to_owned(),
+    //                         box Abstract(
+    //                             "tmp1".to_owned(),
+    //                             box ApplyNative(
+    //                                 Native {
+    //                                     name: "permute".to_owned(),
+    //                                     input_arity: 2,
+    //                                     output_arity: 1,
+    //                                     fun: Native::permute,
+    //                                 },
+    //                                 vec!["tmp0".to_owned(), "tmp1".to_owned()],
+    //                             ),
+    //                         ),
+    //                     ),
+    //                     box Seal(box permutation.into_iter().fold(Something, |expr, i| {
+    //                         Product(box expr, box Scalar(self::Scalar::Number((i + 1) as i64)))
+    //                     })),
+    //                 ),
+    //                 box Seal(box source),
+    //             ),
+    //             box expr,
+    //         );
+    //     }
+    //     Ok(expr)
+    // }
 }
 
 pub fn parse(code: &str) -> Result<Expression, String> {

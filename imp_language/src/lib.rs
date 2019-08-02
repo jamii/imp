@@ -361,6 +361,14 @@ impl ValueType {
             }
         })
     }
+
+    fn as_fun(self) -> Self {
+        use ValueType::*;
+        match self {
+            Nothing | Something => Something, // the type Something include sthe values something and nothing. kinda weird
+            Product(s, t) | Abstract(s, t) => Abstract(s, t),
+        }
+    }
 }
 
 impl Scalar {
@@ -1103,7 +1111,7 @@ impl Expression {
                     .intersection(e2.typecheck(env, cache)?)?;
                 ValueType::Something
             }
-            Negation(e) => e.typecheck(env, cache)?,
+            Negation(e) => e.typecheck(env, cache)?.as_fun(),
             Name(name) => env
                 .lookup(name)
                 .ok_or_else(|| format!("Unbound variable: {:?}", name))?

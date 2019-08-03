@@ -33,7 +33,28 @@ fn update(node: &HtmlElement) {
             let type_env = imp_language::Environment::new();
             let mut type_cache = imp_language::Cache::new();
             let typ = expr.typecheck(&type_env, &mut type_cache);
-            outputs.push(format!("Type: {:?}", typ));
+            outputs.push(format!("Type: {:?}", dbg!(typ)));
+            let scalar_env = imp_language::Environment::new();
+            let mut scalar_cache = imp_language::Cache::new();
+            expr.scalar(&scalar_env, &mut scalar_cache).unwrap();
+            let lowered = expr.lower(&scalar_cache, &type_cache);
+            outputs.push(format!(
+                "Lowered: {}",
+                match dbg!(lowered.map(|lowered| lowered
+                    .into_iter()
+                    .map(|(name, args, body)| format!(
+                        "{} = \\ {} -> {}",
+                        name,
+                        args.join(" "),
+                        body
+                    ))
+                    .collect::<Vec<_>>()
+                    .join("\n")))
+                {
+                    Ok(s) => format!("Ok:\n {}", s),
+                    Err(s) => format!("Err: {}", s),
+                }
+            ));
             match imp_language::eval(expr) {
                 Err(error) => outputs.push(format!("Error: {}", error)),
                 Ok(value) => outputs.push(format!("Evalled: {}", value)),

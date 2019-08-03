@@ -63,6 +63,7 @@ pub enum Expression {
     Seal(Box<Expression>),
     Unseal(Box<Expression>),
     Exists(Vec<Name>, Box<Expression>),
+    Solve(Box<Expression>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -111,7 +112,7 @@ pub struct Cache<T> {
 
 #[derive(Debug, Clone)]
 enum LowerAction {
-    Refer(Vec<Name>),
+    Refer(String, Vec<Name>),
     Inline(Expression),
 }
 #[derive(Debug, Clone)]
@@ -251,6 +252,9 @@ impl fmt::Display for Expression {
                 write_delimited(f, " ", args, |f, arg| write!(f, "{}", arg))?;
                 write!(f, " -> {})", body)?;
             }
+            Solve(e) => {
+                write!(f, "?({})", e)?;
+            }
         }
         Ok(())
     }
@@ -362,11 +366,20 @@ impl ValueType {
         })
     }
 
-    fn as_fun(self) -> Self {
+    fn negate(self) -> Self {
         use ValueType::*;
         match self {
-            Nothing | Something => Something, // the type Something include sthe values something and nothing. kinda weird
-            Product(s, t) | Abstract(s, t) => Abstract(s, t),
+            Nothing | Something => Something, // the type Something includes the values something and nothing. kinda weird
+            Product(s, t) | Abstract(s, t) => Abstract(s, box t.negate()),
+        }
+    }
+
+    fn solve(self) -> Self {
+        use ValueType::*;
+        match self {
+            Nothing => Nothing,
+            Something => Something,
+            Product(s, t) | Abstract(s, t) => Product(s, box t.solve()),
         }
     }
 }
@@ -839,6 +852,7 @@ impl Expression {
             Seal(e) => f(&*e)?,
             Unseal(e) => f(&*e)?,
             Exists(_, body) => f(&*body)?,
+            Solve(e) => f(&*e)?,
         }
         Ok(())
     }
@@ -896,6 +910,7 @@ impl Expression {
             Seal(box e) => f(e)?,
             Unseal(box e) => f(e)?,
             Exists(_, box body) => f(body)?,
+            Solve(box e) => f(e)?,
         }
         Ok(())
     }
@@ -1047,7 +1062,7 @@ impl Expression {
                 Value::scalar(crate::Scalar::Sealed(e, seal_env))
             }
             Unseal(e) => Value::unseal(e.eval(env)?)?,
-            Exists(_, _) => return Err(format!("Unimplemented: {}", self)),
+            Exists(..) | Solve(..) => return Err(format!("Unimplemented: {}", self)),
         })
     }
 
@@ -1111,7 +1126,7 @@ impl Expression {
                     .intersection(e2.typecheck(env, cache)?)?;
                 ValueType::Something
             }
-            Negation(e) => e.typecheck(env, cache)?.as_fun(),
+            Negation(e) => e.typecheck(env, cache)?.negate(),
             Name(name) => env
                 .lookup(name)
                 .ok_or_else(|| format!("Unbound variable: {:?}", name))?
@@ -1151,6 +1166,7 @@ impl Expression {
             }
             Unseal(..) => return Err(format!("Can't type unseal")),
             Exists(..) => return Err(format!("Can't type exists")),
+            Solve(e) => e.typecheck(env, cache)?.solve(),
         };
         cache.insert(self, typ.clone());
         Ok(typ)
@@ -1253,9 +1269,21 @@ impl Expression {
             Negation(box e) => {
                 Negation(box e.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?)
             }
-            Name(name) => {
-                Expression::apply(name, args.iter().map(|arg| Name(arg.clone())).collect())
-            }
+            Name(name) => match actions.lookup(name) {
+                Some(LowerAction::Inline(expr)) => {
+                    expr.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?
+                }
+                // TODO might need to be careful about shadowing here if variable names are not unique
+                Some(LowerAction::Refer(new_name, prefix_args)) => {
+                    // TODO this will have the wrong var names
+                    let mut expr = Expression::apply(
+                        new_name,
+                        prefix_args.iter().map(|arg| Name(arg.clone())).collect(),
+                    );
+                    expr
+                }
+                None => Err(format!("Name from outside of lower {:?}", name))?,
+            },
             Let(name, value, box body) => {
                 let mut actions = actions.clone();
                 match type_cache.get(&value) {
@@ -1263,9 +1291,20 @@ impl Expression {
                         actions.bind(name.clone(), LowerAction::Inline((**value).clone()));
                         body.contains(args, &actions, scalar_cache, type_cache, next_tmp, lets)?
                     }
-                    _ => {
+                    typ => {
+                        let arity = match typ.arity() {
+                            Arity::Exactly(a) => a,
+                            Arity::AtLeast(a) => a,
+                        };
+                        let value_args = (0..arity)
+                            .map(|_| {
+                                let name = format!("var{}", next_tmp);
+                                *next_tmp += 1;
+                                name
+                            })
+                            .collect::<Vec<_>>();
                         let value = value.contains(
-                            args,
+                            &value_args,
                             &actions,
                             scalar_cache,
                             type_cache,
@@ -1274,8 +1313,8 @@ impl Expression {
                         )?;
                         let new_name = format!("{}_{}", name, next_tmp);
                         *next_tmp += 1;
-                        lets.push((new_name, args.to_vec(), value));
-                        actions.bind(name.clone(), LowerAction::Refer(args.to_vec()));
+                        lets.push((new_name.clone(), args.to_vec(), value));
+                        actions.bind(name.clone(), LowerAction::Refer(new_name, args.to_vec()));
                         body.contains(args, &actions, scalar_cache, type_cache, next_tmp, lets)?
                     }
                 }
@@ -1296,6 +1335,7 @@ impl Expression {
                         next_tmp,
                         lets,
                     )?
+                    // TODO does this assume arg is unique?
                     .rename(arg, &args[0]);
                 expr
             }
@@ -1375,15 +1415,19 @@ impl Expression {
             //     assert_eq!(args.len(), 1);
             //     Apply(box Seal(e.clone()), box Name(args[0].clone()))
             // }
+            Solve(e) => {
+                // TODO check e is finite here (or elsewhere)
+                e.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?
+            }
             _ => return Err(format!("Can't lower {}", self)),
         })
     }
 
-    fn applied_to(&self, outer: Lowered, outer_scope: Scope) -> Result<Lowered, String> {
-        use Expression::*;
-        use Lowered::*;
-        match self {}
-    }
+    // fn applied_to(&self, outer: Lowered, outer_scope: Scope) -> Result<Lowered, String> {
+    //     use Expression::*;
+    //     use Lowered::*;
+    //     match self {}
+    // }
 
     pub fn lower(
         &self,

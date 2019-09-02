@@ -401,7 +401,7 @@ impl Native {
                                             if 0 <= i && i < (row.len() as i64) {
                                                 Ok(row[i as usize].clone())
                                             } else {
-                                                Err(format!("Out of bounds: {}", i))
+                                                Err(format!("Out of bounds: {}", i + 1))
                                             }
                                         })
                                         .collect::<Result<Vec<_>, _>>()?,

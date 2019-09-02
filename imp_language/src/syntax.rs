@@ -200,8 +200,24 @@ impl<'a> Parser<'a> {
 
     fn expression_apply(&self) -> Result<Expression, Error> {
         let mut expression = self.expression_inner()?;
-        while let Some(right) = self.try_expression_inner()? {
-            expression = Expression::Apply(box expression, box right);
+        loop {
+            if self.string("[") {
+                let right = self.expression_outer()?;
+                if !self.string("]") {
+                    return Err(self.expected("]"));
+                }
+                expression = Expression::apply(
+                    "permute",
+                    vec![
+                        Expression::Seal(box right),
+                        Expression::Seal(box expression),
+                    ],
+                );
+            } else if let Some(right) = self.try_expression_inner()? {
+                expression = Expression::Apply(box expression, box right);
+            } else {
+                break;
+            }
         }
         Ok(expression)
     }

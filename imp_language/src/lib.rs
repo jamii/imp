@@ -1,37 +1,17 @@
 #![feature(box_syntax)]
 #![feature(box_patterns)]
 
-use lalrpop_util::lalrpop_mod;
 use log::{error, info, warn};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::iter::FromIterator;
 
+#[macro_use]
+mod macros;
 mod lower;
+mod syntax;
 
-macro_rules! d {
-    ( $e:expr ) => {{
-        info!("{:?}", $e);
-    }};
-}
-
-// macro_rules! iflet {
-//     ( $p:pat = $e:expr ) => {{
-//         if let $o = $e {
-//             true
-//         } else {
-//             false
-//         }
-//     }};
-// }
-
-// macro_rules! s {
-//     ( $l:literal ) => {{
-//         $l.to_owned()
-//     }};
-// }
-
-lalrpop_mod!(pub syntax);
+pub use syntax::parse;
 
 pub type Name = String; // non-empty
 
@@ -50,10 +30,10 @@ pub enum Expression {
     Something,
     Scalar(Scalar),
     Union(Box<Expression>, Box<Expression>),
-    Intersection(Box<Expression>, Box<Expression>),
+    Intersect(Box<Expression>, Box<Expression>),
     Product(Box<Expression>, Box<Expression>),
-    Equals(Box<Expression>, Box<Expression>),
-    Negation(Box<Expression>),
+    Equal(Box<Expression>, Box<Expression>),
+    Negate(Box<Expression>),
     Name(Name),
     Let(Name, Box<Expression>, Box<Expression>),
     If(Box<Expression>, Box<Expression>, Box<Expression>),
@@ -227,10 +207,10 @@ impl fmt::Display for Expression {
             Something => write!(f, "something")?,
             Scalar(scalar) => write!(f, "{}", scalar)?,
             Union(e1, e2) => write!(f, "({} | {})", e1, e2)?,
-            Intersection(e1, e2) => write!(f, "({} & {})", e1, e2)?,
+            Intersect(e1, e2) => write!(f, "({} & {})", e1, e2)?,
             Product(e1, e2) => write!(f, "({} x {})", e1, e2)?,
-            Equals(e1, e2) => write!(f, "({} = {})", e1, e2)?,
-            Negation(e) => write!(f, "!{}", e)?,
+            Equal(e1, e2) => write!(f, "({} = {})", e1, e2)?,
+            Negate(e) => write!(f, "!{}", e)?,
             Name(name) => write!(f, "{}", name)?,
             Let(name, value, body) => write!(f, "let {} = {} in {}", name, value, body)?,
             If(cond, if_true, if_false) => {
@@ -260,16 +240,12 @@ impl fmt::Display for Expression {
     }
 }
 
-fn gensym() -> Name {
-    format!("tmp{}", rand::random::<usize>())
-}
-
 impl ScalarType {
     fn union(self, _other: Self) -> Result<Self, String> {
         Ok(ScalarType::Any)
     }
 
-    fn intersection(self, _other: Self) -> Result<Self, String> {
+    fn intersect(self, _other: Self) -> Result<Self, String> {
         Ok(ScalarType::Any)
     }
 
@@ -318,18 +294,18 @@ impl ValueType {
         })
     }
 
-    fn intersection(self, other: Self) -> Result<Self, String> {
+    fn intersect(self, other: Self) -> Result<Self, String> {
         use ValueType::*;
         Ok(match (self, other) {
             (Nothing, _) | (_, Nothing) => Nothing,
             (Something, Something) => Something,
             (Product(s1, t1), Product(s2, t2)) => {
-                Product(s1.intersection(s2)?, box t1.intersection(*t2)?)
+                Product(s1.intersect(s2)?, box t1.intersect(*t2)?)
             }
             (Abstract(s1, t1), Abstract(s2, t2))
             | (Abstract(s1, t1), Product(s2, t2))
             | (Product(s1, t1), Abstract(s2, t2)) => {
-                Abstract(s1.intersection(s2)?, box t1.intersection(*t2)?)
+                Abstract(s1.intersect(s2)?, box t1.intersect(*t2)?)
             }
             (t1, t2) => return Err(format!("Can't unify {:?} and {:?}", t1, t2)),
         })
@@ -356,8 +332,8 @@ impl ValueType {
             (Product(s1, t1), Product(s2, t2))
             | (Abstract(s1, t1), Product(s2, t2))
             | (Product(s1, t1), Abstract(s2, t2)) => {
-                // TODO intersection is fine for now, but may want to think more carefully about this once we have real scalar types
-                s1.intersection(s2)?;
+                // TODO intersect is fine for now, but may want to think more carefully about this once we have real scalar types
+                s1.intersect(s2)?;
                 t1.apply(*t2)?
             }
             (t1 @ Abstract(..), t2 @ Abstract(..)) => {
@@ -638,7 +614,7 @@ impl Value {
         })
     }
 
-    fn intersection(val1: Value, val2: Value) -> Result<Value, String> {
+    fn intersect(val1: Value, val2: Value) -> Result<Value, String> {
         use Expression::*;
         use Value::*;
         Ok(if val1.is_nothing() {
@@ -651,7 +627,7 @@ impl Value {
                 (v1, v2) => {
                     // (f & g) => (a -> (f a) & (g a))
                     let env = Environment::from(vec![("v1".to_owned(), v1), ("v2".to_owned(), v2)]);
-                    let expr = Intersection(
+                    let expr = Intersect(
                         box Apply(box Name("v1".to_owned()), box Name("a".to_owned())),
                         box Apply(box Name("v2".to_owned()), box Name("a".to_owned())),
                     );
@@ -694,7 +670,7 @@ impl Value {
             // !f => (a -> !(f a))
             Closure(
                 "a".to_owned(),
-                Negation(box Apply(
+                Negate(box Apply(
                     box Name("v".to_owned()),
                     box Name("a".to_owned()),
                 )),
@@ -820,7 +796,7 @@ impl Expression {
                 f(&*e1)?;
                 f(&*e2)?;
             }
-            Intersection(e1, e2) => {
+            Intersect(e1, e2) => {
                 f(&*e1)?;
                 f(&*e2)?;
             }
@@ -828,11 +804,11 @@ impl Expression {
                 f(&*e1)?;
                 f(&*e2)?;
             }
-            Equals(e1, e2) => {
+            Equal(e1, e2) => {
                 f(&*e1)?;
                 f(&*e2)?;
             }
-            Negation(e) => f(&*e)?,
+            Negate(e) => f(&*e)?,
             Name(_) => (),
             Let(_, value, body) => {
                 f(&*value)?;
@@ -878,7 +854,7 @@ impl Expression {
                 f(e1)?;
                 f(e2)?;
             }
-            Intersection(box e1, box e2) => {
+            Intersect(box e1, box e2) => {
                 f(e1)?;
                 f(e2)?;
             }
@@ -886,11 +862,11 @@ impl Expression {
                 f(e1)?;
                 f(e2)?;
             }
-            Equals(box e1, box e2) => {
+            Equal(box e1, box e2) => {
                 f(e1)?;
                 f(e2)?;
             }
-            Negation(box e) => f(e)?,
+            Negate(box e) => f(e)?,
             Name(_) => (),
             Let(_, box value, box body) => {
                 f(value)?;
@@ -1026,10 +1002,10 @@ impl Expression {
             Something => Value::something(),
             Scalar(scalar) => Value::scalar(scalar),
             Union(box e1, box e2) => Value::union(e1.eval(env)?, e2.eval(env)?)?,
-            Intersection(box e1, box e2) => Value::intersection(e1.eval(env)?, e2.eval(env)?)?,
+            Intersect(box e1, box e2) => Value::intersect(e1.eval(env)?, e2.eval(env)?)?,
             Product(box e1, box e2) => Value::product(e1.eval(env)?, e2.eval(env)?)?,
-            Equals(box e1, box e2) => Value::equals(e1.eval(env)?, e2.eval(env)?),
-            Negation(box e) => Value::negation(e.eval(env)?),
+            Equal(box e1, box e2) => Value::equals(e1.eval(env)?, e2.eval(env)?),
+            Negate(box e) => Value::negation(e.eval(env)?),
             Name(name) => match env.lookup(&name) {
                 Some(value) => value.clone(),
                 None => Err(format!("Undefined: {}", name))?,
@@ -1114,19 +1090,19 @@ impl Expression {
             Something => ValueType::Something,
             Scalar(_) => ValueType::Product(ScalarType::Any, box ValueType::Something),
             Union(e1, e2) => e1.typecheck(env, cache)?.union(e2.typecheck(env, cache)?)?,
-            Intersection(e1, e2) => e1
+            Intersect(e1, e2) => e1
                 .typecheck(env, cache)?
-                .intersection(e2.typecheck(env, cache)?)?,
+                .intersect(e2.typecheck(env, cache)?)?,
             Product(e1, e2) => e1
                 .typecheck(env, cache)?
                 .product(e2.typecheck(env, cache)?)?,
-            Equals(e1, e2) => {
-                // TODO intersection is fine for now, but may want to think more carefully about this once we have real scalar types
+            Equal(e1, e2) => {
+                // TODO intersect is fine for now, but may want to think more carefully about this once we have real scalar types
                 e1.typecheck(env, cache)?
-                    .intersection(e2.typecheck(env, cache)?)?;
+                    .intersect(e2.typecheck(env, cache)?)?;
                 ValueType::Something
             }
-            Negation(e) => e.typecheck(env, cache)?.negate(),
+            Negate(e) => e.typecheck(env, cache)?.negate(),
             Name(name) => env
                 .lookup(name)
                 .ok_or_else(|| format!("Unbound variable: {:?}", name))?
@@ -1234,7 +1210,7 @@ impl Expression {
                 box e1.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?,
                 box e2.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?,
             ),
-            Intersection(box e1, box e2) => Intersection(
+            Intersect(box e1, box e2) => Intersect(
                 box e1.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?,
                 box e2.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?,
             ),
@@ -1243,7 +1219,7 @@ impl Expression {
                     Arity::Exactly(a) => a,
                     Arity::AtLeast(_) => 0,
                 };
-                Intersection(
+                Intersect(
                     box e1.contains(
                         &args[0..a1],
                         actions,
@@ -1262,12 +1238,12 @@ impl Expression {
                     )?,
                 )
             }
-            Equals(box e1, box e2) => {
+            Equal(box e1, box e2) => {
                 assert_eq!(args.len(), 0);
-                Equals(box e1.clone(), box e2.clone())
+                Equal(box e1.clone(), box e2.clone())
             }
-            Negation(box e) => {
-                Negation(box e.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?)
+            Negate(box e) => {
+                Negate(box e.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?)
             }
             Name(name) => match actions.lookup(name) {
                 Some(LowerAction::Inline(expr)) => {
@@ -1276,7 +1252,7 @@ impl Expression {
                 // TODO might need to be careful about shadowing here if variable names are not unique
                 Some(LowerAction::Refer(new_name, prefix_args)) => {
                     // TODO this will have the wrong var names
-                    let mut expr = Expression::apply(
+                    let expr = Expression::apply(
                         new_name,
                         prefix_args.iter().map(|arg| Name(arg.clone())).collect(),
                     );
@@ -1343,7 +1319,7 @@ impl Expression {
                 match (*scalar_cache.get(left), *scalar_cache.get(right)) {
                     (true, true) => {
                         assert_eq!(args.len(), 0);
-                        Equals(box left.clone(), box right.clone())
+                        Equal(box left.clone(), box right.clone())
                     }
                     (true, false) => {
                         let mut args = args.to_vec();
@@ -1386,7 +1362,7 @@ impl Expression {
                         } else {
                             left_args.extend_from_slice(args);
                         }
-                        Intersection(
+                        Intersect(
                             box left.contains(
                                 &left_args,
                                 actions,
@@ -1493,9 +1469,9 @@ impl Expression {
     // pub fn bound(&self, name: &Name, type_cache: &Cache<ValueType>) -> Option<Expression> {
     //     use Expression::*;
     //     match self {
-    //         Intersection(e1, e2) => {
+    //         Intersect(e1, e2) => {
     //             match (e1.bound(name, type_cache), e2.bound(name, type_cache)) {
-    //                 (Some(b1), Some(b2)) => Some(Intersection(box b1, box b2)),
+    //                 (Some(b1), Some(b2)) => Some(Intersect(box b1, box b2)),
     //                 (Some(b), None) | (None, Some(b)) => Some(b),
     //                 (None, None) => None,
     //             }
@@ -1520,7 +1496,7 @@ impl Expression {
     //             }
     //             f.bound(name, type_cache)
     //         }
-    //         Equals(box e1, box e2) => {
+    //         Equal(box e1, box e2) => {
     //             if let Name(e1) = e1 {
     //                 if e1 == name {
     //                     return Some(e2.clone());
@@ -1623,12 +1599,6 @@ impl Expression {
     // }
 }
 
-pub fn parse(code: &str) -> Result<Expression, String> {
-    syntax::Expression0Parser::new()
-        .parse(code)
-        .map_err(|error| format!("{:?}", error))
-}
-
 pub fn eval(expr: Expression) -> Result<Value, String> {
     expr.eval(&Environment::new())
 }
@@ -1638,20 +1608,21 @@ mod tests {
     use super::*;
 
     fn run(code: &str) -> Result<Value, String> {
-        parse(code)?
+        parse(code)
+            .map_err(|error| format!("{:?}", error))?
             .desugar()
             .with_natives(&Native::stdlib())
             .eval(&Environment::new())
     }
 
     macro_rules! assert_eq_run {
-        ( $code1:expr, $($code2:expr),* $(,)? ) => {{
-            $(
-                println!("{} = {}, {:?} = {:?}", $code1, $code2, run($code1), run($code2));
-                assert_eq!(run($code1), run($code2), "{:?} = {:?}", $code1, $code2);
-            )+
-        }};
-    }
+            ( $code1:expr, $($code2:expr),* $(,)? ) => {{
+                $(
+                    println!("{} = {}, {:?} = {:?}", $code1, $code2, run($code1), run($code2));
+                    assert_eq!(run($code1), run($code2), "{:?} = {:?}", $code1, $code2);
+                )+
+            }};
+        }
 
     #[test]
     fn basic() {
@@ -1664,7 +1635,7 @@ mod tests {
             vec!["a".to_owned(), "b".to_owned()].into_iter().collect()
         );
         assert_eq!(
-            parse("\\ a -> a | b").unwrap().free_names(),
+            parse("a -> a | b").unwrap().free_names(),
             vec!["b".to_owned()].into_iter().collect()
         );
 

@@ -9,7 +9,7 @@ use web_sys::HtmlElement;
 use web_sys::HtmlTextAreaElement;
 
 #[allow(unused_macros)]
-macro_rules! dbg {
+macro_rules! d {
     ($e:expr) => {{
         let val = $e;
         web_sys::console::log_1(&format!("{} = {:#?}", stringify!($e), val).into());
@@ -26,38 +26,40 @@ fn update(node: &HtmlElement) {
         .value();
     let mut outputs = vec![];
     match imp_language::parse(&code) {
-        Err(error) => outputs.push(format!("Error: {}", error)),
+        Err(error) => {
+            outputs.push(format!("Error: {:?}", dbg!(&error)));
+        }
         Ok(expr) => {
             let expr = expr.with_natives(&imp_language::Native::stdlib());
-            // outputs.push(format!("Parsed: {}", expr));
+            outputs.push(format!("Parsed: {}", dbg!(&expr)));
             let type_env = imp_language::Environment::new();
             let mut type_cache = imp_language::Cache::new();
             let typ = expr.typecheck(&type_env, &mut type_cache);
-            outputs.push(format!("Type: {:?}", dbg!(typ)));
+            outputs.push(format!("Type: {:?}", dbg!(&typ)));
             let scalar_env = imp_language::Environment::new();
             let mut scalar_cache = imp_language::Cache::new();
             expr.scalar(&scalar_env, &mut scalar_cache).unwrap();
-            let lowered = expr.lower(&scalar_cache, &type_cache);
-            outputs.push(format!(
-                "Lowered: {}",
-                match dbg!(lowered.map(|lowered| lowered
-                    .into_iter()
-                    .map(|(name, args, body)| format!(
-                        "{} = \\ {} -> {}",
-                        name,
-                        args.join(" "),
-                        body
-                    ))
-                    .collect::<Vec<_>>()
-                    .join("\n")))
-                {
-                    Ok(s) => format!("Ok:\n {}", s),
-                    Err(s) => format!("Err: {}", s),
-                }
-            ));
+            // let lowered = expr.lower(&scalar_cache, &type_cache);
+            // outputs.push(format!(
+            //     "Lowered: {}",
+            //     match dbg!(lowered.map(|lowered| lowered
+            //         .into_iter()
+            //         .map(|(name, args, body)| format!(
+            //             "{} = \\ {} -> {}",
+            //             name,
+            //             args.join(" "),
+            //             body
+            //         ))
+            //         .collect::<Vec<_>>()
+            //         .join("\n")))
+            //     {
+            //         Ok(s) => format!("Ok:\n {}", s),
+            //         Err(s) => format!("Err: {}", s),
+            //     }
+            // ));
             match imp_language::eval(expr) {
-                Err(error) => outputs.push(format!("Error: {}", error)),
-                Ok(value) => outputs.push(format!("Evalled: {}", value)),
+                Err(error) => outputs.push(format!("Error: {}", dbg!(&error))),
+                Ok(value) => outputs.push(format!("Evalled: {}", dbg!(&value))),
             }
         }
     }

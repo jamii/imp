@@ -50,7 +50,7 @@ pub enum Expression {
 pub enum Scalar {
     String(String),
     Number(i64),
-    Sealed(Box<Expression>, Environment<Value>),
+    Sealed(Box<Value>),
 }
 
 pub type Set = BTreeSet<Vec<Scalar>>;
@@ -99,8 +99,6 @@ enum LowerAction {
 pub struct Scope {
     vars: Vec<Option<Name>>,
 }
-
-enum Lowered {}
 
 impl<T> Cache<T> {
     pub fn new() -> Self {
@@ -161,10 +159,9 @@ impl fmt::Display for Scalar {
         match self {
             Scalar::String(string) => write!(f, "{:?}", string)?,
             Scalar::Number(number) => write!(f, "{:?}", number)?,
-            Scalar::Sealed(expr, env) => {
+            Scalar::Sealed(value) => {
                 write!(f, "{{")?;
-                write_environment(f, env)?;
-                write!(f, "{}", expr)?;
+                write!(f, "{}", value)?;
                 write!(f, "}}")?;
             }
         }
@@ -367,13 +364,6 @@ impl Scalar {
             _ => Err(format!("Not an integer: {}", self)),
         }
     }
-
-    fn unseal(&self) -> Result<Value, String> {
-        match self {
-            Scalar::Sealed(expr, env) => expr.clone().eval(&env),
-            _ => Err(format!("${}", self)),
-        }
-    }
 }
 
 impl Native {
@@ -387,31 +377,26 @@ impl Native {
 
     fn permute(scalars: Vec<Scalar>) -> Result<Value, String> {
         match &*scalars {
-            [permutations @ Scalar::Sealed(..), set @ Scalar::Sealed(..)] => {
-                match (permutations.unseal()?, set.unseal()?) {
-                    (Value::Set(permutations), Value::Set(set)) => {
-                        let mut result = Set::new();
-                        for permutation in permutations {
-                            for row in &set {
-                                result.insert(
-                                    permutation
-                                        .iter()
-                                        .map(|i| {
-                                            let i = i.as_integer()? - 1;
-                                            if 0 <= i && i < (row.len() as i64) {
-                                                Ok(row[i as usize].clone())
-                                            } else {
-                                                Err(format!("Out of bounds: {}", i + 1))
-                                            }
-                                        })
-                                        .collect::<Result<Vec<_>, _>>()?,
-                                );
-                            }
-                        }
-                        Ok(Value::Set(result))
+            [Scalar::Sealed(box Value::Set(permutations)), Scalar::Sealed(box Value::Set(set))] => {
+                let mut result = Set::new();
+                for permutation in permutations {
+                    for row in set {
+                        result.insert(
+                            permutation
+                                .iter()
+                                .map(|i| {
+                                    let i = i.as_integer()? - 1;
+                                    if 0 <= i && i < (row.len() as i64) {
+                                        Ok(row[i as usize].clone())
+                                    } else {
+                                        Err(format!("Out of bounds: {}", i + 1))
+                                    }
+                                })
+                                .collect::<Result<Vec<_>, _>>()?,
+                        );
                     }
-                    (a, b) => Err(format!("permute {{{}}} {{{}}}", a, b)),
                 }
+                Ok(Value::Set(result))
             }
             [a, b] => Err(format!("permute {} {}", a, b)),
             _ => unreachable!(),
@@ -420,29 +405,27 @@ impl Native {
 
     fn reduce(scalars: Vec<Scalar>) -> Result<Value, String> {
         match &*scalars {
-            [init, fun @ Scalar::Sealed(..), set @ Scalar::Sealed(..)] => {
-                match (fun.unseal()?, set.unseal()?) {
-                    (fun, Value::Set(set)) => {
-                        let mut result = Value::Set(Set::from_iter(vec![vec![init.clone()]]));
-                        for row in set {
-                            let env = Environment::from(vec![
-                                ("fun".to_owned(), fun.clone()),
-                                ("result".to_owned(), result),
-                                ("row".to_owned(), Value::Set(Set::from_iter(vec![row]))),
-                            ]);
-                            let expr = Expression::Apply(
-                                box Expression::Apply(
-                                    box Expression::Name("fun".to_owned()),
-                                    box Expression::Name("result".to_owned()),
-                                ),
-                                box Expression::Name("row".to_owned()),
-                            );
-                            result = expr.eval(&env)?;
-                        }
-                        Ok(result)
-                    }
-                    (a, b) => Err(format!("reduce {} {{{}}} {{{}}}", init, a, b)),
+            [init, Scalar::Sealed(box fun), Scalar::Sealed(box Value::Set(set))] => {
+                let mut result = Value::Set(Set::from_iter(vec![vec![init.clone()]]));
+                for row in set {
+                    let env = Environment::from(vec![
+                        ("fun".to_owned(), fun.clone()),
+                        ("result".to_owned(), result),
+                        (
+                            "row".to_owned(),
+                            Value::Set(Set::from_iter(vec![row.clone()])),
+                        ),
+                    ]);
+                    let expr = Expression::Apply(
+                        box Expression::Apply(
+                            box Expression::Name("fun".to_owned()),
+                            box Expression::Name("result".to_owned()),
+                        ),
+                        box Expression::Name("row".to_owned()),
+                    );
+                    result = expr.eval(&env)?;
                 }
+                Ok(result)
             }
             [a, b, c] => Err(format!("reduce {} {} {}", a, b, c)),
             _ => unreachable!(),
@@ -452,24 +435,21 @@ impl Native {
     // TODO pivot isn't quite the right name for this
     fn pivot(scalars: Vec<Scalar>) -> Result<Value, String> {
         match &*scalars {
-            [set @ Scalar::Sealed(..)] => match set.unseal()? {
-                Value::Set(set) => {
-                    let mut result = Set::new();
-                    let mut input = set.into_iter().collect::<Vec<_>>();
-                    input.sort();
-                    for (r, row) in input.into_iter().enumerate() {
-                        for (c, val) in row.into_iter().enumerate() {
-                            result.insert(vec![
-                                Scalar::Number(r as i64),
-                                Scalar::Number(c as i64),
-                                val,
-                            ]);
-                        }
+            [Scalar::Sealed(box Value::Set(set))] => {
+                let mut result = Set::new();
+                let mut input = set.iter().collect::<Vec<_>>();
+                input.sort();
+                for (r, row) in input.into_iter().enumerate() {
+                    for (c, val) in row.into_iter().enumerate() {
+                        result.insert(vec![
+                            Scalar::Number(r as i64),
+                            Scalar::Number(c as i64),
+                            val.clone(),
+                        ]);
                     }
-                    Ok(Value::Set(result))
                 }
-                a => Err(format!("pivot {{{}}}", a)),
-            },
+                Ok(Value::Set(result))
+            }
             [a] => Err(format!("pivot {}", a)),
             _ => unreachable!(),
         }
@@ -773,7 +753,10 @@ impl Value {
     }
 
     fn unseal(val: Value) -> Result<Value, String> {
-        val.as_scalar()?.unseal()
+        match val.as_scalar()? {
+            Scalar::Sealed(box sealed) => Ok(sealed),
+            _ => return Err(format!("${}", val)),
+        }
     }
 
     fn typ(&self) -> Result<ValueType, String> {
@@ -1080,10 +1063,7 @@ impl Expression {
                     .map(|arg| env.lookup(&arg).unwrap().clone().as_scalar().unwrap())
                     .collect(),
             )?,
-            Seal(e) => {
-                let seal_env = env.close_over(e.free_names());
-                Value::scalar(crate::Scalar::Sealed(e, seal_env))
-            }
+            Seal(e) => Value::scalar(self::Scalar::Sealed(box e.eval(env)?)),
             Unseal(e) => Value::unseal(e.eval(env)?)?,
             Exists(..) | Solve(..) => return Err(format!("Unimplemented: {}", self)),
         })

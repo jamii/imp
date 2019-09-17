@@ -449,6 +449,41 @@ impl Native {
         }
     }
 
+    // TODO pivot isn't quite the right name for this
+    fn pivot(scalars: Vec<Scalar>) -> Result<Value, String> {
+        match &*scalars {
+            [set @ Scalar::Sealed(..)] => match set.unseal()? {
+                Value::Set(set) => {
+                    let mut result = Set::new();
+                    let mut input = set.into_iter().collect::<Vec<_>>();
+                    input.sort();
+                    for (r, row) in input.into_iter().enumerate() {
+                        for (c, val) in row.into_iter().enumerate() {
+                            result.insert(vec![
+                                Scalar::Number(r as i64),
+                                Scalar::Number(c as i64),
+                                val,
+                            ]);
+                        }
+                    }
+                    Ok(Value::Set(result))
+                }
+                a => Err(format!("pivot {{{}}}", a)),
+            },
+            [a] => Err(format!("pivot {}", a)),
+            _ => unreachable!(),
+        }
+    }
+
+    fn as_text(scalars: Vec<Scalar>) -> Result<Value, String> {
+        match &*scalars {
+            [scalar] => Ok(Value::Set(Set::from_iter(vec![vec![Scalar::String(
+                format!("{}", scalar),
+            )]]))),
+            _ => unreachable!(),
+        }
+    }
+
     // fn solve(scalars: Vec<Scalar>) -> Result<Value, String> {
     //     match &*scalars {
     //         [Scalar::Sealed(box expr, env)] => {
@@ -499,6 +534,18 @@ impl Native {
                 input_arity: 3,
                 output_arity: 1,
                 fun: Native::reduce,
+            },
+            Native {
+                name: "pivot".to_owned(),
+                input_arity: 1,
+                output_arity: 3,
+                fun: Native::pivot,
+            },
+            Native {
+                name: "as_text".to_owned(),
+                input_arity: 1,
+                output_arity: 1,
+                fun: Native::as_text,
             },
             // Native {
             //     name: "solve".to_owned(),

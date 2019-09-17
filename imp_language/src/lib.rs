@@ -442,8 +442,8 @@ impl Native {
                 for (r, row) in input.into_iter().enumerate() {
                     for (c, val) in row.into_iter().enumerate() {
                         result.insert(vec![
-                            Scalar::Number(r as i64),
-                            Scalar::Number(c as i64),
+                            Scalar::Number((r + 1) as i64),
+                            Scalar::Number((c + 1) as i64),
                             val.clone(),
                         ]);
                     }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 cd $(dirname $0)
 set -ex
-cargo +nightly build --target wasm32-unknown-unknown
-wasm-bindgen --no-modules ../target/wasm32-unknown-unknown/debug/imp_demo.wasm --out-dir ./target
+# TODO --target web
+wasm-pack build --target no-modules

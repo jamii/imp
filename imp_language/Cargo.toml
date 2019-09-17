@@ -5,6 +5,5 @@ authors = ["Jamie Brandon <jamie@scattered-thoughts.net>"]
 edition = "2018"
 
 [dependencies]
-regex = "0.2.0"
 unescape = "*"
 log = "*"

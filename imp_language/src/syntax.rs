@@ -131,7 +131,9 @@ impl<'a> Parser<'a> {
                         } else if char.is_alphabetic() {
                             loop {
                                 match chars.next() {
-                                    Some(char) if char.is_alphanumeric() => len += char.len_utf8(),
+                                    Some(char) if char.is_alphanumeric() || char == '_' => {
+                                        len += char.len_utf8()
+                                    }
                                     _ => break,
                                 }
                             }

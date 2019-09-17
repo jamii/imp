@@ -752,7 +752,7 @@ impl Value {
         })
     }
 
-    fn unseal(val: Value) -> Result<Value, String> {
+    pub fn unseal(val: Value) -> Result<Value, String> {
         match val.as_scalar()? {
             Scalar::Sealed(box sealed) => Ok(sealed),
             _ => return Err(format!("${}", val)),

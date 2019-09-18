@@ -148,7 +148,7 @@ impl Value {
         }
     }
 
-    fn negation(val: Value) -> Value {
+    fn negate(val: Value) -> Value {
         use Expression::*;
         use Value::*;
         if val.is_nothing() {
@@ -298,7 +298,7 @@ impl Expression {
             Intersect(box e1, box e2) => Value::intersect(e1.eval(env)?, e2.eval(env)?)?,
             Product(box e1, box e2) => Value::product(e1.eval(env)?, e2.eval(env)?)?,
             Equal(box e1, box e2) => Value::equals(e1.eval(env)?, e2.eval(env)?),
-            Negate(box e) => Value::negation(e.eval(env)?),
+            Negate(box e) => Value::negate(e.eval(env)?),
             Name(name) => match env.lookup(&name) {
                 Some(value) => value.clone(),
                 None => Err(format!("Undefined: {}", name))?,

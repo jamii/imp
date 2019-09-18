@@ -2,7 +2,6 @@
 #![feature(box_patterns)]
 #![feature(result_map_or_else)]
 
-use log::{error, info, warn};
 use std::borrow::Borrow;
 use std::fmt::Display;
 use wasm_bindgen::prelude::*;
@@ -13,7 +12,7 @@ use web_sys::EventTarget;
 use web_sys::HtmlElement;
 use web_sys::HtmlTextAreaElement;
 
-use imp_language::{eval, parse, Cache, Environment, Native, Scalar, Value};
+use imp_language::*;
 
 #[allow(unused_macros)]
 macro_rules! d {

@@ -23,73 +23,86 @@ macro_rules! d {
     }};
 }
 
-fn update(node: &HtmlElement) {
+fn find(class: &str) -> HtmlElement {
+    web_sys::window()
+        .unwrap()
+        .document()
+        .unwrap()
+        .get_elements_by_class_name(class)
+        .get_with_index(0)
+        .unwrap()
+        .dyn_into::<HtmlElement>()
+        .unwrap()
+}
+
+#[wasm_bindgen(start)]
+pub fn init() -> Result<(), JsValue> {
+    console_error_panic_hook::set_once();
+    log::set_logger(&DEFAULT_LOGGER).unwrap();
+    log::set_max_level(log::LevelFilter::Info);
+
+    for node in &[find("imp-repl"), find("imp-render")] {
+        let closure = Closure::wrap(box { move || update() } as Box<dyn Fn()>);
+        node.set_onkeyup(Some(closure.as_ref().dyn_ref().unwrap()));
+        closure.forget();
+    }
+    update();
+
+    Ok(())
+}
+
+fn update() {
+    let result = parse_from(&find("imp-repl"))
+        .and_then(|repl_expr| eval_etc(repl_expr, &Environment::new()));
+    let rendered_node = match result {
+        Ok(result) => {
+            let rendered = parse_from(&find("imp-render")).and_then(|render_expr| {
+                eval_etc(
+                    Expression::Apply(
+                        box render_expr,
+                        box Expression::Seal(box Expression::Name("rendered".to_owned())),
+                    ),
+                    &Environment::from(vec![("rendered".to_owned(), result)]),
+                )
+            });
+            match rendered.and_then(Value::unseal) {
+                Ok(rendered) => render(&rendered),
+                Err(error) => {
+                    Node::tag("span").child(Node::text(&format!("From renderer: {}", error)))
+                }
+            }
+        }
+        Err(error) => Node::tag("span").child(Node::text(&error)),
+    };
+    let result_node = find("imp-result").last_element_child().unwrap();
+    result_node.set_inner_html("");
+    result_node.append_child(&rendered_node.node).unwrap();
+}
+
+fn parse_from(node: &HtmlElement) -> Result<Expression, String> {
     let code = node
         .first_element_child()
         .unwrap()
         .dyn_into::<HtmlTextAreaElement>()
         .unwrap()
         .value();
-    let mut outputs = vec![];
-    let mut evalled_node = None;
-    match parse(&code) {
-        Err(error) => {
-            outputs.push(format!("Error: {:?}", dbg!(&error)));
-        }
-        Ok(expr) => {
-            outputs.push(format!("Parsed: {}", dbg!(&expr)));
-            let expr = expr.with_natives(&Native::stdlib());
-            let type_env = Environment::new();
-            let mut type_cache = Cache::new();
-            let typ = expr.typecheck(&type_env, &mut type_cache);
-            outputs.push(format!("Type: {:?}", dbg!(&typ)));
-            let scalar_env = Environment::new();
-            let mut scalar_cache = Cache::new();
-            expr.scalar(&scalar_env, &mut scalar_cache).unwrap();
-            // let lowered = expr.lower(&scalar_cache, &type_cache);
-            // outputs.push(format!(
-            //     "Lowered: {}",
-            //     match dbg!(lowered.map(|lowered| lowered
-            //         .into_iter()
-            //         .map(|(name, args, body)| format!(
-            //             "{} = \\ {} -> {}",
-            //             name,
-            //             args.join(" "),
-            //             body
-            //         ))
-            //         .collect::<Vec<_>>()
-            //         .join("\n")))
-            //     {
-            //         Ok(s) => format!("Ok:\n {}", s),
-            //         Err(s) => format!("Err: {}", s),
-            //     }
-            // ));
-            match eval(expr) {
-                Err(error) => outputs.push(format!("Error: {}", dbg!(&error))),
-                Ok(value) => {
-                    outputs.push(format!("Evalled: {}", dbg!(&value)));
-                    outputs.push(format!("Rendered:"));
-                    evalled_node = Some(render(&Value::unseal(value).unwrap()));
-                }
-            }
-        }
-    }
-    node.last_element_child()
-        .unwrap()
-        .dyn_into::<HtmlElement>()
-        .unwrap()
-        .set_inner_text(&outputs.join("\r\n\r\n"));
-    if let Some(evalled_node) = evalled_node {
-        node.last_element_child()
-            .unwrap()
-            .append_child(&evalled_node.node)
-            .unwrap();
-    }
+    parse(&code).map_err(|e| format!("{:?}", e))
 }
 
-enum Child {
-    Node(Node),
-    Text(String),
+fn eval_etc(expr: Expression, environment: &Environment<Value>) -> Result<Value, String> {
+    let expr = expr.with_natives(&Native::stdlib());
+
+    // let type_env = Environment::new();
+    // let mut type_cache = Cache::new();
+    // let typ = expr.typecheck(&type_env, &mut type_cache)?;
+
+    // let scalar_env = Environment::new();
+    // let mut scalar_cache = Cache::new();
+    // expr.scalar(&scalar_env, &mut scalar_cache)?;
+
+    let result = expr.eval(environment)?;
+
+    Ok(result)
 }
 
 fn render(value: &Value) -> Node {
@@ -138,10 +151,10 @@ fn render(value: &Value) -> Node {
                                             let scalar = &row[row.len() - 1].clone();
                                             match scalar {
                                                 Scalar::Sealed(box value) => {
-                                                    children.push(Child::Node(render(value)))
+                                                    children.push(render(value))
                                                 }
                                                 Scalar::String(string) => {
-                                                    children.push(Child::Text(string.clone()))
+                                                    children.push(Node::text(string))
                                                 }
                                                 _ => panic!("c {}", scalar),
                                             }
@@ -160,16 +173,12 @@ fn render(value: &Value) -> Node {
         }
         _ => panic!("g {}", value),
     }
-    d!(value);
     let mut node = Node::tag(tag.unwrap());
     for (key, val) in props.unwrap() {
         node = node.attribute(&key, val);
     }
     for child in children.unwrap() {
-        node = match child {
-            Child::Node(child_node) => node.child(child_node),
-            Child::Text(text) => node.text(&text),
-        }
+        node = node.child(child);
     }
     node
 }
@@ -191,16 +200,16 @@ impl Node {
         }
     }
 
-    // fn text(text: &str) -> Self {
-    //     Node {
-    //         node: web_sys::window()
-    //             .unwrap()
-    //             .document()
-    //             .unwrap()
-    //             .create_text_node(text)
-    //             .into(),
-    //     }
-    // }
+    fn text(text: &str) -> Self {
+        Node {
+            node: web_sys::window()
+                .unwrap()
+                .document()
+                .unwrap()
+                .create_text_node(text)
+                .into(),
+        }
+    }
 
     fn attribute<S>(self, name: &str, value: S) -> Self
     where
@@ -243,20 +252,6 @@ impl Node {
         self
     }
 
-    fn text(self, text: &str) -> Self {
-        self.node
-            .append_child(
-                &web_sys::window()
-                    .unwrap()
-                    .document()
-                    .unwrap()
-                    .create_text_node(text)
-                    .into(),
-            )
-            .unwrap();
-        self
-    }
-
     fn on<F>(self, event_name: &str, handler: F) -> Self
     where
         F: FnMut() + 'static,
@@ -274,31 +269,4 @@ impl Node {
             node: event_target.dyn_into().unwrap(),
         }
     }
-}
-
-#[wasm_bindgen(start)]
-pub fn init() -> Result<(), JsValue> {
-    console_error_panic_hook::set_once();
-    log::set_logger(&DEFAULT_LOGGER).unwrap();
-    log::set_max_level(log::LevelFilter::Info);
-
-    let document = web_sys::window().unwrap().document().unwrap();
-
-    let nodes = document.get_elements_by_class_name("imp");
-    for i in 0..nodes.length() {
-        let node = nodes
-            .get_with_index(i)
-            .unwrap()
-            .dyn_into::<HtmlElement>()
-            .unwrap();
-        update(&node);
-        let closure = Closure::wrap(box {
-            let node = node.clone();
-            move || update(&node)
-        } as Box<dyn Fn()>);
-        node.set_onkeyup(Some(closure.as_ref().dyn_ref().unwrap()));
-        closure.forget();
-    }
-
-    Ok(())
 }

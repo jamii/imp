@@ -21,8 +21,45 @@
       run();
     </script>
 
-    <div class="imp">
+    <div class="imp-repl">
       <textarea style="width: 100%; height: 4em;"></textarea>
+    </div>
+
+    <div class="imp-render">
+      <textarea style="width: 100%; height: 0em;">
+result ->
+
+let result = pivot result in
+let rows = result (r c v -> r) in
+let cols = result (r c v -> c) in
+let node = tag props children -> {
+  "tag" x tag |
+  "props" x props |
+  "children" x children
+} in
+let table = node "table" in
+let table_row = node "tr" in
+let table_cell = node "td" in
+let table_header = node "th" in
+let highlight = "style" x "background: red; min-height: 1em; min-width: 1em" in
+
+table {nothing} {
+  (0-1) x (table_row {nothing} {
+    ((0-1) x (table_cell {highlight} {nothing}))
+    |
+    (cols (col -> col x table_cell {highlight} {nothing}))
+  })
+  |
+  (rows (row -> row x table_row {nothing} {
+    ((0-1) x (table_cell {highlight} {nothing}))
+    |
+    (cols (col -> col x table_cell {nothing} {as_text (result row col)}))
+  }))
+}
+      </textarea>
+    </div>
+
+    <div class="imp-result">
       <pre style="white-space: pre-wrap"></pre>
     </div>
 

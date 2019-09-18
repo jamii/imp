@@ -13,7 +13,9 @@ mod stdlib;
 mod syntax;
 
 use crate::shared::*;
-pub use crate::shared::{parse, Cache, Environment, Expression, Native, Scalar, Value};
+pub use crate::shared::{
+    parse, Cache, Environment, Expression, Native, Scalar, ScalarType, Value, ValueType,
+};
 
 pub fn eval(expr: Expression) -> Result<Value, String> {
     expr.eval(&Environment::new())

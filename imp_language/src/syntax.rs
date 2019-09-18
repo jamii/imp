@@ -19,7 +19,7 @@ pub enum Error {
     },
     Other {
         position: usize,
-        message: &'static str,
+        message: String,
     },
 }
 
@@ -253,7 +253,15 @@ impl<'a> Parser<'a> {
             String => Expression::Scalar(Scalar::String(
                 unescape::unescape(&token_str[1..(token_str.len() - 1)]).unwrap(),
             )),
-            Number => Expression::Scalar(Scalar::Number(i64::from_str(token_str).unwrap())),
+            Number => match i64::from_str(token_str) {
+                Ok(number) => Expression::Scalar(Scalar::Number(number)),
+                Err(error) => {
+                    return Err(Error::Other {
+                        position,
+                        message: format!("{}", error),
+                    });
+                }
+            },
             Something => Expression::Something,
             Nothing => Expression::Nothing,
             _ => {
@@ -268,7 +276,7 @@ impl<'a> Parser<'a> {
             Some(expression) => Ok(expression),
             None => Err(Error::Other {
                 position: self.position.get(),
-                message: "Expected start of expression",
+                message: "Expected start of expression".to_owned(),
             }),
         }
     }

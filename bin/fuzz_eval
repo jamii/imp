@@ -1,0 +1,3 @@
+#! /usr/bin/env bash
+set -ex
+cargo fuzz run --release eval || RUST_BACKTRACE=full cargo test --release -p imp_tests

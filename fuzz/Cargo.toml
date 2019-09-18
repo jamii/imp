@@ -13,5 +13,13 @@ imp_tests = { path = "../imp_tests" }
 libfuzzer-sys = {git = "https://github.com/rust-fuzz/libfuzzer-sys.git"}
 
 [[bin]]
+name = "parse"
+path = "fuzz_targets/parse.rs"
+
+[[bin]]
 name = "eval"
 path = "fuzz_targets/eval.rs"
+
+[[bin]]
+name = "typecheck"
+path = "fuzz_targets/typecheck.rs"

@@ -6,5 +6,5 @@ use imp_tests::*;
 
 fuzz_target!(|data: &[u8]| {
     // this comment needs to be here or the macro doesn't work :(
-    fuzz_eval(data);
+    fuzz_parse(data);
 });

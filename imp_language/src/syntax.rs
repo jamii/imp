@@ -38,9 +38,9 @@ pub enum Token {
     Union,
     Product,
     Plus,
+    Minus,
     Equal,
     Abstract,
-    Minus,
     String,
     Number,
     Name,
@@ -314,7 +314,7 @@ impl<'a> Parser<'a> {
             let position = self.position.get();
             let token = self.token()?.0;
             let token_precedence = match token {
-                Plus => 0,
+                Minus | Plus => 0,
                 Product => 1,
                 Union => 2,
                 Intersect => 3,
@@ -327,7 +327,8 @@ impl<'a> Parser<'a> {
             }
             let right = self.expression_binary(token_precedence)?;
             expression = match token {
-                Plus => Expression::apply("+", vec![expression, right]),
+                Plus => Expression::apply("add", vec![expression, right]),
+                Minus => Expression::apply("subtract", vec![expression, right]),
                 Product => Expression::Product(box expression, box right),
                 Union => Expression::Union(box expression, box right),
                 Intersect => Expression::Intersect(box expression, box right),

@@ -81,11 +81,13 @@ fn build_expr(data: &[u8]) -> Option<Expression> {
             }
             13 if bytes.peek().is_some() => {
                 let name = match bytes.next().unwrap() {
-                    0 => "+",
-                    1 => "permute",
-                    2 => "reduce",
-                    3 => "pivot",
-                    4 => "as_text",
+                    0 => "add",
+                    1 => "subtract",
+                    2 => "negative",
+                    3 => "permute",
+                    4 => "reduce",
+                    5 => "pivot",
+                    6 => "as_text",
                     _ => return None,
                 };
                 Expression::Name(name.to_owned())

@@ -9,6 +9,22 @@ impl Native {
         }
     }
 
+    fn subtract(scalars: Vec<Scalar>) -> Result<Value, String> {
+        match &*scalars {
+            [Scalar::Number(n1), Scalar::Number(n2)] => Ok(Value::scalar(Scalar::Number(n1 - n2))),
+            [a, b] => Err(format!("{} - {}", a, b)),
+            _ => unreachable!(),
+        }
+    }
+
+    fn negative(scalars: Vec<Scalar>) -> Result<Value, String> {
+        match &*scalars {
+            [Scalar::Number(n1)] => Ok(Value::scalar(Scalar::Number(-n1))),
+            [a] => Err(format!("- {}", a)),
+            _ => unreachable!(),
+        }
+    }
+
     fn permute(scalars: Vec<Scalar>) -> Result<Value, String> {
         match &*scalars {
             [Scalar::Sealed(box Value::Set(permutations)), Scalar::Sealed(box Value::Set(set))] => {
@@ -132,10 +148,22 @@ impl Native {
     pub fn stdlib() -> Vec<Native> {
         vec![
             Native {
-                name: "+".to_owned(),
+                name: "add".to_owned(),
                 input_arity: 2,
                 output_arity: 1,
                 fun: Native::add,
+            },
+            Native {
+                name: "subtract".to_owned(),
+                input_arity: 2,
+                output_arity: 1,
+                fun: Native::subtract,
+            },
+            Native {
+                name: "negative".to_owned(),
+                input_arity: 1,
+                output_arity: 1,
+                fun: Native::negative,
             },
             Native {
                 name: "permute".to_owned(),

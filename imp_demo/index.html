@@ -29,29 +29,33 @@
       <textarea style="width: 100%; height: 0.2em;">
 result ->
 
-let result = pivot result in
-let rows = result (r c v -> r) in
-let cols = result (r c v -> c) in
 let node = tag props children -> {
   "tag" x tag |
   "props" x props |
   "children" x children
 } in
+
+if is_function result then node "span" {nothing} {as_text result} else
+
+let is_something = $result = something in
+let result = pivot result in
+let rows = if is_something then 1 else result (r c v -> r) in
+let cols = result (r c v -> c) in
+
 let table = node "table" in
 let table_row = node "tr" in
 let table_cell = node "td" in
 let table_header = node "th" in
-let highlight = "style" x "background: red; min-height: 1em; min-width: 1em" in
 
 table {nothing} {
   0 x (table_row {nothing} {
-    (0 x (table_cell {highlight} {nothing}))
+    (0 x (table_cell {"style" x "border-right: solid 1px; border-bottom: solid 1px; height: 1em; min-width: 1em;"} {nothing}))
     |
-    (cols (col -> col x table_cell {highlight} {nothing}))
+    (cols (col -> col x table_cell {"style" x "border-bottom: solid 1px; height: 1em; min-width: 1em;"} {nothing}))
   })
   |
   (rows (row -> row x table_row {nothing} {
-    (0 x (table_cell {highlight} {nothing}))
+    (0 x (table_cell {"style" x "border-right: solid 1px; height: 1em; min-width: 1em;"} {nothing}))
     |
     (cols (col -> col x table_cell {nothing} {as_text (result row col)}))
   }))

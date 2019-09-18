@@ -86,7 +86,12 @@ fn parse_from(node: &HtmlElement) -> Result<Expression, String> {
         .dyn_into::<HtmlTextAreaElement>()
         .unwrap()
         .value();
-    parse(&code).map_err(|e| format!("{:?}", e))
+    if code.is_empty() {
+        // mild hack
+        Ok(Expression::Nothing)
+    } else {
+        parse(&code).map_err(|e| format!("{:?}", e))
+    }
 }
 
 fn eval_etc(expr: Expression, environment: &Environment<Value>) -> Result<Value, String> {

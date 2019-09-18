@@ -114,6 +114,16 @@ impl Native {
         }
     }
 
+    fn is_function(scalars: Vec<Scalar>) -> Result<Value, String> {
+        match &*scalars {
+            [Scalar::Sealed(box value)] => match value {
+                Value::Set(..) => Ok(Value::nothing()),
+                Value::Closure(..) => Ok(Value::something()),
+            },
+            _ => unreachable!(),
+        }
+    }
+
     // fn solve(scalars: Vec<Scalar>) -> Result<Value, String> {
     //     match &*scalars {
     //         [Scalar::Sealed(box expr, env)] => {
@@ -188,6 +198,12 @@ impl Native {
                 input_arity: 1,
                 output_arity: 1,
                 fun: Native::as_text,
+            },
+            Native {
+                name: "is_function".to_owned(),
+                input_arity: 1,
+                output_arity: 1,
+                fun: Native::is_function,
             },
             // Native {
             //     name: "solve".to_owned(),

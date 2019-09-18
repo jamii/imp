@@ -1,0 +1,4 @@
+#! /usr/bin/env bash
+set -ex
+cargo fuzz run --release eval -- -dict=fuzz/dictionary
+RUST_BACKTRACE=full cargo test -p imp_tests

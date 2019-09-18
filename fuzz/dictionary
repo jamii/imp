@@ -1,0 +1,35 @@
+# keywords
+"let"
+"in"
+"="
+"&"
+"|"
+"x"
+"->"
+"("
+"{"
+"["
+")"
+"}"
+"]"
+"nothing"
+"something"
+
+# vars
+"a"
+"b"
+"c"
+
+# values
+"\"\""
+"\"foo\""
+"\"bar\""
+"0"
+"1"
+
+# stdlib
+"+"
+"permute"
+"reduce"
+"pivot"
+"as_text"

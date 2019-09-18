@@ -242,7 +242,9 @@ impl<'a> Parser<'a> {
             }
             Name => Expression::Name(token_str.to_owned()),
             String => {
-                if let Some('"') = &token_str[token_str.len() - 1..].chars().next() {
+                if token_str.len() >= 2
+                    && token_str[token_str.len() - 1..].chars().next() == Some('"')
+                {
                     Expression::Scalar(Scalar::String(
                         unescape::unescape(&token_str[1..(token_str.len() - 1)]).unwrap(),
                     ))

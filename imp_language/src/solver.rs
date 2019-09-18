@@ -6,16 +6,36 @@ enum LowerAction {
     Inline(Expression),
 }
 
+#[derive(Debug)]
+struct Gensym {
+    next_tmp: Cell<usize>,
+}
+
+impl Gensym {
+    fn new() -> Self {
+        Gensym {
+            next_tmp: Cell::new(0),
+        }
+    }
+
+    fn next(&self) -> String {
+        let name = format!("var{}", self.next_tmp.get());
+        self.next_tmp.set(self.next_tmp.get() + 1);
+        name
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ContainsContext<'a> {
+    scalar_cache: &'a Cache<bool>,
+    type_cache: &'a Cache<ValueType>,
+    actions: Environment<LowerAction>,
+    gensym: &'a Gensym,
+    lets: &'a RefCell<&'a mut Vec<(Name, Vec<Name>, Expression)>>,
+}
+
 impl Expression {
-    fn contains(
-        &self,
-        args: &[Name],
-        actions: &Environment<LowerAction>,
-        scalar_cache: &Cache<bool>,
-        type_cache: &Cache<ValueType>,
-        next_tmp: &mut usize,
-        lets: &mut Vec<(Name, Vec<Name>, Expression)>,
-    ) -> Result<Self, String> {
+    fn contains(&self, args: &[Name], context: &ContainsContext) -> Result<Self, String> {
         use Expression::*;
         Ok(match self {
             Nothing => Nothing,
@@ -28,48 +48,30 @@ impl Expression {
                 Apply(box Scalar(scalar.clone()), box Name(args[0].clone()))
             }
             Union(box e1, box e2) => Union(
-                box e1.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?,
-                box e2.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?,
+                box e1.contains(args, context)?,
+                box e2.contains(args, context)?,
             ),
             Intersect(box e1, box e2) => Intersect(
-                box e1.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?,
-                box e2.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?,
+                box e1.contains(args, context)?,
+                box e2.contains(args, context)?,
             ),
             Product(box e1, box e2) => {
-                let a1 = match type_cache.get(e1).arity() {
+                let a1 = match context.type_cache.get(e1).arity() {
                     Arity::Exactly(a) => a,
                     Arity::AtLeast(_) => 0,
                 };
                 Intersect(
-                    box e1.contains(
-                        &args[0..a1],
-                        actions,
-                        scalar_cache,
-                        type_cache,
-                        next_tmp,
-                        lets,
-                    )?,
-                    box e2.contains(
-                        &args[a1..],
-                        actions,
-                        scalar_cache,
-                        type_cache,
-                        next_tmp,
-                        lets,
-                    )?,
+                    box e1.contains(&args[0..a1], context)?,
+                    box e2.contains(&args[a1..], context)?,
                 )
             }
             Equal(box e1, box e2) => {
                 assert_eq!(args.len(), 0);
                 Equal(box e1.clone(), box e2.clone())
             }
-            Negate(box e) => {
-                Negate(box e.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?)
-            }
-            Name(name) => match actions.lookup(name) {
-                Some(LowerAction::Inline(expr)) => {
-                    expr.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?
-                }
+            Negate(box e) => Negate(box e.contains(args, context)?),
+            Name(name) => match context.actions.lookup(name) {
+                Some(LowerAction::Inline(expr)) => expr.contains(args, context)?,
                 // TODO might need to be careful about shadowing here if variable names are not unique
                 Some(LowerAction::Refer(new_name, prefix_args)) => {
                     // TODO this will have the wrong var names
@@ -82,11 +84,13 @@ impl Expression {
                 None => Err(format!("Name from outside of lower {:?}", name))?,
             },
             Let(name, value, box body) => {
-                let mut actions = actions.clone();
-                match type_cache.get(&value) {
+                let mut context = context.clone();
+                match context.type_cache.get(&value) {
                     ValueType::Abstract(..) => {
-                        actions.bind(name.clone(), LowerAction::Inline((**value).clone()));
-                        body.contains(args, &actions, scalar_cache, type_cache, next_tmp, lets)?
+                        context
+                            .actions
+                            .bind(name.clone(), LowerAction::Inline((**value).clone()));
+                        body.contains(args, &context)?
                     }
                     typ => {
                         let arity = match typ.arity() {
@@ -94,50 +98,39 @@ impl Expression {
                             Arity::AtLeast(a) => a,
                         };
                         let value_args = (0..arity)
-                            .map(|_| {
-                                let name = format!("var{}", next_tmp);
-                                *next_tmp += 1;
-                                name
-                            })
+                            .map(|_| context.gensym.next())
                             .collect::<Vec<_>>();
-                        let value = value.contains(
-                            &value_args,
-                            &actions,
-                            scalar_cache,
-                            type_cache,
-                            next_tmp,
-                            lets,
-                        )?;
-                        let new_name = format!("{}_{}", name, next_tmp);
-                        *next_tmp += 1;
-                        lets.push((new_name.clone(), args.to_vec(), value));
-                        actions.bind(name.clone(), LowerAction::Refer(new_name, args.to_vec()));
-                        body.contains(args, &actions, scalar_cache, type_cache, next_tmp, lets)?
+                        let value = value.contains(&value_args, &context)?;
+                        let new_name = context.gensym.next();
+                        context
+                            .lets
+                            .borrow_mut()
+                            .push((new_name.clone(), args.to_vec(), value));
+                        context
+                            .actions
+                            .bind(name.clone(), LowerAction::Refer(new_name, args.to_vec()));
+                        body.contains(args, &context)?
                     }
                 }
             }
             If(box cond, box if_true, box if_false) => If(
-                box cond.contains(&[], actions, scalar_cache, type_cache, next_tmp, lets)?,
-                box if_true.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?,
-                box if_false.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?,
+                box cond.contains(&[], context)?,
+                box if_true.contains(args, context)?,
+                box if_false.contains(args, context)?,
             ),
             Abstract(arg, box body) => {
                 assert!(args.len() >= 1); // TODO otherwise replace with nothing
                 let expr = body
-                    .contains(
-                        &args[1..],
-                        actions,
-                        scalar_cache,
-                        type_cache,
-                        next_tmp,
-                        lets,
-                    )?
+                    .contains(&args[1..], context)?
                     // TODO does this assume arg is unique?
                     .rename(arg, &args[0]);
                 expr
             }
             Apply(box left, box right) => {
-                match (*scalar_cache.get(left), *scalar_cache.get(right)) {
+                match (
+                    *context.scalar_cache.get(left),
+                    *context.scalar_cache.get(right),
+                ) {
                     (true, true) => {
                         assert_eq!(args.len(), 0);
                         Equal(box left.clone(), box right.clone())
@@ -149,7 +142,7 @@ impl Expression {
                             _ => unreachable!(),
                         };
                         args.insert(0, left_name.clone());
-                        right.contains(&args, actions, scalar_cache, type_cache, next_tmp, lets)?
+                        right.contains(&args, context)?
                     }
                     (false, true) => {
                         let mut args = args.to_vec();
@@ -158,23 +151,19 @@ impl Expression {
                             _ => unreachable!(),
                         };
                         args.insert(0, right_name.clone());
-                        left.contains(&args, actions, scalar_cache, type_cache, next_tmp, lets)?
+                        left.contains(&args, context)?
                     }
                     (false, false) => {
-                        let left_arity = match type_cache.get(left).arity() {
+                        let left_arity = match context.type_cache.get(left).arity() {
                             Arity::Exactly(a) => a,
                             Arity::AtLeast(_) => 0,
                         };
-                        let right_arity = match type_cache.get(right).arity() {
+                        let right_arity = match context.type_cache.get(right).arity() {
                             Arity::Exactly(a) => a,
                             Arity::AtLeast(_) => 0,
                         };
                         let new_arg_names = (0..left_arity.min(right_arity))
-                            .map(|_| {
-                                let name = format!("extra_var{}", next_tmp);
-                                *next_tmp += 1;
-                                name
-                            })
+                            .map(|_| context.gensym.next())
                             .collect::<Vec<_>>();
                         let mut left_args = new_arg_names.clone();
                         let mut right_args = new_arg_names;
@@ -184,22 +173,8 @@ impl Expression {
                             left_args.extend_from_slice(args);
                         }
                         Intersect(
-                            box left.contains(
-                                &left_args,
-                                actions,
-                                scalar_cache,
-                                type_cache,
-                                next_tmp,
-                                lets,
-                            )?,
-                            box right.contains(
-                                &right_args,
-                                actions,
-                                scalar_cache,
-                                type_cache,
-                                next_tmp,
-                                lets,
-                            )?,
+                            box left.contains(&left_args, context)?,
+                            box right.contains(&right_args, context)?,
                         )
                     }
                 }
@@ -214,7 +189,7 @@ impl Expression {
             // }
             Solve(e) => {
                 // TODO check e is finite here (or elsewhere)
-                e.contains(args, actions, scalar_cache, type_cache, next_tmp, lets)?
+                e.contains(args, context)?
             }
             _ => return Err(format!("Can't lower {}", self)),
         })
@@ -225,29 +200,24 @@ impl Expression {
         scalar_cache: &Cache<bool>,
         type_cache: &Cache<ValueType>,
     ) -> Result<Vec<(Name, Vec<Name>, Expression)>, String> {
-        let scope = Environment::new();
-        let mut next_tmp = 0;
+        let gensym = Gensym::new();
         let arity = match type_cache.get(self).arity() {
             Arity::Exactly(a) => a,
             Arity::AtLeast(_) => 0,
         };
-        let args = (0..arity)
-            .map(|_| {
-                let name = format!("var{}", next_tmp);
-                next_tmp += 1;
-                name
-            })
-            .collect::<Vec<_>>();
+        let args = (0..arity).map(|_| gensym.next()).collect::<Vec<_>>();
         let mut lets = vec![];
         let predicate = self.contains(
             &args,
-            &scope,
-            scalar_cache,
-            type_cache,
-            &mut next_tmp,
-            &mut lets,
+            &ContainsContext {
+                scalar_cache,
+                type_cache,
+                actions: Environment::new(),
+                gensym: &gensym,
+                lets: &RefCell::new(&mut lets),
+            },
         )?;
-        lets.push((format!("result{}", next_tmp), args, predicate));
+        lets.push((gensym.next(), args, predicate));
         Ok(lets)
     }
 

@@ -1,6 +1,8 @@
+pub use std::cell::{Cell, RefCell};
 pub use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 pub use std::fmt;
 pub use std::iter::FromIterator;
+pub use std::rc::Rc;
 
 pub use crate::analysis::*;
 pub use crate::denotation::*;

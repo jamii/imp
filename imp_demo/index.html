@@ -26,7 +26,7 @@
     </div>
 
     <div class="imp-render">
-      <textarea style="width: 100%; height: 0em;">
+      <textarea style="width: 100%; height: 0.2em;">
 result ->
 
 let result = pivot result in
@@ -44,14 +44,14 @@ let table_header = node "th" in
 let highlight = "style" x "background: red; min-height: 1em; min-width: 1em" in
 
 table {nothing} {
-  (0-1) x (table_row {nothing} {
-    ((0-1) x (table_cell {highlight} {nothing}))
+  0 x (table_row {nothing} {
+    (0 x (table_cell {highlight} {nothing}))
     |
     (cols (col -> col x table_cell {highlight} {nothing}))
   })
   |
   (rows (row -> row x table_row {nothing} {
-    ((0-1) x (table_cell {highlight} {nothing}))
+    (0 x (table_cell {highlight} {nothing}))
     |
     (cols (col -> col x table_cell {nothing} {as_text (result row col)}))
   }))

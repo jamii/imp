@@ -3,6 +3,8 @@
 members = [
   "imp_language",
   "imp_demo",
+  "imp_tests",
+  "fuzz",
 ]
 
 [profile.release]

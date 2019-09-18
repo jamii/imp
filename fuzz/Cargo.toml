@@ -1,0 +1,17 @@
+[package]
+name = "imp_language-fuzz"
+version = "0.0.1"
+authors = ["Jamie Brandon <jamie@scattered-thoughts.net>"]
+edition = "2018"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+imp_tests = { path = "../imp_tests" }
+libfuzzer-sys = {git = "https://github.com/rust-fuzz/libfuzzer-sys.git"}
+
+[[bin]]
+name = "eval"
+path = "fuzz_targets/eval.rs"

@@ -97,7 +97,11 @@ impl<'a> Parser<'a> {
                         let mut escape = false;
                         loop {
                             match chars.next() {
-                                None => break,
+                                None => {
+                                    return Err(Error::Lex {
+                                        position: self.position.get(),
+                                    });
+                                }
                                 Some(char) => {
                                     len += char.len_utf8();
                                     match char {
@@ -111,6 +115,11 @@ impl<'a> Parser<'a> {
                                             escape = false;
                                         }
                                         _ => {
+                                            if escape {
+                                                return Err(Error::Lex {
+                                                    position: self.position.get(),
+                                                });
+                                            }
                                             escape = false;
                                         }
                                     }
@@ -241,20 +250,9 @@ impl<'a> Parser<'a> {
                 Expression::Solve(box expression)
             }
             Name => Expression::Name(token_str.to_owned()),
-            String => {
-                let mut chars = token_str.chars();
-                if chars.next() == Some('"') && chars.last() == Some('"') {
-                    Expression::Scalar(Scalar::String(
-                        unescape::unescape(&token_str[1..(token_str.len() - 1)]).unwrap(),
-                    ))
-                } else {
-                    // TODO better error here
-                    return Err(Error::Other {
-                        position: self.position.get(),
-                        message: "Unterminated string",
-                    });
-                }
-            }
+            String => Expression::Scalar(Scalar::String(
+                unescape::unescape(&token_str[1..(token_str.len() - 1)]).unwrap(),
+            )),
             Number => Expression::Scalar(Scalar::Number(i64::from_str(token_str).unwrap())),
             Something => Expression::Something,
             Nothing => Expression::Nothing,

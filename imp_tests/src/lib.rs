@@ -26,6 +26,8 @@ mod test {
                     .unwrap()
                     .read_to_string(&mut input)
                     .unwrap();
+                dbg!(&input);
+                println!("{}", input);
                 fuzz_eval(&input);
             }
         }

@@ -136,7 +136,7 @@ impl Value {
                     tuple
                 })
             })),
-            (v1, v2) => Err(format!("Type error: {} , {}", v1, v2))?,
+            (v1, v2) => Err(format!("Cannot eval: {} x {}", v1, v2))?,
         })
     }
 
@@ -210,7 +210,7 @@ impl Value {
                     }
                 }
             }
-            (v1, v2) => Err(format!("Type error: {} {}", v1, v2))?,
+            (v1, v2) => Err(format!("Cannot eval: {} {}", v1, v2))?,
         })
     }
 
@@ -218,8 +218,10 @@ impl Value {
         match vals {
             Value::Closure(..) => Err(format!("Reduce on non-finite value: {}", vals)),
             Value::Set(set) => {
+                let mut rows = set.into_iter().collect::<Vec<_>>();
+                rows.sort();
                 let mut reduced = init;
-                for row in set {
+                for row in rows {
                     match row.into_iter().last() {
                         None => return Err(format!("Reduce on zero-column row")),
                         Some(val) => {

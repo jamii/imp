@@ -55,7 +55,13 @@ fn update() {
     let result = parse_from(&find("imp-repl"))
         .and_then(|repl_expr| eval_etc(repl_expr, &Environment::new()));
     let typ = parse_from(&find("imp-repl")).and_then(|repl_expr| type_etc(repl_expr));
-    let rendered_node = match result {
+
+    let mut nodes = vec![];
+    nodes.push(Node::tag("div").child(Node::text(&match typ {
+        Ok(typ) => format!("Type: {}", typ),
+        Err(error) => format!("Type error: {}", error),
+    })));
+    nodes.push(match result {
         Ok(result) => {
             let rendered = parse_from(&find("imp-render")).and_then(|render_expr| {
                 eval_etc(
@@ -67,22 +73,19 @@ fn update() {
                 )
             });
             match rendered.and_then(Value::unseal) {
-                Ok(rendered) => Node::tag("div")
-                    .child(Node::tag("div").child(Node::text(&match typ {
-                        Ok(typ) => format!("Type: {}", typ),
-                        Err(error) => format!("Type error: {}", error),
-                    })))
-                    .child(render(&rendered)),
+                Ok(rendered) => render(&rendered),
                 Err(error) => {
-                    Node::tag("span").child(Node::text(&format!("From renderer: {}", error)))
+                    Node::tag("div").child(Node::text(&format!("From renderer: {}", error)))
                 }
             }
         }
         Err(error) => Node::tag("span").child(Node::text(&error)),
-    };
+    });
     let result_node = find("imp-result").last_element_child().unwrap();
     result_node.set_inner_html("");
-    result_node.append_child(&rendered_node.node).unwrap();
+    for node in nodes {
+        result_node.append_child(&node.node).unwrap();
+    }
 }
 
 fn parse_from(node: &HtmlElement) -> Result<Expression, String> {

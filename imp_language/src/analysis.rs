@@ -308,15 +308,17 @@ impl Expression {
                 if let ValueType::Something = vals_type {
                     return Err(format!("Reduce on zero-column type"));
                 }
-                let reinit_type = fun_type.apply(vals_type)?.apply(ValueType::Product(
-                    ScalarType::Any,
-                    box ValueType::Something,
-                ))?;
+                let reinit_type = fun_type
+                    .apply(init_type.clone())?
+                    .apply(ValueType::Product(
+                        ScalarType::Any,
+                        box ValueType::Something,
+                    ))?;
                 // TODO this is probably going to cause problems if types are compatible but not literally equal
                 if init_type != reinit_type {
                     return Err(format!(
                         "Function application with reduce has type {}, expected {}",
-                        init_type, reinit_type
+                        reinit_type, init_type
                     ));
                 }
                 init_type

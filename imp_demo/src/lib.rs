@@ -54,6 +54,7 @@ pub fn init() -> Result<(), JsValue> {
 fn update() {
     let result = parse_from(&find("imp-repl"))
         .and_then(|repl_expr| eval_etc(repl_expr, &Environment::new()));
+    let typ = parse_from(&find("imp-repl")).and_then(|repl_expr| type_etc(repl_expr));
     let rendered_node = match result {
         Ok(result) => {
             let rendered = parse_from(&find("imp-render")).and_then(|render_expr| {
@@ -66,7 +67,12 @@ fn update() {
                 )
             });
             match rendered.and_then(Value::unseal) {
-                Ok(rendered) => render(&rendered),
+                Ok(rendered) => Node::tag("div")
+                    .child(Node::tag("div").child(Node::text(&match typ {
+                        Ok(typ) => format!("Type: {}", typ),
+                        Err(error) => format!("Type error: {}", error),
+                    })))
+                    .child(render(&rendered)),
                 Err(error) => {
                     Node::tag("span").child(Node::text(&format!("From renderer: {}", error)))
                 }
@@ -94,20 +100,22 @@ fn parse_from(node: &HtmlElement) -> Result<Expression, String> {
     }
 }
 
+fn type_etc(expr: Expression) -> Result<ValueType, String> {
+    let expr = expr.with_natives(&Native::stdlib());
+
+    let type_env = Environment::new();
+    let mut type_cache = Cache::new();
+    let typ = expr.typecheck(&type_env, &mut type_cache)?;
+
+    Ok(typ)
+}
+
 fn eval_etc(expr: Expression, environment: &Environment<Value>) -> Result<Value, String> {
     let expr = expr.with_natives(&Native::stdlib());
 
-    // let type_env = Environment::new();
-    // let mut type_cache = Cache::new();
-    // let typ = expr.typecheck(&type_env, &mut type_cache)?;
+    let value = expr.eval(environment)?;
 
-    // let scalar_env = Environment::new();
-    // let mut scalar_cache = Cache::new();
-    // expr.scalar(&scalar_env, &mut scalar_cache)?;
-
-    let result = expr.eval(environment)?;
-
-    Ok(result)
+    Ok(value)
 }
 
 fn render(value: &Value) -> Node {

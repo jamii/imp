@@ -92,7 +92,7 @@ impl ValueType {
             (Abstract(s1, t1), Abstract(s2, t2))
             | (Abstract(s1, t1), Product(s2, t2))
             | (Product(s1, t1), Abstract(s2, t2)) => Abstract(s1.union(s2)?, box t1.union(*t2)?),
-            (t1, t2) => return Err(format!("Can't unify {:?} and {:?}", t1, t2)),
+            (t1, t2) => return Err(format!("Can't unify {} and {}", t1, t2)),
         })
     }
 
@@ -109,7 +109,7 @@ impl ValueType {
             | (Product(s1, t1), Abstract(s2, t2)) => {
                 Abstract(s1.intersect(s2)?, box t1.intersect(*t2)?)
             }
-            (t1, t2) => return Err(format!("Can't unify {:?} and {:?}", t1, t2)),
+            (t1, t2) => return Err(format!("Can't unify {} and {}", t1, t2)),
         })
     }
 
@@ -118,11 +118,11 @@ impl ValueType {
         Ok(match self {
             Nothing => Nothing,
             Something => match other {
-                Abstract(..) => return Err(format!("Product of function: {:?}", other)),
+                Abstract(..) => return Err(format!("Product of function: {}", other)),
                 _ => other,
             },
             Product(s1, t1) => ValueType::Product(s1, box t1.product(other)?),
-            Abstract(..) => return Err(format!("Product of function: {:?}", self)),
+            Abstract(..) => return Err(format!("Product of function: {}", self)),
         })
     }
 
@@ -139,7 +139,7 @@ impl ValueType {
                 t1.apply(*t2)?
             }
             (t1 @ Abstract(..), t2 @ Abstract(..)) => {
-                return Err(format!("Applied function to function: {:?} {:?}", t1, t2));
+                return Err(format!("Applied function to function: {} {}", t1, t2));
             }
         })
     }
@@ -277,7 +277,7 @@ impl Expression {
             If(c, t, f) => {
                 match c.typecheck(env, cache)? {
                     ValueType::Nothing | ValueType::Something => (),
-                    other => return Err(format!("Non-boolean condition in `if`: {:?}", other)),
+                    other => return Err(format!("Non-boolean condition in `if`: {}", other)),
                 }
                 t.typecheck(env, cache)?.union(f.typecheck(env, cache)?)?
             }
@@ -303,7 +303,7 @@ impl Expression {
                 let vals_type = vals.typecheck(&env, cache)?;
                 let fun_type = fun.typecheck(&env, cache)?;
                 if vals_type.is_function() {
-                    return Err(format!("Reduce on non-finite: {:?}", vals_type));
+                    return Err(format!("Reduce on non-finite: {}", vals_type));
                 }
                 if let ValueType::Something = vals_type {
                     return Err(format!("Reduce on zero-column type"));
@@ -315,7 +315,7 @@ impl Expression {
                 // TODO this is probably going to cause problems if types are compatible but not literally equal
                 if init_type != reinit_type {
                     return Err(format!(
-                        "Function application with reduce has type {:?}, expected {:?}",
+                        "Function application with reduce has type {}, expected {}",
                         init_type, reinit_type
                     ));
                 }

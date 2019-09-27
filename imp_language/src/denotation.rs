@@ -213,6 +213,36 @@ impl Value {
             (v1, v2) => Err(format!("Type error: {} {}", v1, v2))?,
         })
     }
+
+    fn reduce(init: Value, vals: Value, fun: Value) -> Result<Value, String> {
+        match vals {
+            Value::Closure(..) => Err(format!("Reduce on non-finite value: {}", vals)),
+            Value::Set(set) => {
+                let mut reduced = init;
+                for row in set {
+                    match row.into_iter().last() {
+                        None => return Err(format!("Reduce on zero-column row")),
+                        Some(val) => {
+                            let env = Environment::from(vec![
+                                ("fun".to_owned(), fun.clone()),
+                                ("reduced".to_owned(), reduced.clone()),
+                                ("val".to_owned(), Value::scalar(val)),
+                            ]);
+                            reduced = Expression::Apply(
+                                box Expression::Apply(
+                                    box Expression::Name("fun".to_owned()),
+                                    box Expression::Name("reduced".to_owned()),
+                                ),
+                                box Expression::Name("val".to_owned()),
+                            )
+                            .eval(&env)?;
+                        }
+                    }
+                }
+                Ok(reduced)
+            }
+        }
+    }
 }
 
 impl<T> Environment<T> {
@@ -326,6 +356,9 @@ impl Expression {
                     .map(|arg| env.lookup(&arg).unwrap().clone().as_scalar().unwrap())
                     .collect(),
             )?,
+            Reduce(init, vals, fun) => {
+                Value::reduce(init.eval(env)?, vals.eval(env)?, fun.eval(env)?)?
+            }
             Seal(e) => Value::scalar(self::Scalar::Sealed(box e.eval(env)?)),
             Unseal(e) => Value::unseal(e.eval(env)?)?,
             Exists(..) | Solve(..) => return Err(format!("Unimplemented: {}", self)),

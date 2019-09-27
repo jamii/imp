@@ -49,6 +49,7 @@ pub enum Token {
     If,
     Then,
     Else,
+    Reduce,
     Something,
     Nothing,
     Whitespace,
@@ -152,6 +153,7 @@ impl<'a> Parser<'a> {
                                 "if" => If,
                                 "then" => Then,
                                 "else" => Else,
+                                "reduce" => Reduce,
                                 "something" => Something,
                                 "nothing" => Nothing,
                                 _ => Name,
@@ -361,6 +363,12 @@ impl<'a> Parser<'a> {
                     self.expect(Else)?;
                     let els = self.expression_outer()?;
                     Ok(Expression::If(box cond, box then, box els))
+                }
+                Reduce => {
+                    let init = self.expression_inner()?;
+                    let vals = self.expression_inner()?;
+                    let fun = self.expression_inner()?;
+                    Ok(Expression::Reduce(box init, box vals, box fun))
                 }
                 _ => {
                     self.position.set(position);

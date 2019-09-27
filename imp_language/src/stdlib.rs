@@ -53,35 +53,6 @@ impl Native {
         }
     }
 
-    fn reduce(scalars: Vec<Scalar>) -> Result<Value, String> {
-        match &*scalars {
-            [init, Scalar::Sealed(box fun), Scalar::Sealed(box Value::Set(set))] => {
-                let mut result = Value::Set(Set::from_iter(vec![vec![init.clone()]]));
-                for row in set {
-                    let env = Environment::from(vec![
-                        ("fun".to_owned(), fun.clone()),
-                        ("result".to_owned(), result),
-                        (
-                            "row".to_owned(),
-                            Value::Set(Set::from_iter(vec![row.clone()])),
-                        ),
-                    ]);
-                    let expr = Expression::Apply(
-                        box Expression::Apply(
-                            box Expression::Name("fun".to_owned()),
-                            box Expression::Name("result".to_owned()),
-                        ),
-                        box Expression::Name("row".to_owned()),
-                    );
-                    result = expr.eval(&env)?;
-                }
-                Ok(result)
-            }
-            [a, b, c] => Err(format!("reduce {} {} {}", a, b, c)),
-            _ => unreachable!(),
-        }
-    }
-
     // TODO pivot isn't quite the right name for this
     fn pivot(scalars: Vec<Scalar>) -> Result<Value, String> {
         match &*scalars {
@@ -180,12 +151,6 @@ impl Native {
                 input_arity: 2,
                 output_arity: 1,
                 fun: Native::permute,
-            },
-            Native {
-                name: "reduce".to_owned(),
-                input_arity: 3,
-                output_arity: 1,
-                fun: Native::reduce,
             },
             Native {
                 name: "pivot".to_owned(),

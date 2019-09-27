@@ -94,6 +94,7 @@ impl fmt::Display for Expression {
                 write_delimited(f, " ", args, |f, arg| write!(f, "{}", arg))?;
                 write!(f, ")")?;
             }
+            Reduce(init, vals, fun) => write!(f, "(reduce {} {} {})", init, vals, fun)?,
             Seal(e) => write!(f, "{{{}}}", e)?,
             Unseal(e) => write!(f, "${}", e)?,
             Exists(args, body) => {
@@ -104,6 +105,29 @@ impl fmt::Display for Expression {
             Solve(e) => {
                 write!(f, "?({})", e)?;
             }
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for ScalarType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use ScalarType::*;
+        match self {
+            Any => write!(f, ":any")?,
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for ValueType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use ValueType::*;
+        match self {
+            Nothing => write!(f, ":nothing")?,
+            Something => write!(f, ":something")?,
+            Product(s, v) => write!(f, "{} :x {}", s, v)?,
+            Abstract(s, v) => write!(f, "{} :-> {}", s, v)?,
         }
         Ok(())
     }

@@ -27,6 +27,7 @@ pub enum Expression {
     Abstract(Name, Box<Expression>),
     Apply(Box<Expression>, Box<Expression>),
     ApplyNative(Native, Vec<Name>),
+    Reduce(Box<Expression>, Box<Expression>, Box<Expression>),
     Seal(Box<Expression>),
     Unseal(Box<Expression>),
     Exists(Vec<Name>, Box<Expression>),
@@ -89,6 +90,11 @@ impl Expression {
                 f(&*arg)?;
             }
             ApplyNative(_, _) => (),
+            Reduce(init, vals, fun) => {
+                f(&*init)?;
+                f(&*vals)?;
+                f(&*fun)?;
+            }
             Seal(e) => f(&*e)?,
             Unseal(e) => f(&*e)?,
             Exists(_, body) => f(&*body)?,
@@ -147,6 +153,11 @@ impl Expression {
                 f(arg)?;
             }
             ApplyNative(_, _) => (),
+            Reduce(init, vals, fun) => {
+                f(init)?;
+                f(vals)?;
+                f(fun)?;
+            }
             Seal(box e) => f(e)?,
             Unseal(box e) => f(e)?,
             Exists(_, box body) => f(body)?,

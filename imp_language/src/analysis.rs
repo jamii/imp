@@ -10,7 +10,7 @@ pub enum ScalarType {
     Any,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValueType {
     Nothing,
     Something,
@@ -297,6 +297,29 @@ impl Expression {
                     t = ValueType::Product(ScalarType::Any, box t)
                 }
                 t
+            }
+            Reduce(init, vals, fun) => {
+                let init_type = init.typecheck(&env, cache)?;
+                let vals_type = vals.typecheck(&env, cache)?;
+                let fun_type = fun.typecheck(&env, cache)?;
+                if vals_type.is_function() {
+                    return Err(format!("Reduce on non-finite: {:?}", vals_type));
+                }
+                if let ValueType::Something = vals_type {
+                    return Err(format!("Reduce on zero-column type"));
+                }
+                let reinit_type = fun_type.apply(vals_type)?.apply(ValueType::Product(
+                    ScalarType::Any,
+                    box ValueType::Something,
+                ))?;
+                // TODO this is probably going to cause problems if types are compatible but not literally equal
+                if init_type != reinit_type {
+                    return Err(format!(
+                        "Function application with reduce has type {:?}, expected {:?}",
+                        init_type, reinit_type
+                    ));
+                }
+                init_type
             }
             Seal(e) => {
                 e.typecheck(env, cache)?;

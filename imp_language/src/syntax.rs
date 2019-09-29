@@ -39,6 +39,7 @@ pub enum Token {
     Product,
     Plus,
     Minus,
+    LessThan,
     Equal,
     Abstract,
     String,
@@ -94,6 +95,7 @@ impl<'a> Parser<'a> {
                         }
                         _ => Minus,
                     },
+                    '<' => LessThan,
                     '"' => {
                         let mut escape = false;
                         loop {
@@ -154,8 +156,8 @@ impl<'a> Parser<'a> {
                                 "then" => Then,
                                 "else" => Else,
                                 "reduce" => Reduce,
-                                "something" => Something,
-                                "nothing" => Nothing,
+                                "something" | "some" => Something,
+                                "nothing" | "none" => Nothing,
                                 _ => Name,
                             }
                         } else if char.is_ascii_whitespace() {
@@ -320,7 +322,7 @@ impl<'a> Parser<'a> {
                 Product => 1,
                 Union => 2,
                 Intersect => 3,
-                Equal => 4,
+                Equal | LessThan => 4,
                 _ => usize::max_value(), // ie bail
             };
             if token_precedence >= precedence {
@@ -335,6 +337,7 @@ impl<'a> Parser<'a> {
                 Union => Expression::Union(box expression, box right),
                 Intersect => Expression::Intersect(box expression, box right),
                 Equal => Expression::Equal(box expression, box right),
+                LessThan => Expression::apply("less_than", vec![expression, right]),
                 _ => unreachable!(),
             };
         }

@@ -85,12 +85,37 @@ impl Native {
         }
     }
 
+    fn fun_as_text(scalars: Vec<Scalar>) -> Result<Value, String> {
+        match &*scalars {
+            [Scalar::Sealed(box value)] => {
+                Ok(Value::Set(Set::from_iter(vec![vec![Scalar::String(
+                    format!("{}", value),
+                )]])))
+            }
+            [a] => Err(format!("fun_as_text {}", a)),
+            _ => unreachable!(),
+        }
+    }
+
     fn is_function(scalars: Vec<Scalar>) -> Result<Value, String> {
         match &*scalars {
             [Scalar::Sealed(box value)] => match value {
                 Value::Set(..) => Ok(Value::nothing()),
                 Value::Closure(..) => Ok(Value::something()),
             },
+            _ => unreachable!(),
+        }
+    }
+
+    fn less_than(scalars: Vec<Scalar>) -> Result<Value, String> {
+        match &*scalars {
+            [a, b] => {
+                if a < b {
+                    Ok(Value::something())
+                } else {
+                    Ok(Value::nothing())
+                }
+            }
             _ => unreachable!(),
         }
     }
@@ -165,11 +190,23 @@ impl Native {
                 fun: Native::as_text,
             },
             Native {
+                name: "fun_as_text".to_owned(),
+                input_arity: 1,
+                output_arity: 1,
+                fun: Native::fun_as_text,
+            },
+            Native {
                 name: "is_function".to_owned(),
                 input_arity: 1,
                 output_arity: 1,
                 fun: Native::is_function,
             },
+            Native {
+                name: "less_than".to_owned(),
+                input_arity: 2,
+                output_arity: 0,
+                fun: Native::less_than,
+            }
             // Native {
             //     name: "solve".to_owned(),
             //     input_arity: 1,

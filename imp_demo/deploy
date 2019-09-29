@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+set -ex
+
+rsync -ar ./pkg ~/blog/static/imp/

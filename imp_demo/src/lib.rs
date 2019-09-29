@@ -23,29 +23,32 @@ let node = tag props children -> {
   "children" x children
 } in
 
-if is_function result then node "span" {nothing} {as_text result} else
+if is_function result then node "pre" {"style" x "margin: 0; padding: 0;"} {fun_as_text result} else
 
 let is_something = $result = something in
 let result = pivot result in
 let rows = if is_something then 1 else result (r c v -> r) in
 let cols = result (r c v -> c) in
+let num_rows = reduce rows rows (a b -> if a < b then b else a) in
 
 let table = node "table" in
 let table_row = node "tr" in
 let table_cell = node "td" in
 let table_header = node "th" in
+let code = node "code" {nothing} in
 
 table {nothing} {
-  0 x (table_row {nothing} {
-    (0 x (table_cell {"style" x "border-right: solid 1px; border-bottom: solid 1px; height: 1em; min-width: 1em; color: lightGrey;"} {nothing}))
-    |
-    (cols (col -> col x table_cell {"style" x "border-bottom: solid 1px; height: 1em; min-width: 1em;"} {nothing}))
-  })
-  |
   (rows (row -> row x table_row {nothing} {
-    (0 x (table_cell {"style" x "border-right: solid 1px; height: 1em; min-width: 1em;"} {nothing}))
+    (0 x 0 x (table_cell {"style" x "color: lightGrey;"} {code {"("}}))
     |
-    (cols (col -> col x table_cell {nothing} {as_text (result row col)}))
+    (cols (col ->
+      (if col = 1 then nothing else
+        (col x 0 x table_cell {"style" x "color: lightGrey;"} {code {"x"}}))
+      |
+      (col x 1 x table_cell {nothing} {code {as_text (result row col)}})
+    ))
+    |
+    (10000 x 0 x (table_cell {"style" x "color: lightGrey;"} {code {if row = num_rows then ")" else ") |"}}))
   }))
 }
 "#;

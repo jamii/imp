@@ -220,22 +220,15 @@ fn render(value: &Value) -> Result<Node, String> {
     Ok(node)
 }
 
-fn update(node: &HtmlElement) {
-    let code = find_first(node, "imp-input")
-        .unwrap()
-        .first_element_child()
-        .unwrap()
-        .dyn_into::<HtmlTextAreaElement>()
-        .unwrap()
-        .value();
-    let output = match run(&code)
+#[wasm_bindgen]
+pub fn update(input: &str, output_node: &HtmlElement) {
+    let output = match run(&input)
         .and_then(|value| run_ui(value))
         .and_then(|ui| render(&Value::unseal(ui)?))
     {
         Ok(output) => output,
         Err(error) => Node::tag("div").child(Node::text(&error)),
     };
-    let output_node = find_first(node, "imp-output").unwrap();
     output_node.set_inner_html("");
     output_node.append_child(&output.node).unwrap();
 }
@@ -246,20 +239,20 @@ pub fn init() -> Result<(), JsValue> {
     log::set_logger(&DEFAULT_LOGGER).unwrap();
     log::set_max_level(log::LevelFilter::Info);
 
-    for node in find_all("imp-repl") {
-        let closure = {
-            let node = node.clone();
-            Closure::wrap(box { move || update(&node) } as Box<dyn Fn()>)
-        };
-        node.set_onkeyup(Some(closure.as_ref().dyn_ref().unwrap()));
-        closure.forget();
-        update(&node);
-    }
+    // for node in find_all("imp-repl") {
+    //     let closure = {
+    //         let node = node.clone();
+    //         Closure::wrap(box { move || update(&node) } as Box<dyn Fn()>)
+    //     };
+    //     node.set_onkeyup(Some(closure.as_ref().dyn_ref().unwrap()));
+    //     closure.forget();
+    //     update(&node);
+    // }
 
-    for node in find_all("imp-status") {
-        node.set_inner_text("imp loaded succesfully!");
-        node.style().set_property("color", "green").unwrap();
-    }
+    // for node in find_all("imp-status") {
+    //     node.set_inner_text("imp loaded succesfully!");
+    //     node.style().set_property("color", "green").unwrap();
+    // }
 
     Ok(())
 }

@@ -314,8 +314,8 @@ impl Expression {
                         ScalarType::Any,
                         box ValueType::Something,
                     ))?;
-                // TODO this is probably going to cause problems if types are compatible but not literally equal
-                if init_type != reinit_type {
+                // TODO do we need to fixpoint this?
+                if let Err(_) = init_type.clone().union(reinit_type.clone()) {
                     return Err(format!(
                         "Function application with reduce has type {}, expected {}",
                         reinit_type, init_type

@@ -14,6 +14,42 @@ use web_sys::HtmlTextAreaElement;
 
 use imp_language::*;
 
+const RENDERER: &'static str = r#"
+result ->
+
+let node = tag props children -> {
+  "tag" x tag |
+  "props" x props |
+  "children" x children
+} in
+
+if is_function result then node "span" {nothing} {as_text result} else
+
+let is_something = $result = something in
+let result = pivot result in
+let rows = if is_something then 1 else result (r c v -> r) in
+let cols = result (r c v -> c) in
+
+let table = node "table" in
+let table_row = node "tr" in
+let table_cell = node "td" in
+let table_header = node "th" in
+
+table {nothing} {
+  0 x (table_row {nothing} {
+    (0 x (table_cell {"style" x "border-right: solid 1px; border-bottom: solid 1px; height: 1em; min-width: 1em; color: lightGrey;"} {nothing}))
+    |
+    (cols (col -> col x table_cell {"style" x "border-bottom: solid 1px; height: 1em; min-width: 1em;"} {nothing}))
+  })
+  |
+  (rows (row -> row x table_row {nothing} {
+    (0 x (table_cell {"style" x "border-right: solid 1px; height: 1em; min-width: 1em;"} {nothing}))
+    |
+    (cols (col -> col x table_cell {nothing} {as_text (result row col)}))
+  }))
+}
+"#;
+
 #[allow(unused_macros)]
 macro_rules! d {
     ($e:expr) => {{
@@ -23,105 +59,70 @@ macro_rules! d {
     }};
 }
 
-fn find(class: &str) -> HtmlElement {
-    web_sys::window()
+fn find_first(node: &HtmlElement, class: &str) -> Option<HtmlElement> {
+    let nodes = node.get_elements_by_class_name(class);
+    if nodes.length() > 0 {
+        Some(
+            nodes
+                .get_with_index(0)
+                .unwrap()
+                .dyn_into::<HtmlElement>()
+                .unwrap(),
+        )
+    } else {
+        None
+    }
+}
+
+fn find_all(class: &str) -> Vec<HtmlElement> {
+    let nodes = web_sys::window()
         .unwrap()
         .document()
         .unwrap()
-        .get_elements_by_class_name(class)
-        .get_with_index(0)
-        .unwrap()
-        .dyn_into::<HtmlElement>()
-        .unwrap()
+        .get_elements_by_class_name(class);
+    (0..nodes.length())
+        .map(|i| {
+            nodes
+                .get_with_index(i)
+                .unwrap()
+                .dyn_into::<HtmlElement>()
+                .unwrap()
+        })
+        .collect()
 }
 
-#[wasm_bindgen(start)]
-pub fn init() -> Result<(), JsValue> {
-    console_error_panic_hook::set_once();
-    log::set_logger(&DEFAULT_LOGGER).unwrap();
-    log::set_max_level(log::LevelFilter::Info);
-
-    for node in &[find("imp-repl"), find("imp-render")] {
-        let closure = Closure::wrap(box { move || update() } as Box<dyn Fn()>);
-        node.set_onkeyup(Some(closure.as_ref().dyn_ref().unwrap()));
-        closure.forget();
-    }
-    update();
-
-    Ok(())
-}
-
-fn update() {
-    let result = parse_from(&find("imp-repl"))
-        .and_then(|repl_expr| eval_etc(repl_expr, &Environment::new()));
-    let typ = parse_from(&find("imp-repl")).and_then(|repl_expr| type_etc(repl_expr));
-
-    let mut nodes = vec![];
-    nodes.push(Node::tag("div").child(Node::text(&match typ {
-        Ok(typ) => format!("Type: {}", typ),
-        Err(error) => format!("Type error: {}", error),
-    })));
-    nodes.push(match result {
-        Ok(result) => {
-            let rendered = parse_from(&find("imp-render")).and_then(|render_expr| {
-                eval_etc(
-                    Expression::Apply(
-                        box render_expr,
-                        box Expression::Seal(box Expression::Name("rendered".to_owned())),
-                    ),
-                    &Environment::from(vec![("rendered".to_owned(), result)]),
-                )
-            });
-            match rendered.and_then(Value::unseal) {
-                Ok(rendered) => render(&rendered),
-                Err(error) => {
-                    Node::tag("div").child(Node::text(&format!("From renderer: {}", error)))
-                }
-            }
-        }
-        Err(error) => Node::tag("span").child(Node::text(&error)),
-    });
-    let result_node = find("imp-result").last_element_child().unwrap();
-    result_node.set_inner_html("");
-    for node in nodes {
-        result_node.append_child(&node.node).unwrap();
-    }
-}
-
-fn parse_from(node: &HtmlElement) -> Result<Expression, String> {
-    let code = node
-        .first_element_child()
-        .unwrap()
-        .dyn_into::<HtmlTextAreaElement>()
-        .unwrap()
-        .value();
-    if code.is_empty() {
+fn run(code: &str) -> Result<Value, String> {
+    let expr = if code.is_empty() {
         // mild hack
-        Ok(Expression::Nothing)
+        Expression::Nothing
     } else {
-        parse(&code).map_err(|e| format!("{:?}", e))
-    }
-}
-
-fn type_etc(expr: Expression) -> Result<ValueType, String> {
+        parse(&code).map_err(|e| format!("Parse error: {:?}", e))?
+    };
     let expr = expr.with_natives(&Native::stdlib());
-
-    let type_env = Environment::new();
-    let mut type_cache = Cache::new();
-    let typ = expr.typecheck(&type_env, &mut type_cache)?;
-
-    Ok(typ)
-}
-
-fn eval_etc(expr: Expression, environment: &Environment<Value>) -> Result<Value, String> {
-    let expr = expr.with_natives(&Native::stdlib());
-
-    let value = expr.eval(environment)?;
-
+    // let type_env = Environment::new();
+    // let mut type_cache = Cache::new();
+    // let typ = expr
+    //     .typecheck(&type_env, &mut type_cache)
+    //     .map_err(|e| format!("Type error: {}", e))?;
+    let value = expr
+        .eval(&Environment::new())
+        .map_err(|e| format!("Eval error: {}", e))?;
     Ok(value)
 }
 
-fn render(value: &Value) -> Node {
+fn run_ui(value: Value) -> Result<Value, String> {
+    let expr = parse(&RENDERER).map_err(|e| format!("In renderer: Parse error: {:?}", e))?;
+    let expr = expr.with_natives(&Native::stdlib());
+    let ui = Expression::Apply(
+        box expr,
+        box Expression::Seal(box Expression::Name("value".to_owned())),
+    )
+    .eval(&Environment::from(vec![("value".to_owned(), value)]))
+    .map_err(|e| format!("In renderer: Eval error: {}", e))?;
+    Ok(ui)
+}
+
+fn render(value: &Value) -> Result<Node, String> {
     let mut tag = None;
     let mut props = None;
     let mut children = None;
@@ -147,11 +148,21 @@ fn render(value: &Value) -> Node {
                                                 [Scalar::String(key), Scalar::String(val)] => {
                                                     props.push((key.to_owned(), val.to_owned()))
                                                 }
-                                                _ => panic!("a {:?}", row),
+                                                _ => {
+                                                    return Err(format!(
+                                                        "Unexpected value in renderer: {:?}",
+                                                        row
+                                                    ));
+                                                }
                                             }
                                         }
                                     }
-                                    _ => panic!("b {:?}", row),
+                                    _ => {
+                                        return Err(format!(
+                                            "Unexpected value in renderer: {:?}",
+                                            row
+                                        ));
+                                    }
                                 }
                                 props
                             });
@@ -167,27 +178,37 @@ fn render(value: &Value) -> Node {
                                             let scalar = &row[row.len() - 1].clone();
                                             match scalar {
                                                 Scalar::Sealed(box value) => {
-                                                    children.push(render(value))
+                                                    children.push(render(value)?)
                                                 }
                                                 Scalar::String(string) => {
                                                     children.push(Node::text(string))
                                                 }
-                                                _ => panic!("c {}", scalar),
+                                                _ => {
+                                                    return Err(format!(
+                                                        "Unexpected value in renderer: {}",
+                                                        scalar
+                                                    ));
+                                                }
                                             }
                                         }
                                     }
-                                    _ => panic!("d {:?}", row),
+                                    _ => {
+                                        return Err(format!(
+                                            "Unexpected value in renderer: {:?}",
+                                            row
+                                        ));
+                                    }
                                 }
                                 children
                             });
                         }
-                        _ => panic!("e {}", string),
+                        _ => return Err(format!("Unexpected value in renderer: {}", string)),
                     },
-                    _ => panic!("f {:?}", row),
+                    _ => return Err(format!("Unexpected value in renderer: {:?}", row)),
                 }
             }
         }
-        _ => panic!("g {}", value),
+        _ => return Err(format!("Unexpected value in renderer: {}", value)),
     }
     let mut node = Node::tag(tag.unwrap());
     for (key, val) in props.unwrap() {
@@ -196,8 +217,54 @@ fn render(value: &Value) -> Node {
     for child in children.unwrap() {
         node = node.child(child);
     }
-    node
+    Ok(node)
 }
+
+fn update(node: &HtmlElement) {
+    let code = find_first(node, "imp-input")
+        .unwrap()
+        .first_element_child()
+        .unwrap()
+        .dyn_into::<HtmlTextAreaElement>()
+        .unwrap()
+        .value();
+    let output = match run(&code)
+        .and_then(|value| run_ui(value))
+        .and_then(|ui| render(&Value::unseal(ui)?))
+    {
+        Ok(output) => output,
+        Err(error) => Node::tag("div").child(Node::text(&error)),
+    };
+    let output_node = find_first(node, "imp-output").unwrap();
+    output_node.set_inner_html("");
+    output_node.append_child(&output.node).unwrap();
+}
+
+#[wasm_bindgen(start)]
+pub fn init() -> Result<(), JsValue> {
+    console_error_panic_hook::set_once();
+    log::set_logger(&DEFAULT_LOGGER).unwrap();
+    log::set_max_level(log::LevelFilter::Info);
+
+    for node in find_all("imp-repl") {
+        let closure = {
+            let node = node.clone();
+            Closure::wrap(box { move || update(&node) } as Box<dyn Fn()>)
+        };
+        node.set_onkeyup(Some(closure.as_ref().dyn_ref().unwrap()));
+        closure.forget();
+        update(&node);
+    }
+
+    for node in find_all("imp-status") {
+        node.set_inner_text("imp loaded succesfully!");
+        node.style().set_property("color", "green").unwrap();
+    }
+
+    Ok(())
+}
+
+// ================================================================================
 
 struct Node {
     node: web_sys::Node,

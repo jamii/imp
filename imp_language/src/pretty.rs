@@ -59,9 +59,9 @@ impl fmt::Display for Value {
                 }
             }
             Value::Closure(name, body, env) => {
-                write!(f, "({} -> ", name)?;
+                write!(f, "(")?;
                 write_environment(f, env)?;
-                write!(f, "{})", body)?;
+                write!(f, "{} -> {})", name, body)?;
             }
         }
         Ok(())

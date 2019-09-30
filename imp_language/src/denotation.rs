@@ -172,22 +172,10 @@ impl Value {
     }
 
     fn negate(val: Value) -> Value {
-        use Expression::*;
-        use Value::*;
         if val.is_nothing() {
             Value::something()
-        } else if val.is_something() {
-            Value::nothing()
         } else {
-            // !f => (a -> !(f a))
-            Closure(
-                "a".to_owned(),
-                Negate(box Apply(
-                    box Name("v".to_owned()),
-                    box Name("a".to_owned()),
-                )),
-                Environment::from(vec![("v".to_owned(), val)]),
-            )
+            Value::nothing()
         }
     }
 

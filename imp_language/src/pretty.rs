@@ -44,8 +44,8 @@ impl fmt::Display for Scalar {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            v if v.is_nothing() => write!(f, "nothing")?,
-            v if v.is_something() => write!(f, "something")?,
+            v if v.is_nothing() => write!(f, "none")?,
+            v if v.is_something() => write!(f, "some")?,
             Value::Set(set) => {
                 let is_something = self.is_something();
                 if is_something {

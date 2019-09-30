@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-
-set -ex
-
-cargo watch -s './build && ./deploy' -i 'pkg/*' -i 'target/*'

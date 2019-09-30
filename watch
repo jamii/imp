@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+cd $(dirname $0)
+set -ex
+
+cargo watch -s 'imp_demo/build && imp_demo/deploy' -i 'imp_demo/pkg/*'

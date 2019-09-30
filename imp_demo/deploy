@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-
+cd $(dirname $0)
 set -ex
 
 rsync -ar ./pkg ~/blog/static/imp/

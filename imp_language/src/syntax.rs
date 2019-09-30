@@ -50,6 +50,7 @@ pub enum Token {
     If,
     Then,
     Else,
+    When,
     Reduce,
     Something,
     Nothing,
@@ -155,6 +156,7 @@ impl<'a> Parser<'a> {
                                 "if" => If,
                                 "then" => Then,
                                 "else" => Else,
+                                "when" => When,
                                 "reduce" => Reduce,
                                 "something" | "some" => Something,
                                 "nothing" | "none" => Nothing,
@@ -366,6 +368,12 @@ impl<'a> Parser<'a> {
                     self.expect(Else)?;
                     let els = self.expression_outer()?;
                     Ok(Expression::If(box cond, box then, box els))
+                }
+                When => {
+                    let cond = self.expression_outer()?;
+                    self.expect(Then)?;
+                    let then = self.expression_outer()?;
+                    Ok(Expression::If(box cond, box then, box Expression::Nothing))
                 }
                 Reduce => {
                     let init = self.expression_inner()?;

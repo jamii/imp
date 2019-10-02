@@ -26,14 +26,21 @@ where
     Ok(())
 }
 
+impl fmt::Display for NamedValue {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.value.fmt(f)
+    }
+}
 impl fmt::Display for Scalar {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Scalar::String(string) => write!(f, "{:?}", string)?,
             Scalar::Number(number) => write!(f, "{:?}", number)?,
-            Scalar::Sealed(value) => {
+            Scalar::Sealed(value_env, scalar_env, expr) => {
                 write!(f, "{{")?;
-                write!(f, "{}", value)?;
+                write_environment(f, value_env);
+                write_environment(f, scalar_env);
+                write!(f, "{}", expr)?;
                 write!(f, "}}")?;
             }
         }

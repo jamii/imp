@@ -1,14 +1,45 @@
 use crate::shared::*;
 
+#[derive(Debug, Clone)]
+pub struct NamedValue {
+    pub name: Name,
+    pub value: Value,
+}
+
+impl PartialEq for NamedValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl Eq for NamedValue {}
+
+impl PartialOrd for NamedValue {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.name.cmp(&other.name))
+    }
+}
+
+impl Ord for NamedValue {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.name.cmp(&other.name)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Scalar {
     String(String),
     Number(i64),
-    Sealed(Box<Value>),
+    Sealed(
+        Environment<NamedValue>,
+        Environment<Scalar>,
+        Box<Expression>,
+    ),
 }
 
 pub type Set = BTreeSet<Vec<Scalar>>;
 
+// TODO remove eq/ord
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Value {
     Set(Set),
@@ -27,14 +58,28 @@ impl Scalar {
             _ => Err(format!("Not an integer: {}", self)),
         }
     }
+
+    pub fn unseal(scalar: Self) -> Result<Value, String> {
+        match scalar {
+            Scalar::Sealed(value_env, scalar_env, box sealed) => {
+                let mut env = Environment::new();
+                for (name, named_value) in value_env.bindings.into_iter() {
+                    env.bind(name, named_value.value)
+                }
+                for (name, scalar) in scalar_env.bindings.into_iter() {
+                    env.bind(name, Value::scalar(scalar));
+                }
+                let value = sealed.eval(&env)?;
+                Ok(value)
+            }
+            _ => return Err(format!("${}", scalar)),
+        }
+    }
 }
 
 impl Value {
     pub fn unseal(val: Value) -> Result<Value, String> {
-        match val.as_scalar()? {
-            Scalar::Sealed(box sealed) => Ok(sealed),
-            _ => return Err(format!("${}", val)),
-        }
+        Scalar::unseal(val.as_scalar()?)
     }
 
     pub fn is_nothing(&self) -> bool {
@@ -372,7 +417,26 @@ impl Expression {
             Reduce(init, vals, fun) => {
                 Value::reduce(init.eval(env)?, vals.eval(env)?, fun.eval(env)?)?
             }
-            Seal(e) => Value::scalar(self::Scalar::Sealed(box e.eval(env)?)),
+            Seal(e) => {
+                let mut value_env = Environment::new();
+                let mut scalar_env = Environment::new();
+                for name in e.free_names() {
+                    let value = env.lookup(&name).unwrap();
+                    // anything that isn't a scalar should be a top-level value, so safe to compare by name instead of value
+                    // TODO this is a bit of a hack - prefer to figure this out statically
+                    match value.as_scalar() {
+                        Ok(scalar) => scalar_env.bind(name, scalar),
+                        Err(_) => value_env.bind(
+                            name.clone(),
+                            NamedValue {
+                                name,
+                                value: value.clone(),
+                            },
+                        ),
+                    }
+                }
+                Value::scalar(self::Scalar::Sealed(value_env, scalar_env, e))
+            }
             Unseal(e) => Value::unseal(e.eval(env)?)?,
             Exists(..) | Solve(..) => return Err(format!("Unimplemented: {}", self)),
         })

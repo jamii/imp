@@ -142,10 +142,10 @@ fn render(value: &Value) -> Result<Node, String> {
                         "props" => {
                             props = Some({
                                 let mut props = vec![];
-                                match &row[1] {
-                                    Scalar::Sealed(box Value::Set(set)) => {
+                                match Scalar::unseal(row[1].clone()) {
+                                    Ok(Value::Set(set)) => {
                                         for row in set.into_iter() {
-                                            match &**row {
+                                            match &*row {
                                                 [Scalar::String(key), Scalar::String(val)] => {
                                                     props.push((key.to_owned(), val.to_owned()))
                                                 }
@@ -171,16 +171,16 @@ fn render(value: &Value) -> Result<Node, String> {
                         "children" => {
                             children = Some({
                                 let mut children = vec![];
-                                match &row[1] {
-                                    Scalar::Sealed(box Value::Set(set)) => {
+                                match Scalar::unseal(row[1].clone()) {
+                                    Ok(Value::Set(set)) => {
                                         let mut rows = set.iter().collect::<Vec<_>>();
                                         rows.sort();
                                         for row in rows {
-                                            let scalar = &row[row.len() - 1].clone();
+                                            let scalar = &row[row.len() - 1];
                                             match scalar {
-                                                Scalar::Sealed(box value) => {
-                                                    children.push(render(value)?)
-                                                }
+                                                Scalar::Sealed(..) => children.push(render(
+                                                    &Scalar::unseal(scalar.clone())?,
+                                                )?),
                                                 Scalar::String(string) => {
                                                     children.push(Node::text(string))
                                                 }

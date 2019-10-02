@@ -25,38 +25,38 @@ impl Native {
         }
     }
 
-    fn permute(scalars: Vec<Scalar>) -> Result<Value, String> {
-        match &*scalars {
-            [Scalar::Sealed(box Value::Set(permutations)), Scalar::Sealed(box Value::Set(set))] => {
-                let mut result = Set::new();
-                for permutation in permutations {
-                    for row in set {
-                        result.insert(
-                            permutation
-                                .iter()
-                                .map(|i| {
-                                    let i = i.as_integer()? - 1;
-                                    if 0 <= i && i < (row.len() as i64) {
-                                        Ok(row[i as usize].clone())
-                                    } else {
-                                        Err(format!("Out of bounds: {}", i + 1))
-                                    }
-                                })
-                                .collect::<Result<Vec<_>, _>>()?,
-                        );
-                    }
-                }
-                Ok(Value::Set(result))
-            }
-            [a, b] => Err(format!("permute {} {}", a, b)),
-            _ => unreachable!(),
-        }
-    }
+    // fn permute(scalars: Vec<Scalar>) -> Result<Value, String> {
+    //     match &*scalars {
+    //         [Scalar::Sealed(box Value::Set(permutations)), Scalar::Sealed(box Value::Set(set))] => {
+    //             let mut result = Set::new();
+    //             for permutation in permutations {
+    //                 for row in set {
+    //                     result.insert(
+    //                         permutation
+    //                             .iter()
+    //                             .map(|i| {
+    //                                 let i = i.as_integer()? - 1;
+    //                                 if 0 <= i && i < (row.len() as i64) {
+    //                                     Ok(row[i as usize].clone())
+    //                                 } else {
+    //                                     Err(format!("Out of bounds: {}", i + 1))
+    //                                 }
+    //                             })
+    //                             .collect::<Result<Vec<_>, _>>()?,
+    //                     );
+    //                 }
+    //             }
+    //             Ok(Value::Set(result))
+    //         }
+    //         [a, b] => Err(format!("permute {} {}", a, b)),
+    //         _ => unreachable!(),
+    //     }
+    // }
 
     // TODO pivot isn't quite the right name for this
     fn pivot(scalars: Vec<Scalar>) -> Result<Value, String> {
-        match &*scalars {
-            [Scalar::Sealed(box Value::Set(set))] => {
+        match Scalar::unseal(scalars[0].clone()) {
+            Ok(Value::Set(set)) => {
                 let mut result = Set::new();
                 let mut input = set.iter().collect::<Vec<_>>();
                 input.sort();
@@ -71,8 +71,7 @@ impl Native {
                 }
                 Ok(Value::Set(result))
             }
-            [a] => Err(format!("pivot {}", a)),
-            _ => unreachable!(),
+            _ => Err(format!("pivot {}", &scalars[0])),
         }
     }
 
@@ -86,24 +85,21 @@ impl Native {
     }
 
     fn fun_as_text(scalars: Vec<Scalar>) -> Result<Value, String> {
-        match &*scalars {
-            [Scalar::Sealed(box value)] => {
-                Ok(Value::Set(Set::from_iter(vec![vec![Scalar::String(
-                    format!("{}", value),
-                )]])))
-            }
-            [a] => Err(format!("fun_as_text {}", a)),
-            _ => unreachable!(),
+        match Scalar::unseal(scalars[0].clone()) {
+            Ok(value) => Ok(Value::Set(Set::from_iter(vec![vec![Scalar::String(
+                format!("{}", value),
+            )]]))),
+            Err(_) => Err(format!("fun_as_text {}", &scalars[0])),
         }
     }
 
     fn is_function(scalars: Vec<Scalar>) -> Result<Value, String> {
-        match &*scalars {
-            [Scalar::Sealed(box value)] => match value {
+        match Scalar::unseal(scalars[0].clone()) {
+            Ok(value) => match value {
                 Value::Set(..) => Ok(Value::nothing()),
                 Value::Closure(..) => Ok(Value::something()),
             },
-            _ => unreachable!(),
+            Err(_) => Err(format!("is_function {}", &scalars[0])),
         }
     }
 
@@ -171,12 +167,12 @@ impl Native {
                 output_arity: 1,
                 fun: Native::negative,
             },
-            Native {
-                name: "permute".to_owned(),
-                input_arity: 2,
-                output_arity: 1,
-                fun: Native::permute,
-            },
+            // Native {
+            //     name: "permute".to_owned(),
+            //     input_arity: 2,
+            //     output_arity: 1,
+            //     fun: Native::permute,
+            // },
             Native {
                 name: "pivot".to_owned(),
                 input_arity: 1,

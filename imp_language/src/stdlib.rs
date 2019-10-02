@@ -53,6 +53,38 @@ impl Native {
     //     }
     // }
 
+    fn rows(scalars: Vec<Scalar>) -> Result<Value, String> {
+        match Scalar::unseal(scalars[0].clone()) {
+            Ok(Value::Set(set)) => {
+                let mut result = Set::new();
+                let mut input = set.iter().collect::<Vec<_>>();
+                input.sort();
+                for (r, _row) in input.into_iter().enumerate() {
+                    result.insert(vec![Scalar::Number((r + 1) as i64)]);
+                }
+                Ok(Value::Set(result))
+            }
+            _ => Err(format!("rows {}", &scalars[0])),
+        }
+    }
+
+    fn cols(scalars: Vec<Scalar>) -> Result<Value, String> {
+        match Scalar::unseal(scalars[0].clone()) {
+            Ok(Value::Set(set)) => {
+                let mut result = Set::new();
+                let mut input = set.iter().collect::<Vec<_>>();
+                input.sort();
+                for (_r, row) in input.into_iter().enumerate() {
+                    for (c, _val) in row.into_iter().enumerate() {
+                        result.insert(vec![Scalar::Number((c + 1) as i64)]);
+                    }
+                }
+                Ok(Value::Set(result))
+            }
+            _ => Err(format!("pivot {}", &scalars[0])),
+        }
+    }
+
     // TODO pivot isn't quite the right name for this
     fn pivot(scalars: Vec<Scalar>) -> Result<Value, String> {
         match Scalar::unseal(scalars[0].clone()) {
@@ -174,7 +206,19 @@ impl Native {
             //     fun: Native::permute,
             // },
             Native {
-                name: "pivot".to_owned(),
+                name: "sealed_rows".to_owned(),
+                input_arity: 1,
+                output_arity: 1,
+                fun: Native::rows,
+            },
+            Native {
+                name: "sealed_cols".to_owned(),
+                input_arity: 1,
+                output_arity: 1,
+                fun: Native::cols,
+            },
+            Native {
+                name: "sealed_pivot".to_owned(),
                 input_arity: 1,
                 output_arity: 3,
                 fun: Native::pivot,

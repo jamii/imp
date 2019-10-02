@@ -25,10 +25,8 @@ let node = tag props children -> {
 
 if is_function result then node "pre" {"style" x "margin: 0; padding: 0;"} {fun_as_text result} else
 
-let is_something = $result = something in
-let result = pivot result in
-let rows = if is_something then 1 else result (r c v -> r) in
-let cols = result (r c v -> c) in
+let rows = sealed_rows result in
+let pivoted = sealed_pivot result in
 let num_rows = reduce rows rows (a b -> if a < b then b else a) in
 
 let table = node "table" in
@@ -41,11 +39,11 @@ table {nothing} {
   (rows (row -> row x table_row {nothing} {
     (0 x 0 x (table_cell {"style" x "color: lightGrey;"} {code {"("}}))
     |
-    (cols (col ->
+    ((pivoted row) (col val ->
       (if col = 1 then nothing else
         (col x 0 x table_cell {"style" x "color: lightGrey;"} {code {"x"}}))
       |
-      (col x 1 x table_cell {nothing} {code {as_text (result row col)}})
+      (col x 1 x table_cell {nothing} {code {as_text val}})
     ))
     |
     (10000 x 0 x (table_cell {"style" x "color: lightGrey;"} {code {if row = num_rows then ")" else ") |"}}))

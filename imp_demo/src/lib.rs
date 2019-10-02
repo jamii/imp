@@ -101,28 +101,25 @@ fn run(code: &str) -> Result<Value, String> {
     } else {
         parse(&code).map_err(|e| format!("Parse error: {:?}", e))?
     };
-    let expr = expr.with_natives(&Native::stdlib());
+    Ok(expr
+        .with_natives(&Native::stdlib())
+        .with_unique_names()?
+        .eval(&Environment::new())?)
     // let type_env = Environment::new();
     // let mut type_cache = Cache::new();
     // let typ = expr
     //     .typecheck(&type_env, &mut type_cache)
     //     .map_err(|e| format!("Type error: {}", e))?;
-    let value = expr
-        .eval(&Environment::new())
-        .map_err(|e| format!("Eval error: {}", e))?;
-    Ok(value)
 }
 
 fn run_ui(value: Value) -> Result<Value, String> {
     let expr = parse(&RENDERER).map_err(|e| format!("In renderer: Parse error: {:?}", e))?;
-    let expr = expr.with_natives(&Native::stdlib());
-    let ui = Expression::Apply(
+    let expr = expr.with_natives(&Native::stdlib()).with_unique_names()?;
+    Ok(Expression::Apply(
         box expr,
         box Expression::Seal(box Expression::Name("value".to_owned())),
     )
-    .eval(&Environment::from(vec![("value".to_owned(), value)]))
-    .map_err(|e| format!("In renderer: Eval error: {}", e))?;
-    Ok(ui)
+    .eval(&Environment::from(vec![("value".to_owned(), value)]))?)
 }
 
 fn render(value: &Value) -> Result<Node, String> {
@@ -226,7 +223,8 @@ fn render(value: &Value) -> Result<Node, String> {
 #[wasm_bindgen]
 pub fn update(input: &str, output_node: &HtmlElement) {
     let output = match run(&input)
-        .and_then(|value| run_ui(value))
+        .map_err(|e| format!("Eval error: {}", e))
+        .and_then(|value| run_ui(value).map_err(|e| format!("In renderer: Eval error: {}", e)))
         .and_then(|ui| render(&Value::unseal(ui)?))
     {
         Ok(output) => output,

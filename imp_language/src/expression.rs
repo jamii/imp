@@ -263,4 +263,51 @@ impl Expression {
             _ => self.map1(|expr| Ok(expr.rename(old, new))).unwrap(),
         }
     }
+
+    pub fn with_unique_names(self) -> Result<Self, String> {
+        fn map(
+            expression: Expression,
+            bound: &HashMap<Name, Name>,
+            last_id: &mut HashMap<Name, usize>,
+        ) -> Result<Expression, String> {
+            use Expression::*;
+            Ok(match expression {
+                Name(name) => match bound.get(&name) {
+                    Some(unique_name) => Name(unique_name.clone()),
+                    None => return Err(format!("Undefined: {}", name)),
+                },
+                ApplyNative(native, names) => {
+                    let names = names
+                        .into_iter()
+                        .map(|name| match bound.get(&name) {
+                            Some(unique_name) => Ok(unique_name.clone()),
+                            None => Err(format!("Undefined: {}", name)),
+                        })
+                        .collect::<Result<Vec<_>, String>>()?;
+                    ApplyNative(native, names)
+                }
+                Let(name, value, body) => {
+                    let value = map(*value, bound, last_id)?;
+                    let id = last_id.entry(name.clone()).or_insert(0);
+                    *id += 1;
+                    let unique_name = format!("{}_{}", name, id);
+                    let mut bound = bound.clone();
+                    bound.insert(name, unique_name.clone());
+                    let body = map(*body, &bound, last_id)?;
+                    Let(unique_name, box value, box body)
+                }
+                Abstract(name, body) => {
+                    let id = last_id.entry(name.clone()).or_insert(0);
+                    *id += 1;
+                    let unique_name = format!("{}_{}", name, id);
+                    let mut bound = bound.clone();
+                    bound.insert(name, unique_name.clone());
+                    let body = map(*body, &bound, last_id)?;
+                    Abstract(unique_name, box body)
+                }
+                _ => expression.map1(|e| map(e, bound, last_id))?,
+            })
+        }
+        map(self, &HashMap::new(), &mut HashMap::new())
+    }
 }

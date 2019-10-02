@@ -303,9 +303,11 @@ impl Expression {
                     Let(unique_name, box value, box body)
                 }
                 Abstract(name, body) => {
-                    let id = last_id.entry(name.clone()).or_insert(0);
-                    *id += 1;
-                    let unique_name = format!("{}_{}", name, id);
+                    // TODO renaming abstracts makes eq on seals weird
+                    // let id = last_id.entry(name.clone()).or_insert(0);
+                    // *id += 1;
+                    // let unique_name = format!("{}_{}", name, id);
+                    let unique_name = name.clone();
                     let mut bound = bound.clone();
                     bound.insert(name, unique_name.clone());
                     let body = map(*body, &bound, last_id)?;

@@ -104,6 +104,7 @@ fn run(code: &str) -> Result<Value, String> {
     Ok(expr
         .with_natives(&Native::stdlib())
         .with_unique_names()?
+        .lift_lets()
         .eval(&Environment::new())?)
     // let type_env = Environment::new();
     // let mut type_cache = Cache::new();
@@ -114,7 +115,7 @@ fn run(code: &str) -> Result<Value, String> {
 
 fn run_ui(value: Value) -> Result<Value, String> {
     let expr = parse(&RENDERER).map_err(|e| format!("In renderer: Parse error: {:?}", e))?;
-    let expr = expr.with_natives(&Native::stdlib()).with_unique_names()?;
+    let expr = expr.with_natives(&Native::stdlib()).with_unique_names()?; // .lift_lets();
     Ok(Expression::Apply(
         box expr,
         box Expression::Seal(box Expression::Name("value".to_owned())),

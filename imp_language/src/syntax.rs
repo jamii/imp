@@ -295,7 +295,7 @@ impl<'a> Parser<'a> {
                 let right = self.expression_outer()?;
                 self.expect(Token::ClosePermute)?;
                 expression = Expression::apply(
-                    "permute",
+                    Expression::Name("permute".to_owned()),
                     vec![
                         Expression::Seal(box right),
                         Expression::Seal(box expression),
@@ -333,13 +333,21 @@ impl<'a> Parser<'a> {
             }
             let right = self.expression_binary(token_precedence)?;
             expression = match token {
-                Plus => Expression::apply("add", vec![expression, right]),
-                Minus => Expression::apply("subtract", vec![expression, right]),
+                Plus => {
+                    Expression::apply(Expression::Name("add".to_owned()), vec![expression, right])
+                }
+                Minus => Expression::apply(
+                    Expression::Name("subtract".to_owned()),
+                    vec![expression, right],
+                ),
                 Product => Expression::Product(box expression, box right),
                 Union => Expression::Union(box expression, box right),
                 Intersect => Expression::Intersect(box expression, box right),
                 Equal => Expression::Equal(box expression, box right),
-                LessThan => Expression::apply("less_than", vec![expression, right]),
+                LessThan => Expression::apply(
+                    Expression::Name("less_than".to_owned()),
+                    vec![expression, right],
+                ),
                 _ => unreachable!(),
             };
         }

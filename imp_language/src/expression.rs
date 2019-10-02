@@ -41,11 +41,17 @@ impl Expression {
             .fold(body, |body, arg| Expression::Abstract(arg, box body))
     }
 
-    pub fn apply(fun: &str, args: Vec<Expression>) -> Expression {
+    pub fn apply(fun: Expression, args: Vec<Expression>) -> Expression {
         args.into_iter()
-            .fold(Expression::Name(fun.to_owned()), |fun, arg| {
-                Expression::Apply(box fun, box arg)
-            })
+            .fold(fun, |fun, arg| Expression::Apply(box fun, box arg))
+    }
+
+    pub fn _let(lets: Vec<(Name, Expression)>, body: Expression) -> Expression {
+        let mut expression = body;
+        for (name, value) in lets.into_iter().rev() {
+            expression = Expression::Let(name, box value, box expression);
+        }
+        expression
     }
 
     pub fn visit1<'a, F>(&'a self, f: &mut F) -> Result<(), String>
@@ -309,5 +315,53 @@ impl Expression {
             })
         }
         map(self, &HashMap::new(), &mut HashMap::new())
+    }
+
+    pub fn lift_lets(self) -> Self {
+        fn map(
+            expression: Expression,
+            lets: &mut Vec<(Name, Expression)>,
+            contexts: &mut HashMap<Name, Vec<Name>>,
+            context: &[Name],
+        ) -> Expression {
+            use Expression::*;
+            match expression {
+                Name(name) => match contexts.get(&name) {
+                    Some(context) => Expression::apply(
+                        Name(name),
+                        context
+                            .iter()
+                            .map(|name| Expression::Name(name.clone()))
+                            .collect(),
+                    ),
+                    None => Name(name),
+                },
+                Let(name, value, body) => {
+                    let value = map(*value, lets, contexts, context);
+                    let free_names = value.free_names();
+                    let ordered_free_names = context
+                        .iter()
+                        .filter(|name| free_names.contains(&**name))
+                        .map(|name| name.clone())
+                        .collect();
+                    let value = Expression::_abstract(ordered_free_names, value);
+                    lets.push((name.clone(), value));
+                    contexts.insert(name, context.to_vec());
+                    map(*body, lets, contexts, context)
+                }
+                Abstract(name, body) => {
+                    let mut context = context.to_vec();
+                    context.push(name.clone());
+                    let body = map(*body, lets, contexts, &context);
+                    Abstract(name, box body)
+                }
+                _ => expression
+                    .map1(|e| Ok(map(e, lets, contexts, context)))
+                    .unwrap(),
+            }
+        }
+        let mut lets = vec![];
+        let expression = map(self, &mut lets, &mut HashMap::new(), &[]);
+        Expression::_let(lets, expression)
     }
 }

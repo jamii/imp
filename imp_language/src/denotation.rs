@@ -284,7 +284,7 @@ impl<T> Environment<T>
 where
     T: Clone,
 {
-    pub fn close_over(&self, names: BTreeSet<Name>) -> Self {
+    pub fn close_over(&self, names: HashSet<Name>) -> Self {
         Environment::from(
             self.bindings
                 .iter()
@@ -296,8 +296,8 @@ where
 }
 
 impl Expression {
-    pub fn free_names(&self) -> BTreeSet<Name> {
-        fn visit(expr: &Expression, free_names: &mut BTreeSet<Name>, bound: &BTreeSet<Name>) {
+    pub fn free_names(&self) -> HashSet<Name> {
+        fn visit(expr: &Expression, free_names: &mut HashSet<Name>, bound: &HashSet<Name>) {
             match expr {
                 Expression::Name(name) => {
                     if !bound.contains(name) {
@@ -325,8 +325,8 @@ impl Expression {
                 }
             }
         }
-        let mut free_names = BTreeSet::new();
-        visit(self, &mut free_names, &BTreeSet::new());
+        let mut free_names = HashSet::new();
+        visit(self, &mut free_names, &HashSet::new());
         free_names
     }
 

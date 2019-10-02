@@ -76,7 +76,7 @@ impl Expression {
                 Some(LowerAction::Refer(new_name, prefix_args)) => {
                     // TODO this will have the wrong var names
                     let expr = Expression::apply(
-                        new_name,
+                        Expression::Name(new_name.to_owned()),
                         prefix_args.iter().map(|arg| Name(arg.clone())).collect(),
                     );
                     expr

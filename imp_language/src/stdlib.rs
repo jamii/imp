@@ -128,8 +128,8 @@ impl Native {
     fn is_function(scalars: Vec<Scalar>) -> Result<Value, String> {
         match Scalar::unseal(scalars[0].clone()) {
             Ok(value) => match value {
-                Value::Set(..) => Ok(Value::nothing()),
-                Value::Closure(..) => Ok(Value::something()),
+                Value::Set(..) => Ok(Value::none()),
+                Value::Closure(..) => Ok(Value::some()),
             },
             Err(_) => Err(format!("is_function {}", &scalars[0])),
         }
@@ -139,9 +139,9 @@ impl Native {
         match &*scalars {
             [a, b] => {
                 if a < b {
-                    Ok(Value::something())
+                    Ok(Value::some())
                 } else {
-                    Ok(Value::nothing())
+                    Ok(Value::none())
                 }
             }
             _ => unreachable!(),

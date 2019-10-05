@@ -95,7 +95,7 @@ fn find_all(class: &str) -> Vec<HtmlElement> {
 fn run(code: &str) -> Result<Value, String> {
     let expr = if code.is_empty() {
         // mild hack
-        Expression::Nothing
+        Expression::None
     } else {
         parse(&code).map_err(|e| format!("Parse error: {:?}", e))?
     };

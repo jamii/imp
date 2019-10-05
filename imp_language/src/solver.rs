@@ -38,10 +38,10 @@ impl Expression {
     fn contains(&self, args: &[Name], context: &ContainsContext) -> Result<Self, String> {
         use Expression::*;
         Ok(match self {
-            Nothing => Nothing,
-            Something => {
+            None => None,
+            Some => {
                 assert_eq!(args.len(), 0);
-                Something
+                Some
             }
             Scalar(scalar) => {
                 assert_eq!(args.len(), 1);
@@ -71,9 +71,9 @@ impl Expression {
             }
             Negate(box e) => Negate(box e.contains(args, context)?),
             Name(name) => match context.actions.lookup(name) {
-                Some(LowerAction::Inline(expr)) => expr.contains(args, context)?,
+                Option::Some(LowerAction::Inline(expr)) => expr.contains(args, context)?,
                 // TODO might need to be careful about shadowing here if variable names are not unique
-                Some(LowerAction::Refer(new_name, prefix_args)) => {
+                Option::Some(LowerAction::Refer(new_name, prefix_args)) => {
                     // TODO this will have the wrong var names
                     let expr = Expression::apply(
                         Expression::Name(new_name.to_owned()),
@@ -81,7 +81,7 @@ impl Expression {
                     );
                     expr
                 }
-                None => Err(format!("Name from outside of lower {:?}", name))?,
+                Option::None => Err(format!("Name from outside of lower {:?}", name))?,
             },
             Let(name, value, box body) => {
                 let mut context = context.clone();
@@ -119,7 +119,7 @@ impl Expression {
                 box if_false.contains(args, context)?,
             ),
             Abstract(arg, box body) => {
-                assert!(args.len() >= 1); // TODO otherwise replace with nothing
+                assert!(args.len() >= 1); // TODO otherwise replace with none
                 let expr = body
                     .contains(&args[1..], context)?
                     // TODO does this assume arg is unique?
@@ -340,8 +340,8 @@ impl Expression {
     //         box predicate.clone(),
     //         box args
     //             .into_iter()
-    //             .fold(Something, |a, b| Product(box a, box b)),
-    //         box Nothing,
+    //             .fold(Some, |a, b| Product(box a, box b)),
+    //         box None,
     //     );
     //     for name in ordering.iter().rev() {
     //         expr = Apply(
@@ -371,7 +371,7 @@ impl Expression {
     //                             ),
     //                         ),
     //                     ),
-    //                     box Seal(box permutation.into_iter().fold(Something, |expr, i| {
+    //                     box Seal(box permutation.into_iter().fold(Some, |expr, i| {
     //                         Product(box expr, box Scalar(self::Scalar::Number((i + 1) as i64)))
     //                     })),
     //                 ),

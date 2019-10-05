@@ -13,8 +13,8 @@ pub struct Native {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Expression {
-    Nothing,
-    Something,
+    None,
+    Some,
     Scalar(Scalar),
     Union(Box<Expression>, Box<Expression>),
     Intersect(Box<Expression>, Box<Expression>),
@@ -60,8 +60,8 @@ impl Expression {
     {
         use Expression::*;
         match self {
-            Nothing => (),
-            Something => (),
+            None => (),
+            Some => (),
             Scalar(_) => (),
             Union(e1, e2) => {
                 f(&*e1)?;
@@ -123,8 +123,8 @@ impl Expression {
     {
         use Expression::*;
         match self {
-            Nothing => (),
-            Something => (),
+            None => (),
+            Some => (),
             Scalar(_) => (),
             Union(box e1, box e2) => {
                 f(e1)?;
@@ -185,7 +185,7 @@ impl Expression {
         F: FnMut(Expression) -> Result<Expression, String>,
     {
         self.visit1_mut(&mut |e| {
-            *e = f(std::mem::replace(e, Expression::Nothing))?;
+            *e = f(std::mem::replace(e, Expression::None))?;
             Ok(())
         })?;
         Ok(self)
@@ -196,7 +196,7 @@ impl Expression {
         F: FnMut(Expression) -> Result<Expression, String>,
     {
         self.visit_mut(&mut |e| {
-            *e = f(std::mem::replace(e, Expression::Nothing))?;
+            *e = f(std::mem::replace(e, Expression::None))?;
             Ok(())
         })?;
         Ok(self)
@@ -211,7 +211,9 @@ impl Expression {
             use Expression::*;
             match expr {
                 Name(name) => {
-                    if let (false, Some(native)) = (bound.contains(&name), natives.get(&name)) {
+                    if let (false, Option::Some(native)) =
+                        (bound.contains(&name), natives.get(&name))
+                    {
                         let args = (0..native.input_arity)
                             .map(|i| format!("a{}", i))
                             .collect::<Vec<_>>();
@@ -279,15 +281,15 @@ impl Expression {
             use Expression::*;
             Ok(match expression {
                 Name(name) => match bound.get(&name) {
-                    Some(unique_name) => Name(unique_name.clone()),
-                    None => return Err(format!("Undefined: {}", name)),
+                    Option::Some(unique_name) => Name(unique_name.clone()),
+                    Option::None => return Err(format!("Undefined: {}", name)),
                 },
                 ApplyNative(native, names) => {
                     let names = names
                         .into_iter()
                         .map(|name| match bound.get(&name) {
-                            Some(unique_name) => Ok(unique_name.clone()),
-                            None => Err(format!("Undefined: {}", name)),
+                            Option::Some(unique_name) => Ok(unique_name.clone()),
+                            Option::None => Err(format!("Undefined: {}", name)),
                         })
                         .collect::<Result<Vec<_>, String>>()?;
                     ApplyNative(native, names)
@@ -329,14 +331,14 @@ impl Expression {
             use Expression::*;
             match expression {
                 Name(name) => match contexts.get(&name) {
-                    Some(context) => Expression::apply(
+                    Option::Some(context) => Expression::apply(
                         Name(name),
                         context
                             .iter()
                             .map(|name| Expression::Name(name.clone()))
                             .collect(),
                     ),
-                    None => Name(name),
+                    Option::None => Name(name),
                 },
                 Let(name, value, body) => {
                     let value = map(*value, lets, contexts, context);

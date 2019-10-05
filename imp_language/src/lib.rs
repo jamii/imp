@@ -69,27 +69,27 @@ mod tests {
         //     )]]))
         // );
 
-        // assert_eq_run!("()", "something");
-        // assert_eq_run!("(nothing,)", "nothing");
-        // assert_eq_run!("(nothing,something)", "nothing");
-        // assert_eq_run!("(something,something)", "something");
+        // assert_eq_run!("()", "some");
+        // assert_eq_run!("(none,)", "none");
+        // assert_eq_run!("(none,some)", "none");
+        // assert_eq_run!("(some,some)", "some");
         // assert_eq_run!("(1,(2,3))", "((1,2),3)", "(1,2,3)");
 
-        // assert_eq_run!("!nothing", "something");
-        // assert_eq_run!("!something", "nothing");
-        // assert_eq_run!("!3", "nothing");
+        // assert_eq_run!("!none", "some");
+        // assert_eq_run!("!some", "none");
+        // assert_eq_run!("!3", "none");
 
-        // assert_eq_run!("nothing | something", "something");
-        // assert_eq_run!("nothing & something", "nothing");
+        // assert_eq_run!("none | some", "some");
+        // assert_eq_run!("none & some", "none");
         // assert_eq_run!("(1 | 2) & (2 | 3)", "2");
         // assert_eq_run!("1 | (2 | 3)", "(1 | 2) | 3");
 
-        // assert_eq_run!("1 = 1", "something");
-        // assert_eq_run!("1 = 2", "nothing");
-        // assert_eq_run!("(1 | 2) = (2 | 1)", "something");
+        // assert_eq_run!("1 = 1", "some");
+        // assert_eq_run!("1 = 2", "none");
+        // assert_eq_run!("(1 | 2) = (2 | 1)", "some");
 
-        // assert_eq_run!("1[1]", "something");
-        // assert_eq_run!("1[2]", "nothing");
+        // assert_eq_run!("1[1]", "some");
+        // assert_eq_run!("1[2]", "none");
         // assert_eq_run!(r#"((1, "one") | (2, "two"))[2]"#, r#""two""#);
 
         // // assert!(run("(1, _, 3)"))

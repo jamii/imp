@@ -41,8 +41,8 @@ fn build_expr(data: &[u8]) -> Option<Expression> {
     let mut bytes = data.into_iter().peekable();
     while let Some(byte) = bytes.next() {
         let expr = match byte {
-            0 => Expression::Nothing,
-            1 => Expression::Something,
+            0 => Expression::None,
+            1 => Expression::Some,
             2 if bytes.peek().is_some() => {
                 Expression::Scalar(Scalar::Number(*bytes.next().unwrap() as i64))
             }

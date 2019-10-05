@@ -82,14 +82,14 @@ impl Value {
         Scalar::unseal(val.as_scalar()?)
     }
 
-    pub fn is_nothing(&self) -> bool {
+    pub fn is_none(&self) -> bool {
         match self {
             Value::Set(set) if set.len() == 0 => true,
             _ => false,
         }
     }
 
-    pub fn is_something(&self) -> bool {
+    pub fn is_some(&self) -> bool {
         match self {
             Value::Set(set) if set.len() == 1 => set.iter().next().unwrap().is_empty(),
             _ => false,
@@ -113,11 +113,11 @@ impl Value {
         Value::Set(tuples.into_iter().collect())
     }
 
-    pub fn nothing() -> Value {
+    pub fn none() -> Value {
         Value::set(vec![])
     }
 
-    pub fn something() -> Value {
+    pub fn some() -> Value {
         Value::set(vec![vec![]])
     }
 
@@ -128,9 +128,9 @@ impl Value {
     fn union(val1: Value, val2: Value) -> Result<Value, String> {
         use Expression::*;
         use Value::*;
-        Ok(if val1.is_nothing() {
+        Ok(if val1.is_none() {
             val2
-        } else if val2.is_nothing() {
+        } else if val2.is_none() {
             val1
         } else {
             match (val1, val2) {
@@ -151,10 +151,10 @@ impl Value {
     fn intersect(val1: Value, val2: Value) -> Result<Value, String> {
         use Expression::*;
         use Value::*;
-        Ok(if val1.is_nothing() {
-            Value::nothing()
-        } else if val2.is_nothing() {
-            Value::nothing()
+        Ok(if val1.is_none() {
+            Value::none()
+        } else if val2.is_none() {
+            Value::none()
         } else {
             match (val1, val2) {
                 (Set(set1), Set(set2)) => Value::set(set1.intersection(&set2).cloned()),
@@ -182,13 +182,13 @@ impl Value {
                     tuple
                 })
             })),
-            // (nothing x v2) => nothing
-            // (something x v2) => v2
+            // (none x v2) => none
+            // (some x v2) => v2
             // (v1 x v2) => (a -> (v1 a) x v2)
             (v1, v2) => {
-                if v1.is_nothing() {
-                    Value::nothing()
-                } else if v1.is_something() {
+                if v1.is_none() {
+                    Value::none()
+                } else if v1.is_some() {
                     v2
                 } else {
                     let env = Environment::from(vec![("v1".to_owned(), v1), ("v2".to_owned(), v2)]);
@@ -207,9 +207,9 @@ impl Value {
         Ok(match (val1, val2) {
             (Set(set1), Set(set2)) => {
                 if set1 == set2 {
-                    Value::something()
+                    Value::some()
                 } else {
-                    Value::nothing()
+                    Value::none()
                 }
             }
             (v1, v2) => return Err(format!("{} = {}", v1, v2)),
@@ -217,10 +217,10 @@ impl Value {
     }
 
     fn negate(val: Value) -> Value {
-        if val.is_nothing() {
-            Value::something()
+        if val.is_none() {
+            Value::some()
         } else {
-            Value::nothing()
+            Value::none()
         }
     }
 
@@ -243,7 +243,7 @@ impl Value {
             (Closure(name, body, env), Set(set)) | (Set(set), Closure(name, body, env)) => {
                 let mut set_iter = set.into_iter();
                 match set_iter.next() {
-                    None => Value::nothing(),
+                    None => Value::none(),
                     Some(tuple) => {
                         // fun (scalar x tuple | tail) => (fun scalar tuple | fun tail)
                         let head = {
@@ -379,8 +379,8 @@ impl Expression {
         use Expression::*;
         use Value::*;
         Ok(match self {
-            Nothing => Value::nothing(),
-            Something => Value::something(),
+            None => Value::none(),
+            Some => Value::some(),
             Scalar(scalar) => Value::scalar(scalar),
             Union(box e1, box e2) => Value::union(e1.eval(env)?, e2.eval(env)?)?,
             Intersect(box e1, box e2) => Value::intersect(e1.eval(env)?, e2.eval(env)?)?,
@@ -388,8 +388,8 @@ impl Expression {
             Equal(box e1, box e2) => Value::equals(e1.eval(env)?, e2.eval(env)?)?,
             Negate(box e) => Value::negate(e.eval(env)?),
             Name(name) => match env.lookup(&name) {
-                Some(value) => value.clone(),
-                None => Err(format!("Undefined: {}", name))?,
+                Option::Some(value) => value.clone(),
+                Option::None => Err(format!("Undefined: {}", name))?,
             },
             Let(name, box value, box body) => {
                 let mut env = env.clone();
@@ -397,7 +397,7 @@ impl Expression {
                 body.eval(&env)?
             }
             If(box cond, box if_true, box if_false) => {
-                if !cond.eval(env)?.is_nothing() {
+                if !cond.eval(env)?.is_none() {
                     if_true.eval(env)?
                 } else {
                     if_false.eval(env)?

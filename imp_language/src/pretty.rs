@@ -51,17 +51,17 @@ impl fmt::Display for Scalar {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            v if v.is_nothing() => write!(f, "none")?,
-            v if v.is_something() => write!(f, "some")?,
+            v if v.is_none() => write!(f, "none")?,
+            v if v.is_some() => write!(f, "some")?,
             Value::Set(set) => {
-                let is_something = self.is_something();
-                if is_something {
+                let is_some = self.is_some();
+                if is_some {
                     write!(f, "(")?;
                 }
                 write_delimited(f, " | ", set, |f, value| {
                     write_delimited(f, " x ", value, |f, scalar| write!(f, "{}", scalar))
                 })?;
-                if is_something {
+                if is_some {
                     write!(f, ")")?;
                 }
             }
@@ -79,8 +79,8 @@ impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Expression::*;
         match self {
-            Nothing => write!(f, "nothing")?,
-            Something => write!(f, "something")?,
+            None => write!(f, "none")?,
+            Some => write!(f, "some")?,
             Scalar(scalar) => write!(f, "{}", scalar)?,
             Union(e1, e2) => write!(f, "({} | {})", e1, e2)?,
             Intersect(e1, e2) => write!(f, "({} & {})", e1, e2)?,
@@ -131,8 +131,8 @@ impl fmt::Display for ValueType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use ValueType::*;
         match self {
-            Nothing => write!(f, ":nothing")?,
-            Something => write!(f, ":something")?,
+            None => write!(f, ":none")?,
+            Some => write!(f, ":some")?,
             Product(s, v) => write!(f, "{} :x {}", s, v)?,
             Abstract(s, v) => write!(f, "{} :-> {}", s, v)?,
         }

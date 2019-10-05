@@ -52,8 +52,8 @@ pub enum Token {
     Else,
     When,
     Reduce,
-    Something,
-    Nothing,
+    Some,
+    None,
     Whitespace,
     EOF,
 }
@@ -71,8 +71,8 @@ impl<'a> Parser<'a> {
         let mut chars = self.source[self.position.get()..].chars();
         let mut len = 0;
         let token = match chars.next() {
-            None => EOF,
-            Some(char) => {
+            Option::None => EOF,
+            Option::Some(char) => {
                 len += char.len_utf8();
                 match char {
                     '(' => OpenGroup,
@@ -90,7 +90,7 @@ impl<'a> Parser<'a> {
                     '+' => Plus,
                     '=' => Equal,
                     '-' => match chars.next() {
-                        Some('>') => {
+                        Option::Some('>') => {
                             len += 1;
                             Abstract
                         }
@@ -101,12 +101,12 @@ impl<'a> Parser<'a> {
                         let mut escape = false;
                         loop {
                             match chars.next() {
-                                None => {
+                                Option::None => {
                                     return Err(Error::Lex {
                                         position: self.position.get(),
                                     });
                                 }
-                                Some(char) => {
+                                Option::Some(char) => {
                                     len += char.len_utf8();
                                     match char {
                                         '\\' => {
@@ -136,7 +136,9 @@ impl<'a> Parser<'a> {
                         if char.is_digit(10) {
                             loop {
                                 match chars.next() {
-                                    Some(char) if char.is_digit(10) => len += char.len_utf8(),
+                                    Option::Some(char) if char.is_digit(10) => {
+                                        len += char.len_utf8()
+                                    }
                                     _ => break,
                                 }
                             }
@@ -144,7 +146,7 @@ impl<'a> Parser<'a> {
                         } else if char.is_alphabetic() {
                             loop {
                                 match chars.next() {
-                                    Some(char) if char.is_alphanumeric() || char == '_' => {
+                                    Option::Some(char) if char.is_alphanumeric() || char == '_' => {
                                         len += char.len_utf8()
                                     }
                                     _ => break,
@@ -158,14 +160,16 @@ impl<'a> Parser<'a> {
                                 "else" => Else,
                                 "when" => When,
                                 "reduce" => Reduce,
-                                "something" | "some" => Something,
-                                "nothing" | "none" => Nothing,
+                                "some" | "some" => Some,
+                                "none" | "none" => None,
                                 _ => Name,
                             }
                         } else if char.is_ascii_whitespace() {
                             loop {
                                 match chars.next() {
-                                    Some(char) if char.is_whitespace() => len += char.len_utf8(),
+                                    Option::Some(char) if char.is_whitespace() => {
+                                        len += char.len_utf8()
+                                    }
                                     _ => break,
                                 }
                             }
@@ -232,7 +236,7 @@ impl<'a> Parser<'a> {
         use Token::*;
         let position = self.position.get();
         let (token, token_str) = self.token()?;
-        Ok(Some(match token {
+        Ok(Option::Some(match token {
             OpenGroup => {
                 let expression = self.expression_outer()?;
                 self.expect(CloseGroup)?;
@@ -268,11 +272,11 @@ impl<'a> Parser<'a> {
                     });
                 }
             },
-            Something => Expression::Something,
-            Nothing => Expression::Nothing,
+            Some => Expression::Some,
+            None => Expression::None,
             _ => {
                 self.position.set(position);
-                return Ok(None);
+                return Ok(Option::None);
             }
         }))
     }
@@ -356,7 +360,7 @@ impl<'a> Parser<'a> {
 
     fn expression_outer(&self) -> Result<Expression, Error> {
         use Token::*;
-        if let Some(expression) = self.try_abstract()? {
+        if let Option::Some(expression) = self.try_abstract()? {
             Ok(expression)
         } else {
             let position = self.position.get();
@@ -381,7 +385,7 @@ impl<'a> Parser<'a> {
                     let cond = self.expression_outer()?;
                     self.expect(Then)?;
                     let then = self.expression_outer()?;
-                    Ok(Expression::If(box cond, box then, box Expression::Nothing))
+                    Ok(Expression::If(box cond, box then, box Expression::None))
                 }
                 Reduce => {
                     let init = self.expression_inner()?;

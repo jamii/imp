@@ -149,7 +149,7 @@ impl ValueType {
                 t1.apply(*t2)?
             }
             (t1 @ Abstract(..), t2 @ Abstract(..)) => {
-                return Err(format!("Applied function to function: {} {}", t1, t2));
+                return Err(format!("Applied function to function: ({}) ({})", t1, t2));
             }
         })
     }

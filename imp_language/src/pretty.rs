@@ -121,7 +121,7 @@ impl fmt::Display for ScalarType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use ScalarType::*;
         match self {
-            Any => write!(f, ":any")?,
+            Any => write!(f, "any")?,
         }
         Ok(())
     }
@@ -131,10 +131,10 @@ impl fmt::Display for ValueType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use ValueType::*;
         match self {
-            None => write!(f, ":none")?,
-            Maybe => write!(f, ":maybe")?,
-            Product(s, v) => write!(f, "{} :x {}", s, v)?,
-            Abstract(s, v) => write!(f, "{} :-> {}", s, v)?,
+            None => write!(f, "none")?,
+            Maybe => write!(f, "maybe")?,
+            Product(s, v) => write!(f, "{} x {}", s, v)?,
+            Abstract(s, v) => write!(f, "{} -> {}", s, v)?,
         }
         Ok(())
     }

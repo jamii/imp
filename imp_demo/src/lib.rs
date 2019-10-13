@@ -23,7 +23,7 @@ let node = tag props children -> {
   "children" x children
 } in
 
-if is_function result then node "pre" {"style" x "margin: 0; padding: 0;"} {fun_as_text result} else
+if is_function result then node "code" {none} {fun_as_text result} else
 
 let rows = sealed_rows result in
 let pivoted = sealed_pivot result in
@@ -33,17 +33,17 @@ let table = node "table" in
 let table_row = node "tr" in
 let table_cell = node "td" in
 let table_header = node "th" in
-let code = node "code" {nothing} in
+let code = node "code" {none} in
 
-table {nothing} {
-  (rows (row -> row x table_row {nothing} {
+table {none} {
+  (rows (row -> row x table_row {none} {
     (0 x 0 x (table_cell {"style" x "color: lightGrey;"} {code {"("}}))
     |
     ((pivoted row) (col val ->
-      (if col = 1 then nothing else
+      (if col = 1 then none else
         (col x 0 x table_cell {"style" x "color: lightGrey;"} {code {"x"}}))
       |
-      (col x 1 x table_cell {nothing} {code {as_text val}})
+      (col x 1 x table_cell {none} {code {as_text val}})
     ))
     |
     (10000 x 0 x (table_cell {"style" x "color: lightGrey;"} {code {if row = num_rows then ")" else ") |"}}))
@@ -92,23 +92,29 @@ fn find_all(class: &str) -> Vec<HtmlElement> {
         .collect()
 }
 
-fn run(code: &str) -> Result<Value, String> {
+fn run(code: &str) -> Result<(ValueType, Value), String> {
     let expr = if code.is_empty() {
         // mild hack
         Expression::None
     } else {
         parse(&code).map_err(|e| format!("Parse error: {:?}", e))?
     };
-    Ok(expr
+
+    let expr = expr
         .with_natives(&Native::stdlib())
         .with_unique_names()?
-        .lift_lets()
-        .eval(&Environment::new())?)
-    // let type_env = Environment::new();
-    // let mut type_cache = Cache::new();
-    // let typ = expr
-    //     .typecheck(&type_env, &mut type_cache)
-    //     .map_err(|e| format!("Type error: {}", e))?;
+        .lift_lets();
+
+    let mut type_cache = Cache::new();
+    let typ = expr
+        .typecheck(&Environment::new(), &mut type_cache)
+        .map_err(|e| format!("Type error: {}", e))?;
+
+    let value = expr
+        .eval(&Environment::new())
+        .map_err(|e| format!("Eval error: {}", e))?;
+
+    Ok((typ, value))
 }
 
 fn run_ui(value: Value) -> Result<Value, String> {
@@ -222,11 +228,25 @@ fn render(value: &Value) -> Result<Node, String> {
 #[wasm_bindgen]
 pub fn update(input: &str, output_node: &HtmlElement) {
     let output = match run(&input)
-        .map_err(|e| format!("Eval error: {}", e))
-        .and_then(|value| run_ui(value).map_err(|e| format!("In renderer: Eval error: {}", e)))
-        .and_then(|ui| render(&Value::unseal(ui)?))
+        .and_then(|(typ, value)| {
+            Ok((
+                typ,
+                run_ui(value).map_err(|e| format!("Renderer error: {}", e))?,
+            ))
+        })
+        .and_then(|(typ, ui)| Ok((typ, render(&Value::unseal(ui)?)?)))
     {
-        Ok(output) => output,
+        Ok((typ, output)) => Node::tag("div")
+            .child(
+                Node::tag("div")
+                    .attribute("class", "imp-type")
+                    .child(Node::tag("code").child(Node::text(&format!("Type = {}", typ)))),
+            )
+            .child(
+                Node::tag("div")
+                    .attribute("class", "imp-value")
+                    .child(output),
+            ),
         Err(error) => Node::tag("div").child(Node::text(&error)),
     };
     output_node.set_inner_html("");

@@ -132,7 +132,7 @@ impl fmt::Display for ValueType {
         use ValueType::*;
         match self {
             None => write!(f, ":none")?,
-            Some => write!(f, ":some")?,
+            Maybe => write!(f, ":maybe")?,
             Product(s, v) => write!(f, "{} :x {}", s, v)?,
             Abstract(s, v) => write!(f, "{} :-> {}", s, v)?,
         }

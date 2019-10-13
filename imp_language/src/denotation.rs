@@ -128,22 +128,16 @@ impl Value {
     fn union(val1: Value, val2: Value) -> Result<Value, String> {
         use Expression::*;
         use Value::*;
-        Ok(if val1.is_none() {
-            val2
-        } else if val2.is_none() {
-            val1
-        } else {
-            match (val1, val2) {
-                (Set(set1), Set(set2)) => Value::set(set1.union(&set2).cloned()),
-                (v1, v2) => {
-                    // (v1 | v2) => (a -> (v1 a) | (v2 a))
-                    let env = Environment::from(vec![("v1".to_owned(), v1), ("v2".to_owned(), v2)]);
-                    let expr = Union(
-                        box Apply(box Name("v1".to_owned()), box Name("a".to_owned())),
-                        box Apply(box Name("v2".to_owned()), box Name("a".to_owned())),
-                    );
-                    Closure("a".to_owned(), expr, env)
-                }
+        Ok(match (val1, val2) {
+            (Set(set1), Set(set2)) => Value::set(set1.union(&set2).cloned()),
+            (v1, v2) => {
+                // (v1 | v2) => (a -> (v1 a) | (v2 a))
+                let env = Environment::from(vec![("v1".to_owned(), v1), ("v2".to_owned(), v2)]);
+                let expr = Union(
+                    box Apply(box Name("v1".to_owned()), box Name("a".to_owned())),
+                    box Apply(box Name("v2".to_owned()), box Name("a".to_owned())),
+                );
+                Closure("a".to_owned(), expr, env)
             }
         })
     }
@@ -151,22 +145,17 @@ impl Value {
     fn intersect(val1: Value, val2: Value) -> Result<Value, String> {
         use Expression::*;
         use Value::*;
-        Ok(if val1.is_none() {
-            Value::none()
-        } else if val2.is_none() {
-            Value::none()
-        } else {
-            match (val1, val2) {
-                (Set(set1), Set(set2)) => Value::set(set1.intersection(&set2).cloned()),
-                (v1, v2) => {
-                    // (v1 & v2) => (a -> (v1 a) & (v2 a))
-                    let env = Environment::from(vec![("v1".to_owned(), v1), ("v2".to_owned(), v2)]);
-                    let expr = Intersect(
-                        box Apply(box Name("v1".to_owned()), box Name("a".to_owned())),
-                        box Apply(box Name("v2".to_owned()), box Name("a".to_owned())),
-                    );
-                    Closure("a".to_owned(), expr, env)
-                }
+        Ok(match (val1, val2) {
+            (Set(set1), Set(set2)) => Value::set(set1.intersection(&set2).cloned()),
+            (v1, v2) => {
+                // we can assume v1,v2 != some because of types
+                // (v1 & v2) => (a -> (v1 a) & (v2 a))
+                let env = Environment::from(vec![("v1".to_owned(), v1), ("v2".to_owned(), v2)]);
+                let expr = Intersect(
+                    box Apply(box Name("v1".to_owned()), box Name("a".to_owned())),
+                    box Apply(box Name("v2".to_owned()), box Name("a".to_owned())),
+                );
+                Closure("a".to_owned(), expr, env)
             }
         })
     }

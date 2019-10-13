@@ -154,14 +154,6 @@ impl ValueType {
         })
     }
 
-    fn negate(self) -> Self {
-        use ValueType::*;
-        match self {
-            None | Maybe => Maybe, // the type Maybe includes the values some and none. kinda weird
-            Product(s, t) | Abstract(s, t) => Abstract(s, box t.negate()),
-        }
-    }
-
     fn solve(self) -> Self {
         use ValueType::*;
         match self {
@@ -259,7 +251,7 @@ impl Expression {
         use Expression::*;
         let typ = match self {
             None => ValueType::None,
-            Maybe => ValueType::Maybe,
+            Some => ValueType::Maybe,
             Scalar(_) => ValueType::Product(ScalarType::Any, box ValueType::Maybe),
             Union(e1, e2) => e1.typecheck(env, cache)?.union(e2.typecheck(env, cache)?)?,
             Intersect(e1, e2) => e1
@@ -274,7 +266,10 @@ impl Expression {
                     .intersect(e2.typecheck(env, cache)?)?;
                 ValueType::Maybe
             }
-            Negate(e) => e.typecheck(env, cache)?.negate(),
+            Negate(e) => {
+                e.typecheck(env, cache)?;
+                ValueType::Maybe
+            }
             Name(name) => env
                 .lookup(name)
                 .ok_or_else(|| format!("Unbound variable: {:?}", name))?

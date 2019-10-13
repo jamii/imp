@@ -160,8 +160,8 @@ impl<'a> Parser<'a> {
                                 "else" => Else,
                                 "when" => When,
                                 "reduce" => Reduce,
-                                "some" | "some" => Some,
-                                "none" | "none" => None,
+                                "some" => Some,
+                                "none" => None,
                                 _ => Name,
                             }
                         } else if char.is_ascii_whitespace() {

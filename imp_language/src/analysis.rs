@@ -13,7 +13,7 @@ pub enum ScalarType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValueType {
     None,
-    Some,
+    Maybe,
     Product(ScalarType, Box<ValueType>), // no Abstract inside Product
     Abstract(ScalarType, Box<ValueType>),
 }
@@ -75,7 +75,7 @@ impl ValueType {
     pub fn arity(&self) -> Arity {
         match self {
             ValueType::None => Arity::AtLeast(0),
-            ValueType::Some => Arity::Exactly(0),
+            ValueType::Maybe => Arity::Exactly(0),
             ValueType::Product(_, tail) | ValueType::Abstract(_, tail) => match tail.arity() {
                 Arity::AtLeast(a) => Arity::AtLeast(a + 1),
                 Arity::Exactly(a) => Arity::Exactly(a + 1),
@@ -87,7 +87,7 @@ impl ValueType {
         use ValueType::*;
         Ok(match (self, other) {
             (None, t) | (t, None) => t,
-            (Some, Some) => Some,
+            (Maybe, Maybe) => Maybe,
             (Product(s1, t1), Product(s2, t2)) => Product(s1.union(s2)?, box t1.union(*t2)?),
             (Abstract(s1, t1), Abstract(s2, t2))
             | (Abstract(s1, t1), Product(s2, t2))
@@ -100,7 +100,7 @@ impl ValueType {
         use ValueType::*;
         Ok(match (self, other) {
             (None, _) | (_, None) => None,
-            (Some, Some) => Some,
+            (Maybe, Maybe) => Maybe,
             (Product(s1, t1), Product(s2, t2)) => {
                 Product(s1.intersect(s2)?, box t1.intersect(*t2)?)
             }
@@ -117,12 +117,22 @@ impl ValueType {
         use ValueType::*;
         Ok(match self {
             None => None,
-            Some => match other {
-                Abstract(..) => return Err(format!("Product of function: {}", other)),
-                _ => other,
-            },
-            Product(s1, t1) => ValueType::Product(s1, box t1.product(other)?),
-            Abstract(..) => return Err(format!("Product of function: {}", self)),
+            Maybe => other,
+            Product(s1, t1) => {
+                let t2 = t1.product(other)?;
+                match t2 {
+                    None => None,
+                    Abstract(..) => Abstract(s1, box t2),
+                    _ => Product(s1, box t2),
+                }
+            }
+            Abstract(s1, t1) => {
+                let t2 = t1.product(other)?;
+                match t2 {
+                    None => None,
+                    _ => Abstract(s1, box t2),
+                }
+            }
         })
     }
 
@@ -130,7 +140,7 @@ impl ValueType {
         use ValueType::*;
         Ok(match (self, other) {
             (None, _) | (_, None) => None,
-            (Some, t) | (t, Some) => t,
+            (Maybe, t) | (t, Maybe) => t,
             (Product(s1, t1), Product(s2, t2))
             | (Abstract(s1, t1), Product(s2, t2))
             | (Product(s1, t1), Abstract(s2, t2)) => {
@@ -147,7 +157,7 @@ impl ValueType {
     fn negate(self) -> Self {
         use ValueType::*;
         match self {
-            None | Some => Some, // the type Some includes the values some and none. kinda weird
+            None | Maybe => Maybe, // the type Maybe includes the values some and none. kinda weird
             Product(s, t) | Abstract(s, t) => Abstract(s, box t.negate()),
         }
     }
@@ -156,7 +166,7 @@ impl ValueType {
         use ValueType::*;
         match self {
             None => None,
-            Some => Some,
+            Maybe => Maybe,
             Product(s, t) | Abstract(s, t) => Product(s, box t.solve()),
         }
     }
@@ -176,9 +186,9 @@ impl Value {
                 match (arities.next(), arities.next()) {
                     (None, None) => ValueType::None,
                     (Some(arity), None) => {
-                        let mut typ = ValueType::Some;
+                        let mut typ = ValueType::Maybe;
                         for _ in 0..arity {
-                            typ = ValueType::Product(ScalarType::Any, box ValueType::Some);
+                            typ = ValueType::Product(ScalarType::Any, box ValueType::Maybe);
                         }
                         typ
                     }
@@ -194,7 +204,7 @@ impl Value {
                 );
                 type_env.bind(
                     name.clone(),
-                    ValueType::Product(ScalarType::Any, box ValueType::Some),
+                    ValueType::Product(ScalarType::Any, box ValueType::Maybe),
                 );
                 let mut type_cache = Cache::new();
                 body.typecheck(&type_env, &mut type_cache)?
@@ -249,8 +259,8 @@ impl Expression {
         use Expression::*;
         let typ = match self {
             None => ValueType::None,
-            Some => ValueType::Some,
-            Scalar(_) => ValueType::Product(ScalarType::Any, box ValueType::Some),
+            Maybe => ValueType::Maybe,
+            Scalar(_) => ValueType::Product(ScalarType::Any, box ValueType::Maybe),
             Union(e1, e2) => e1.typecheck(env, cache)?.union(e2.typecheck(env, cache)?)?,
             Intersect(e1, e2) => e1
                 .typecheck(env, cache)?
@@ -262,7 +272,7 @@ impl Expression {
                 // TODO intersect is fine for now, but may want to think more carefully about this once we have real scalar types
                 e1.typecheck(env, cache)?
                     .intersect(e2.typecheck(env, cache)?)?;
-                ValueType::Some
+                ValueType::Maybe
             }
             Negate(e) => e.typecheck(env, cache)?.negate(),
             Name(name) => env
@@ -276,7 +286,7 @@ impl Expression {
             }
             If(c, t, f) => {
                 match c.typecheck(env, cache)? {
-                    ValueType::None | ValueType::Some => (),
+                    ValueType::None | ValueType::Maybe => (),
                     other => return Err(format!("Non-boolean condition in `if`: {}", other)),
                 }
                 t.typecheck(env, cache)?.union(f.typecheck(env, cache)?)?
@@ -285,14 +295,14 @@ impl Expression {
                 let mut env = env.clone();
                 env.bind(
                     arg.clone(),
-                    ValueType::Product(ScalarType::Any, box ValueType::Some),
+                    ValueType::Product(ScalarType::Any, box ValueType::Maybe),
                 );
                 ValueType::Abstract(ScalarType::Any, box body.typecheck(&env, cache)?)
             }
             Apply(e1, e2) => e1.typecheck(env, cache)?.apply(e2.typecheck(env, cache)?)?,
             ApplyNative(f, args) => {
                 assert_eq!(f.input_arity, args.len());
-                let mut t = ValueType::Some;
+                let mut t = ValueType::Maybe;
                 for _ in 0..f.output_arity {
                     t = ValueType::Product(ScalarType::Any, box t)
                 }
@@ -305,15 +315,12 @@ impl Expression {
                 if vals_type.is_function() {
                     return Err(format!("Reduce on non-finite: {}", vals_type));
                 }
-                if let ValueType::Some = vals_type {
+                if let ValueType::Maybe = vals_type {
                     return Err(format!("Reduce on zero-column type"));
                 }
                 let reinit_type = fun_type
                     .apply(init_type.clone())?
-                    .apply(ValueType::Product(
-                        ScalarType::Any,
-                        box ValueType::Some,
-                    ))?;
+                    .apply(ValueType::Product(ScalarType::Any, box ValueType::Maybe))?;
                 // TODO do we need to fixpoint this?
                 if let Err(_) = init_type.clone().union(reinit_type.clone()) {
                     return Err(format!(
@@ -325,7 +332,7 @@ impl Expression {
             }
             Seal(e) => {
                 e.typecheck(env, cache)?;
-                ValueType::Product(ScalarType::Any, box ValueType::Some)
+                ValueType::Product(ScalarType::Any, box ValueType::Maybe)
             }
             Unseal(..) => return Err(format!("Can't type unseal")),
             Exists(..) => return Err(format!("Can't type exists")),

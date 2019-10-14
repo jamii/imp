@@ -41,7 +41,7 @@ table {none} {
     |
     ((pivoted row) (col val ->
       (if col = 1 then none else
-        (col x 0 x table_cell {"style" x "color: lightGrey;"} {code {"x"}}))
+        (col x 0 x table_cell {"style" x "color: lightGrey;"} {code {" x "}}))
       |
       (col x 1 x table_cell {none} {code {as_text val}})
     ))
@@ -240,14 +240,16 @@ pub fn update(input: &str, output_node: &HtmlElement) {
             .child(
                 Node::tag("div")
                     .attribute("class", "imp-type")
-                    .child(Node::tag("code").child(Node::text(&format!("Type = {}", typ)))),
+                    .child(Node::tag("code").child(Node::text(&format!("type = {}", typ)))),
             )
             .child(
                 Node::tag("div")
                     .attribute("class", "imp-value")
                     .child(output),
             ),
-        Err(error) => Node::tag("div").child(Node::text(&error)),
+        Err(error) => Node::tag("div")
+            .attribute("class", "imp-error")
+            .child(Node::tag("code").child(Node::text(&error))),
     };
     output_node.set_inner_html("");
     output_node.append_child(&output.node).unwrap();

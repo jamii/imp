@@ -50,18 +50,6 @@ impl ScalarType {
     fn intersect(self, _other: Self) -> Result<Self, String> {
         Ok(ScalarType::Any)
     }
-
-    fn product(self, tail: ValueType) -> ValueType {
-        if tail.is_function() {
-            ValueType::Abstract(self, box tail)
-        } else {
-            ValueType::Product(self, box tail)
-        }
-    }
-
-    fn abstract_(self, tail: ValueType) -> ValueType {
-        ValueType::Abstract(self, box tail)
-    }
 }
 
 impl ValueType {
@@ -92,7 +80,7 @@ impl ValueType {
             (Abstract(s1, t1), Abstract(s2, t2))
             | (Abstract(s1, t1), Product(s2, t2))
             | (Product(s1, t1), Abstract(s2, t2)) => Abstract(s1.union(s2)?, box t1.union(*t2)?),
-            (t1, t2) => return Err(format!("Can't unify {} and {}", t1, t2)),
+            (t1, t2) => return Err(format!("Can't unify ({}) and ({})", t1, t2)),
         })
     }
 
@@ -109,7 +97,7 @@ impl ValueType {
             | (Product(s1, t1), Abstract(s2, t2)) => {
                 Abstract(s1.intersect(s2)?, box t1.intersect(*t2)?)
             }
-            (t1, t2) => return Err(format!("Can't unify {} and {}", t1, t2)),
+            (t1, t2) => return Err(format!("Can't unify ({}) and ({})", t1, t2)),
         })
     }
 
@@ -122,7 +110,6 @@ impl ValueType {
                 let t2 = t1.product(other)?;
                 match t2 {
                     None => None,
-                    Abstract(..) => Abstract(s1, box t2),
                     _ => Product(s1, box t2),
                 }
             }

@@ -6,25 +6,6 @@ use crate::shared::*;
 //     Inline(Expression),
 // }
 
-// #[derive(Debug)]
-// struct Gensym {
-//     next_tmp: Cell<usize>,
-// }
-
-// impl Gensym {
-//     fn new() -> Self {
-//         Gensym {
-//             next_tmp: Cell::new(0),
-//         }
-//     }
-
-//     fn next(&self) -> String {
-//         let name = format!("var{}", self.next_tmp.get());
-//         self.next_tmp.set(self.next_tmp.get() + 1);
-//         name
-//     }
-// }
-
 // #[derive(Debug, Clone)]
 // struct ContainsContext<'a> {
 //     scalar_cache: &'a Cache<bool>,

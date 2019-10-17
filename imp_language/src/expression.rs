@@ -34,6 +34,25 @@ pub enum Expression {
     Solve(Box<Expression>),
 }
 
+#[derive(Debug)]
+pub struct Gensym {
+    next_tmp: Cell<usize>,
+}
+
+impl Gensym {
+    pub fn new() -> Self {
+        Gensym {
+            next_tmp: Cell::new(0),
+        }
+    }
+
+    pub fn next(&self) -> String {
+        let name = format!("var{}", self.next_tmp.get());
+        self.next_tmp.set(self.next_tmp.get() + 1);
+        name
+    }
+}
+
 impl Expression {
     pub fn _abstract(mut args: Vec<Name>, body: Expression) -> Expression {
         args.reverse();

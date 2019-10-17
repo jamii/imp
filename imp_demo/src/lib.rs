@@ -110,7 +110,8 @@ fn run(code: &str) -> Result<(Expression, ValueType, Value), String> {
         .typecheck(&Environment::new(), &mut type_cache)
         .map_err(|e| format!("Type error: {}", e))?;
 
-    expr.funify(&mut type_cache);
+    let gensym = Gensym::new();
+    expr.funify(&mut type_cache, &gensym);
 
     let value = expr
         .clone()

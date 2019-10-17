@@ -14,7 +14,7 @@ mod syntax;
 
 use crate::shared::*;
 pub use crate::shared::{
-    parse, Cache, Environment, Expression, Native, Scalar, ScalarType, Value, ValueType,
+    parse, Cache, Environment, Expression, Gensym, Native, Scalar, ScalarType, Value, ValueType,
 };
 
 pub fn eval(expr: Expression) -> Result<Value, String> {

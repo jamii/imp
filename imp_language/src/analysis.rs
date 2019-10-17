@@ -329,10 +329,10 @@ impl Expression {
         Ok(typ)
     }
 
-    pub fn funify(&mut self, type_cache: &mut Cache<ValueType>) {
+    pub fn funify(&mut self, type_cache: &mut Cache<ValueType>, gensym: &Gensym) {
         use Expression::*;
         self.visit1_mut(&mut |expr| {
-            expr.funify(type_cache);
+            expr.funify(type_cache, gensym);
             Ok(())
         })
         .unwrap();
@@ -344,9 +344,7 @@ impl Expression {
             if fun_arity > 0 {
                 *self = match self.take() {
                     Union(a, b) => {
-                        let names = (0..fun_arity)
-                            .map(|i| format!("tmp_{}", i))
-                            .collect::<Vec<_>>();
+                        let names = (0..fun_arity).map(|_| gensym.next()).collect::<Vec<_>>();
                         Expression::_abstract(
                             names.clone(),
                             Union(
@@ -356,9 +354,7 @@ impl Expression {
                         )
                     }
                     Intersect(a, b) => {
-                        let names = (0..fun_arity)
-                            .map(|i| format!("tmp_{}", i))
-                            .collect::<Vec<_>>();
+                        let names = (0..fun_arity).map(|_| gensym.next()).collect::<Vec<_>>();
                         Expression::_abstract(
                             names.clone(),
                             Intersect(
@@ -370,12 +366,10 @@ impl Expression {
                     Product(a, b) => {
                         let a_arity = type_cache.get(&a).arity();
                         let split = fun_arity.min(a_arity);
-                        let names = (0..fun_arity)
-                            .map(|i| format!("tmp_{}", i))
-                            .collect::<Vec<_>>();
+                        let names = (0..fun_arity).map(|_| gensym.next()).collect::<Vec<_>>();
                         Expression::_abstract(
                             names.clone(),
-                            Union(
+                            Product(
                                 box Expression::_apply(*a, names[0..split].to_vec()),
                                 box Expression::_apply(*b, names[split..].to_vec()),
                             ),
@@ -387,9 +381,7 @@ impl Expression {
                         } else {
                             (b, a)
                         };
-                        let names = (0..fun_arity)
-                            .map(|i| format!("tmp_{}", i))
-                            .collect::<Vec<_>>();
+                        let names = (0..fun_arity).map(|_| gensym.next()).collect::<Vec<_>>();
                         Expression::_abstract(
                             names.clone(),
                             Apply(a, box Expression::_product(*b, names)),

@@ -82,13 +82,6 @@ impl Value {
         Scalar::unseal(val.as_scalar()?)
     }
 
-    pub fn is_none(&self) -> bool {
-        match self {
-            Value::Set(set) if set.len() == 0 => true,
-            _ => false,
-        }
-    }
-
     pub fn is_some(&self) -> bool {
         match self {
             Value::Set(set) if set.len() == 1 => set.iter().next().unwrap().is_empty(),
@@ -171,15 +164,15 @@ impl Value {
 
     fn negate(val: Value) -> Result<Value, String> {
         use Value::*;
-        Ok(match &val {
-            Set(_) => {
-                if val.is_none() {
+        Ok(match val {
+            Set(set) => {
+                if set.is_empty() {
                     Value::some()
                 } else {
                     Value::none()
                 }
             }
-            _ => return Err(format!("Internal error: !{:?}", val)),
+            val => return Err(format!("Internal error: !{:?}", val)),
         })
     }
 
@@ -356,7 +349,7 @@ impl Expression {
                 body.eval(&env)?
             }
             If(box cond, box if_true, box if_false) => {
-                if !cond.eval(env)?.is_none() {
+                if cond.eval(env)?.is_some() {
                     if_true.eval(env)?
                 } else {
                     if_false.eval(env)?

@@ -41,6 +41,12 @@ impl Expression {
             .fold(body, |body, arg| Expression::Abstract(arg, box body))
     }
 
+    pub fn _apply(fun: Expression, args: Vec<Name>) -> Expression {
+        args.into_iter().fold(fun, |fun, arg| {
+            Expression::Apply(box fun, box Expression::Name(arg))
+        })
+    }
+
     pub fn apply(fun: Expression, args: Vec<Expression>) -> Expression {
         args.into_iter()
             .fold(fun, |fun, arg| Expression::Apply(box fun, box arg))
@@ -196,7 +202,7 @@ impl Expression {
         F: FnMut(Expression) -> Result<Expression, String>,
     {
         self.visit_mut(&mut |e| {
-            *e = f(std::mem::replace(e, Expression::None))?;
+            *e = f(e.take())?;
             Ok(())
         })?;
         Ok(self)
@@ -367,5 +373,9 @@ impl Expression {
         let mut lets = vec![];
         let expression = map(self, &mut lets, &mut HashMap::new(), &[]);
         Expression::_let(lets, expression)
+    }
+
+    pub fn take(&mut self) -> Expression {
+        std::mem::replace(self, Expression::None)
     }
 }

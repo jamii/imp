@@ -18,12 +18,6 @@ pub enum ValueType {
     Abstract(ScalarType, Box<ValueType>),
 }
 
-#[derive(Debug, Clone)]
-pub enum Arity {
-    Exactly(usize),
-    AtLeast(usize),
-}
-
 impl<T> Cache<T> {
     pub fn new() -> Self {
         Cache {
@@ -60,14 +54,19 @@ impl ValueType {
         }
     }
 
-    pub fn arity(&self) -> Arity {
+    pub fn arity(&self) -> usize {
         match self {
-            ValueType::None => Arity::AtLeast(0),
-            ValueType::Maybe => Arity::Exactly(0),
-            ValueType::Product(_, tail) | ValueType::Abstract(_, tail) => match tail.arity() {
-                Arity::AtLeast(a) => Arity::AtLeast(a + 1),
-                Arity::Exactly(a) => Arity::Exactly(a + 1),
-            },
+            ValueType::None => panic!("none has no arity"),
+            ValueType::Maybe => 0,
+            ValueType::Product(_, tail) | ValueType::Abstract(_, tail) => 1 + tail.arity(),
+        }
+    }
+
+    pub fn fun_arity(&self) -> usize {
+        match self {
+            ValueType::None => panic!("none has no arity"),
+            ValueType::Abstract(_, tail) => 1 + tail.fun_arity(),
+            _ => 0,
         }
     }
 
@@ -281,7 +280,11 @@ impl Expression {
                     arg.clone(),
                     ValueType::Product(ScalarType::Any, box ValueType::Maybe),
                 );
-                ValueType::Abstract(ScalarType::Any, box body.typecheck(&env, cache)?)
+                let body_type = body.typecheck(&env, cache)?;
+                match body_type {
+                    ValueType::None => ValueType::None,
+                    _ => ValueType::Abstract(ScalarType::Any, box body_type),
+                }
             }
             Apply(e1, e2) => e1.typecheck(env, cache)?.apply(e2.typecheck(env, cache)?)?,
             ApplyNative(f, args) => {
@@ -324,5 +327,63 @@ impl Expression {
         };
         cache.insert(self, typ.clone());
         Ok(typ)
+    }
+
+    pub fn funify(&mut self, type_cache: &mut Cache<ValueType>) {
+        use Expression::*;
+        self.visit1_mut(&mut |expr| {
+            expr.funify(type_cache);
+            Ok(())
+        })
+        .unwrap();
+        let typ = type_cache.get(&self);
+        if let ValueType::None = &typ {
+            *self = None;
+        } else {
+            let fun_arity = typ.fun_arity();
+            if fun_arity > 0 {
+                *self = match self.take() {
+                    Union(a, b) => {
+                        let names = (0..fun_arity)
+                            .map(|i| format!("tmp_{}", i))
+                            .collect::<Vec<_>>();
+                        Expression::_abstract(
+                            names.clone(),
+                            Union(
+                                box Expression::_apply(*a, names.clone()),
+                                box Expression::_apply(*b, names.clone()),
+                            ),
+                        )
+                    }
+                    Intersect(a, b) => {
+                        let names = (0..fun_arity)
+                            .map(|i| format!("tmp_{}", i))
+                            .collect::<Vec<_>>();
+                        Expression::_abstract(
+                            names.clone(),
+                            Union(
+                                box Expression::_apply(*a, names.clone()),
+                                box Expression::_apply(*b, names.clone()),
+                            ),
+                        )
+                    }
+                    Product(a, b) => {
+                        let a_arity = type_cache.get(&a).arity();
+                        let split = fun_arity.min(a_arity);
+                        let names = (0..fun_arity)
+                            .map(|i| format!("tmp_{}", i))
+                            .collect::<Vec<_>>();
+                        Expression::_abstract(
+                            names.clone(),
+                            Union(
+                                box Expression::_apply(*a, names[0..split].to_vec()),
+                                box Expression::_apply(*b, names[split..].to_vec()),
+                            ),
+                        )
+                    }
+                    other => other,
+                }
+            }
+        }
     }
 }

@@ -38,8 +38,8 @@ impl fmt::Display for Scalar {
             Scalar::Number(number) => write!(f, "{:?}", number)?,
             Scalar::Sealed(value_env, scalar_env, expr) => {
                 write!(f, "{{")?;
-                write_environment(f, value_env);
-                write_environment(f, scalar_env);
+                write_environment(f, value_env)?;
+                write_environment(f, scalar_env)?;
                 write!(f, "{}", expr)?;
                 write!(f, "}}")?;
             }

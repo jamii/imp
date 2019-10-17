@@ -92,7 +92,7 @@ fn find_all(class: &str) -> Vec<HtmlElement> {
         .collect()
 }
 
-fn run(code: &str) -> Result<(ValueType, Value), String> {
+fn run(code: &str) -> Result<(Expression, ValueType, Value), String> {
     let expr = if code.is_empty() {
         // mild hack
         Expression::None
@@ -100,7 +100,7 @@ fn run(code: &str) -> Result<(ValueType, Value), String> {
         parse(&code).map_err(|e| format!("Parse error: {:?}", e))?
     };
 
-    let expr = expr
+    let mut expr = expr
         .with_natives(&Native::stdlib())
         .with_unique_names()?
         .lift_lets();
@@ -110,11 +110,14 @@ fn run(code: &str) -> Result<(ValueType, Value), String> {
         .typecheck(&Environment::new(), &mut type_cache)
         .map_err(|e| format!("Type error: {}", e))?;
 
+    expr.funify(&mut type_cache);
+
     let value = expr
+        .clone()
         .eval(&Environment::new())
         .map_err(|e| format!("Eval error: {}", e))?;
 
-    Ok((typ, value))
+    Ok((expr, typ, value))
 }
 
 fn run_ui(value: Value) -> Result<Value, String> {
@@ -228,15 +231,21 @@ fn render(value: &Value) -> Result<Node, String> {
 #[wasm_bindgen]
 pub fn update(input: &str, output_node: &HtmlElement) {
     let output = match run(&input)
-        .and_then(|(typ, value)| {
+        .and_then(|(expr, typ, value)| {
             Ok((
+                expr,
                 typ,
                 run_ui(value).map_err(|e| format!("Renderer error: {}", e))?,
             ))
         })
-        .and_then(|(typ, ui)| Ok((typ, render(&Value::unseal(ui)?)?)))
+        .and_then(|(expr, typ, ui)| Ok((expr, typ, render(&Value::unseal(ui)?)?)))
     {
-        Ok((typ, output)) => Node::tag("div")
+        Ok((expr, typ, output)) => Node::tag("div")
+            .child(
+                Node::tag("div")
+                    .attribute("class", "imp-lowered")
+                    .child(Node::tag("code").child(Node::text(&format!("expr = {}", expr)))),
+            )
             .child(
                 Node::tag("div")
                     .attribute("class", "imp-type")

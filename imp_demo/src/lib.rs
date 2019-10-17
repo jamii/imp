@@ -120,126 +120,44 @@ fn run(code: &str) -> Result<(Expression, ValueType, Value), String> {
     Ok((expr, typ, value))
 }
 
-fn run_ui(value: Value) -> Result<Value, String> {
-    let expr = parse(&RENDERER).map_err(|e| format!("In renderer: Parse error: {:?}", e))?;
-    let expr = expr.with_natives(&Native::stdlib()).with_unique_names()?; // .lift_lets();
-    Ok(Expression::Apply(
-        box expr,
-        box Expression::Seal(box Expression::Name("value".to_owned())),
-    )
-    .eval(&Environment::from(vec![("value".to_owned(), value)]))?)
-}
-
-fn render(value: &Value) -> Result<Node, String> {
-    let mut tag = None;
-    let mut props = None;
-    let mut children = None;
+fn render(value: &Value) -> Node {
     match value {
+        Value::Closure(..) => Node::tag("code").child(Node::text(&format!("{}", value))),
         Value::Set(set) => {
-            for row in set {
-                match &row[0] {
-                    Scalar::String(string) => match &**string {
-                        "tag" => {
-                            tag = if let Scalar::String(tag) = &row[1] {
-                                Some(tag)
-                            } else {
-                                None
-                            }
-                        }
-                        "props" => {
-                            props = Some({
-                                let mut props = vec![];
-                                match Scalar::unseal(row[1].clone()) {
-                                    Ok(Value::Set(set)) => {
-                                        for row in set.into_iter() {
-                                            match &*row {
-                                                [Scalar::String(key), Scalar::String(val)] => {
-                                                    props.push((key.to_owned(), val.to_owned()))
-                                                }
-                                                _ => {
-                                                    return Err(format!(
-                                                        "Unexpected value in renderer: {:?}",
-                                                        row
-                                                    ));
-                                                }
-                                            }
-                                        }
-                                    }
-                                    _ => {
-                                        return Err(format!(
-                                            "Unexpected value in renderer: {:?}",
-                                            row
-                                        ));
-                                    }
-                                }
-                                props
-                            });
-                        }
-                        "children" => {
-                            children = Some({
-                                let mut children = vec![];
-                                match Scalar::unseal(row[1].clone()) {
-                                    Ok(Value::Set(set)) => {
-                                        let mut rows = set.iter().collect::<Vec<_>>();
-                                        rows.sort();
-                                        for row in rows {
-                                            let scalar = &row[row.len() - 1];
-                                            match scalar {
-                                                Scalar::Sealed(..) => children.push(render(
-                                                    &Scalar::unseal(scalar.clone())?,
-                                                )?),
-                                                Scalar::String(string) => {
-                                                    children.push(Node::text(string))
-                                                }
-                                                _ => {
-                                                    return Err(format!(
-                                                        "Unexpected value in renderer: {}",
-                                                        scalar
-                                                    ));
-                                                }
-                                            }
-                                        }
-                                    }
-                                    _ => {
-                                        return Err(format!(
-                                            "Unexpected value in renderer: {:?}",
-                                            row
-                                        ));
-                                    }
-                                }
-                                children
-                            });
-                        }
-                        _ => return Err(format!("Unexpected value in renderer: {}", string)),
-                    },
-                    _ => return Err(format!("Unexpected value in renderer: {:?}", row)),
+            let mut table = Node::tag("table");
+            for (r, row) in set.iter().enumerate() {
+                let mut table_row = Node::tag("tr");
+                table_row = table_row.child(
+                    Node::tag("td")
+                        .style("color", "lightGrey")
+                        .child(Node::tag("code").child(Node::text("("))),
+                );
+                for (c, scalar) in row.iter().enumerate() {
+                    if c != 0 {
+                        table_row = table_row.child(
+                            Node::tag("td").child(Node::tag("code").child(Node::text(" x "))),
+                        );
+                    }
+                    table_row =
+                        table_row
+                            .child(Node::tag("td").child(
+                                Node::tag("code").child(Node::text(&format!("{}", scalar))),
+                            ));
                 }
+                table_row =
+                    table_row.child(Node::tag("td").style("color", "lightGrey").child(
+                        Node::tag("code").child(Node::text(if r == 0 { ")" } else { ") |" })),
+                    ));
+                table = table.child(table_row);
             }
+            table
         }
-        _ => return Err(format!("Unexpected value in renderer: {}", value)),
     }
-    let mut node = Node::tag(tag.unwrap());
-    for (key, val) in props.unwrap() {
-        node = node.attribute(&key, val);
-    }
-    for child in children.unwrap() {
-        node = node.child(child);
-    }
-    Ok(node)
 }
 
 #[wasm_bindgen]
 pub fn update(input: &str, output_node: &HtmlElement) {
-    let output = match run(&input)
-        .and_then(|(expr, typ, value)| {
-            Ok((
-                expr,
-                typ,
-                run_ui(value).map_err(|e| format!("Renderer error: {}", e))?,
-            ))
-        })
-        .and_then(|(expr, typ, ui)| Ok((expr, typ, render(&Value::unseal(ui)?)?)))
-    {
+    let output = match run(&input) {
         Ok((expr, typ, output)) => Node::tag("div")
             .child(
                 Node::tag("div")
@@ -254,7 +172,7 @@ pub fn update(input: &str, output_node: &HtmlElement) {
             .child(
                 Node::tag("div")
                     .attribute("class", "imp-value")
-                    .child(output),
+                    .child(render(&output)),
             ),
         Err(error) => Node::tag("div")
             .attribute("class", "imp-error")

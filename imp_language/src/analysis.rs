@@ -254,10 +254,10 @@ impl Expression {
                     .intersect(e2.typecheck(env, cache)?)?;
                 ValueType::Maybe
             }
-            Negate(e) => {
-                e.typecheck(env, cache)?;
-                ValueType::Maybe
-            }
+            Negate(e) => match e.typecheck(env, cache)? {
+                ValueType::Abstract(..) => return Err(format!("Negate on function: {}", e)),
+                _ => ValueType::Maybe,
+            },
             Name(name) => env
                 .lookup(name)
                 .ok_or_else(|| format!("Unbound variable: {:?}", name))?
@@ -361,7 +361,7 @@ impl Expression {
                             .collect::<Vec<_>>();
                         Expression::_abstract(
                             names.clone(),
-                            Union(
+                            Intersect(
                                 box Expression::_apply(*a, names.clone()),
                                 box Expression::_apply(*b, names.clone()),
                             ),
@@ -379,6 +379,20 @@ impl Expression {
                                 box Expression::_apply(*a, names[0..split].to_vec()),
                                 box Expression::_apply(*b, names[split..].to_vec()),
                             ),
+                        )
+                    }
+                    Apply(a, b) => {
+                        let (a, b) = if type_cache.get(&a).is_function() {
+                            (a, b)
+                        } else {
+                            (b, a)
+                        };
+                        let names = (0..fun_arity)
+                            .map(|i| format!("tmp_{}", i))
+                            .collect::<Vec<_>>();
+                        Expression::_abstract(
+                            names.clone(),
+                            Apply(a, box Expression::_product(*b, names)),
                         )
                     }
                     other => other,

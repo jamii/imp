@@ -47,6 +47,12 @@ impl Expression {
         })
     }
 
+    pub fn _product(a: Expression, args: Vec<Name>) -> Expression {
+        args.into_iter().fold(a, |a, arg| {
+            Expression::Product(box a, box Expression::Name(arg))
+        })
+    }
+
     pub fn apply(fun: Expression, args: Vec<Expression>) -> Expression {
         args.into_iter()
             .fold(fun, |fun, arg| Expression::Apply(box fun, box arg))

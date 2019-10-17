@@ -126,42 +126,22 @@ impl Value {
     }
 
     fn union(val1: Value, val2: Value) -> Result<Value, String> {
-        use Expression::*;
         use Value::*;
         Ok(match (val1, val2) {
             (Set(set1), Set(set2)) => Value::set(set1.union(&set2).cloned()),
-            (v1, v2) => {
-                // (v1 | v2) => (a -> (v1 a) | (v2 a))
-                let env = Environment::from(vec![("v1".to_owned(), v1), ("v2".to_owned(), v2)]);
-                let expr = Union(
-                    box Apply(box Name("v1".to_owned()), box Name("a".to_owned())),
-                    box Apply(box Name("v2".to_owned()), box Name("a".to_owned())),
-                );
-                Closure("a".to_owned(), expr, env)
-            }
+            (val1, val2) => return Err(format!("Internal error: {:?} | {:?}", val1, val2)),
         })
     }
 
     fn intersect(val1: Value, val2: Value) -> Result<Value, String> {
-        use Expression::*;
         use Value::*;
         Ok(match (val1, val2) {
             (Set(set1), Set(set2)) => Value::set(set1.intersection(&set2).cloned()),
-            (v1, v2) => {
-                // we can assume v1,v2 != some because of types
-                // (v1 & v2) => (a -> (v1 a) & (v2 a))
-                let env = Environment::from(vec![("v1".to_owned(), v1), ("v2".to_owned(), v2)]);
-                let expr = Intersect(
-                    box Apply(box Name("v1".to_owned()), box Name("a".to_owned())),
-                    box Apply(box Name("v2".to_owned()), box Name("a".to_owned())),
-                );
-                Closure("a".to_owned(), expr, env)
-            }
+            (val1, val2) => return Err(format!("Internal error: {:?} & {:?}", val1, val2)),
         })
     }
 
     fn product(val1: Value, val2: Value) -> Result<Value, String> {
-        use Expression::*;
         use Value::*;
         Ok(match (val1, val2) {
             (Set(set1), Set(set2)) => Value::set(set1.iter().flat_map(|tuple1| {
@@ -171,23 +151,7 @@ impl Value {
                     tuple
                 })
             })),
-            // (none x v2) => none
-            // (some x v2) => v2
-            // (v1 x v2) => (a -> (v1 a) x v2)
-            (v1, v2) => {
-                if v1.is_none() {
-                    Value::none()
-                } else if v1.is_some() {
-                    v2
-                } else {
-                    let env = Environment::from(vec![("v1".to_owned(), v1), ("v2".to_owned(), v2)]);
-                    let expr = Product(
-                        box Apply(box Name("v1".to_owned()), box Name("a".to_owned())),
-                        box Name("v2".to_owned()),
-                    );
-                    Closure("a".to_owned(), expr, env)
-                }
-            }
+            (val1, val2) => return Err(format!("Internal error: {:?} x {:?}", val1, val2)),
         })
     }
 
@@ -205,12 +169,18 @@ impl Value {
         })
     }
 
-    fn negate(val: Value) -> Value {
-        if val.is_none() {
-            Value::some()
-        } else {
-            Value::none()
-        }
+    fn negate(val: Value) -> Result<Value, String> {
+        use Value::*;
+        Ok(match &val {
+            Set(_) => {
+                if val.is_none() {
+                    Value::some()
+                } else {
+                    Value::none()
+                }
+            }
+            _ => return Err(format!("Internal error: !{:?}", val)),
+        })
     }
 
     fn apply(val1: Value, val2: Value) -> Result<Value, String> {
@@ -375,7 +345,7 @@ impl Expression {
             Intersect(box e1, box e2) => Value::intersect(e1.eval(env)?, e2.eval(env)?)?,
             Product(box e1, box e2) => Value::product(e1.eval(env)?, e2.eval(env)?)?,
             Equal(box e1, box e2) => Value::equals(e1.eval(env)?, e2.eval(env)?)?,
-            Negate(box e) => Value::negate(e.eval(env)?),
+            Negate(box e) => Value::negate(e.eval(env)?)?,
             Name(name) => match env.lookup(&name) {
                 Option::Some(value) => value.clone(),
                 Option::None => Err(format!("Undefined: {}", name))?,

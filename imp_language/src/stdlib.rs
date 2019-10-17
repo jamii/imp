@@ -238,7 +238,7 @@ impl Native {
             Native {
                 name: "is_function".to_owned(),
                 input_arity: 1,
-                output_arity: 1,
+                output_arity: 0,
                 fun: Native::is_function,
             },
             Native {

@@ -110,6 +110,8 @@ impl ValueType {
                 let t2 = t1.product(other)?;
                 match t2 {
                     None => None,
+                    // surprising normalization rule!
+                    Abstract(..) => Abstract(s1, box t2),
                     _ => Product(s1, box t2),
                 }
             }

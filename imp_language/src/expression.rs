@@ -26,7 +26,7 @@ pub enum Expression {
     If(Box<Expression>, Box<Expression>, Box<Expression>),
     Abstract(Name, Box<Expression>),
     Apply(Box<Expression>, Box<Expression>),
-    ApplyNative(Native, Vec<Name>),
+    Native(Native),
     Reduce(Box<Expression>, Box<Expression>, Box<Expression>),
     Seal(Box<Expression>),
     Unseal(Box<Expression>),
@@ -126,7 +126,7 @@ impl Expression {
                 f(&*fun)?;
                 f(&*arg)?;
             }
-            ApplyNative(_, _) => (),
+            Native(_) => (),
             Reduce(init, vals, fun) => {
                 f(&*init)?;
                 f(&*vals)?;
@@ -189,7 +189,7 @@ impl Expression {
                 f(fun)?;
                 f(arg)?;
             }
-            ApplyNative(_, _) => (),
+            Native(_) => (),
             Reduce(init, vals, fun) => {
                 f(init)?;
                 f(vals)?;
@@ -245,10 +245,7 @@ impl Expression {
                     if let (false, Option::Some(native)) =
                         (bound.contains(&name), natives.get(&name))
                     {
-                        let args = (0..native.input_arity)
-                            .map(|i| format!("a{}", i))
-                            .collect::<Vec<_>>();
-                        Expression::_abstract(args.clone(), ApplyNative((*native).clone(), args))
+                        Native((*native).clone())
                     } else {
                         Name(name)
                     }
@@ -291,14 +288,6 @@ impl Expression {
                 };
                 Abstract(arg, body)
             }
-            ApplyNative(f, mut args) => {
-                for arg in &mut args {
-                    if arg == old {
-                        *arg = new.clone();
-                    }
-                }
-                ApplyNative(f, args)
-            }
             _ => self.map1(|expr| Ok(expr.rename(old, new))).unwrap(),
         }
     }
@@ -315,16 +304,6 @@ impl Expression {
                     Option::Some(unique_name) => Name(unique_name.clone()),
                     Option::None => return Err(format!("Undefined: {}", name)),
                 },
-                ApplyNative(native, names) => {
-                    let names = names
-                        .into_iter()
-                        .map(|name| match bound.get(&name) {
-                            Option::Some(unique_name) => Ok(unique_name.clone()),
-                            Option::None => Err(format!("Undefined: {}", name)),
-                        })
-                        .collect::<Result<Vec<_>, String>>()?;
-                    ApplyNative(native, names)
-                }
                 Let(name, value, body) => {
                     let value = map(*value, bound, last_id)?;
                     let id = last_id.entry(name.clone()).or_insert(0);

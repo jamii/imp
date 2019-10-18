@@ -291,13 +291,6 @@ impl Expression {
                         free_names.insert(name.clone());
                     }
                 }
-                Expression::ApplyNative(_, args) => {
-                    for arg in args {
-                        if !bound.contains(arg) {
-                            free_names.insert(arg.clone());
-                        }
-                    }
-                }
                 Expression::Abstract(name, body) => {
                     let mut bound = bound.clone();
                     bound.insert(name.clone());
@@ -349,13 +342,30 @@ impl Expression {
                 let closure_env = env.close_over(body.free_names());
                 Closure(arg, body, closure_env)
             }
+            Native(_) => unreachable!(), // handled by case below
+            Apply(box Native(native), arg) => {
+                let mut result = crate::Set::new();
+                let set1 = match arg.eval(env)? {
+                    Set(set1) => set1,
+                    _ => unreachable!(),
+                };
+                for row in set1 {
+                    let set2 = match (native.fun)(row[..native.input_arity].to_vec())? {
+                        Set(set2) => set2,
+                        _ => unreachable!(),
+                    };
+                    for row2 in set2 {
+                        let row1 = row[native.input_arity..].to_vec();
+                        if row2.starts_with(&row1) {
+                            result.insert(row2[row1.len()..].to_vec());
+                        } else if row1.starts_with(&row2) {
+                            result.insert(row1[row2.len()..].to_vec());
+                        }
+                    }
+                }
+                Set(result)
+            }
             Apply(fun, arg) => Value::apply(fun.eval(env)?, arg.eval(env)?)?,
-            ApplyNative(native, args) => (native.fun)(
-                args.into_iter()
-                    // with_natives wraps ApplyNative in a function so by this point we know all the args exist and are scalars
-                    .map(|arg| env.lookup(&arg).unwrap().clone().as_scalar().unwrap())
-                    .collect(),
-            )?,
             Reduce(init, vals, fun) => {
                 Value::reduce(init.eval(env)?, vals.eval(env)?, fun.eval(env)?)?
             }

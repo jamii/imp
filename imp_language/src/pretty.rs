@@ -99,11 +99,7 @@ impl fmt::Display for Expression {
                 write!(f, "({} -> {})", arg, body)?;
             }
             Apply(fun, arg) => write!(f, "({} {})", fun, arg)?,
-            ApplyNative(fun, args) => {
-                write!(f, "(<{}> ", fun.name)?;
-                write_delimited(f, " ", args, |f, arg| write!(f, "{}", arg))?;
-                write!(f, ")")?;
-            }
+            Native(native) => write!(f, "<{}> ", native.name)?,
             Reduce(init, vals, fun) => write!(f, "(reduce {} {} {})", init, vals, fun)?,
             Seal(e) => write!(f, "{{{}}}", e)?,
             Unseal(e) => write!(f, "${}", e)?,

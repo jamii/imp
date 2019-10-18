@@ -287,11 +287,13 @@ impl Expression {
                 }
             }
             Apply(e1, e2) => e1.typecheck(env, cache)?.apply(e2.typecheck(env, cache)?)?,
-            ApplyNative(f, args) => {
-                assert_eq!(f.input_arity, args.len());
+            Native(native) => {
                 let mut t = ValueType::Maybe;
-                for _ in 0..f.output_arity {
+                for _ in 0..native.output_arity {
                     t = ValueType::Product(ScalarType::Any, box t)
+                }
+                for _ in 0..native.input_arity {
+                    t = ValueType::Abstract(ScalarType::Any, box t)
                 }
                 t
             }
@@ -385,6 +387,19 @@ impl Expression {
                         Expression::_abstract(
                             names.clone(),
                             Apply(a, box Expression::_product(*b, names)),
+                        )
+                    }
+                    Native(native) => {
+                        let names = (0..fun_arity).map(|_| gensym.next()).collect::<Vec<_>>();
+                        Expression::_abstract(
+                            names.clone(),
+                            Apply(
+                                box Native(native),
+                                box Expression::_product(
+                                    Name(names[0].clone()),
+                                    names[1..].to_vec(),
+                                ),
+                            ),
                         )
                     }
                     other => other,

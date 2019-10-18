@@ -179,44 +179,34 @@ impl Value {
     fn apply(val1: Value, val2: Value) -> Result<Value, String> {
         use Value::*;
         Ok(match (val1, val2) {
-            (Set(set1), Set(set2)) => {
-                let mut tuples = vec![];
-                for tuple1 in &set1 {
-                    for tuple2 in &set2 {
-                        if tuple2.starts_with(&tuple1) {
-                            tuples.push(tuple2[tuple1.len()..].to_vec());
-                        } else if tuple1.starts_with(&tuple2) {
-                            tuples.push(tuple1[tuple2.len()..].to_vec());
+            (fun, Set(set)) | (Set(set), fun) => {
+                let mut result = crate::Set::new();
+                for row in set {
+                    let mut fun = fun.clone();
+                    let mut row_iter = row.into_iter();
+                    loop {
+                        match fun {
+                            Closure(name, body, mut env) => {
+                                // thanks to funify, if fun is a closure we must have scalars remaining
+                                let scalar = row_iter.next().unwrap();
+                                env.bind(name, Value::scalar(scalar));
+                                fun = body.eval(&env)?;
+                            }
+                            Set(set1) => {
+                                let row2 = row_iter.collect::<Vec<_>>();
+                                for row1 in set1 {
+                                    if row2.starts_with(&row1) {
+                                        result.insert(row2[row1.len()..].to_vec());
+                                    } else if row1.starts_with(&row2) {
+                                        result.insert(row1[row2.len()..].to_vec());
+                                    }
+                                }
+                                break;
+                            }
                         }
                     }
                 }
-                Value::set(tuples)
-            }
-            (Closure(name, body, env), Set(set)) | (Set(set), Closure(name, body, env)) => {
-                let mut set_iter = set.into_iter();
-                match set_iter.next() {
-                    None => Value::none(),
-                    Some(tuple) => {
-                        // fun (scalar x tuple | tail) => (fun scalar tuple | fun tail)
-                        let head = {
-                            let mut tuple_iter = tuple.into_iter();
-                            match tuple_iter.next() {
-                                None => Closure(name.clone(), body.clone(), env.clone()),
-                                Some(scalar) => {
-                                    let tuple = tuple_iter.collect::<Vec<_>>();
-                                    let mut new_env = env.clone();
-                                    new_env.bind(name.clone(), Value::scalar(scalar));
-                                    Value::apply(
-                                        body.clone().eval(&new_env)?,
-                                        Value::set(vec![tuple]),
-                                    )?
-                                }
-                            }
-                        };
-                        let tail = Value::apply(Closure(name, body, env), Value::set(set_iter))?;
-                        Value::union(head, tail)?
-                    }
-                }
+                Set(result)
             }
             (v1, v2) => Err(format!("Cannot eval: {} {}", v1, v2))?,
         })

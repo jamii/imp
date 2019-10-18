@@ -129,14 +129,20 @@ fn render(value: &Value) -> Node {
             for (r, row) in set.iter().enumerate() {
                 let mut table_row = Node::tag("tr");
                 table_row = table_row.child(
-                    Node::tag("td")
-                        .style("color", "lightGrey")
-                        .child(Node::tag("code").child(Node::text("("))),
+                    Node::tag("td").child(
+                        Node::tag("code")
+                            .style("color", "lightgray")
+                            .child(Node::text("(")),
+                    ),
                 );
                 for (c, scalar) in row.iter().enumerate() {
                     if c != 0 {
                         table_row = table_row.child(
-                            Node::tag("td").child(Node::tag("code").child(Node::text(" x "))),
+                            Node::tag("td").child(
+                                Node::tag("code")
+                                    .style("color", "lightgray")
+                                    .child(Node::text(" x ")),
+                            ),
                         );
                     }
                     table_row =

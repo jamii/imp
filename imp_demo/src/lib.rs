@@ -100,10 +100,9 @@ fn run(code: &str) -> Result<(Expression, ValueType, Value), String> {
         parse(&code).map_err(|e| format!("Parse error: {:?}", e))?
     };
 
-    let mut expr = expr
-        .with_natives(&Native::stdlib())
-        .with_unique_names()?
-        .lift_lets();
+    let mut expr = expr.with_natives(&Native::stdlib());
+    // .with_unique_names()?
+    // .lift_lets();
 
     let mut type_cache = Cache::new();
     let typ = expr
@@ -169,13 +168,13 @@ pub fn update(input: &str, output_node: &HtmlElement) {
         Ok((expr, typ, output)) => Node::tag("div")
             .child(
                 Node::tag("div")
-                    .attribute("class", "imp-lowered")
-                    .child(Node::tag("code").child(Node::text(&format!("expr = {}", expr)))),
+                    .attribute("class", "imp-type")
+                    .child(Node::tag("code").child(Node::text(&format!("type = {}", typ)))),
             )
             .child(
                 Node::tag("div")
-                    .attribute("class", "imp-type")
-                    .child(Node::tag("code").child(Node::text(&format!("type = {}", typ)))),
+                    .attribute("class", "imp-lowered")
+                    .child(Node::tag("code").child(Node::text(&format!("lowered = {}", expr)))),
             )
             .child(
                 Node::tag("div")

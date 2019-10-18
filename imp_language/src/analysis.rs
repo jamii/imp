@@ -248,16 +248,20 @@ impl Expression {
             Product(e1, e2) => e1
                 .typecheck(env, cache)?
                 .product(e2.typecheck(env, cache)?)?,
-            Equal(e1, e2) => {
-                // TODO intersect is fine for now, but may want to think more carefully about this once we have real scalar types
-                e1.typecheck(env, cache)?
-                    .intersect(e2.typecheck(env, cache)?)?;
-                ValueType::Maybe
-            }
             Negate(e) => match e.typecheck(env, cache)? {
                 ValueType::Abstract(..) => return Err(format!("Negate on function: {}", e)),
                 _ => ValueType::Maybe,
             },
+            Equal(e1, e2) => {
+                let t1 = e1.typecheck(env, cache)?;
+                let t2 = e2.typecheck(env, cache)?;
+                if t1.is_function() || t2.is_function() {
+                    Err(format!("Equals on function: {} = {}", e1, e2))?
+                }
+                // TODO intersect is fine for now, but may want to think more carefully about this once we have real scalar types
+                t1.intersect(t2)?;
+                ValueType::Maybe
+            }
             Name(name) => env
                 .lookup(name)
                 .ok_or_else(|| format!("Unbound variable: {:?}", name))?
@@ -344,31 +348,25 @@ impl Expression {
         } else {
             let fun_arity = typ.fun_arity();
             if fun_arity > 0 {
+                let names = (0..fun_arity).map(|_| gensym.next()).collect::<Vec<_>>();
                 *self = match self.take() {
-                    Union(a, b) => {
-                        let names = (0..fun_arity).map(|_| gensym.next()).collect::<Vec<_>>();
-                        Expression::_abstract(
-                            names.clone(),
-                            Union(
-                                box Expression::_apply(*a, names.clone()),
-                                box Expression::_apply(*b, names.clone()),
-                            ),
-                        )
-                    }
-                    Intersect(a, b) => {
-                        let names = (0..fun_arity).map(|_| gensym.next()).collect::<Vec<_>>();
-                        Expression::_abstract(
-                            names.clone(),
-                            Intersect(
-                                box Expression::_apply(*a, names.clone()),
-                                box Expression::_apply(*b, names.clone()),
-                            ),
-                        )
-                    }
+                    Union(a, b) => Expression::_abstract(
+                        names.clone(),
+                        Union(
+                            box Expression::_apply(*a, names.clone()),
+                            box Expression::_apply(*b, names.clone()),
+                        ),
+                    ),
+                    Intersect(a, b) => Expression::_abstract(
+                        names.clone(),
+                        Intersect(
+                            box Expression::_apply(*a, names.clone()),
+                            box Expression::_apply(*b, names.clone()),
+                        ),
+                    ),
                     Product(a, b) => {
                         let a_arity = type_cache.get(&a).arity();
                         let split = fun_arity.min(a_arity);
-                        let names = (0..fun_arity).map(|_| gensym.next()).collect::<Vec<_>>();
                         Expression::_abstract(
                             names.clone(),
                             Product(
@@ -383,25 +381,18 @@ impl Expression {
                         } else {
                             (b, a)
                         };
-                        let names = (0..fun_arity).map(|_| gensym.next()).collect::<Vec<_>>();
                         Expression::_abstract(
                             names.clone(),
                             Apply(a, box Expression::_product(*b, names)),
                         )
                     }
-                    Native(native) => {
-                        let names = (0..fun_arity).map(|_| gensym.next()).collect::<Vec<_>>();
-                        Expression::_abstract(
-                            names.clone(),
-                            Apply(
-                                box Native(native),
-                                box Expression::_product(
-                                    Name(names[0].clone()),
-                                    names[1..].to_vec(),
-                                ),
-                            ),
-                        )
-                    }
+                    Native(native) => Expression::_abstract(
+                        names.clone(),
+                        Apply(
+                            box Native(native),
+                            box Expression::_product(Name(names[0].clone()), names[1..].to_vec()),
+                        ),
+                    ),
                     other => other,
                 }
             }

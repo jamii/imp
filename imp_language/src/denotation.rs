@@ -130,7 +130,7 @@ impl Value {
         use Value::*;
         Ok(match (val1, val2) {
             (Set(set1), Set(set2)) => Value::set(set1.intersection(&set2).cloned()),
-            (val1, val2) => return Err(format!("Internal error: {:?} & {:?}", val1, val2)),
+            (val1, val2) => return Err(format!("Internal error: {} & {}", val1, val2)),
         })
     }
 
@@ -144,7 +144,7 @@ impl Value {
                     tuple
                 })
             })),
-            (val1, val2) => return Err(format!("Internal error: {:?} x {:?}", val1, val2)),
+            (val1, val2) => return Err(format!("Internal error: {} x {}", val1, val2)),
         })
     }
 
@@ -158,7 +158,7 @@ impl Value {
                     Value::none()
                 }
             }
-            (v1, v2) => return Err(format!("{} = {}", v1, v2)),
+            (v1, v2) => return Err(format!("Internal error: {} = {}", v1, v2)),
         })
     }
 
@@ -195,10 +195,15 @@ impl Value {
                             Set(set1) => {
                                 let row2 = row_iter.collect::<Vec<_>>();
                                 for row1 in set1 {
-                                    if row2.starts_with(&row1) {
-                                        result.insert(row2[row1.len()..].to_vec());
-                                    } else if row1.starts_with(&row2) {
-                                        result.insert(row1[row2.len()..].to_vec());
+                                    let n = row1.len().min(row2.len());
+                                    if &row1[..n] == &row2[..n] {
+                                        result.insert(
+                                            row1[n..]
+                                                .iter()
+                                                .chain(row2[n..].iter())
+                                                .cloned()
+                                                .collect(),
+                                        );
                                     }
                                 }
                                 break;

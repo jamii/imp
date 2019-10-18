@@ -47,7 +47,7 @@ impl Gensym {
     }
 
     pub fn next(&self) -> String {
-        let name = format!("var{}", self.next_tmp.get());
+        let name = format!("tmp{}", self.next_tmp.get());
         self.next_tmp.set(self.next_tmp.get() + 1);
         name
     }

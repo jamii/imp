@@ -112,6 +112,7 @@ fn run(code: &str) -> Result<(Expression, ValueType, Value), String> {
 
     let gensym = Gensym::new();
     expr.funify(&mut type_cache, &gensym);
+    // expr = expr.simplify(&HashSet::new());
 
     let value = expr
         .clone()

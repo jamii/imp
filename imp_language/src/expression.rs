@@ -262,12 +262,12 @@ impl Expression {
         map(self, &natives, &BTreeSet::new())
     }
 
-    pub fn rename(self, old: &Name, new: &Name) -> Self {
+    pub fn rename(self, old: &Name, new: &Expression) -> Self {
         use Expression::*;
         match self {
             Name(name) => {
                 if name == *old {
-                    Name(new.clone())
+                    new.clone()
                 } else {
                     Name(name)
                 }

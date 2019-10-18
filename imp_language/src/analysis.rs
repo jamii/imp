@@ -407,4 +407,26 @@ impl Expression {
             }
         }
     }
+
+    // pub fn simplify(self, scalar_names: &HashSet<Name>) -> Self {
+    //     use Expression::*;
+    //     match self {
+    //         Apply(box Abstract(name1, body), box Name(name2))
+    //         | Apply(box Name(name2), box Abstract(name1, body))
+    //             if scalar_names.contains(&name2) =>
+    //         {
+    //             body.rename(&name1, &Name(name2))
+    //         }
+    //         Apply(box Abstract(name1, body), box Scalar(scalar))
+    //         | Apply(box Scalar(scalar), box Abstract(name1, body)) => {
+    //             body.rename(&name1, &Scalar(scalar))
+    //         }
+    //         Abstract(name, body) => {
+    //             let mut scalar_names = scalar_names.clone();
+    //             scalar_names.insert(name.clone());
+    //             Abstract(name, box body.simplify(&scalar_names))
+    //         }
+    //         other => other.map1(|expr| Ok(expr.simplify(scalar_names))).unwrap(),
+    //     }
+    // }
 }

@@ -51,18 +51,21 @@ impl fmt::Display for Scalar {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            v if v.is_none() => write!(f, "none")?,
-            v if v.is_some() => write!(f, "some")?,
             Value::Set(set) => {
-                let is_some = self.is_some();
-                if is_some {
-                    write!(f, "(")?;
-                }
-                write_delimited(f, " | ", set, |f, value| {
-                    write_delimited(f, " x ", value, |f, scalar| write!(f, "{}", scalar))
-                })?;
-                if is_some {
-                    write!(f, ")")?;
+                if set.is_empty() {
+                    write!(f, "none")?;
+                } else if self.is_some() {
+                    write!(f, "some")?;
+                } else {
+                    if !self.as_scalar().is_ok() {
+                        write!(f, "(")?;
+                    }
+                    write_delimited(f, " | ", set, |f, value| {
+                        write_delimited(f, " x ", value, |f, scalar| write!(f, "{}", scalar))
+                    })?;
+                    if !self.as_scalar().is_ok() {
+                        write!(f, ")")?;
+                    }
                 }
             }
             Value::Closure(name, body, env) => {

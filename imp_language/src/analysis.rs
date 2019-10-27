@@ -152,47 +152,6 @@ impl ValueType {
     }
 }
 
-impl Value {
-    fn typ(&self) -> Result<ValueType, String> {
-        // TODO this method is fishy - should seal capture checked types instead? might mess with staging
-        use Value::*;
-        Ok(match self {
-            Set(set) => {
-                let mut arities = set
-                    .iter()
-                    .map(|row| row.len())
-                    .collect::<HashSet<_>>()
-                    .into_iter();
-                match (arities.next(), arities.next()) {
-                    (None, None) => ValueType::None,
-                    (Some(arity), None) => {
-                        let mut typ = ValueType::Maybe;
-                        for _ in 0..arity {
-                            typ = ValueType::Product(ScalarType::Any, box ValueType::Maybe);
-                        }
-                        typ
-                    }
-                    (_, Some(_)) => return Err(format!("Mismatched arities in: {}", self)),
-                }
-            }
-            Closure(name, body, env) => {
-                let mut type_env = Environment::from(
-                    env.bindings
-                        .iter()
-                        .map(|(name, value)| Ok((name.clone(), value.typ()?)))
-                        .collect::<Result<Vec<(String, ValueType)>, String>>()?,
-                );
-                type_env.bind(
-                    name.clone(),
-                    ValueType::Product(ScalarType::Any, box ValueType::Maybe),
-                );
-                let mut type_cache = Cache::new();
-                body.typecheck(&type_env, &mut type_cache)?
-            }
-        })
-    }
-}
-
 impl Expression {
     pub fn scalar(&self, env: &Environment<bool>, cache: &mut Cache<bool>) -> Result<bool, String> {
         use Expression::*;
@@ -348,7 +307,7 @@ impl Expression {
         } else {
             let fun_arity = typ.fun_arity();
             if fun_arity > 0 {
-                let names = (0..fun_arity).map(|_| gensym.next()).collect::<Vec<_>>();
+                let names = gensym.names(fun_arity);
                 *self = match self.take() {
                     Union(a, b) => Expression::_abstract(
                         names.clone(),

@@ -92,7 +92,7 @@ fn find_all(class: &str) -> Vec<HtmlElement> {
         .collect()
 }
 
-fn run(code: &str) -> Result<(Expression, ValueType, Value), String> {
+fn run(code: &str, debug_info: &mut Vec<String>) -> Result<(ValueType, Value), String> {
     let expr = if code.is_empty() {
         // mild hack
         Expression::None
@@ -101,24 +101,38 @@ fn run(code: &str) -> Result<(Expression, ValueType, Value), String> {
     };
 
     let mut expr = expr.with_natives(&Native::stdlib());
-    // .with_unique_names()?
-    // .lift_lets();
+    debug_info.push(format!("with_natives: {}", expr.clone()));
 
     let mut type_cache = Cache::new();
     let typ = expr
         .typecheck(&Environment::new(), &mut type_cache)
         .map_err(|e| format!("Type error: {}", e))?;
 
+    let mut scalar_cache = Cache::new();
+    expr.scalar(&Environment::new(), &mut scalar_cache)?;
+
     let gensym = Gensym::new();
+
     expr.funify(&mut type_cache, &gensym);
+    debug_info.push(format!("funify: {}", expr.clone()));
+
     // expr = expr.simplify(&HashSet::new());
+
+    match expr.lower(&ContainsContext {
+        scalar_cache: &scalar_cache,
+        type_cache: &type_cache,
+        gensym: &gensym,
+    }) {
+        Ok(lowered) => debug_info.push(format!("lower: {}", lowered)),
+        Err(err) => debug_info.push(format!("lower err: {}", err)),
+    }
 
     let value = expr
         .clone()
         .eval(&Environment::new())
         .map_err(|e| format!("Eval error: {}", e))?;
 
-    Ok((expr, typ, value))
+    Ok((typ, value))
 }
 
 fn render(value: &Value) -> Node {
@@ -164,17 +178,27 @@ fn render(value: &Value) -> Node {
 
 #[wasm_bindgen]
 pub fn update(input: &str, output_node: &HtmlElement) {
-    let output = match run(&input) {
-        Ok((expr, typ, output)) => Node::tag("div")
+    output_node.set_inner_html("");
+    let tmp = Node::tag("div")
+        .attribute("class", "imp-error")
+        .child(Node::text("Crashed?"));
+    output_node.append_child(&tmp.node).unwrap();
+
+    let mut debug_info = vec![];
+    let output = match run(&input, &mut debug_info) {
+        Ok((typ, output)) => Node::tag("div")
+            .child({
+                let mut node = Node::tag("div").attribute("class", "imp-debug-info");
+                for d in debug_info {
+                    node =
+                        node.child(Node::tag("div").child(Node::tag("code").child(Node::text(&d))));
+                }
+                node
+            })
             .child(
                 Node::tag("div")
                     .attribute("class", "imp-type")
                     .child(Node::tag("code").child(Node::text(&format!("type = {}", typ)))),
-            )
-            .child(
-                Node::tag("div")
-                    .attribute("class", "imp-lowered")
-                    .child(Node::tag("code").child(Node::text(&format!("lowered = {}", expr)))),
             )
             .child(
                 Node::tag("div")

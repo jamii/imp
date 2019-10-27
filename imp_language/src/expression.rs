@@ -46,10 +46,14 @@ impl Gensym {
         }
     }
 
-    pub fn next(&self) -> String {
+    pub fn name(&self) -> String {
         let name = format!("tmp{}", self.next_tmp.get());
         self.next_tmp.set(self.next_tmp.get() + 1);
         name
+    }
+
+    pub fn names(&self, n: usize) -> Vec<String> {
+        (0..n).map(|_| self.name()).collect()
     }
 }
 

@@ -1,5 +1,6 @@
 #![feature(box_syntax)]
 #![feature(box_patterns)]
+#![feature(backtrace)]
 
 #[macro_use]
 mod macros;
@@ -13,93 +14,49 @@ mod stdlib;
 mod syntax;
 
 use crate::shared::*;
-pub use crate::shared::{
-    parse, Cache, ContainsContext, Environment, Expression, Gensym, Native, Scalar, ScalarType,
-    Value, ValueType,
-};
+pub use crate::shared::{Expression, Native, Scalar, ScalarType, Value, ValueType};
 
-pub fn eval(expr: Expression) -> Result<Value, String> {
-    expr.eval(&Environment::new())
-}
+pub fn run(code: &str, debug_info: &mut Vec<String>) -> Result<(ValueType, Value), String> {
+    let expr = if code.is_empty() {
+        // mild hack
+        Expression::None
+    } else {
+        parse(&code).map_err(|e| format!("Parse error: {:?}", e))?
+    };
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    let gensym = Gensym::new();
 
-    fn run(code: &str) -> Result<Value, String> {
-        parse(code)
-            .map_err(|error| format!("{:?}", error))?
-            .with_natives(&Native::stdlib())
-            .eval(&Environment::new())
+    let mut expr = expr.with_natives(&Native::stdlib());
+    debug_info.push(format!("with_natives: {}", d!(&expr)));
+
+    let mut type_cache = Cache::new();
+    let typ = expr
+        .typecheck(&Environment::new(), &mut type_cache)
+        .map_err(|e| format!("Type error: {}", e))?;
+    expr.funify(&mut type_cache, &gensym);
+    debug_info.push(format!("funify: {}", d!(&expr)));
+
+    // expr = expr.simplify(&HashSet::new());
+
+    let mut type_cache = Cache::new();
+    let _typ = expr
+        .typecheck(&Environment::new(), &mut type_cache)
+        .map_err(|e| format!("Type error: {}", e))?;
+    let mut scalar_cache = Cache::new();
+    expr.scalar(&Environment::new(), &mut scalar_cache)?;
+    match expr.lower(&ContainsContext {
+        scalar_cache: &scalar_cache,
+        type_cache: &type_cache,
+        gensym: &gensym,
+    }) {
+        Ok(lowered) => debug_info.push(format!("lower: {}", d!(&lowered))),
+        Err(err) => debug_info.push(format!("lower err: {}", err)),
     }
 
-    macro_rules! assert_eq_run {
-            ( $code1:expr, $($code2:expr),* $(,)? ) => {{
-                $(
-                    println!("{} = {}, {:?} = {:?}", $code1, $code2, run($code1), run($code2));
-                    assert_eq!(run($code1), run($code2), "{:?} = {:?}", $code1, $code2);
-                )+
-            }};
-        }
+    let value = expr
+        .clone()
+        .eval(&Environment::new())
+        .map_err(|e| format!("Eval error: {}", e))?;
 
-    #[test]
-    fn basic() {
-        assert_eq!(
-            parse("a").unwrap().free_names(),
-            vec!["a".to_owned()].into_iter().collect()
-        );
-        assert_eq!(
-            parse("a | b").unwrap().free_names(),
-            vec!["a".to_owned(), "b".to_owned()].into_iter().collect()
-        );
-        assert_eq!(
-            parse("a -> a | b").unwrap().free_names(),
-            vec!["b".to_owned()].into_iter().collect()
-        );
-
-        assert_eq_run!("(1 | 2) + 3", "3 + (1 | 2)", "4 | 5");
-
-        // assert_eq!(
-        //     run("1"),
-        //     Expression::Materialized(Relation::from_iter(vec![vec![Value::Number(1)]]))
-        // );
-        // assert_eq!(
-        //     run(r#""foo""#),
-        //     Expression::Materialized(Relation::from_iter(vec![vec![Value::String(
-        //         "foo".to_owned()
-        //     )]]))
-        // );
-
-        // assert_eq_run!("()", "some");
-        // assert_eq_run!("(none,)", "none");
-        // assert_eq_run!("(none,some)", "none");
-        // assert_eq_run!("(some,some)", "some");
-        // assert_eq_run!("(1,(2,3))", "((1,2),3)", "(1,2,3)");
-
-        // assert_eq_run!("!none", "some");
-        // assert_eq_run!("!some", "none");
-        // assert_eq_run!("!3", "none");
-
-        // assert_eq_run!("none | some", "some");
-        // assert_eq_run!("none & some", "none");
-        // assert_eq_run!("(1 | 2) & (2 | 3)", "2");
-        // assert_eq_run!("1 | (2 | 3)", "(1 | 2) | 3");
-
-        // assert_eq_run!("1 = 1", "some");
-        // assert_eq_run!("1 = 2", "none");
-        // assert_eq_run!("(1 | 2) = (2 | 1)", "some");
-
-        // assert_eq_run!("1[1]", "some");
-        // assert_eq_run!("1[2]", "none");
-        // assert_eq_run!(r#"((1, "one") | (2, "two"))[2]"#, r#""two""#);
-
-        // // assert!(run("(1, _, 3)"))
-        // assert_eq_run!("(1, 2, _, 3, 4)", "((1, 2), _, 3, 4)");
-
-        // //         run("
-        // // let fixpoint_loop = f => old => new => if old = new then new else fixpoint_loop{f, new, f{old}} in
-        // // let fixpoint = f => old => fixpoint_loop{f, new, f{old}} in
-        // // fixpoint{x => x, 1}
-        // // ");
-    }
+    Ok((typ, value))
 }

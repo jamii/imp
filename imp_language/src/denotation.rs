@@ -89,6 +89,18 @@ impl Value {
         }
     }
 
+    pub fn is_scalar(&self) -> bool {
+        if let Value::Set(set) = self {
+            if set.len() == 1 {
+                let tuple = set.iter().next().unwrap();
+                if tuple.len() == 1 {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     pub fn as_scalar(&self) -> Result<Scalar, String> {
         if let Value::Set(set) = self {
             if set.len() == 1 {

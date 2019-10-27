@@ -57,13 +57,13 @@ impl fmt::Display for Value {
                 } else if self.is_some() {
                     write!(f, "some")?;
                 } else {
-                    if !self.as_scalar().is_ok() {
+                    if !self.is_scalar() {
                         write!(f, "(")?;
                     }
-                    write_delimited(f, " | ", set, |f, value| {
-                        write_delimited(f, " x ", value, |f, scalar| write!(f, "{}", scalar))
+                    write_delimited(f, " | ", set, |f, row| {
+                        write_delimited(f, " x ", row, |f, scalar| write!(f, "{}", scalar))
                     })?;
-                    if !self.as_scalar().is_ok() {
+                    if !self.is_scalar() {
                         write!(f, ")")?;
                     }
                 }

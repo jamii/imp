@@ -55,6 +55,14 @@ impl Gensym {
     pub fn names(&self, n: usize) -> Vec<String> {
         (0..n).map(|_| self.name()).collect()
     }
+
+    pub fn name_exprs(&self, n: usize) -> Vec<Expression> {
+        (0..n)
+            .map(|_| self.name())
+            .into_iter()
+            .map(|name| Expression::Name(name))
+            .collect::<Vec<_>>()
+    }
 }
 
 impl Expression {

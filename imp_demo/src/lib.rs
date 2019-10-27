@@ -92,49 +92,6 @@ fn find_all(class: &str) -> Vec<HtmlElement> {
         .collect()
 }
 
-fn run(code: &str, debug_info: &mut Vec<String>) -> Result<(ValueType, Value), String> {
-    let expr = if code.is_empty() {
-        // mild hack
-        Expression::None
-    } else {
-        parse(&code).map_err(|e| format!("Parse error: {:?}", e))?
-    };
-
-    let mut expr = expr.with_natives(&Native::stdlib());
-    debug_info.push(format!("with_natives: {}", expr.clone()));
-
-    let mut type_cache = Cache::new();
-    let typ = expr
-        .typecheck(&Environment::new(), &mut type_cache)
-        .map_err(|e| format!("Type error: {}", e))?;
-
-    let mut scalar_cache = Cache::new();
-    expr.scalar(&Environment::new(), &mut scalar_cache)?;
-
-    let gensym = Gensym::new();
-
-    expr.funify(&mut type_cache, &gensym);
-    debug_info.push(format!("funify: {}", expr.clone()));
-
-    // expr = expr.simplify(&HashSet::new());
-
-    match expr.lower(&ContainsContext {
-        scalar_cache: &scalar_cache,
-        type_cache: &type_cache,
-        gensym: &gensym,
-    }) {
-        Ok(lowered) => debug_info.push(format!("lower: {}", lowered)),
-        Err(err) => debug_info.push(format!("lower err: {}", err)),
-    }
-
-    let value = expr
-        .clone()
-        .eval(&Environment::new())
-        .map_err(|e| format!("Eval error: {}", e))?;
-
-    Ok((typ, value))
-}
-
 fn render(value: &Value) -> Node {
     match value {
         Value::Closure(..) => Node::tag("code").child(Node::text(&format!("{}", value))),
@@ -185,7 +142,7 @@ pub fn update(input: &str, output_node: &HtmlElement) {
     output_node.append_child(&tmp.node).unwrap();
 
     let mut debug_info = vec![];
-    let output = match run(&input, &mut debug_info) {
+    let output = match imp_language::run(&input, &mut debug_info) {
         Ok((typ, output)) => Node::tag("div")
             .child({
                 let mut node = Node::tag("div").attribute("class", "imp-debug-info");

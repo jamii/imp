@@ -16,16 +16,17 @@ impl Expression {
                 Ok(Expression::None)
             } else {
                 let arity = context.type_cache.get(self).arity();
-                let args = context.gensym.names(arity);
-                Ok(Expression::_abstract(
-                    args.to_vec(),
-                    self.contains(&args, context)?,
-                ))
+                let names = context.gensym.names(arity);
+                let args = names
+                    .iter()
+                    .map(|name| Expression::Name(name.clone()))
+                    .collect::<Vec<_>>();
+                Ok(Expression::_abstract(names, self.contains(&args, context)?))
             }
         }
     }
 
-    fn contains(&self, args: &[Name], context: &ContainsContext) -> Result<Self, String> {
+    fn contains(&self, args: &[Expression], context: &ContainsContext) -> Result<Self, String> {
         use Expression::*;
         Ok(match self {
             None => None,
@@ -35,7 +36,7 @@ impl Expression {
             }
             Scalar(scalar) => {
                 assert_eq!(args.len(), 1);
-                Apply(box Scalar(scalar.clone()), box Name(args[0].clone()))
+                Apply(box Scalar(scalar.clone()), box args[0].clone())
             }
             Union(box e1, box e2) => Union(
                 box e1.contains(args, context)?,
@@ -67,7 +68,7 @@ impl Expression {
                 assert_eq!(args.len(), 0);
                 Negate(box e.lower(context)?)
             }
-            Name(name) => Expression::_apply(Name(name.clone()), args.to_vec()),
+            Name(name) => Expression::apply(Name(name.clone()), args.to_vec()),
             If(box cond, box if_true, box if_false) => If(
                 box cond.contains(&[], context)?,
                 box if_true.contains(args, context)?,
@@ -75,9 +76,8 @@ impl Expression {
             ),
             Abstract(arg, box body) => {
                 assert!(args.len() >= 1);
-                body.clone()
-                    .rename(arg, &Name(args[0].clone()))
-                    .contains(&args[1..], context)?
+                // TODO can rename break if arg is not unique?
+                body.contains(&args[1..], context)?.rename(arg, &args[0])
             }
             Apply(box left, box right) => {
                 match (
@@ -90,26 +90,18 @@ impl Expression {
                     }
                     (true, false) => {
                         let mut args = args.to_vec();
-                        let left_name = match left {
-                            Name(name) => name,
-                            _ => unreachable!(),
-                        };
-                        args.insert(0, left_name.clone());
+                        args.insert(0, left.clone());
                         right.contains(&args, context)?
                     }
                     (false, true) => {
                         let mut args = args.to_vec();
-                        let right_name = match right {
-                            Name(name) => name,
-                            _ => unreachable!(),
-                        };
-                        args.insert(0, right_name.clone());
+                        args.insert(0, right.clone());
                         left.contains(&args, context)?
                     }
                     (false, false) => {
                         let left_arity = context.type_cache.get(left).arity();
                         let right_arity = context.type_cache.get(right).arity();
-                        let mut left_args = context.gensym.names(left_arity.min(right_arity));
+                        let mut left_args = context.gensym.name_exprs(left_arity.min(right_arity));
                         let mut right_args = left_args.clone();
                         if left_arity < right_arity {
                             right_args.extend_from_slice(args);
@@ -123,7 +115,7 @@ impl Expression {
                     }
                 }
             }
-            Native(native) => Expression::_apply(Native(native.clone()), args.to_vec()),
+            Native(native) => Expression::apply(Native(native.clone()), args.to_vec()),
             Solve(e) => e.contains(args, context)?,
             _ => return Err(format!("Can't lower {}", self)),
         })

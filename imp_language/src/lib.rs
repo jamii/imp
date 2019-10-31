@@ -5,6 +5,7 @@
 #[macro_use]
 mod macros;
 mod analysis;
+mod decorrelation;
 mod denotation;
 mod expression;
 mod pretty;
@@ -38,20 +39,20 @@ pub fn run(code: &str, debug_info: &mut Vec<String>) -> Result<(ValueType, Value
 
     // expr = expr.simplify(&HashSet::new());
 
-    let mut type_cache = Cache::new();
-    let _typ = expr
-        .typecheck(&Environment::new(), &mut type_cache)
-        .map_err(|e| format!("Type error: {}", e))?;
-    let mut scalar_cache = Cache::new();
-    expr.scalar(&Environment::new(), &mut scalar_cache)?;
-    match expr.lower(&ContainsContext {
-        scalar_cache: &scalar_cache,
-        type_cache: &type_cache,
-        gensym: &gensym,
-    }) {
-        Ok(lowered) => debug_info.push(format!("lower: {}", d!(&lowered))),
-        Err(err) => debug_info.push(format!("lower err: {}", err)),
-    }
+    // let mut type_cache = Cache::new();
+    // let _typ = expr
+    //     .typecheck(&Environment::new(), &mut type_cache)
+    //     .map_err(|e| format!("Type error: {}", e))?;
+    // let mut scalar_cache = Cache::new();
+    // expr.scalar(&Environment::new(), &mut scalar_cache)?;
+    // match expr.lower(&ContainsContext {
+    //     scalar_cache: &scalar_cache,
+    //     type_cache: &type_cache,
+    //     gensym: &gensym,
+    // }) {
+    //     Ok(lowered) => debug_info.push(format!("lower: {}", d!(&lowered))),
+    //     Err(err) => debug_info.push(format!("lower err: {}", err)),
+    // }
 
     let value = expr
         .clone()

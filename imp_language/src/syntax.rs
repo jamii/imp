@@ -54,6 +54,7 @@ pub enum Token {
     Reduce,
     Some,
     None,
+    Comment,
     Whitespace,
     EOF,
 }
@@ -97,6 +98,23 @@ impl<'a> Parser<'a> {
                         _ => Minus,
                     },
                     '<' => LessThan,
+                    '/' => match chars.next() {
+                        Option::Some('/') => {
+                            len += 1;
+                            loop {
+                                match chars.next() {
+                                    Option::None | Option::Some('\n') => break,
+                                    Option::Some(_) => len += 1,
+                                }
+                            }
+                            Comment
+                        }
+                        _ => {
+                            return Err(Error::Lex {
+                                position: self.position.get(),
+                            });
+                        }
+                    },
                     '"' => {
                         let mut escape = false;
                         loop {
@@ -187,7 +205,7 @@ impl<'a> Parser<'a> {
         let token_start = self.position.get();
         let token_end = token_start + len;
         self.position.set(token_end);
-        if let Whitespace = token {
+        if let Whitespace | Comment = token {
             self.token()
         } else {
             Ok((token, &self.source[token_start..token_end]))

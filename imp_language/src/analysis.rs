@@ -54,19 +54,21 @@ impl ValueType {
         }
     }
 
-    pub fn arity(&self) -> usize {
+    pub fn arity(&self) -> Option<usize> {
         match self {
-            ValueType::None => panic!("none has no arity"),
-            ValueType::Maybe => 0,
-            ValueType::Product(_, tail) | ValueType::Abstract(_, tail) => 1 + tail.arity(),
+            ValueType::None => Option::None,
+            ValueType::Maybe => Option::Some(0),
+            ValueType::Product(_, tail) | ValueType::Abstract(_, tail) => {
+                Option::Some(1 + tail.arity().unwrap())
+            }
         }
     }
 
-    pub fn fun_arity(&self) -> usize {
+    pub fn fun_arity(&self) -> Option<usize> {
         match self {
-            ValueType::None => panic!("none has no arity"),
-            ValueType::Abstract(_, tail) => 1 + tail.fun_arity(),
-            _ => 0,
+            ValueType::None => Option::None,
+            ValueType::Abstract(_, tail) => Option::Some(1 + tail.fun_arity().unwrap()),
+            _ => Option::Some(0),
         }
     }
 
@@ -164,13 +166,6 @@ impl Expression {
             Let(name, box value, box body) => {
                 let mut env = env.clone();
                 env.bind(name.clone(), value.scalar(&env, cache)?);
-                body.scalar(&env, cache)?
-            }
-            Exists(names, box body) => {
-                let mut env = env.clone();
-                for name in names {
-                    env.bind(name.clone(), true);
-                }
                 body.scalar(&env, cache)?
             }
             Abstract(arg, body) => {
@@ -287,7 +282,6 @@ impl Expression {
                 ValueType::Product(ScalarType::Any, box ValueType::Maybe)
             }
             Unseal(..) => return Err(format!("Can't type unseal")),
-            Exists(..) => return Err(format!("Can't type exists")),
             Solve(e) => e.typecheck(env, cache)?.solve(),
         };
         cache.insert(self, typ.clone());
@@ -302,57 +296,61 @@ impl Expression {
         })
         .unwrap();
         let typ = type_cache.get(&self);
-        if let ValueType::None = &typ {
-            *self = None;
-        } else {
-            let fun_arity = typ.fun_arity();
-            if fun_arity > 0 {
-                let names = gensym.names(fun_arity);
-                *self = match self.take() {
-                    Union(a, b) => Expression::_abstract(
-                        names.clone(),
-                        Union(
-                            box Expression::_apply(*a, names.clone()),
-                            box Expression::_apply(*b, names.clone()),
-                        ),
-                    ),
-                    Intersect(a, b) => Expression::_abstract(
-                        names.clone(),
-                        Intersect(
-                            box Expression::_apply(*a, names.clone()),
-                            box Expression::_apply(*b, names.clone()),
-                        ),
-                    ),
-                    Product(a, b) => {
-                        let a_arity = type_cache.get(&a).arity();
-                        let split = fun_arity.min(a_arity);
-                        Expression::_abstract(
+        match typ.fun_arity() {
+            Option::None => *self = None,
+            Option::Some(fun_arity) => {
+                if fun_arity > 0 {
+                    let names = gensym.names(fun_arity);
+                    *self = match self.take() {
+                        Union(a, b) => Expression::_abstract(
                             names.clone(),
-                            Product(
-                                box Expression::_apply(*a, names[0..split].to_vec()),
-                                box Expression::_apply(*b, names[split..].to_vec()),
+                            Union(
+                                box Expression::_apply(*a, names.clone()),
+                                box Expression::_apply(*b, names.clone()),
                             ),
-                        )
-                    }
-                    Apply(a, b) => {
-                        let (a, b) = if type_cache.get(&a).is_function() {
-                            (a, b)
-                        } else {
-                            (b, a)
-                        };
-                        Expression::_abstract(
-                            names.clone(),
-                            Apply(a, box Expression::_product(*b, names)),
-                        )
-                    }
-                    Native(native) => Expression::_abstract(
-                        names.clone(),
-                        Apply(
-                            box Native(native),
-                            box Expression::_product(Name(names[0].clone()), names[1..].to_vec()),
                         ),
-                    ),
-                    other => other,
+                        Intersect(a, b) => Expression::_abstract(
+                            names.clone(),
+                            Intersect(
+                                box Expression::_apply(*a, names.clone()),
+                                box Expression::_apply(*b, names.clone()),
+                            ),
+                        ),
+                        Product(a, b) => {
+                            // if a: none then self: none
+                            let a_arity = type_cache.get(&a).arity().unwrap();
+                            let split = fun_arity.min(a_arity);
+                            Expression::_abstract(
+                                names.clone(),
+                                Product(
+                                    box Expression::_apply(*a, names[0..split].to_vec()),
+                                    box Expression::_apply(*b, names[split..].to_vec()),
+                                ),
+                            )
+                        }
+                        Apply(a, b) => {
+                            let (a, b) = if type_cache.get(&a).is_function() {
+                                (a, b)
+                            } else {
+                                (b, a)
+                            };
+                            Expression::_abstract(
+                                names.clone(),
+                                Apply(a, box Expression::_product(*b, names)),
+                            )
+                        }
+                        Native(native) => Expression::_abstract(
+                            names.clone(),
+                            Apply(
+                                box Native(native),
+                                box Expression::_product(
+                                    Name(names[0].clone()),
+                                    names[1..].to_vec(),
+                                ),
+                            ),
+                        ),
+                        other => other,
+                    }
                 }
             }
         }

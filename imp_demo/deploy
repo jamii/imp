@@ -3,3 +3,4 @@ cd $(dirname $0)
 set -ex
 
 rsync -ar ./pkg ~/blog/static/imp/
+rm ~/blog/static/imp/pkg/.gitignore

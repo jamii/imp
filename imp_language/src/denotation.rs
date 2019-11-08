@@ -407,7 +407,7 @@ impl Expression {
                 Value::scalar(self::Scalar::Sealed(value_env, scalar_env, e))
             }
             Unseal(e) => Value::unseal(e.eval(env)?)?,
-            Exists(..) | Solve(..) => return Err(format!("Unimplemented: {}", self)),
+            Solve(..) => return Err(format!("Unimplemented: {}", self)),
         })
     }
 }

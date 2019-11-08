@@ -1,3 +1,5 @@
+#![deny(non_snake_case)]
+
 use imp_language::*;
 use std::io::prelude::*;
 

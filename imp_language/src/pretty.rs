@@ -99,15 +99,10 @@ impl fmt::Display for Expression {
                 write!(f, "({} -> {})", arg, body)?;
             }
             Apply(fun, arg) => write!(f, "({} {})", fun, arg)?,
-            Native(native) => write!(f, "<{}> ", native.name)?,
+            Native(native) => write!(f, "<{}>", native.name)?,
             Reduce(init, vals, fun) => write!(f, "(reduce {} {} {})", init, vals, fun)?,
             Seal(e) => write!(f, "{{{}}}", e)?,
             Unseal(e) => write!(f, "${}", e)?,
-            Exists(args, body) => {
-                write!(f, "exists(")?;
-                write_delimited(f, " ", args, |f, arg| write!(f, "{}", arg))?;
-                write!(f, " -> {})", body)?;
-            }
             Solve(e) => {
                 write!(f, "?({})", e)?;
             }
@@ -134,6 +129,71 @@ impl fmt::Display for ValueType {
             Maybe => write!(f, "maybe")?,
             Product(s, v) => write!(f, "{} x {}", s, v)?,
             Abstract(s, v) => write!(f, "{} -> {}", s, v)?,
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for Bir {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "(?")?;
+        write_delimited(f, " ", &self.names, |f, name| write!(f, "{}", name))?;
+        write!(f, " -> {})", self.body)?;
+        Ok(())
+    }
+}
+
+impl fmt::Display for BooleanBir {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use BooleanBir::*;
+        match self {
+            None => write!(f, "none")?,
+            Some => write!(f, "some")?,
+            Union(es) => {
+                write!(f, "(")?;
+                write_delimited(f, " | ", es, |f, e| write!(f, "{}", e))?;
+                write!(f, ")")?;
+            }
+            Intersect(es) => {
+                write!(f, "(")?;
+                write_delimited(f, " & ", es, |f, e| write!(f, "{}", e))?;
+                write!(f, ")")?;
+            }
+            ScalarEqual(e1, e2) => write!(f, "({} == {})", e1, e2)?,
+            Equal(e1, e2) => write!(f, "({} = {})", e1, e2)?,
+            Negate(e) => write!(f, "!{}", e)?,
+            Exists(bir) => write!(f, "(exists {}", bir)?,
+            Let(name, value, body) => write!(f, "let {} = {} in {}", name, value, body)?,
+            If(cond, if_true, if_false) => {
+                write!(f, "if {} then {} else {}", cond, if_true, if_false)?
+            }
+            Apply(fun, args) => {
+                write!(f, "({} ", fun)?;
+                write_delimited(f, " ", args, |f, arg| write!(f, "{}", arg))?;
+                write!(f, ")")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for ValueBir {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use ValueBir::*;
+        match self {
+            Name(name) => write!(f, "{}", name)?,
+            Native(native) => write!(f, "<{}>", native.name)?,
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for ScalarBir {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use ScalarBir::*;
+        match self {
+            Name(name) => write!(f, "{}", name)?,
+            Scalar(scalar) => write!(f, "{}", scalar)?,
         }
         Ok(())
     }

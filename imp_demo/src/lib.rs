@@ -1,3 +1,4 @@
+#![deny(non_snake_case)]
 #![feature(box_syntax)]
 #![feature(box_patterns)]
 #![feature(result_map_or_else)]

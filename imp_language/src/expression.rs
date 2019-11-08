@@ -30,7 +30,6 @@ pub enum Expression {
     Reduce(Box<Expression>, Box<Expression>, Box<Expression>),
     Seal(Box<Expression>),
     Unseal(Box<Expression>),
-    Exists(Vec<Name>, Box<Expression>),
     Solve(Box<Expression>),
 }
 
@@ -146,7 +145,6 @@ impl Expression {
             }
             Seal(e) => f(&*e)?,
             Unseal(e) => f(&*e)?,
-            Exists(_, body) => f(&*body)?,
             Solve(e) => f(&*e)?,
         }
         Ok(())
@@ -209,7 +207,6 @@ impl Expression {
             }
             Seal(box e) => f(e)?,
             Unseal(box e) => f(e)?,
-            Exists(_, box body) => f(body)?,
             Solve(box e) => f(e)?,
         }
         Ok(())

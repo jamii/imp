@@ -6,7 +6,6 @@
 mod macros;
 mod analysis;
 mod bir;
-mod decorrelation;
 mod denotation;
 mod expression;
 mod pretty;
@@ -40,7 +39,12 @@ pub fn run(code: &str, debug_info: &mut Vec<String>) -> Result<(ValueType, Value
         type_cache: &type_cache,
         gensym: &gensym,
     }) {
-        Ok(bir) => debug_info.push(format!("bir: {}", d!(&bir))),
+        Ok(bir) => {
+            debug_info.push(format!("bir: {}", d!(&bir)));
+
+            let dnf = bir.dnf();
+            debug_info.push(format!("dnf: {}", d!(&dnf)));
+        }
         Err(err) => debug_info.push(format!("bir err: {}", err)),
     }
 

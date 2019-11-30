@@ -149,24 +149,17 @@ impl fmt::Display for BooleanBir {
         match self {
             None => write!(f, "none")?,
             Some => write!(f, "some")?,
-            Union(es) => {
-                write!(f, "(")?;
-                write_delimited(f, " | ", es, |f, e| write!(f, "{}", e))?;
-                write!(f, ")")?;
+            Union(b1, b2) => {
+                write!(f, "({} | {})", b1, b2)?;
             }
-            Intersect(es) => {
-                write!(f, "(")?;
-                write_delimited(f, " & ", es, |f, e| write!(f, "{}", e))?;
-                write!(f, ")")?;
+            Intersect(b1, b2) => {
+                write!(f, "({} & {})", b1, b2)?;
             }
             ScalarEqual(e1, e2) => write!(f, "({} == {})", e1, e2)?,
             Equal(e1, e2) => write!(f, "({} = {})", e1, e2)?,
             Negate(e) => write!(f, "!{}", e)?,
-            Exists(bir) => write!(f, "(exists {}", bir)?,
+            Exists(bir) => write!(f, "(exists {})", bir)?,
             Let(name, value, body) => write!(f, "let {} = {} in {}", name, value, body)?,
-            If(cond, if_true, if_false) => {
-                write!(f, "if {} then {} else {}", cond, if_true, if_false)?
-            }
             Apply(fun, args) => {
                 write!(f, "({} ", fun)?;
                 write_delimited(f, " ", args, |f, arg| write!(f, "{}", arg))?;

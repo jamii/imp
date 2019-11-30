@@ -136,7 +136,7 @@ impl fmt::Display for ValueType {
 
 impl fmt::Display for Bir {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "(?")?;
+        write!(f, "?(")?;
         write_delimited(f, " ", &self.names, |f, name| write!(f, "{}", name))?;
         write!(f, " -> {})", self.body)?;
         Ok(())

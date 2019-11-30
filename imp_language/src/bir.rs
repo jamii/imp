@@ -1,9 +1,12 @@
 use crate::shared::*;
 
+type ValueName = Name; // name created by BooleanBir::Let
+type ScalarName = Name; // name created by Bir
+
 #[derive(Debug, Clone)]
 pub struct Bir {
     pub typ: ValueType,
-    pub names: Vec<Name>,
+    pub names: Vec<ScalarName>,
     pub body: Box<BooleanBir>,
 }
 
@@ -17,20 +20,20 @@ pub enum BooleanBir {
     Equal(Bir, Bir),
     Negate(Box<BooleanBir>),
     Exists(Bir),
-    Let(Name, Bir, Box<BooleanBir>),
+    Let(ValueName, Bir, Box<BooleanBir>),
     // If(Box<BooleanBir>, Box<BooleanBir>, Box<BooleanBir>),
     Apply(ValueBir, Vec<ScalarBir>),
 }
 
 #[derive(Debug, Clone)]
 pub enum ValueBir {
-    Name(Name), // name created by BooleanBir::Let
+    Name(ValueName),
     Native(Native),
 }
 
 #[derive(Debug, Clone)]
 pub enum ScalarBir {
-    Name(Name), // name created by Bir
+    Name(ScalarName),
     Scalar(Scalar),
 }
 
@@ -454,6 +457,8 @@ impl BooleanBir {
                         Union(box Some, box b) | Union(box b, box Some) => Some,
                         Negate(box None) => Some,
                         Negate(box Some) => None,
+                        Exists(Bir { body: box None, .. }) => None,
+                        Exists(Bir { body: box Some, .. }) => Some,
                         b => b,
                     }
                 }

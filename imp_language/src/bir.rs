@@ -441,11 +441,34 @@ impl BooleanBir {
         .unwrap();
         self
     }
+
+    fn merge_bool(mut self) -> BooleanBir {
+        use BooleanBir::*;
+        self.visit_mut(&mut |bir_ref| {
+            match bir_ref {
+                BirRefMut::BooleanBir(b) => {
+                    *b = match std::mem::replace(b, None) {
+                        Intersect(box None, _) | Intersect(_, box None) => None,
+                        Intersect(box Some, box b) | Intersect(box b, box Some) => b,
+                        Union(box None, box b) | Union(box b, box None) => b,
+                        Union(box Some, box b) | Union(box b, box Some) => Some,
+                        Negate(box None) => Some,
+                        Negate(box Some) => None,
+                        b => b,
+                    }
+                }
+                _ => (),
+            };
+            Ok(())
+        })
+        .unwrap();
+        self
+    }
 }
 
 impl Bir {
     pub fn dnf(mut self) -> Bir {
-        *self.body = self.body.sink_negates(false).lift_unions();
+        *self.body = self.body.sink_negates(false).lift_unions().merge_bool();
         self
     }
 }

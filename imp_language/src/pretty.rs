@@ -1,16 +1,20 @@
 use crate::shared::*;
 
-fn write_delimited<T, TS: IntoIterator<Item = T>, F: Fn(&mut fmt::Formatter, T) -> fmt::Result>(
+fn write_delimited<T, TS, F>(
     f: &mut fmt::Formatter,
     delimiter: &str,
     things: TS,
     write: F,
-) -> fmt::Result {
-    let mut iter = things.into_iter().enumerate().peekable();
-    while let Some((_i, thing)) = iter.next() {
+) -> fmt::Result
+where
+    TS: IntoIterator<Item = T>,
+    F: Fn(&mut fmt::Formatter, T) -> fmt::Result,
+{
+    let mut iter = things.into_iter().peekable();
+    while let Some(thing) = iter.next() {
         write(f, thing)?;
-        if let Some(_) = iter.peek() {
-            write!(f, "{}", delimiter)?;
+        if iter.peek().is_some() {
+            f.write_str(delimiter)?;
         }
     }
     Ok(())

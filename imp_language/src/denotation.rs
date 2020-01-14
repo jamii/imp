@@ -282,6 +282,10 @@ impl<T> Environment<T> {
     pub fn bind(&mut self, name: Name, value: T) {
         self.bindings.push((name, value));
     }
+
+    pub fn unbind(&mut self) {
+        self.bindings.pop();
+    }
 }
 
 impl<T> Environment<T>

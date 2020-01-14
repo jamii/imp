@@ -7,6 +7,7 @@ mod macros;
 mod analysis;
 mod bir;
 mod denotation;
+mod dir;
 mod expression;
 mod pretty;
 mod shared;

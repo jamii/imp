@@ -58,6 +58,14 @@ pub fn run(code: &str, debug_info: &mut Vec<String>) -> Result<(ValueType, Value
 
     // expr = expr.simplify(&HashSet::new());
 
+    let mut type_cache = Cache::new();
+    let _typ = expr
+        .typecheck(&Environment::new(), &mut type_cache)
+        .map_err(|e| format!("Type error: {}", e))?;
+    let dirs = DirsContext::new(&type_cache, &gensym);
+    let result = expr.into_dirs(0, &[], &dirs);
+    debug_info.push(format!("dirs: {:?}\n{:#?}", result, dirs.dirs));
+
     let value = expr
         .clone()
         .eval(&Environment::new())

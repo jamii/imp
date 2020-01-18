@@ -58,7 +58,7 @@ impl<'a> DirsContext<'a> {
             Product(slots) => slots
                 .iter()
                 .map(|slot| self.arity(*slot))
-                .fold(None, |a, b| a.and_then(|a| b.map(|b| a + b))),
+                .fold(Some(0), |a, b| a.and_then(|a| b.map(|b| a + b))),
             FilterEqual(a, _) => self.arity(*a),
             Project(_, key) => Some(key.len()),
             Difference(a, _) => self.arity(*a),
@@ -264,12 +264,16 @@ impl Expression {
                                     assert!(names.len() <= a_arity)
                                 }
 
+                                let outer_arity = outer_names.len();
                                 let a_arity = context.arity(a_slot).unwrap_or(0);
-                                let extra_names = context.gensym.names(if a_arity > names.len() {
-                                    a_arity - names.len()
-                                } else {
-                                    0
-                                });
+                                let extra_names =
+                                    context
+                                        .gensym
+                                        .names(if a_arity - outer_arity > names.len() {
+                                            a_arity - outer_arity - names.len()
+                                        } else {
+                                            0
+                                        });
                                 names.extend(extra_names.clone());
 
                                 for name in &names {
@@ -293,7 +297,14 @@ impl Expression {
                                     context.env.borrow_mut().unbind();
                                 }
 
-                                ab_slot
+                                let new_outer_arity = new_outer_names.len();
+                                let ab_arity = context.arity(ab_slot).unwrap_or(0);
+                                let applied = context.dir(Dir::Project(
+                                    ab_slot,
+                                    (0..outer_arity).chain(new_outer_arity..ab_arity).collect(),
+                                ));
+
+                                applied
                             }
                             Native(native) => {
                                 let outer_arity = context.arity(outer_slot).unwrap_or(0);

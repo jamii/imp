@@ -1,33 +1,45 @@
 use crate::shared::*;
 
+fn none() -> Set {
+    Set::from_iter(vec![])
+}
+
+fn some() -> Set {
+    Set::from_iter(vec![vec![]])
+}
+
+fn scalar(s: Scalar) -> Set {
+    Set::from_iter(vec![vec![s]])
+}
+
 impl Native {
-    fn add(scalars: Vec<Scalar>) -> Result<Value, String> {
+    fn add(scalars: Vec<Scalar>) -> Result<Set, String> {
         match &*scalars {
-            [Scalar::Number(n1), Scalar::Number(n2)] => Ok(Value::scalar(Scalar::Number(n1 + n2))),
+            [Scalar::Number(n1), Scalar::Number(n2)] => Ok(scalar(Scalar::Number(n1 + n2))),
             [a, b] => Err(format!("{} + {}", a, b)),
             _ => unreachable!(),
         }
     }
 
-    fn subtract(scalars: Vec<Scalar>) -> Result<Value, String> {
+    fn subtract(scalars: Vec<Scalar>) -> Result<Set, String> {
         match &*scalars {
-            [Scalar::Number(n1), Scalar::Number(n2)] => Ok(Value::scalar(Scalar::Number(n1 - n2))),
+            [Scalar::Number(n1), Scalar::Number(n2)] => Ok(scalar(Scalar::Number(n1 - n2))),
             [a, b] => Err(format!("{} - {}", a, b)),
             _ => unreachable!(),
         }
     }
 
-    fn negative(scalars: Vec<Scalar>) -> Result<Value, String> {
+    fn negative(scalars: Vec<Scalar>) -> Result<Set, String> {
         match &*scalars {
-            [Scalar::Number(n1)] => Ok(Value::scalar(Scalar::Number(-n1))),
+            [Scalar::Number(n1)] => Ok(scalar(Scalar::Number(-n1))),
             [a] => Err(format!("- {}", a)),
             _ => unreachable!(),
         }
     }
 
-    // fn permute(scalars: Vec<Scalar>) -> Result<Value, String> {
+    // fn permute(scalars: Vec<Scalar>) -> Result<Set, String> {
     //     match &*scalars {
-    //         [Scalar::Sealed(box Value::Set(permutations)), Scalar::Sealed(box Value::Set(set))] => {
+    //         [Scalar::Sealed(box Set::Set(permutations)), Scalar::Sealed(box Set::Set(set))] => {
     //             let mut result = Set::new();
     //             for permutation in permutations {
     //                 for row in set {
@@ -46,14 +58,14 @@ impl Native {
     //                     );
     //                 }
     //             }
-    //             Ok(Value::Set(result))
+    //             Ok(Set::Set(result))
     //         }
     //         [a, b] => Err(format!("permute {} {}", a, b)),
     //         _ => unreachable!(),
     //     }
     // }
 
-    fn rows(scalars: Vec<Scalar>) -> Result<Value, String> {
+    fn rows(scalars: Vec<Scalar>) -> Result<Set, String> {
         match Scalar::unseal(scalars[0].clone()) {
             Ok(Value::Set(set)) => {
                 let mut result = Set::new();
@@ -62,13 +74,13 @@ impl Native {
                 for (r, _row) in input.into_iter().enumerate() {
                     result.insert(vec![Scalar::Number((r + 1) as i64)]);
                 }
-                Ok(Value::Set(result))
+                Ok(result)
             }
             _ => Err(format!("rows {}", &scalars[0])),
         }
     }
 
-    fn cols(scalars: Vec<Scalar>) -> Result<Value, String> {
+    fn cols(scalars: Vec<Scalar>) -> Result<Set, String> {
         match Scalar::unseal(scalars[0].clone()) {
             Ok(Value::Set(set)) => {
                 let mut result = Set::new();
@@ -79,14 +91,14 @@ impl Native {
                         result.insert(vec![Scalar::Number((c + 1) as i64)]);
                     }
                 }
-                Ok(Value::Set(result))
+                Ok(result)
             }
             _ => Err(format!("pivot {}", &scalars[0])),
         }
     }
 
     // TODO pivot isn't quite the right name for this
-    fn pivot(scalars: Vec<Scalar>) -> Result<Value, String> {
+    fn pivot(scalars: Vec<Scalar>) -> Result<Set, String> {
         match Scalar::unseal(scalars[0].clone()) {
             Ok(Value::Set(set)) => {
                 let mut result = Set::new();
@@ -101,54 +113,56 @@ impl Native {
                         ]);
                     }
                 }
-                Ok(Value::Set(result))
+                Ok(result)
             }
             _ => Err(format!("pivot {}", &scalars[0])),
         }
     }
 
-    fn as_text(scalars: Vec<Scalar>) -> Result<Value, String> {
+    fn as_text(scalars: Vec<Scalar>) -> Result<Set, String> {
         match &*scalars {
-            [scalar] => Ok(Value::Set(Set::from_iter(vec![vec![Scalar::String(
-                format!("{}", scalar),
-            )]]))),
+            [scalar] => Ok(Set::from_iter(vec![vec![Scalar::String(format!(
+                "{}",
+                scalar
+            ))]])),
             _ => unreachable!(),
         }
     }
 
-    fn fun_as_text(scalars: Vec<Scalar>) -> Result<Value, String> {
+    fn fun_as_text(scalars: Vec<Scalar>) -> Result<Set, String> {
         match Scalar::unseal(scalars[0].clone()) {
-            Ok(value) => Ok(Value::Set(Set::from_iter(vec![vec![Scalar::String(
-                format!("{}", value),
-            )]]))),
+            Ok(value) => Ok(Set::from_iter(vec![vec![Scalar::String(format!(
+                "{}",
+                value
+            ))]])),
             Err(_) => Err(format!("fun_as_text {}", &scalars[0])),
         }
     }
 
-    fn is_function(scalars: Vec<Scalar>) -> Result<Value, String> {
+    fn is_function(scalars: Vec<Scalar>) -> Result<Set, String> {
         match Scalar::unseal(scalars[0].clone()) {
             Ok(value) => match value {
-                Value::Set(..) => Ok(Value::none()),
-                Value::Closure(..) => Ok(Value::some()),
+                Value::Set(..) => Ok(none()),
+                Value::Closure(..) => Ok(some()),
             },
             Err(_) => Err(format!("is_function {}", &scalars[0])),
         }
     }
 
-    fn less_than(scalars: Vec<Scalar>) -> Result<Value, String> {
+    fn less_than(scalars: Vec<Scalar>) -> Result<Set, String> {
         match &*scalars {
             [a, b] => {
                 if a < b {
-                    Ok(Value::some())
+                    Ok(some())
                 } else {
-                    Ok(Value::none())
+                    Ok(none())
                 }
             }
             _ => unreachable!(),
         }
     }
 
-    // fn solve(scalars: Vec<Scalar>) -> Result<Value, String> {
+    // fn solve(scalars: Vec<Scalar>) -> Result<Set, String> {
     //     match &*scalars {
     //         [Scalar::Sealed(box expr, env)] => {
     //             // TODO scalar_env?
@@ -162,14 +176,14 @@ impl Native {
     //                 env.bindings
     //                     .iter()
     //                     .map(|(name, value)| Ok((name.clone(), value.typ()?)))
-    //                     .collect::<Result<Vec<(String, ValueType)>, String>>()?,
+    //                     .collect::<Result<Vec<(String, SetType)>, String>>()?,
     //             );
     //             let mut scalar_cache = Cache::new();
     //             let mut type_cache = Cache::new();
     //             expr.scalar(&scalar_env, &mut scalar_cache)?;
     //             expr.typecheck(&type_env, &mut type_cache)?;
     //             let lowered = expr.lower(&scalar_cache, &type_cache)?;
-    //             Ok(Value::Set(Set::from_iter(vec![vec![Scalar::Sealed(
+    //             Ok(Set::Set(Set::from_iter(vec![vec![Scalar::Sealed(
     //                 box lowered,
     //                 env.clone(),
     //             )]])))

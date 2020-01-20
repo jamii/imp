@@ -7,7 +7,7 @@ fn main() {
     for line in std::io::stdin().lock().lines() {
         let line = line.unwrap();
         let mut debug_info = vec![];
-        let result = run(&line, &mut debug_info);
+        let result = run_looped(&line, &mut debug_info);
         println!();
         for d in debug_info {
             println!("{}", d);

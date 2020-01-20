@@ -18,8 +18,10 @@ pub fn fuzz_parse(data: &[u8]) {
 pub fn fuzz_eval(data: &[u8]) {
     if let Some(expr) = build_expr(data) {
         // dbg!(&expr);
-        if let Ok(result) = eval(expr) {
-            format!("{}", result);
+        let mut debug_info = vec![];
+        if let Ok((_typ, Value::Set(set1))) = eval_looped(expr.clone(), &mut debug_info) {
+            let (_typ, set2) = eval_flat(expr, &mut debug_info).unwrap();
+            assert_eq!(set1, set2);
         }
     }
 }
@@ -92,14 +94,18 @@ fn build_expr(data: &[u8]) -> Option<Expression> {
                 };
                 Expression::Name(name.to_owned())
             }
-            14 if stack.len() >= 1 => Expression::Seal(box stack.pop().unwrap()),
-            15 if stack.len() >= 1 => Expression::Unseal(box stack.pop().unwrap()),
+            // 14 if stack.len() >= 1 => Expression::Seal(box stack.pop().unwrap()),
+            // 15 if stack.len() >= 1 => Expression::Unseal(box stack.pop().unwrap()),
             // TODO solve
             _ => return None,
         };
         stack.push(expr);
     }
-    stack.pop()
+    let expr = stack.pop();
+    if let Some(expr) = &expr {
+        println!("{}", expr);
+    }
+    expr
 }
 
 pub fn fuzz_artifacts() {

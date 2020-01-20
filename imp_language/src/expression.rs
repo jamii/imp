@@ -8,7 +8,7 @@ pub struct Native {
     pub name: Name,
     pub input_arity: usize,
     pub output_arity: usize,
-    pub fun: fn(Vec<Scalar>) -> Result<Value, String>,
+    pub fun: fn(Vec<Scalar>) -> Result<Set, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

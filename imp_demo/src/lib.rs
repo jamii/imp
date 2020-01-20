@@ -143,7 +143,7 @@ pub fn update(input: &str, output_node: &HtmlElement) {
     output_node.append_child(&tmp.node).unwrap();
 
     let mut debug_info = vec![];
-    let output = match imp_language::run(&input, &mut debug_info) {
+    let output = match imp_language::run_looped(&input, &mut debug_info) {
         Ok((typ, output)) => Node::tag("div")
             .child({
                 let mut node = Node::tag("div").attribute("class", "imp-debug-info");

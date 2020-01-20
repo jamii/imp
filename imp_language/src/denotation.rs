@@ -371,10 +371,7 @@ impl Expression {
                     _ => unreachable!(),
                 };
                 for row in set1 {
-                    let set2 = match (native.fun)(row[..native.input_arity].to_vec())? {
-                        Set(set2) => set2,
-                        _ => unreachable!(),
-                    };
+                    let set2 = (native.fun)(row[..native.input_arity].to_vec())?;
                     for row2 in set2 {
                         let row1 = row[native.input_arity..].to_vec();
                         if row2.starts_with(&row1) {

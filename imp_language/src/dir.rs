@@ -68,10 +68,15 @@ impl<'a> DirsContext<'a> {
         }
     }
 
-    pub fn dir(&self, dir: Dir) -> Slot {
+    fn dir(&self, dir: Dir) -> Slot {
         let mut dirs = self.dirs.borrow_mut();
         dirs.push(dir);
         dirs.len() - 1
+
+    pub fn finish(self) -> Dirs {
+        Dirs {
+            dirs: self.dirs.into_inner(),
+        }
     }
 }
 
@@ -325,5 +330,68 @@ impl Expression {
             }
             Reduce(..) | Seal(..) | Unseal(..) | Solve(..) => return Err(format!("TODO")),
         })
+    }
+}
+
+impl Dirs {
+    pub fn eval(&self) -> Result<Set, String> {
+        let mut data = self.dirs.iter().map(|_| Set::new()).collect::<Vec<_>>();
+        for (slot, dir) in self.dirs.iter().enumerate() {
+            use Dir::*;
+            data[slot] = match dir {
+                Constant(set) => set.clone(),
+                Union(slots) => {
+                    let mut set = data[slots[0]].clone();
+                    for slot in &slots[1..] {
+                        set = set.union(&data[*slot]).cloned().collect();
+                    }
+                    set
+                }
+                Intersect(slots) => {
+                    let mut set = data[slots[0]].clone();
+                    for slot in &slots[1..] {
+                        set = set.intersection(&data[*slot]).cloned().collect();
+                    }
+                    set
+                }
+                Product(slots) => {
+                    let mut set = Set::from_iter(vec![vec![]]);
+                    for slot in slots {
+                        set = set
+                            .into_iter()
+                            .flat_map(|row_a| {
+                                data[*slot].iter().map(move |row_b| {
+                                    row_a.iter().chain(row_b.iter()).cloned().collect()
+                                })
+                            })
+                            .collect()
+                    }
+                    set
+                }
+                FilterEqual(slot, eqs) => data[*slot]
+                    .iter()
+                    .filter(|row| eqs.iter().all(|(a, b)| row[*a] == row[*b]))
+                    .cloned()
+                    .collect(),
+                Project(slot, cols) => data[*slot]
+                    .iter()
+                    .map(|row| cols.iter().map(|col| row[*col].clone()).collect())
+                    .collect(),
+                Difference(a, b) => data[*a].difference(&data[*b]).cloned().collect(),
+                ApplyNative(slot, native) => {
+                    let mut set = Set::new();
+                    for row in &data[*slot] {
+                        let mid = row.len() - native.input_arity;
+                        let inputs = row[mid..].to_vec();
+                        let outputs = (native.fun)(inputs)?;
+                        for output in outputs {
+                            set.insert(row[..mid].iter().cloned().chain(output).collect());
+                        }
+                    }
+                    set
+                }
+            }
+        }
+        Ok(data.into_iter().last().unwrap())
     }
 }

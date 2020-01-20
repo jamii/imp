@@ -144,25 +144,31 @@ pub fn update(input: &str, output_node: &HtmlElement) {
 
     let mut debug_info = vec![];
     let output = match imp_language::run_looped(&input, &mut debug_info) {
-        Ok((typ, output)) => Node::tag("div")
-            .child({
-                let mut node = Node::tag("div").attribute("class", "imp-debug-info");
-                for d in debug_info {
-                    node =
-                        node.child(Node::tag("div").child(Node::tag("code").child(Node::text(&d))));
-                }
-                node
-            })
-            .child(
-                Node::tag("div")
-                    .attribute("class", "imp-type")
-                    .child(Node::tag("code").child(Node::text(&format!("type = {}", typ)))),
-            )
-            .child(
-                Node::tag("div")
-                    .attribute("class", "imp-value")
-                    .child(render(&output)),
-            ),
+        Ok((typ, output)) => {
+            if !typ.is_function() {
+                let (_typ2, output2) = imp_language::run_flat(&input, &mut debug_info).unwrap();
+                assert_eq!(output, Value::Set(output2));
+            }
+            Node::tag("div")
+                .child({
+                    let mut node = Node::tag("div").attribute("class", "imp-debug-info");
+                    for d in debug_info {
+                        node = node
+                            .child(Node::tag("div").child(Node::tag("code").child(Node::text(&d))));
+                    }
+                    node
+                })
+                .child(
+                    Node::tag("div")
+                        .attribute("class", "imp-type")
+                        .child(Node::tag("code").child(Node::text(&format!("type = {}", typ)))),
+                )
+                .child(
+                    Node::tag("div")
+                        .attribute("class", "imp-value")
+                        .child(render(&output)),
+                )
+        }
         Err(error) => Node::tag("div")
             .attribute("class", "imp-error")
             .child(Node::tag("code").child(Node::text(&error))),

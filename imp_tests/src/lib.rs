@@ -19,9 +19,11 @@ pub fn fuzz_eval(data: &[u8]) {
     if let Some(expr) = build_expr(data) {
         // dbg!(&expr);
         let mut debug_info = vec![];
-        if let Ok((_typ, Value::Set(set1))) = eval_looped(expr.clone(), &mut debug_info) {
-            let (_typ, set2) = eval_flat(expr, &mut debug_info).unwrap();
-            assert_eq!(set1, set2);
+        if let Ok((typ, Value::Set(set1))) = eval_looped(expr.clone(), &mut debug_info) {
+            if !typ.is_function() {
+                let (_typ, set2) = eval_flat(expr, &mut debug_info).unwrap();
+                assert_eq!(set1, set2);
+            }
         }
     }
 }
@@ -86,10 +88,12 @@ fn build_expr(data: &[u8]) -> Option<Expression> {
                     0 => "add",
                     1 => "subtract",
                     2 => "negative",
-                    3 => "permute",
-                    4 => "reduce",
-                    5 => "pivot",
+                    // 3 => "permute",
+                    // 4 => "reduce",
+                    // 5 => "pivot",
                     6 => "as_text",
+                    7 => "is_function",
+                    8 => "less_than",
                     _ => return None,
                 };
                 Expression::Name(name.to_owned())
@@ -103,7 +107,7 @@ fn build_expr(data: &[u8]) -> Option<Expression> {
     }
     let expr = stack.pop();
     if let Some(expr) = &expr {
-        println!("{}", expr);
+        println!("--------------------------------------------------------------------------------\n{}\n--------------------------------------------------------------------------------", expr);
     }
     expr
 }

@@ -20,17 +20,17 @@ pub struct Dirs {
     pub dirs: Vec<Dir>,
 }
 
-#[derive(Debug)]
-enum Binding {
+#[derive(Debug, Clone)]
+enum Binding<'a> {
     Set(Slot),
-    Fun(Expression),
+    Fun(Environment<(Vec<Name>, Binding<'a>)>, &'a Expression),
     Scalar,
 }
 
 #[derive(Debug)]
 pub struct DirsContext<'a> {
     pub dirs: RefCell<Vec<Dir>>,
-    env: RefCell<Environment<(Vec<Name>, Binding)>>,
+    env: RefCell<Environment<(Vec<Name>, Binding<'a>)>>,
     type_cache: &'a Cache<ValueType>,
     gensym: &'a Gensym,
 }
@@ -52,15 +52,20 @@ impl<'a> DirsContext<'a> {
                 None => None,
                 Some(tuple) => Some(tuple.len()),
             },
-            Union(slots) | Intersect(slots) => {
-                slots.iter().next().and_then(|slot| self.arity(*slot))
-            }
+            Union(slots) => slots
+                .iter()
+                .map(|slot| self.arity(*slot))
+                .fold(None, |a, b| a.or(b)),
+            Intersect(slots) => slots
+                .iter()
+                .map(|slot| self.arity(*slot))
+                .fold(Some(0), |a, b| a.and(b)),
             Product(slots) => slots
                 .iter()
                 .map(|slot| self.arity(*slot))
                 .fold(Some(0), |a, b| a.and_then(|a| b.map(|b| a + b))),
             FilterEqual(a, _) => self.arity(*a),
-            Project(_, key) => Some(key.len()),
+            Project(a, key) => self.arity(*a).and(Some(key.len())),
             Difference(a, _) => self.arity(*a),
             ApplyNative(a, native) => self
                 .arity(*a)
@@ -71,7 +76,10 @@ impl<'a> DirsContext<'a> {
     fn dir(&self, dir: Dir) -> Slot {
         let mut dirs = self.dirs.borrow_mut();
         dirs.push(dir);
-        dirs.len() - 1
+        let slot = dirs.len() - 1;
+        dbg!(slot, &dirs[slot]);
+        slot
+    }
 
     pub fn finish(self) -> Dirs {
         Dirs {
@@ -84,14 +92,15 @@ impl<'a> DirsContext<'a> {
 // assumes names are unique
 // should only be applied to something with finite type
 impl Expression {
-    pub fn into_dirs(
-        &self,
+    pub fn into_dirs<'a>(
+        &'a self,
         outer_slot: Slot,
         outer_names: &[Name],
-        context: &DirsContext,
+        context: &DirsContext<'a>,
     ) -> Result<Slot, String> {
         use Expression::*;
-        Ok(match self {
+        println!("[[[{}", self);
+        let slot = Ok(match self {
             None => context.dir(Dir::Constant(Set::from_iter(vec![]))),
             Some => outer_slot,
             Scalar(scalar) => context.dir(Dir::Product(vec![
@@ -154,20 +163,21 @@ impl Expression {
                 let env = context.env.borrow();
                 let (binding_names, binding) = env.lookup(name).unwrap();
                 match binding {
-                    Binding::Fun(_fun) => {
+                    Binding::Fun(..) => {
                         return Err(format!("Bare fun!"));
                     }
                     Binding::Set(binding_slot) => {
                         let mut join_key = vec![];
+                        let outer_arity = context.arity(outer_slot).unwrap_or(0);
+                        let binding_outer_arity = binding_names.len();
+                        let binding_arity = context.arity(*binding_slot).unwrap_or(0);
                         for (binding_ix, name) in binding_names.iter().enumerate() {
                             // must have come from a parent scope, so binding_names is contained in outer_names
                             let outer_ix =
                                 outer_names.iter().position(|name2| name == name2).unwrap();
-                            join_key.push((outer_ix, binding_ix));
+                            join_key.push((outer_ix, outer_arity + binding_ix));
                         }
-                        let outer_arity = context.arity(outer_slot).unwrap_or(0);
-                        let binding_outer_arity = binding_names.len();
-                        let binding_arity = context.arity(*binding_slot).unwrap_or(0);
+                        dbg!(outer_arity, binding_outer_arity, binding_arity);
                         context.dir(Dir::Project(
                             context.dir(Dir::FilterEqual(
                                 context.dir(Dir::Product(vec![outer_slot, *binding_slot])),
@@ -191,9 +201,10 @@ impl Expression {
             }
             Let(name, value, body) => {
                 if context.type_cache.get(value).is_function() {
+                    let env = (*context.env.borrow()).clone();
                     context.env.borrow_mut().bind(
                         name.clone(),
-                        (outer_names.to_vec(), Binding::Fun(self.clone())),
+                        (outer_names.to_vec(), Binding::Fun(env, value)),
                     );
                 } else {
                     let value_slot = value.into_dirs(outer_slot, outer_names, context)?;
@@ -219,12 +230,12 @@ impl Expression {
 
                 let a_slot = a.into_dirs(outer_slot, outer_names, context)?;
 
-                fn apply_to(
+                fn apply_to<'a>(
                     outer_slot: Slot,
                     outer_names: &[crate::Name],
                     mut a_slot: Slot,
-                    b: &Expression,
-                    context: &DirsContext,
+                    b: &'a Expression,
+                    context: &DirsContext<'a>,
                 ) -> Result<Slot, String> {
                     Ok(if !context.type_cache.get(&b).is_function() {
                         let mut b_slot = b.into_dirs(outer_slot, outer_names, context)?;
@@ -248,15 +259,29 @@ impl Expression {
                         // if b is a fun, must be either name, abstract or native
                         match &b {
                             Name(name) => {
-                                let env = context.env.borrow();
+                                // TODO gross!
+                                let mut env = Environment::new();
+                                std::mem::swap(&mut env, &mut context.env.borrow_mut());
                                 let (_binding_names, binding) = env.lookup(&name).unwrap();
                                 // don't need binding_names because must be subset of outer_names
-                                match binding {
-                                    Binding::Fun(fun) => {
-                                        apply_to(outer_slot, outer_names, a_slot, fun, context)?
+                                let slot = match binding {
+                                    Binding::Fun(env, fun) => {
+                                        let mut env = env.clone();
+                                        std::mem::swap(&mut env, &mut context.env.borrow_mut());
+                                        let slot = apply_to(
+                                            outer_slot,
+                                            outer_names,
+                                            a_slot,
+                                            fun,
+                                            context,
+                                        )?;
+                                        std::mem::swap(&mut env, &mut context.env.borrow_mut());
+                                        slot
                                     }
                                     _ => unreachable!(),
-                                }
+                                };
+                                std::mem::swap(&mut env, &mut context.env.borrow_mut());
+                                slot
                             }
                             Abstract(name, body) => {
                                 let mut body = &**body;
@@ -272,26 +297,14 @@ impl Expression {
                                     assert!(names.len() <= a_arity)
                                 }
 
-                                let outer_arity = outer_names.len();
-                                let a_arity = context.arity(a_slot).unwrap_or(0);
-                                let num_extra_names = a_arity - outer_arity - names.len();
-                                if num_extra_names > 0 {
-                                    names.extend(
-                                        context.gensym.names(a_arity - outer_arity - names.len()),
-                                    );
-                                }
-
-                                let new_outer_slot = a_slot;
                                 let new_outer_names = outer_names
                                     .iter()
                                     .chain(names.iter())
                                     .cloned()
                                     .collect::<Vec<_>>();
-                                let extra_slot = context.dir(Dir::Project(
+                                let new_outer_slot = context.dir(Dir::Project(
                                     a_slot,
-                                    (0..a_arity)
-                                        .chain(a_arity - num_extra_names..a_arity)
-                                        .collect(),
+                                    (0..new_outer_names.len()).collect(),
                                 ));
 
                                 for name in &names {
@@ -303,7 +316,7 @@ impl Expression {
                                 let ab_slot = apply_to(
                                     new_outer_slot,
                                     &new_outer_names,
-                                    extra_slot,
+                                    a_slot,
                                     body,
                                     context,
                                 )?;
@@ -311,22 +324,11 @@ impl Expression {
                                     context.env.borrow_mut().unbind();
                                 }
 
+                                let outer_arity = outer_names.len();
                                 let new_outer_arity = new_outer_names.len();
                                 let ab_arity = context.arity(ab_slot).unwrap_or(0);
-                                dbg!(new_outer_arity, ab_arity, num_extra_names);
                                 let applied = context.dir(Dir::Project(
-                                    // apply to extra names
-                                    context.dir(Dir::FilterEqual(
-                                        ab_slot,
-                                        (0..num_extra_names)
-                                            .map(|i| {
-                                                (
-                                                    new_outer_arity - num_extra_names + i,
-                                                    new_outer_arity + i,
-                                                )
-                                            })
-                                            .collect(),
-                                    )),
+                                    ab_slot,
                                     (0..outer_arity).chain(new_outer_arity..ab_arity).collect(),
                                 ));
 
@@ -340,7 +342,28 @@ impl Expression {
                                 }
                                 context.dir(Dir::ApplyNative(a_slot, native.clone()))
                             }
-                            _ => unreachable!(),
+                            // TODO gross that we have to repeat this
+                            Let(name, value, body) => {
+                                if context.type_cache.get(value).is_function() {
+                                    let env = (*context.env.borrow()).clone();
+                                    context.env.borrow_mut().bind(
+                                        name.clone(),
+                                        (outer_names.to_vec(), Binding::Fun(env, b)),
+                                    );
+                                } else {
+                                    let value_slot =
+                                        value.into_dirs(outer_slot, outer_names, context)?;
+                                    context.env.borrow_mut().bind(
+                                        name.clone(),
+                                        (outer_names.to_vec(), Binding::Set(value_slot)),
+                                    );
+                                }
+                                let body_slot =
+                                    apply_to(outer_slot, outer_names, a_slot, body, context)?;
+                                context.env.borrow_mut().unbind();
+                                body_slot
+                            }
+                            other => unreachable!("What are this {:?}", other),
                         }
                     })
                 }
@@ -350,16 +373,26 @@ impl Expression {
                 return Err(format!("Bare native!"));
             }
             Reduce(..) | Seal(..) | Unseal(..) | Solve(..) => return Err(format!("TODO")),
-        })
+        });
+        println!("]]] {} {}", self, slot.clone().unwrap());
+        assert_eq!(
+            context.arity(slot.clone().unwrap()),
+            context
+                .type_cache
+                .get(self)
+                .arity()
+                .and_then(|a| context.arity(outer_slot).map(|b| a + b))
+        );
+        slot
     }
 }
 
 impl Dirs {
     pub fn eval(&self, slot: usize) -> Result<Set, String> {
-        dbg!(self.dirs.iter().enumerate().collect::<Vec<_>>());
         let mut data = self.dirs.iter().map(|_| Set::new()).collect::<Vec<_>>();
         for (slot, dir) in self.dirs.iter().enumerate() {
             use Dir::*;
+            dbg!(slot, &dir);
             data[slot] = match dir {
                 Constant(set) => set.clone(),
                 Union(slots) => {
@@ -412,7 +445,8 @@ impl Dirs {
                     }
                     set
                 }
-            }
+            };
+            dbg!(&data[slot]);
         }
         Ok(data[slot].clone())
     }

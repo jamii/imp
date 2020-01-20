@@ -78,8 +78,11 @@ pub fn eval_flat(
 ) -> Result<(ValueType, Set), String> {
     let gensym = Gensym::new();
 
-    let mut expr = expr.with_natives(&Native::stdlib());
+    let expr = expr.with_natives(&Native::stdlib());
     debug_info.push(format!("with_natives: {}", d!(&expr)));
+
+    let mut expr = expr.desugar(&gensym);
+    debug_info.push(format!("desugared: {}", d!(&expr)));
 
     let mut type_cache = Cache::new();
     let typ = expr
@@ -88,7 +91,6 @@ pub fn eval_flat(
     expr.funify(&mut type_cache, &gensym);
     debug_info.push(format!("funify: {}", d!(&expr)));
 
-    let expr = expr.desugar(&gensym);
     let mut type_cache = Cache::new();
     let _typ = expr
         .typecheck(&Environment::new(), &mut type_cache)
@@ -111,4 +113,15 @@ pub fn run_looped(code: &str, debug_info: &mut Vec<String>) -> Result<(ValueType
     };
 
     eval_looped(expr, debug_info)
+}
+
+pub fn run_flat(code: &str, debug_info: &mut Vec<String>) -> Result<(ValueType, Set), String> {
+    let expr = if code.is_empty() {
+        // mild hack
+        Expression::None
+    } else {
+        parse(&code).map_err(|e| format!("Parse error: {:?}", e))?
+    };
+
+    eval_flat(expr, debug_info)
 }

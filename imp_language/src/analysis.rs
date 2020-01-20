@@ -360,13 +360,13 @@ impl Expression {
         use Expression::*;
         self.map(|expr| {
             Ok(if let If(cond, if_true, if_false) = expr {
-                let name = gensym.name();
+                let cond_name = gensym.name();
                 Let(
-                    name.clone(),
+                    cond_name.clone(),
                     cond,
                     box Union(
-                        box Product(box Name(name.clone()), if_true),
-                        box Product(box Negate(box Name(name.clone())), if_false),
+                        box Product(box Name(cond_name.clone()), if_true),
+                        box Product(box Negate(box Name(cond_name.clone())), if_false),
                     ),
                 )
             } else {

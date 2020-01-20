@@ -356,6 +356,26 @@ impl Expression {
         }
     }
 
+    pub fn desugar(self, gensym: &Gensym) -> Self {
+        use Expression::*;
+        self.map(|expr| {
+            Ok(if let If(cond, if_true, if_false) = expr {
+                let name = gensym.name();
+                Let(
+                    name.clone(),
+                    cond,
+                    box Union(
+                        box Product(box Name(name.clone()), if_true),
+                        box Product(box Negate(box Name(name.clone())), if_false),
+                    ),
+                )
+            } else {
+                expr
+            })
+        })
+        .unwrap()
+    }
+
     // pub fn simplify(self, scalar_names: &HashSet<Name>) -> Self {
     //     use Expression::*;
     //     match self {

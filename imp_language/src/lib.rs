@@ -88,6 +88,7 @@ pub fn eval_flat(
     expr.funify(&mut type_cache, &gensym);
     debug_info.push(format!("funify: {}", d!(&expr)));
 
+    let expr = expr.desugar(&gensym);
     let mut type_cache = Cache::new();
     let _typ = expr
         .typecheck(&Environment::new(), &mut type_cache)

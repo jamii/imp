@@ -94,10 +94,10 @@ pub fn eval_flat(
         .typecheck(&Environment::new(), &mut type_cache)
         .map_err(|e| format!("Type error: {}", e))?;
     let dirs = DirsContext::new(&type_cache, &gensym);
-    expr.into_dirs(0, &[], &dirs)?;
+    let slot = expr.into_dirs(0, &[], &dirs)?;
     let dirs = dirs.finish();
 
-    let set = dirs.eval()?;
+    let set = dirs.eval(slot)?;
 
     Ok((typ, set))
 }

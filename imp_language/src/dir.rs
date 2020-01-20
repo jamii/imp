@@ -230,6 +230,7 @@ impl Expression {
                         let mut b_slot = b.into_dirs(outer_slot, outer_names, context)?;
                         let mut a_arity = context.arity(a_slot).unwrap_or(0);
                         let mut b_arity = context.arity(b_slot).unwrap_or(0);
+                        let outer_arity = outer_names.len();
                         if a_arity > b_arity {
                             std::mem::swap(&mut a_slot, &mut b_slot);
                             std::mem::swap(&mut a_arity, &mut b_arity);
@@ -239,7 +240,9 @@ impl Expression {
                                 context.dir(Dir::Product(vec![a_slot, b_slot])),
                                 (0..a_arity).map(|i| (i, a_arity + i)).collect(),
                             )),
-                            (a_arity + a_arity..a_arity + b_arity).collect(),
+                            (0..outer_arity)
+                                .chain(a_arity + a_arity..a_arity + b_arity)
+                                .collect(),
                         ))
                     } else {
                         // if b is a fun, must be either name, abstract or native
@@ -271,20 +274,10 @@ impl Expression {
 
                                 let outer_arity = outer_names.len();
                                 let a_arity = context.arity(a_slot).unwrap_or(0);
-                                let extra_names =
-                                    context
-                                        .gensym
-                                        .names(if a_arity - outer_arity > names.len() {
-                                            a_arity - outer_arity - names.len()
-                                        } else {
-                                            0
-                                        });
-                                names.extend(extra_names.clone());
-
-                                for name in &names {
-                                    context.env.borrow_mut().bind(
-                                        name.clone(),
-                                        (outer_names.to_vec(), Binding::Scalar),
+                                let num_extra_names = a_arity - outer_arity - names.len();
+                                if num_extra_names > 0 {
+                                    names.extend(
+                                        context.gensym.names(a_arity - outer_arity - names.len()),
                                     );
                                 }
 
@@ -294,18 +287,46 @@ impl Expression {
                                     .chain(names.iter())
                                     .cloned()
                                     .collect::<Vec<_>>();
-                                let ab_slot =
-                                    body.into_dirs(new_outer_slot, &new_outer_names, context)?;
-                                // TODO need to apply to product of extra names
+                                let extra_slot = context.dir(Dir::Project(
+                                    a_slot,
+                                    (0..a_arity)
+                                        .chain(a_arity - num_extra_names..a_arity)
+                                        .collect(),
+                                ));
 
+                                for name in &names {
+                                    context.env.borrow_mut().bind(
+                                        name.clone(),
+                                        (outer_names.to_vec(), Binding::Scalar),
+                                    );
+                                }
+                                let ab_slot = apply_to(
+                                    new_outer_slot,
+                                    &new_outer_names,
+                                    extra_slot,
+                                    body,
+                                    context,
+                                )?;
                                 for _ in &names {
                                     context.env.borrow_mut().unbind();
                                 }
 
                                 let new_outer_arity = new_outer_names.len();
                                 let ab_arity = context.arity(ab_slot).unwrap_or(0);
+                                dbg!(new_outer_arity, ab_arity, num_extra_names);
                                 let applied = context.dir(Dir::Project(
-                                    ab_slot,
+                                    // apply to extra names
+                                    context.dir(Dir::FilterEqual(
+                                        ab_slot,
+                                        (0..num_extra_names)
+                                            .map(|i| {
+                                                (
+                                                    new_outer_arity - num_extra_names + i,
+                                                    new_outer_arity + i,
+                                                )
+                                            })
+                                            .collect(),
+                                    )),
                                     (0..outer_arity).chain(new_outer_arity..ab_arity).collect(),
                                 ));
 
@@ -334,7 +355,8 @@ impl Expression {
 }
 
 impl Dirs {
-    pub fn eval(&self) -> Result<Set, String> {
+    pub fn eval(&self, slot: usize) -> Result<Set, String> {
+        dbg!(self.dirs.iter().enumerate().collect::<Vec<_>>());
         let mut data = self.dirs.iter().map(|_| Set::new()).collect::<Vec<_>>();
         for (slot, dir) in self.dirs.iter().enumerate() {
             use Dir::*;
@@ -392,6 +414,6 @@ impl Dirs {
                 }
             }
         }
-        Ok(data.into_iter().last().unwrap())
+        Ok(data[slot].clone())
     }
 }

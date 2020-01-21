@@ -323,8 +323,14 @@ impl Expression {
                             Expression::_abstract(
                                 names.clone(),
                                 Product(
-                                    box Expression::_apply(*a, names[0..split].to_vec()),
-                                    box Expression::_apply(*b, names[split..].to_vec()),
+                                    box Apply(
+                                        a,
+                                        box Expression::_product(Some, names[0..split].to_vec()),
+                                    ),
+                                    box Apply(
+                                        b,
+                                        box Expression::_product(Some, names[split..].to_vec()),
+                                    ),
                                 ),
                             )
                         }

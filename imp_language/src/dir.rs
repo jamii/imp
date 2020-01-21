@@ -76,9 +76,7 @@ impl<'a> DirsContext<'a> {
     fn dir(&self, dir: Dir) -> Slot {
         let mut dirs = self.dirs.borrow_mut();
         dirs.push(dir);
-        let slot = dirs.len() - 1;
-        dbg!(slot, &dirs[slot]);
-        slot
+        dirs.len() - 1
     }
 
     pub fn finish(self) -> Dirs {
@@ -99,7 +97,6 @@ impl Expression {
         context: &DirsContext<'a>,
     ) -> Result<Slot, String> {
         use Expression::*;
-        println!("[[[{}", self);
         let slot = Ok(match self {
             None => context.dir(Dir::Constant(Set::from_iter(vec![]))),
             Some => outer_slot,
@@ -177,7 +174,6 @@ impl Expression {
                                 outer_names.iter().position(|name2| name == name2).unwrap();
                             join_key.push((outer_ix, outer_arity + binding_ix));
                         }
-                        dbg!(outer_arity, binding_outer_arity, binding_arity);
                         context.dir(Dir::Project(
                             context.dir(Dir::FilterEqual(
                                 context.dir(Dir::Product(vec![outer_slot, *binding_slot])),
@@ -374,7 +370,6 @@ impl Expression {
             }
             Reduce(..) | Seal(..) | Unseal(..) | Solve(..) => return Err(format!("TODO")),
         });
-        println!("]]] {} {}", self, slot.clone().unwrap());
         assert_eq!(
             context.arity(slot.clone().unwrap()),
             context
@@ -392,7 +387,7 @@ impl Dirs {
         let mut data = self.dirs.iter().map(|_| Set::new()).collect::<Vec<_>>();
         for (slot, dir) in self.dirs.iter().enumerate() {
             use Dir::*;
-            dbg!(slot, &dir);
+            // dbg!(slot, &dir);
             data[slot] = match dir {
                 Constant(set) => set.clone(),
                 Union(slots) => {
@@ -446,8 +441,10 @@ impl Dirs {
                     set
                 }
             };
-            dbg!(&data[slot]);
+            // dbg!(&data[slot]);
         }
         Ok(data[slot].clone())
     }
 }
+
+// TODO combine outer into apply_to?

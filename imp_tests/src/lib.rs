@@ -105,11 +105,7 @@ fn build_expr(data: &[u8]) -> Option<Expression> {
         };
         stack.push(expr);
     }
-    let expr = stack.pop();
-    if let Some(expr) = &expr {
-        println!("--------------------------------------------------------------------------------\n{}\n--------------------------------------------------------------------------------", expr);
-    }
-    expr
+    stack.pop()
 }
 
 pub fn fuzz_artifacts() {

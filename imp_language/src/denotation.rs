@@ -353,10 +353,14 @@ impl Expression {
                 body.eval(&env)?
             }
             If(box cond, box if_true, box if_false) => {
-                if cond.eval(env)?.is_some() {
-                    if_true.eval(env)?
+                // eval both branches so we match error behaviour for decorrelated
+                let cond = cond.eval(env)?;
+                let if_true = if_true.eval(env)?;
+                let if_false = if_false.eval(env)?;
+                if cond.is_some() {
+                    if_true
                 } else {
-                    if_false.eval(env)?
+                    if_false
                 }
             }
             Abstract(arg, box body) => {

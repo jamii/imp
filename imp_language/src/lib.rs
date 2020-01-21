@@ -84,6 +84,10 @@ pub fn eval_flat(
     log::debug!("with_natives: {}", expr);
     debug_info.push(format!("with_natives: {}", expr));
 
+    let expr = expr.with_unique_names()?;
+    log::debug!("with_unique: {}", expr);
+    debug_info.push(format!("with_unique: {}", expr));
+
     let mut expr = expr.desugar(&gensym);
     log::debug!("desugared: {}", expr);
     debug_info.push(format!("desugared: {}", expr));

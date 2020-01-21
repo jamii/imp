@@ -305,15 +305,15 @@ impl Expression {
                         Union(a, b) => Expression::_abstract(
                             names.clone(),
                             Union(
-                                box Expression::_apply(*a, names.clone()),
-                                box Expression::_apply(*b, names.clone()),
+                                box Apply(a, box Expression::_product(Some, names.clone())),
+                                box Apply(b, box Expression::_product(Some, names.clone())),
                             ),
                         ),
                         Intersect(a, b) => Expression::_abstract(
                             names.clone(),
                             Intersect(
-                                box Expression::_apply(*a, names.clone()),
-                                box Expression::_apply(*b, names.clone()),
+                                box Apply(a, box Expression::_product(Some, names.clone())),
+                                box Apply(b, box Expression::_product(Some, names.clone())),
                             ),
                         ),
                         Product(a, b) => {
@@ -347,13 +347,7 @@ impl Expression {
                         }
                         Native(native) => Expression::_abstract(
                             names.clone(),
-                            Apply(
-                                box Native(native),
-                                box Expression::_product(
-                                    Name(names[0].clone()),
-                                    names[1..].to_vec(),
-                                ),
-                            ),
+                            Apply(box Native(native), box Expression::_product(Some, names)),
                         ),
                         other => other,
                     }

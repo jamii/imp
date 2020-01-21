@@ -2,7 +2,7 @@
 macro_rules! d {
     ($e:expr) => {{
         let val = $e;
-        ::log::info!("{} = {:#?}", stringify!($e), val);
+        ::log::debug!("{} = {:#?}", stringify!($e), val);
         val
     }};
 }

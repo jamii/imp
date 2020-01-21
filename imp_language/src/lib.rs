@@ -27,7 +27,8 @@ pub fn eval_looped(
     let gensym = Gensym::new();
 
     let mut expr = expr.with_natives(&Native::stdlib());
-    debug_info.push(format!("with_natives: {}", d!(&expr)));
+    log::debug!("with_natives: {}", expr);
+    debug_info.push(format!("with_natives: {}", expr));
 
     // let mut type_cache = Cache::new();
     // let _typ = expr
@@ -52,7 +53,8 @@ pub fn eval_looped(
         .typecheck(&Environment::new(), &mut type_cache)
         .map_err(|e| format!("Type error: {}", e))?;
     expr.funify(&mut type_cache, &gensym);
-    debug_info.push(format!("funify: {}", d!(&expr)));
+    log::debug!("funify: {}", expr);
+    debug_info.push(format!("funify: {}", &expr));
 
     // expr = expr.simplify(&HashSet::new());
 
@@ -79,17 +81,20 @@ pub fn eval_flat(
     let gensym = Gensym::new();
 
     let expr = expr.with_natives(&Native::stdlib());
-    debug_info.push(format!("with_natives: {}", d!(&expr)));
+    log::debug!("with_natives: {}", expr);
+    debug_info.push(format!("with_natives: {}", expr));
 
     let mut expr = expr.desugar(&gensym);
-    debug_info.push(format!("desugared: {}", d!(&expr)));
+    log::debug!("desugared: {}", expr);
+    debug_info.push(format!("desugared: {}", expr));
 
     let mut type_cache = Cache::new();
     let typ = expr
         .typecheck(&Environment::new(), &mut type_cache)
         .map_err(|e| format!("Type error: {}", e))?;
     expr.funify(&mut type_cache, &gensym);
-    debug_info.push(format!("funify: {}", d!(&expr)));
+    log::debug!("funify: {}", expr);
+    debug_info.push(format!("funify: {}", expr));
 
     let mut type_cache = Cache::new();
     let _typ = expr

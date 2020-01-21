@@ -1,5 +1,4 @@
 #![feature(box_syntax)]
-#![feature(bind_by_move_pattern_guards)]
 
 use imp_language::*;
 use std::fs::File;
@@ -8,16 +7,32 @@ use walkdir::WalkDir;
 
 pub fn fuzz_parse(data: &[u8]) {
     if let Ok(code) = std::str::from_utf8(data) {
-        // dbg!(&code);
+        log::debug!(
+            "--------------------\n{:?}\n{}\n--------------------",
+            code,
+            code
+        );
         if let Ok(expr) = parse(code) {
             format!("{}", expr);
         }
     }
 }
 
+pub fn fuzz_typecheck(data: &[u8]) {
+    if let Some(expr) = build_expr(data) {
+        log::debug!("--------------------\n{}\n--------------------", expr);
+        let type_env = Environment::new();
+        let mut type_cache = Cache::new();
+        let _typ = expr.typecheck(&type_env, &mut type_cache);
+        let scalar_env = Environment::new();
+        let mut scalar_cache = Cache::new();
+        let _scalar = expr.scalar(&scalar_env, &mut scalar_cache);
+    }
+}
+
 pub fn fuzz_eval(data: &[u8]) {
     if let Some(expr) = build_expr(data) {
-        // dbg!(&expr);
+        log::debug!("--------------------\n{}\n--------------------", expr);
         let mut debug_info = vec![];
         if let Ok((typ, Value::Set(set1))) = eval_looped(expr.clone(), &mut debug_info) {
             if !typ.is_function() {
@@ -25,18 +40,6 @@ pub fn fuzz_eval(data: &[u8]) {
                 assert_eq!(set1, set2);
             }
         }
-    }
-}
-
-pub fn fuzz_typecheck(data: &[u8]) {
-    if let Some(expr) = build_expr(data) {
-        // dbg!(&expr);
-        let type_env = Environment::new();
-        let mut type_cache = Cache::new();
-        let _typ = expr.typecheck(&type_env, &mut type_cache);
-        let scalar_env = Environment::new();
-        let mut scalar_cache = Cache::new();
-        let _scalar = expr.scalar(&scalar_env, &mut scalar_cache);
     }
 }
 
@@ -133,6 +136,7 @@ pub fn fuzz_artifacts() {
 mod test {
     #[test]
     fn fuzz_artifacts() {
+        env_logger::init();
         super::fuzz_artifacts();
     }
 }

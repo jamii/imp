@@ -7,3 +7,5 @@ edition = "2018"
 [dependencies]
 imp_language = {path = "../imp_language"}
 walkdir = "2"
+log = "*"
+env_logger = "*"

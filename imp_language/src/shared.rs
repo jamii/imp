@@ -9,6 +9,7 @@ pub use crate::bir::*;
 pub use crate::denotation::*;
 pub use crate::dir::*;
 pub use crate::expression::*;
+pub use crate::flatten::*;
 pub use crate::pretty::*;
 pub use crate::solver::*;
 pub use crate::syntax::*;

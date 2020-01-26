@@ -9,6 +9,7 @@ mod bir;
 mod denotation;
 mod dir;
 mod expression;
+mod flatten;
 mod pretty;
 mod shared;
 mod solver;
@@ -113,6 +114,38 @@ pub fn eval_flat(
     Ok((typ, set))
 }
 
+pub fn eval_flat2(expr: Expression, debug_info: &mut Vec<String>) -> Result<(), String> {
+    let gensym = Gensym::new();
+
+    let expr = expr.with_natives(&Native::stdlib());
+    log::debug!("with_natives: {}", expr);
+    debug_info.push(format!("with_natives: {}", expr));
+
+    let mut expr = expr.with_unique_names()?;
+    log::debug!("with_unique: {}", expr);
+    debug_info.push(format!("with_unique: {}", expr));
+
+    let mut type_cache = Cache::new();
+    let _typ = expr
+        .typecheck(&Environment::new(), &mut type_cache)
+        .map_err(|e| format!("Type error: {}", e))?;
+    expr.funify(&mut type_cache, &gensym);
+    log::debug!("funify: {}", expr);
+    debug_info.push(format!("funify: {}", expr));
+
+    let mut type_cache = Cache::new();
+    let _typ = expr
+        .typecheck(&Environment::new(), &mut type_cache)
+        .map_err(|e| format!("Type error: {}", e))?;
+    let globals = expr.flatten(&type_cache, &gensym);
+    println!("globals\n-------");
+    for global in globals {
+        println!("\n{}\n{:?} &\n{}", global.name, global.scope, global.expr)
+    }
+
+    Ok(())
+}
+
 pub fn run_looped(code: &str, debug_info: &mut Vec<String>) -> Result<(ValueType, Value), String> {
     let expr = if code.is_empty() {
         // mild hack
@@ -133,4 +166,15 @@ pub fn run_flat(code: &str, debug_info: &mut Vec<String>) -> Result<(ValueType, 
     };
 
     eval_flat(expr, debug_info)
+}
+
+pub fn run_flat2(code: &str, debug_info: &mut Vec<String>) -> Result<(), String> {
+    let expr = if code.is_empty() {
+        // mild hack
+        Expression::None
+    } else {
+        parse(&code).map_err(|e| format!("Parse error: {:?}", e))?
+    };
+
+    eval_flat2(expr, debug_info)
 }

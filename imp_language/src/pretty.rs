@@ -138,10 +138,10 @@ impl fmt::Display for ValueType {
     }
 }
 
-impl fmt::Display for Bir {
+impl fmt::Display for ValueBir {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "?(")?;
-        write_delimited(f, " ", &self.names, |f, name| write!(f, "{}", name))?;
+        write!(f, "{} = ?(", self.name)?;
+        write_delimited(f, " ", &self.args, |f, name| write!(f, "{}", name))?;
         write!(f, " -> {})", self.body)?;
         Ok(())
     }
@@ -159,24 +159,29 @@ impl fmt::Display for BooleanBir {
             Intersect(b1, b2) => {
                 write!(f, "({} & {})", b1, b2)?;
             }
+            If(cond, if_true, if_false) => {
+                write!(f, "(if {} then {} else {})", cond, if_true, if_false)?;
+            }
             ScalarEqual(e1, e2) => write!(f, "({} == {})", e1, e2)?,
-            Equal(e1, e2) => write!(f, "({} = {})", e1, e2)?,
             Negate(e) => write!(f, "!{}", e)?,
-            Exists(bir) => write!(f, "(exists {})", bir)?,
-            Let(name, value, body) => write!(f, "let {} = {} in {}", name, value, body)?,
             Apply(fun, args) => {
                 write!(f, "({} ", fun)?;
                 write_delimited(f, " ", args, |f, arg| write!(f, "{}", arg))?;
                 write!(f, ")")?;
+            }
+            Exists(args, body) => {
+                write!(f, "(exists ")?;
+                write_delimited(f, " ", args, |f, name| write!(f, "{}", name))?;
+                write!(f, " -> {})", body)?;
             }
         }
         Ok(())
     }
 }
 
-impl fmt::Display for ValueBir {
+impl fmt::Display for ValueRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use ValueBir::*;
+        use ValueRef::*;
         match self {
             Name(name) => write!(f, "{}", name)?,
             Native(native) => write!(f, "<{}>", native.name)?,
@@ -185,9 +190,9 @@ impl fmt::Display for ValueBir {
     }
 }
 
-impl fmt::Display for ScalarBir {
+impl fmt::Display for ScalarRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use ScalarBir::*;
+        use ScalarRef::*;
         match self {
             Name(name) => write!(f, "{}", name)?,
             Scalar(scalar) => write!(f, "{}", scalar)?,

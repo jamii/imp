@@ -125,13 +125,13 @@ pub fn eval_flat2(expr: Expression, debug_info: &mut Vec<String>) -> Result<(), 
     log::debug!("with_unique: {}", expr);
     debug_info.push(format!("with_unique: {}", expr));
 
-    let mut type_cache = Cache::new();
-    let _typ = expr
-        .typecheck(&Environment::new(), &mut type_cache)
-        .map_err(|e| format!("Type error: {}", e))?;
-    expr.funify(&mut type_cache, &gensym);
-    log::debug!("funify: {}", expr);
-    debug_info.push(format!("funify: {}", expr));
+    // let mut type_cache = Cache::new();
+    // let _typ = expr
+    //     .typecheck(&Environment::new(), &mut type_cache)
+    //     .map_err(|e| format!("Type error: {}", e))?;
+    // expr.funify(&mut type_cache, &gensym);
+    // log::debug!("funify: {}", expr);
+    // debug_info.push(format!("funify: {}", expr));
 
     let mut type_cache = Cache::new();
     let _typ = expr

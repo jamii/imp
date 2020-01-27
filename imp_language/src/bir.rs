@@ -39,19 +39,13 @@ struct BirContext<'a> {
     type_cache: &'a Cache<ValueType>,
 }
 
-type Bindings<'a> = Environment<Binding<'a>>;
+type Bindings = Environment<Binding>;
 
 #[derive(Debug, Clone)]
-enum Binding<'a> {
+enum Binding {
     Abstract,
-    LetFun {
-        expr: &'a Expression,
-        bindings: Bindings<'a>,
-    },
-    LetSet {
-        name: Name,
-        scope_names: Vec<Name>,
-    },
+    LetFun { bir: BooleanBir, args: Vec<Name> },
+    LetSet { name: Name, scope_names: Vec<Name> },
 }
 
 impl<'a> BirContext<'a> {
@@ -234,10 +228,20 @@ impl Expression {
                     ScalarRef::Name(name.clone()),
                     ScalarRef::Name(arg_names[0].clone()),
                 ),
-                Binding::LetFun {
-                    expr,
-                    bindings: fun_env,
-                } => expr.bir_into(context, fun_env, scope, arg_names),
+                Binding::LetFun { bir, args } => {
+                    let mut bir = bir.clone();
+                    assert_eq!(args.len(), arg_names.len());
+                    for (arg1, arg2) in args.iter().zip(arg_names.iter()) {
+                        bir = B::Intersect(
+                            box B::ScalarEqual(
+                                ScalarRef::Name(arg1.clone()),
+                                ScalarRef::Name(arg2.clone()),
+                            ),
+                            box bir,
+                        );
+                    }
+                    bir
+                }
                 Binding::LetSet { name, scope_names } => B::Apply(
                     ValueRef::Name(name.clone()),
                     scope_names
@@ -248,21 +252,20 @@ impl Expression {
                 ),
             },
             Let(name, value, body) => {
+                let value_arg_names = context
+                    .gensym
+                    .names(context.type_cache.get(value).arity().unwrap_or(0));
+                let value_bir = value.bir_into(context, &env, scope, &value_arg_names);
                 let mut env = env.clone();
                 if context.type_cache.get(value).is_function() {
-                    let bindings = env.clone();
                     env.bind(
                         name.clone(),
                         Binding::LetFun {
-                            expr: value,
-                            bindings,
+                            bir: value_bir,
+                            args: value_arg_names,
                         },
                     );
                 } else {
-                    let value_arg_names = context
-                        .gensym
-                        .names(context.type_cache.get(value).arity().unwrap_or(0));
-                    let value_bir = value.bir_into(context, &env, scope, &value_arg_names);
                     let scope_names = value
                         .free_names()
                         .into_iter()

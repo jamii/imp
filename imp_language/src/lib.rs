@@ -121,7 +121,7 @@ pub fn eval_flat2(expr: Expression, debug_info: &mut Vec<String>) -> Result<(), 
     log::debug!("with_natives: {}", expr);
     debug_info.push(format!("with_natives: {}", expr));
 
-    let mut expr = expr.with_unique_names()?;
+    let expr = expr.with_unique_names()?;
     log::debug!("with_unique: {}", expr);
     debug_info.push(format!("with_unique: {}", expr));
 
@@ -137,11 +137,14 @@ pub fn eval_flat2(expr: Expression, debug_info: &mut Vec<String>) -> Result<(), 
     let _typ = expr
         .typecheck(&Environment::new(), &mut type_cache)
         .map_err(|e| format!("Type error: {}", e))?;
-    let globals = expr.flatten(&type_cache, &gensym);
-    println!("globals\n-------");
-    for global in globals {
-        println!("\n{}\n{:?} &\n{}", global.name, global.scope, global.expr)
+    println!("-------");
+    let birs = expr.bir(&type_cache, &gensym);
+    println!("\nbirs\n");
+    for bir in birs {
+        println!("{}", bir);
+        bir.validate().unwrap();
     }
+    println!("-------");
 
     Ok(())
 }

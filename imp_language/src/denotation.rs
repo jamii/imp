@@ -317,6 +317,12 @@ impl Expression {
                     bound.insert(name.clone());
                     visit(body, free_names, &bound);
                 }
+                Expression::Let(name, value, body) => {
+                    visit(value, free_names, bound);
+                    let mut bound = bound.clone();
+                    bound.insert(name.clone());
+                    visit(body, free_names, &bound);
+                }
                 _ => {
                     expr.visit1(&mut |e| {
                         visit(e, free_names, bound);

@@ -23,3 +23,7 @@ path = "fuzz_targets/eval.rs"
 [[bin]]
 name = "typecheck"
 path = "fuzz_targets/typecheck.rs"
+
+[[bin]]
+name = "bir"
+path = "fuzz_targets/bir.rs"

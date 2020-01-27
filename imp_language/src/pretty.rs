@@ -169,11 +169,6 @@ impl fmt::Display for BooleanBir {
                 write_delimited(f, " ", args, |f, arg| write!(f, "{}", arg))?;
                 write!(f, ")")?;
             }
-            Exists(args, body) => {
-                write!(f, "(exists ")?;
-                write_delimited(f, " ", args, |f, name| write!(f, "{}", name))?;
-                write!(f, " -> {})", body)?;
-            }
         }
         Ok(())
     }

@@ -30,6 +30,21 @@ pub fn fuzz_typecheck(data: &[u8]) {
     }
 }
 
+pub fn fuzz_bir(data: &[u8]) {
+    if let Some(expr) = build_expr(data) {
+        log::debug!("--------------------\n{}\n--------------------", expr);
+        let type_env = Environment::new();
+        let mut type_cache = Cache::new();
+        let typ = expr.typecheck(&type_env, &mut type_cache);
+        if let Ok(typ) = typ {
+            if !typ.is_function() {
+                let mut debug_info = vec![];
+                drop(eval_flat2(expr, &mut debug_info));
+            }
+        }
+    }
+}
+
 pub fn fuzz_eval(data: &[u8]) {
     if let Some(expr) = build_expr(data) {
         log::debug!("--------------------\n{}\n--------------------", expr);
@@ -116,6 +131,7 @@ pub fn fuzz_artifacts() {
         ("../fuzz/artifacts/parse/", fuzz_parse as fn(&[u8])),
         ("../fuzz/artifacts/eval/", fuzz_eval as fn(&[u8])),
         ("../fuzz/artifacts/typecheck/", fuzz_typecheck as fn(&[u8])),
+        ("../fuzz/artifacts/bir/", fuzz_bir as fn(&[u8])),
     ] {
         for entry in WalkDir::new(path) {
             let entry = entry.unwrap();

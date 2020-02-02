@@ -48,8 +48,8 @@ impl Lirs {
         pirs.push(Pir::Constant(Set::from_iter(vec![])));
         // slot 1 is always Some
         pirs.push(Pir::Constant(Set::from_iter(vec![vec![]])));
+        let mut env = Environment::new();
         for lir in &self.lirs {
-            let mut env = Environment::new();
             let slot = lir.pir_into(&env, &mut pirs);
             env.bind(lir.name.clone(), (slot, lir.args.clone()));
             pirs.slot = slot; // actually only care about last one
@@ -88,6 +88,7 @@ impl BooleanLir {
         pirs: &mut Pirs,
     ) -> (Slot, Vec<Name>) {
         use BooleanLir::*;
+        // dbg!(self, known_slot, known_vars);
         match self {
             None | Some => panic!("{} nested in lir", self),
             Union(a, b) => {
@@ -118,10 +119,32 @@ impl BooleanLir {
             }
             ScalarEqual(a, b) => match (a, b) {
                 (ScalarRef::Name(a), ScalarRef::Name(b)) => {
-                    let a_col = known_vars.iter().position(|name| name == a).unwrap();
-                    let b_col = known_vars.iter().position(|name| name == b).unwrap();
-                    let slot = pirs.push(Pir::FilterEqual(known_slot, vec![(a_col, b_col)]));
-                    (slot, known_vars.to_vec())
+                    let a_col = known_vars.iter().position(|name| name == a);
+                    let b_col = known_vars.iter().position(|name| name == b);
+                    match (a_col, b_col) {
+                        (Option::Some(a_col), Option::Some(b_col)) => {
+                            let slot =
+                                pirs.push(Pir::FilterEqual(known_slot, vec![(a_col, b_col)]));
+                            (slot, known_vars.to_vec())
+                        }
+                        (Option::Some(a_col), Option::None) => {
+                            let mut projection = (0..known_vars.len()).collect::<Vec<_>>();
+                            projection.push(a_col);
+                            let slot = pirs.push(Pir::Project(known_slot, projection));
+                            let mut known_vars = known_vars.to_vec();
+                            known_vars.push(b.clone());
+                            (slot, known_vars)
+                        }
+                        (Option::None, Option::Some(b_col)) => {
+                            let mut projection = (0..known_vars.len()).collect::<Vec<_>>();
+                            projection.push(b_col);
+                            let slot = pirs.push(Pir::Project(known_slot, projection));
+                            let mut known_vars = known_vars.to_vec();
+                            known_vars.push(a.clone());
+                            (slot, known_vars)
+                        }
+                        (Option::None, Option::None) => unreachable!(),
+                    }
                 }
                 (ScalarRef::Name(a), ScalarRef::Scalar(b))
                 | (ScalarRef::Scalar(b), ScalarRef::Name(a)) => {
@@ -311,6 +334,7 @@ impl Pirs {
                 }
             };
             dbg!(&data[slot]);
+            println!();
         }
         Ok(data[self.slot].clone())
     }

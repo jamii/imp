@@ -69,7 +69,7 @@ impl<'a> LirContext<'a> {
             name: name.clone(),
             typ,
             args,
-            body,
+            body: body.simplify(),
         };
         println!("{}", lir);
         self.lirs.borrow_mut().push(lir);
@@ -267,9 +267,7 @@ impl Expression {
                 let value_arg_names = context
                     .gensym
                     .names(context.type_cache.get(value).arity().unwrap_or(0));
-                let value_lir = value
-                    .lir_into(context, &env, scope, &value_arg_names)
-                    .simplify();
+                let value_lir = value.lir_into(context, &env, scope, &value_arg_names);
                 let mut env = env.clone();
                 if let B::None = value_lir {
                     env.bind(name.clone(), Binding::Constant(false));
@@ -386,7 +384,7 @@ impl Expression {
 
         println!("self: {}  =>  lir: {}", self, lir);
 
-        lir.simplify()
+        lir
     }
 }
 

@@ -117,7 +117,8 @@ impl Expression {
     ) -> BooleanLir {
         use BooleanLir as B;
         use Expression::*;
-        let self_arity = context.type_cache.get(self).arity();
+        let self_type = context.type_cache.get(self);
+        let self_arity = self_type.arity();
         println!("self: {}", self);
         dbg!(arg_names);
         match self_arity {
@@ -243,13 +244,25 @@ impl Expression {
                 Binding::LetFun { lir, args } => {
                     let mut lir = lir.clone();
                     assert_eq!(args.len(), arg_names.len());
-                    for (arg1, arg2) in args.iter().zip(arg_names.iter()) {
+                    let fun_arity = self_type.fun_arity().unwrap();
+                    for (arg1, arg2) in args[..fun_arity].iter().zip(arg_names[..fun_arity].iter())
+                    {
                         lir = B::Intersect(
                             box B::ScalarEqual(
                                 ScalarRef::Name(arg1.clone()),
                                 ScalarRef::Name(arg2.clone()),
                             ),
                             box lir,
+                        );
+                    }
+                    for (arg1, arg2) in args[fun_arity..].iter().zip(arg_names[fun_arity..].iter())
+                    {
+                        lir = B::Intersect(
+                            box lir,
+                            box B::ScalarEqual(
+                                ScalarRef::Name(arg1.clone()),
+                                ScalarRef::Name(arg2.clone()),
+                            ),
                         );
                     }
                     lir

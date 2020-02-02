@@ -94,13 +94,18 @@ impl BooleanLir {
             Union(a, b) => {
                 let (a_slot, a_vars) = a.pir_into(known_slot, known_vars, env, pirs);
                 let (b_slot, b_vars) = b.pir_into(known_slot, known_vars, env, pirs);
-                assert_eq!(
-                    a_vars.iter().collect::<HashSet<_>>(),
-                    b_vars.iter().collect::<HashSet<_>>(),
-                );
-                let b_slot = pirs.project(b_slot, &b_vars, &a_vars);
+                let vars = a_vars
+                    .iter()
+                    .filter(|name| b_vars.iter().position(|name2| *name == name2).is_some())
+                    .cloned()
+                    .collect::<Vec<_>>();
+                assert!(known_vars
+                    .iter()
+                    .all(|name| vars.iter().position(|name2| name == name2).is_some()));
+                let a_slot = pirs.project(a_slot, &a_vars, &vars);
+                let b_slot = pirs.project(b_slot, &b_vars, &vars);
                 let slot = pirs.push(Pir::Union(vec![a_slot, b_slot]));
-                (slot, a_vars)
+                (slot, vars)
             }
             Intersect(a, b) => {
                 let (a_slot, a_vars) = a.pir_into(known_slot, known_vars, env, pirs);
@@ -143,7 +148,9 @@ impl BooleanLir {
                             known_vars.push(a.clone());
                             (slot, known_vars)
                         }
-                        (Option::None, Option::None) => unreachable!(),
+                        (Option::None, Option::None) => {
+                            panic!("Neither of {} = {} bound in {:?}", a, b, known_vars)
+                        }
                     }
                 }
                 (ScalarRef::Name(a), ScalarRef::Scalar(b))

@@ -76,8 +76,8 @@ pub fn eval_flat(
 
     let pirs = lirs.pirs();
     println!("\npirs\n");
-    for pir in &pirs.pirs {
-        println!("{:?}", pir);
+    for (i, pir) in pirs.pirs.iter().enumerate() {
+        println!("{} = {:?}", i, pir);
         // lir.validate().unwrap();
     }
     println!("-------");

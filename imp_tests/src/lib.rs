@@ -118,12 +118,3 @@ pub fn fuzz_artifacts() {
         }
     }
 }
-
-#[cfg(test)]
-mod test {
-    #[test]
-    fn fuzz_artifacts() {
-        env_logger::init();
-        super::fuzz_artifacts();
-    }
-}

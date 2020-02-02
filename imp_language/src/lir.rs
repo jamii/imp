@@ -46,13 +46,13 @@ struct LirContext<'a> {
     type_cache: &'a Cache<ValueType>,
 }
 
-type Bindings = Environment<Binding>;
+type Bindings<'a> = Environment<Binding<'a>>;
 
 #[derive(Debug, Clone)]
-enum Binding {
+enum Binding<'a> {
     Constant(bool),
     Abstract,
-    LetFun { lir: BooleanLir, args: Vec<Name> },
+    LetFun { expr: &'a Expression },
     LetSet { name: Name, scope_names: Vec<Name> },
 }
 
@@ -241,32 +241,7 @@ impl Expression {
                     ScalarRef::Name(name.clone()),
                     ScalarRef::Name(arg_names[0].clone()),
                 ),
-                Binding::LetFun { lir, args } => {
-                    let mut lir = lir.clone();
-                    assert_eq!(args.len(), arg_names.len());
-                    let fun_arity = self_type.fun_arity().unwrap();
-                    for (arg1, arg2) in args[..fun_arity].iter().zip(arg_names[..fun_arity].iter())
-                    {
-                        lir = B::Intersect(
-                            box B::ScalarEqual(
-                                ScalarRef::Name(arg1.clone()),
-                                ScalarRef::Name(arg2.clone()),
-                            ),
-                            box lir,
-                        );
-                    }
-                    for (arg1, arg2) in args[fun_arity..].iter().zip(arg_names[fun_arity..].iter())
-                    {
-                        lir = B::Intersect(
-                            box lir,
-                            box B::ScalarEqual(
-                                ScalarRef::Name(arg1.clone()),
-                                ScalarRef::Name(arg2.clone()),
-                            ),
-                        );
-                    }
-                    lir
-                }
+                Binding::LetFun { expr } => expr.lir_into(context, env, scope, arg_names),
                 Binding::LetSet { name, scope_names } => B::Apply(
                     ValueRef::Name(name.clone()),
                     scope_names
@@ -277,52 +252,48 @@ impl Expression {
                 ),
             },
             Let(name, value, body) => {
-                let value_arg_names = context
-                    .gensym
-                    .names(context.type_cache.get(value).arity().unwrap_or(0));
-                let value_lir = value.lir_into(context, &env, scope, &value_arg_names);
                 let mut env = env.clone();
-                if let B::None = value_lir {
-                    env.bind(name.clone(), Binding::Constant(false));
-                } else if let B::Some = value_lir {
-                    env.bind(name.clone(), Binding::Constant(true));
-                } else if context.type_cache.get(value).is_function() {
-                    env.bind(
-                        name.clone(),
-                        Binding::LetFun {
-                            lir: value_lir,
-                            args: value_arg_names,
-                        },
-                    );
+                if context.type_cache.get(value).is_function() {
+                    env.bind(name.clone(), Binding::LetFun { expr: value });
                 } else {
-                    let scope_names = value
-                        .free_names()
-                        .into_iter()
-                        .filter(|name| {
-                            if let Option::Some(Binding::Abstract) = env.lookup(name) {
-                                true
-                            } else {
-                                false
-                            }
-                        })
-                        .collect::<Vec<_>>();
-                    context.define(
-                        Option::Some(name.clone()),
-                        context.type_cache.get(value).clone(),
-                        scope_names
-                            .iter()
-                            .chain(value_arg_names.iter())
-                            .cloned()
-                            .collect(),
-                        B::Intersect(box scope.clone(), box value_lir),
-                    );
-                    env.bind(
-                        name.clone(),
-                        Binding::LetSet {
-                            name: name.clone(),
-                            scope_names: scope_names.to_vec(),
-                        },
-                    );
+                    let value_arg_names = context
+                        .gensym
+                        .names(context.type_cache.get(value).arity().unwrap_or(0));
+                    let value_lir = value.lir_into(context, &env, scope, &value_arg_names);
+                    if let B::None = value_lir {
+                        env.bind(name.clone(), Binding::Constant(false));
+                    } else if let B::Some = value_lir {
+                        env.bind(name.clone(), Binding::Constant(true));
+                    } else {
+                        let scope_names = value
+                            .free_names()
+                            .into_iter()
+                            .filter(|name| {
+                                if let Option::Some(Binding::Abstract) = env.lookup(name) {
+                                    true
+                                } else {
+                                    false
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        context.define(
+                            Option::Some(name.clone()),
+                            context.type_cache.get(value).clone(),
+                            scope_names
+                                .iter()
+                                .chain(value_arg_names.iter())
+                                .cloned()
+                                .collect(),
+                            B::Intersect(box scope.clone(), box value_lir),
+                        );
+                        env.bind(
+                            name.clone(),
+                            Binding::LetSet {
+                                name: name.clone(),
+                                scope_names: scope_names.to_vec(),
+                            },
+                        );
+                    }
                 }
                 body.lir_into(context, &env, scope, arg_names)
             }

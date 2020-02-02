@@ -2,6 +2,9 @@ use crate::shared::*;
 
 // Logical Intermediate Representation
 
+// TODO can inline any ValueLir that is only used once
+// TODO can inline any ValueLir that is used monotonically in only one other ValueLir
+
 #[derive(Debug, Clone)]
 pub struct ValueLir {
     pub name: Name,

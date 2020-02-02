@@ -1,10 +1,12 @@
 use crate::shared::*;
 
+// Physical Intermediate Representation
+
 pub type Slot = usize;
 pub type Column = usize;
 
 #[derive(Debug)]
-pub enum Dir {
+pub enum Pir {
     Constant(Set),
     Union(Vec<Slot>),
     Intersect(Vec<Slot>),
@@ -16,8 +18,8 @@ pub enum Dir {
 }
 
 #[derive(Debug)]
-pub struct Dirs {
-    pub dirs: Vec<Dir>,
+pub struct Pirs {
+    pub pirs: Vec<Pir>,
 }
 
 #[derive(Debug, Clone)]
@@ -28,17 +30,17 @@ enum Binding<'a> {
 }
 
 #[derive(Debug)]
-pub struct DirsContext<'a> {
-    pub dirs: RefCell<Vec<Dir>>,
+pub struct PirsContext<'a> {
+    pub pirs: RefCell<Vec<Pir>>,
     env: RefCell<Environment<(Vec<Name>, Binding<'a>)>>,
     type_cache: &'a Cache<ValueType>,
     gensym: &'a Gensym,
 }
 
-impl<'a> DirsContext<'a> {
+impl<'a> PirsContext<'a> {
     pub fn new(type_cache: &'a Cache<ValueType>, gensym: &'a Gensym) -> Self {
-        DirsContext {
-            dirs: RefCell::new(vec![Dir::Constant(Set::from_iter(vec![vec![]]))]),
+        PirsContext {
+            pirs: RefCell::new(vec![Pir::Constant(Set::from_iter(vec![vec![]]))]),
             env: RefCell::new(Environment::new()),
             type_cache: &type_cache,
             gensym: &gensym,
@@ -46,8 +48,8 @@ impl<'a> DirsContext<'a> {
     }
 
     fn arity(&self, slot: Slot) -> Option<usize> {
-        use Dir::*;
-        match &self.dirs.borrow()[slot] {
+        use Pir::*;
+        match &self.pirs.borrow()[slot] {
             Constant(set) => match set.iter().next() {
                 None => None,
                 Some(tuple) => Some(tuple.len()),
@@ -73,15 +75,15 @@ impl<'a> DirsContext<'a> {
         }
     }
 
-    fn dir(&self, dir: Dir) -> Slot {
-        let mut dirs = self.dirs.borrow_mut();
-        dirs.push(dir);
-        dirs.len() - 1
+    fn pir(&self, pir: Pir) -> Slot {
+        let mut pirs = self.pirs.borrow_mut();
+        pirs.push(pir);
+        pirs.len() - 1
     }
 
-    pub fn finish(self) -> Dirs {
-        Dirs {
-            dirs: self.dirs.into_inner(),
+    pub fn finish(self) -> Pirs {
+        Pirs {
+            pirs: self.pirs.into_inner(),
         }
     }
 }
@@ -90,39 +92,39 @@ impl<'a> DirsContext<'a> {
 // assumes names are unique
 // should only be applied to something with finite type
 impl Expression {
-    pub fn into_dirs<'a>(
+    pub fn into_pirs<'a>(
         &'a self,
         outer_slot: Slot,
         outer_names: &[Name],
-        context: &DirsContext<'a>,
+        context: &PirsContext<'a>,
     ) -> Result<Slot, String> {
         use Expression::*;
         let slot = Ok(match self {
-            None => context.dir(Dir::Constant(Set::from_iter(vec![]))),
+            None => context.pir(Pir::Constant(Set::from_iter(vec![]))),
             Some => outer_slot,
-            Scalar(scalar) => context.dir(Dir::Product(vec![
+            Scalar(scalar) => context.pir(Pir::Product(vec![
                 outer_slot,
-                context.dir(Dir::Constant(Set::from_iter(vec![vec![scalar.clone()]]))),
+                context.pir(Pir::Constant(Set::from_iter(vec![vec![scalar.clone()]]))),
             ])),
             Union(a, b) => {
-                let a_slot = a.into_dirs(outer_slot, outer_names, context)?;
-                let b_slot = b.into_dirs(outer_slot, outer_names, context)?;
-                context.dir(Dir::Union(vec![a_slot, b_slot]))
+                let a_slot = a.into_pirs(outer_slot, outer_names, context)?;
+                let b_slot = b.into_pirs(outer_slot, outer_names, context)?;
+                context.pir(Pir::Union(vec![a_slot, b_slot]))
             }
             Intersect(a, b) => {
-                let a_slot = a.into_dirs(outer_slot, outer_names, context)?;
-                let b_slot = b.into_dirs(outer_slot, outer_names, context)?;
-                context.dir(Dir::Intersect(vec![a_slot, b_slot]))
+                let a_slot = a.into_pirs(outer_slot, outer_names, context)?;
+                let b_slot = b.into_pirs(outer_slot, outer_names, context)?;
+                context.pir(Pir::Intersect(vec![a_slot, b_slot]))
             }
             Product(a, b) => {
-                let a_slot = a.into_dirs(outer_slot, outer_names, context)?;
-                let b_slot = b.into_dirs(outer_slot, outer_names, context)?;
+                let a_slot = a.into_pirs(outer_slot, outer_names, context)?;
+                let b_slot = b.into_pirs(outer_slot, outer_names, context)?;
                 let outer_arity = context.arity(outer_slot).unwrap_or(0);
                 let a_arity = context.arity(a_slot).unwrap_or(0);
                 let b_arity = context.arity(b_slot).unwrap_or(0);
-                context.dir(Dir::Project(
-                    context.dir(Dir::FilterEqual(
-                        context.dir(Dir::Product(vec![a_slot, b_slot])),
+                context.pir(Pir::Project(
+                    context.pir(Pir::FilterEqual(
+                        context.pir(Pir::Product(vec![a_slot, b_slot])),
                         (0..outer_arity).map(|i| (i, a_arity + i)).collect(),
                     )),
                     (0..a_arity)
@@ -131,29 +133,29 @@ impl Expression {
                 ))
             }
             Equal(a, b) => {
-                let a_slot = a.into_dirs(outer_slot, outer_names, context)?;
-                let b_slot = b.into_dirs(outer_slot, outer_names, context)?;
+                let a_slot = a.into_pirs(outer_slot, outer_names, context)?;
+                let b_slot = b.into_pirs(outer_slot, outer_names, context)?;
                 let outer_arity = context.arity(outer_slot).unwrap_or(0);
-                context.dir(Dir::Difference(
-                    context.dir(Dir::Difference(
+                context.pir(Pir::Difference(
+                    context.pir(Pir::Difference(
                         outer_slot,
-                        context.dir(Dir::Project(
-                            context.dir(Dir::Difference(a_slot, b_slot)),
+                        context.pir(Pir::Project(
+                            context.pir(Pir::Difference(a_slot, b_slot)),
                             (0..outer_arity).collect(),
                         )),
                     )),
-                    context.dir(Dir::Project(
-                        context.dir(Dir::Difference(b_slot, a_slot)),
+                    context.pir(Pir::Project(
+                        context.pir(Pir::Difference(b_slot, a_slot)),
                         (0..outer_arity).collect(),
                     )),
                 ))
             }
             Negate(a) => {
-                let a_slot = a.into_dirs(outer_slot, outer_names, context)?;
+                let a_slot = a.into_pirs(outer_slot, outer_names, context)?;
                 let outer_arity = context.arity(outer_slot).unwrap_or(0);
-                context.dir(Dir::Difference(
+                context.pir(Pir::Difference(
                     outer_slot,
-                    context.dir(Dir::Project(a_slot, (0..outer_arity).collect())),
+                    context.pir(Pir::Project(a_slot, (0..outer_arity).collect())),
                 ))
             }
             Name(name) => {
@@ -174,9 +176,9 @@ impl Expression {
                                 outer_names.iter().position(|name2| name == name2).unwrap();
                             join_key.push((outer_ix, outer_arity + binding_ix));
                         }
-                        context.dir(Dir::Project(
-                            context.dir(Dir::FilterEqual(
-                                context.dir(Dir::Product(vec![outer_slot, *binding_slot])),
+                        context.pir(Pir::Project(
+                            context.pir(Pir::FilterEqual(
+                                context.pir(Pir::Product(vec![outer_slot, *binding_slot])),
                                 join_key,
                             )),
                             (0..outer_arity)
@@ -188,7 +190,7 @@ impl Expression {
                     }
                     Binding::Scalar => {
                         let outer_ix = outer_names.iter().position(|name2| name == name2).unwrap();
-                        context.dir(Dir::Project(
+                        context.pir(Pir::Project(
                             outer_slot,
                             (0..outer_names.len()).chain(vec![outer_ix]).collect(),
                         ))
@@ -203,13 +205,13 @@ impl Expression {
                         (outer_names.to_vec(), Binding::Fun(env, value)),
                     );
                 } else {
-                    let value_slot = value.into_dirs(outer_slot, outer_names, context)?;
+                    let value_slot = value.into_pirs(outer_slot, outer_names, context)?;
                     context.env.borrow_mut().bind(
                         name.clone(),
                         (outer_names.to_vec(), Binding::Set(value_slot)),
                     );
                 }
-                let body_slot = body.into_dirs(outer_slot, outer_names, context)?;
+                let body_slot = body.into_pirs(outer_slot, outer_names, context)?;
                 context.env.borrow_mut().unbind();
                 body_slot
             }
@@ -224,7 +226,7 @@ impl Expression {
                     std::mem::swap(&mut a, &mut b);
                 }
 
-                let a_slot = a.into_dirs(outer_slot, outer_names, context)?;
+                let a_slot = a.into_pirs(outer_slot, outer_names, context)?;
 
                 b.apply_to(outer_slot, outer_names, a_slot, context)?
             }
@@ -249,12 +251,12 @@ impl Expression {
         outer_slot: Slot,
         outer_names: &[crate::Name],
         mut a_slot: Slot,
-        context: &DirsContext<'a>,
+        context: &PirsContext<'a>,
     ) -> Result<Slot, String> {
         use Expression::*;
         let b = self;
         Ok(if !context.type_cache.get(&b).is_function() {
-            let mut b_slot = b.into_dirs(outer_slot, outer_names, context)?;
+            let mut b_slot = b.into_pirs(outer_slot, outer_names, context)?;
             let mut a_arity = context.arity(a_slot).unwrap_or(0);
             let mut b_arity = context.arity(b_slot).unwrap_or(0);
             let outer_arity = outer_names.len();
@@ -262,9 +264,9 @@ impl Expression {
                 std::mem::swap(&mut a_slot, &mut b_slot);
                 std::mem::swap(&mut a_arity, &mut b_arity);
             }
-            context.dir(Dir::Project(
-                context.dir(Dir::FilterEqual(
-                    context.dir(Dir::Product(vec![a_slot, b_slot])),
+            context.pir(Pir::Project(
+                context.pir(Pir::FilterEqual(
+                    context.pir(Pir::Product(vec![a_slot, b_slot])),
                     (0..a_arity).map(|i| (i, a_arity + i)).collect(),
                 )),
                 (0..outer_arity)
@@ -313,7 +315,7 @@ impl Expression {
                         .cloned()
                         .collect::<Vec<_>>();
                     let new_outer_slot =
-                        context.dir(Dir::Project(a_slot, (0..new_outer_names.len()).collect()));
+                        context.pir(Pir::Project(a_slot, (0..new_outer_names.len()).collect()));
 
                     for name in &names {
                         context
@@ -330,7 +332,7 @@ impl Expression {
                     let outer_arity = outer_names.len();
                     let new_outer_arity = new_outer_names.len();
                     let ab_arity = context.arity(ab_slot).unwrap_or(0);
-                    let applied = context.dir(Dir::Project(
+                    let applied = context.pir(Pir::Project(
                         ab_slot,
                         (0..outer_arity).chain(new_outer_arity..ab_arity).collect(),
                     ));
@@ -343,7 +345,7 @@ impl Expression {
                         // funified!
                         assert_eq!(outer_arity + native.input_arity, a_arity);
                     }
-                    context.dir(Dir::ApplyNative(a_slot, native.clone()))
+                    context.pir(Pir::ApplyNative(a_slot, native.clone()))
                 }
                 // TODO gross that we have to repeat this
                 Let(name, value, body) => {
@@ -354,7 +356,7 @@ impl Expression {
                             .borrow_mut()
                             .bind(name.clone(), (outer_names.to_vec(), Binding::Fun(env, b)));
                     } else {
-                        let value_slot = value.into_dirs(outer_slot, outer_names, context)?;
+                        let value_slot = value.into_pirs(outer_slot, outer_names, context)?;
                         context.env.borrow_mut().bind(
                             name.clone(),
                             (outer_names.to_vec(), Binding::Set(value_slot)),
@@ -370,13 +372,13 @@ impl Expression {
     }
 }
 
-impl Dirs {
+impl Pirs {
     pub fn eval(&self, slot: usize) -> Result<Set, String> {
-        let mut data = self.dirs.iter().map(|_| Set::new()).collect::<Vec<_>>();
-        for (slot, dir) in self.dirs.iter().enumerate() {
-            use Dir::*;
-            // dbg!(slot, &dir);
-            data[slot] = match dir {
+        let mut data = self.pirs.iter().map(|_| Set::new()).collect::<Vec<_>>();
+        for (slot, pir) in self.pirs.iter().enumerate() {
+            use Pir::*;
+            // dbg!(slot, &pir);
+            data[slot] = match pir {
                 Constant(set) => set.clone(),
                 Union(slots) => {
                     let mut set = data[slots[0]].clone();

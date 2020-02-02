@@ -1,22 +1,24 @@
 use crate::shared::*;
 
+// Logical Intermediate Representation
+
 #[derive(Debug, Clone)]
-pub struct ValueBir {
+pub struct ValueLir {
     pub name: Name,
     pub typ: ValueType,
     pub args: Vec<ScalarRef>,
-    pub body: BooleanBir,
+    pub body: BooleanLir,
 }
 
 #[derive(Debug, Clone)]
-pub enum BooleanBir {
+pub enum BooleanLir {
     None,
     Some,
-    Union(Box<BooleanBir>, Box<BooleanBir>),
-    Intersect(Box<BooleanBir>, Box<BooleanBir>),
-    If(Box<BooleanBir>, Box<BooleanBir>, Box<BooleanBir>),
+    Union(Box<BooleanLir>, Box<BooleanLir>),
+    Intersect(Box<BooleanLir>, Box<BooleanLir>),
+    If(Box<BooleanLir>, Box<BooleanLir>, Box<BooleanLir>),
     ScalarEqual(ScalarRef, ScalarRef),
-    Negate(Box<BooleanBir>),
+    Negate(Box<BooleanLir>),
     Apply(ValueRef, Vec<ScalarRef>),
 }
 
@@ -33,8 +35,8 @@ pub enum ScalarRef {
 }
 
 #[derive(Debug)]
-struct BirContext<'a> {
-    birs: RefCell<&'a mut Vec<ValueBir>>,
+struct LirContext<'a> {
+    lirs: RefCell<&'a mut Vec<ValueLir>>,
     gensym: &'a Gensym,
     type_cache: &'a Cache<ValueType>,
 }
@@ -44,27 +46,27 @@ type Bindings = Environment<Binding>;
 #[derive(Debug, Clone)]
 enum Binding {
     Abstract,
-    LetFun { bir: BooleanBir, args: Vec<Name> },
+    LetFun { lir: BooleanLir, args: Vec<Name> },
     LetSet { name: Name, scope_names: Vec<Name> },
 }
 
-impl<'a> BirContext<'a> {
+impl<'a> LirContext<'a> {
     fn define(
         &self,
         name: Option<Name>,
         typ: ValueType,
         args: Vec<Name>,
-        body: BooleanBir,
+        body: BooleanLir,
     ) -> Name {
         let name = name.unwrap_or_else(|| self.gensym.name());
-        let bir = ValueBir {
+        let lir = ValueLir {
             name: name.clone(),
             typ,
             args: args.into_iter().map(|name| ScalarRef::Name(name)).collect(),
             body,
         };
-        println!("{}", bir);
-        self.birs.borrow_mut().push(bir);
+        println!("{}", lir);
+        self.lirs.borrow_mut().push(lir);
         name
     }
 
@@ -82,16 +84,16 @@ impl<'a> BirContext<'a> {
 }
 
 impl Expression {
-    pub fn bir(&self, type_cache: &Cache<ValueType>, gensym: &Gensym) -> Vec<ValueBir> {
-        let mut birs = vec![];
+    pub fn lir(&self, type_cache: &Cache<ValueType>, gensym: &Gensym) -> Vec<ValueLir> {
+        let mut lirs = vec![];
         let arg_names = gensym.names(type_cache.get(self).arity().unwrap_or(0));
-        let context = BirContext {
-            birs: RefCell::new(&mut birs),
+        let context = LirContext {
+            lirs: RefCell::new(&mut lirs),
             gensym,
             type_cache,
         };
-        let body = self.bir_into(&context, &Environment::new(), &BooleanBir::Some, &arg_names);
-        birs.push(ValueBir {
+        let body = self.lir_into(&context, &Environment::new(), &BooleanLir::Some, &arg_names);
+        lirs.push(ValueLir {
             name: "<main>".to_owned(),
             typ: type_cache.get(self).clone(),
             args: arg_names
@@ -100,17 +102,17 @@ impl Expression {
                 .collect(),
             body,
         });
-        birs
+        lirs
     }
 
-    fn bir_into(
+    fn lir_into(
         &self,
-        context: &BirContext,
+        context: &LirContext,
         env: &Bindings,
-        scope: &BooleanBir,
+        scope: &BooleanLir,
         arg_names: &[Name],
-    ) -> BooleanBir {
-        use BooleanBir as B;
+    ) -> BooleanLir {
+        use BooleanLir as B;
         use Expression::*;
         let self_arity = context.type_cache.get(self).arity();
         println!("self: {}", self);
@@ -119,7 +121,7 @@ impl Expression {
             Option::None => return B::None,
             Option::Some(self_arity) => assert_eq!(self_arity, arg_names.len()),
         }
-        let bir = match self {
+        let lir = match self {
             None => B::None,
             Some => B::Some,
             Scalar(scalar) => B::ScalarEqual(
@@ -127,30 +129,30 @@ impl Expression {
                 ScalarRef::Name(arg_names[0].clone()),
             ),
             Union(a, b) => {
-                let a_bir = a.bir_into(context, env, scope, arg_names);
-                let b_bir = if self_arity.unwrap() == 0 {
+                let a_lir = a.lir_into(context, env, scope, arg_names);
+                let b_lir = if self_arity.unwrap() == 0 {
                     // can only reach b if !a
-                    let scope = B::Intersect(box scope.clone(), box B::Negate(box a_bir.clone()));
-                    b.bir_into(context, env, &scope, arg_names)
+                    let scope = B::Intersect(box scope.clone(), box B::Negate(box a_lir.clone()));
+                    b.lir_into(context, env, &scope, arg_names)
                 } else {
-                    b.bir_into(context, env, scope, arg_names)
+                    b.lir_into(context, env, scope, arg_names)
                 };
-                B::Union(box a_bir, box b_bir)
+                B::Union(box a_lir, box b_lir)
             }
             Intersect(a, b) => {
-                let a_bir = a.bir_into(context, env, scope, arg_names);
+                let a_lir = a.lir_into(context, env, scope, arg_names);
                 // can only reach b if exists a
-                let scope = B::Intersect(box scope.clone(), box a_bir.clone());
-                let b_bir = b.bir_into(context, env, &scope, arg_names);
-                B::Intersect(box a_bir, box b_bir)
+                let scope = B::Intersect(box scope.clone(), box a_lir.clone());
+                let b_lir = b.lir_into(context, env, &scope, arg_names);
+                B::Intersect(box a_lir, box b_lir)
             }
             Product(a, b) => {
                 let a_arity = context.type_cache.get(a).arity().unwrap();
-                let a_bir = a.bir_into(context, env, scope, &arg_names[..a_arity]);
+                let a_lir = a.lir_into(context, env, scope, &arg_names[..a_arity]);
                 // can only reach b if exists a
-                let scope = B::Intersect(box scope.clone(), box a_bir.clone());
-                let b_bir = b.bir_into(context, env, &scope, &arg_names[a_arity..]);
-                B::Intersect(box a_bir, box b_bir)
+                let scope = B::Intersect(box scope.clone(), box a_lir.clone());
+                let b_lir = b.lir_into(context, env, &scope, &arg_names[a_arity..]);
+                B::Intersect(box a_lir, box b_lir)
             }
             Equal(a, b) => {
                 match (context.as_scalar_ref(env, a), context.as_scalar_ref(env, b)) {
@@ -181,7 +183,7 @@ impl Expression {
                             self_names.clone(),
                             B::Intersect(
                                 box scope.clone(),
-                                box a.bir_into(context, env, scope, &arg_names),
+                                box a.lir_into(context, env, scope, &arg_names),
                             ),
                         );
                         let b_name = context.define(
@@ -190,7 +192,7 @@ impl Expression {
                             self_names.clone(),
                             B::Intersect(
                                 box scope.clone(),
-                                box b.bir_into(context, env, scope, &arg_names),
+                                box b.lir_into(context, env, scope, &arg_names),
                             ),
                         );
 
@@ -221,26 +223,26 @@ impl Expression {
             Negate(a) => {
                 let a_arity = context.type_cache.get(a).arity().unwrap_or(0);
                 let arg_names = context.gensym.names(a_arity);
-                B::Negate(box a.bir_into(context, env, scope, &arg_names))
+                B::Negate(box a.lir_into(context, env, scope, &arg_names))
             }
             Name(name) => match env.lookup(name).unwrap() {
                 Binding::Abstract => B::ScalarEqual(
                     ScalarRef::Name(name.clone()),
                     ScalarRef::Name(arg_names[0].clone()),
                 ),
-                Binding::LetFun { bir, args } => {
-                    let mut bir = bir.clone();
+                Binding::LetFun { lir, args } => {
+                    let mut lir = lir.clone();
                     assert_eq!(args.len(), arg_names.len());
                     for (arg1, arg2) in args.iter().zip(arg_names.iter()) {
-                        bir = B::Intersect(
+                        lir = B::Intersect(
                             box B::ScalarEqual(
                                 ScalarRef::Name(arg1.clone()),
                                 ScalarRef::Name(arg2.clone()),
                             ),
-                            box bir,
+                            box lir,
                         );
                     }
-                    bir
+                    lir
                 }
                 Binding::LetSet { name, scope_names } => B::Apply(
                     ValueRef::Name(name.clone()),
@@ -255,13 +257,13 @@ impl Expression {
                 let value_arg_names = context
                     .gensym
                     .names(context.type_cache.get(value).arity().unwrap_or(0));
-                let value_bir = value.bir_into(context, &env, scope, &value_arg_names);
+                let value_lir = value.lir_into(context, &env, scope, &value_arg_names);
                 let mut env = env.clone();
                 if context.type_cache.get(value).is_function() {
                     env.bind(
                         name.clone(),
                         Binding::LetFun {
-                            bir: value_bir,
+                            lir: value_lir,
                             args: value_arg_names,
                         },
                     );
@@ -285,7 +287,7 @@ impl Expression {
                             .chain(value_arg_names.iter())
                             .cloned()
                             .collect(),
-                        B::Intersect(box scope.clone(), box value_bir),
+                        B::Intersect(box scope.clone(), box value_lir),
                     );
                     env.bind(
                         name.clone(),
@@ -295,22 +297,22 @@ impl Expression {
                         },
                     );
                 }
-                body.bir_into(context, &env, scope, arg_names)
+                body.lir_into(context, &env, scope, arg_names)
             }
             If(cond, if_true, if_false) => {
-                let cond_bir = cond.bir_into(context, env, scope, &[]);
-                let if_true_bir = {
+                let cond_lir = cond.lir_into(context, env, scope, &[]);
+                let if_true_lir = {
                     // can only reach if_true if cond
-                    let scope = B::Intersect(box scope.clone(), box cond_bir.clone());
-                    if_true.bir_into(context, env, &scope, arg_names)
+                    let scope = B::Intersect(box scope.clone(), box cond_lir.clone());
+                    if_true.lir_into(context, env, &scope, arg_names)
                 };
-                let if_false_bir = {
+                let if_false_lir = {
                     // can only reach if_false if !cond
                     let scope =
-                        B::Intersect(box scope.clone(), box B::Negate(box cond_bir.clone()));
-                    if_false.bir_into(context, env, &scope, arg_names)
+                        B::Intersect(box scope.clone(), box B::Negate(box cond_lir.clone()));
+                    if_false.lir_into(context, env, &scope, arg_names)
                 };
-                B::If(box cond_bir, box if_true_bir, box if_false_bir)
+                B::If(box cond_lir, box if_true_lir, box if_false_lir)
             }
             Abstract(name, body) => {
                 let mut env = env.clone();
@@ -327,7 +329,7 @@ impl Expression {
                         ScalarRef::Name(name.clone()),
                         ScalarRef::Name(arg_names[0].clone()),
                     ),
-                    box body.bir_into(context, &env, &scope, &arg_names[1..]),
+                    box body.lir_into(context, &env, &scope, &arg_names[1..]),
                 )
             }
             Apply(a, b) => {
@@ -347,14 +349,14 @@ impl Expression {
                 } else {
                     b_arg_names.extend(arg_names.iter().cloned());
                 }
-                let a_bir = a.bir_into(context, env, scope, &a_arg_names);
-                let b_bir = if context.type_cache.get(b).is_function() {
-                    let scope = B::Intersect(box scope.clone(), box a_bir.clone());
-                    b.bir_into(context, env, &scope, &b_arg_names)
+                let a_lir = a.lir_into(context, env, scope, &a_arg_names);
+                let b_lir = if context.type_cache.get(b).is_function() {
+                    let scope = B::Intersect(box scope.clone(), box a_lir.clone());
+                    b.lir_into(context, env, &scope, &b_arg_names)
                 } else {
-                    b.bir_into(context, env, scope, &b_arg_names)
+                    b.lir_into(context, env, scope, &b_arg_names)
                 };
-                B::Intersect(box a_bir, box b_bir)
+                B::Intersect(box a_lir, box b_lir)
             }
             Native(native) => B::Apply(
                 ValueRef::Native(native.clone()),
@@ -366,13 +368,13 @@ impl Expression {
             Reduce(..) | Seal(..) | Unseal(..) | Solve(..) => panic!("Unimplemented: {:?}", self),
         };
 
-        println!("self: {}  =>  bir: {}", self, bir);
+        println!("self: {}  =>  lir: {}", self, lir);
 
-        bir
+        lir
     }
 }
 
-impl ValueBir {
+impl ValueLir {
     pub fn validate(&self) -> Result<(), String> {
         let mut bound = Some(HashSet::new());
         self.body
@@ -391,9 +393,9 @@ impl ValueBir {
     }
 }
 
-impl BooleanBir {
+impl BooleanLir {
     fn validate<'a>(&'a self, bound: &mut Option<HashSet<&'a Name>>) -> Result<(), String> {
-        use BooleanBir::*;
+        use BooleanLir::*;
 
         fn intersect_bound<'a>(
             a_bound: Option<HashSet<&'a Name>>,

@@ -5,11 +5,11 @@
 #[macro_use]
 mod macros;
 mod analysis;
-mod bir;
 mod denotation;
-mod dir;
 mod expression;
 mod flatten;
+mod lir;
+mod pir;
 mod pretty;
 mod shared;
 mod solver;
@@ -63,9 +63,9 @@ pub fn eval_looped(
     // let _typ = expr
     //     .typecheck(&Environment::new(), &mut type_cache)
     //     .map_err(|e| format!("Type error: {}", e))?;
-    // let dirs = DirsContext::new(&type_cache, &gensym);
-    // let result = expr.into_dirs(0, &[], &dirs);
-    // debug_info.push(format!("dirs: {:?}\n{:#?}", result, dirs.dirs));
+    // let pirs = PirsContext::new(&type_cache, &gensym);
+    // let result = expr.into_pirs(0, &[], &pirs);
+    // debug_info.push(format!("pirs: {:?}\n{:#?}", result, pirs.pirs));
 
     let value = expr
         .clone()
@@ -105,11 +105,11 @@ pub fn eval_flat(
     let _typ = expr
         .typecheck(&Environment::new(), &mut type_cache)
         .map_err(|e| format!("Type error: {}", e))?;
-    let dirs = DirsContext::new(&type_cache, &gensym);
-    let slot = expr.into_dirs(0, &[], &dirs)?;
-    let dirs = dirs.finish();
+    let pirs = PirsContext::new(&type_cache, &gensym);
+    let slot = expr.into_pirs(0, &[], &pirs)?;
+    let pirs = pirs.finish();
 
-    let set = dirs.eval(slot)?;
+    let set = pirs.eval(slot)?;
 
     Ok((typ, set))
 }
@@ -138,11 +138,11 @@ pub fn eval_flat2(expr: Expression, debug_info: &mut Vec<String>) -> Result<(), 
         .typecheck(&Environment::new(), &mut type_cache)
         .map_err(|e| format!("Type error: {}", e))?;
     println!("-------");
-    let birs = expr.bir(&type_cache, &gensym);
-    println!("\nbirs\n");
-    for bir in birs {
-        println!("{}", bir);
-        bir.validate().unwrap();
+    let lirs = expr.lir(&type_cache, &gensym);
+    println!("\nlirs\n");
+    for lir in lirs {
+        println!("{}", lir);
+        lir.validate().unwrap();
     }
     println!("-------");
 

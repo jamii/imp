@@ -138,7 +138,7 @@ impl fmt::Display for ValueType {
     }
 }
 
-impl fmt::Display for ValueBir {
+impl fmt::Display for ValueLir {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} = ?(", self.name)?;
         write_delimited(f, " ", &self.args, |f, name| write!(f, "{}", name))?;
@@ -147,9 +147,9 @@ impl fmt::Display for ValueBir {
     }
 }
 
-impl fmt::Display for BooleanBir {
+impl fmt::Display for BooleanLir {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use BooleanBir::*;
+        use BooleanLir::*;
         match self {
             None => write!(f, "none")?,
             Some => write!(f, "some")?,

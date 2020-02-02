@@ -20,6 +20,7 @@ pub enum Pir {
 #[derive(Debug)]
 pub struct Pirs {
     pub pirs: Vec<Pir>,
+    pub slot: Slot,
 }
 
 impl Pirs {
@@ -39,13 +40,19 @@ impl Pirs {
 
 impl Lirs {
     pub fn pirs(&self) -> Pirs {
-        let mut pirs = Pirs { pirs: vec![] };
-        // slot 0 is always Some
+        let mut pirs = Pirs {
+            pirs: vec![],
+            slot: 0,
+        };
+        // slot 0 is always None
+        pirs.push(Pir::Constant(Set::from_iter(vec![])));
+        // slot 1 is always Some
         pirs.push(Pir::Constant(Set::from_iter(vec![vec![]])));
-        let mut env = Environment::new();
         for lir in &self.lirs {
-            let pir = lir.pir_into(&env, &mut pirs);
-            env.bind(lir.name.clone(), (pir, lir.args.clone()));
+            let mut env = Environment::new();
+            let slot = lir.pir_into(&env, &mut pirs);
+            env.bind(lir.name.clone(), (slot, lir.args.clone()));
+            pirs.slot = slot; // actually only care about last one
         }
         pirs
     }
@@ -53,8 +60,22 @@ impl Lirs {
 
 impl ValueLir {
     fn pir_into(&self, env: &Environment<(Slot, Vec<Name>)>, pirs: &mut Pirs) -> Slot {
-        let (slot, vars) = self.body.pir_into(0, &[], env, pirs);
-        pirs.project(slot, &vars, &self.args)
+        match self.body {
+            BooleanLir::None => 0,
+            BooleanLir::Some => {
+                assert_eq!(
+                    self.args.len(),
+                    0,
+                    "Body is some but args is {:?}",
+                    self.args
+                );
+                1
+            }
+            _ => {
+                let (slot, vars) = self.body.pir_into(1, &[], env, pirs);
+                pirs.project(slot, &vars, &self.args)
+            }
+        }
     }
 }
 
@@ -68,11 +89,7 @@ impl BooleanLir {
     ) -> (Slot, Vec<Name>) {
         use BooleanLir::*;
         match self {
-            None => {
-                let slot = pirs.push(Pir::Constant(Set::from_iter(vec![])));
-                (slot, vec![])
-            }
-            Some => (known_slot, known_vars.to_vec()),
+            None | Some => panic!("{} nested in lir", self),
             Union(a, b) => {
                 let (a_slot, a_vars) = a.pir_into(known_slot, known_vars, env, pirs);
                 let (b_slot, b_vars) = b.pir_into(known_slot, known_vars, env, pirs);
@@ -229,11 +246,11 @@ impl BooleanLir {
 }
 
 impl Pirs {
-    pub fn eval(&self, slot: usize) -> Result<Set, String> {
+    pub fn eval(&self) -> Result<Set, String> {
         let mut data = self.pirs.iter().map(|_| Set::new()).collect::<Vec<_>>();
         for (slot, pir) in self.pirs.iter().enumerate() {
             use Pir::*;
-            // dbg!(slot, &pir);
+            dbg!(slot, &pir);
             data[slot] = match pir {
                 Constant(set) => set.clone(),
                 Union(slots) => {
@@ -284,18 +301,17 @@ impl Pirs {
                 ApplyNative(slot, native, key) => {
                     let mut set = Set::new();
                     for row in &data[*slot] {
-                        let mid = row.len() - native.input_arity;
                         let inputs = key.iter().map(|i| row[*i].clone()).collect();
                         let outputs = (native.fun)(inputs)?;
                         for output in outputs {
-                            set.insert(row[..mid].iter().cloned().chain(output).collect());
+                            set.insert(row.iter().cloned().chain(output).collect());
                         }
                     }
                     set
                 }
             };
-            // dbg!(&data[slot]);
+            dbg!(&data[slot]);
         }
-        Ok(data[slot].clone())
+        Ok(data[self.slot].clone())
     }
 }

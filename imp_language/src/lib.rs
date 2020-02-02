@@ -75,8 +75,14 @@ pub fn eval_flat(
     println!("-------");
 
     let pirs = lirs.pirs();
-    let set = pirs.eval(0)?;
+    println!("\npirs\n");
+    for pir in &pirs.pirs {
+        println!("{:?}", pir);
+        // lir.validate().unwrap();
+    }
+    println!("-------");
 
+    let set = pirs.eval()?;
     Ok((typ, set))
 }
 

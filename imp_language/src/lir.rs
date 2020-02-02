@@ -50,6 +50,7 @@ type Bindings = Environment<Binding>;
 
 #[derive(Debug, Clone)]
 enum Binding {
+    Constant(bool),
     Abstract,
     LetFun { lir: BooleanLir, args: Vec<Name> },
     LetSet { name: Name, scope_names: Vec<Name> },
@@ -98,12 +99,12 @@ impl Expression {
             type_cache,
         };
         let body = self.lir_into(&context, &Environment::new(), &BooleanLir::Some, &arg_names);
-        lirs.push(ValueLir {
-            name: "<main>".to_owned(),
-            typ: type_cache.get(self).clone(),
-            args: arg_names,
+        context.define(
+            Option::Some("<main>".to_owned()),
+            type_cache.get(self).clone(),
+            arg_names,
             body,
-        });
+        );
         Lirs { lirs }
     }
 
@@ -228,6 +229,13 @@ impl Expression {
                 B::Negate(box a.lir_into(context, env, scope, &arg_names))
             }
             Name(name) => match env.lookup(name).unwrap() {
+                Binding::Constant(b) => {
+                    if *b {
+                        B::Some
+                    } else {
+                        B::None
+                    }
+                }
                 Binding::Abstract => B::ScalarEqual(
                     ScalarRef::Name(name.clone()),
                     ScalarRef::Name(arg_names[0].clone()),
@@ -259,9 +267,15 @@ impl Expression {
                 let value_arg_names = context
                     .gensym
                     .names(context.type_cache.get(value).arity().unwrap_or(0));
-                let value_lir = value.lir_into(context, &env, scope, &value_arg_names);
+                let value_lir = value
+                    .lir_into(context, &env, scope, &value_arg_names)
+                    .simplify();
                 let mut env = env.clone();
-                if context.type_cache.get(value).is_function() {
+                if let B::None = value_lir {
+                    env.bind(name.clone(), Binding::Constant(false));
+                } else if let B::Some = value_lir {
+                    env.bind(name.clone(), Binding::Constant(true));
+                } else if context.type_cache.get(value).is_function() {
                     env.bind(
                         name.clone(),
                         Binding::LetFun {
@@ -372,20 +386,28 @@ impl Expression {
 
         println!("self: {}  =>  lir: {}", self, lir);
 
-        lir
+        lir.simplify()
     }
 }
 
 impl ValueLir {
     pub fn validate(&self) -> Result<(), String> {
-        let mut bound = Some(HashSet::new());
-        self.body
-            .validate(&mut bound)
-            .map_err(|s| format!("{} in {}", s, self))?;
-        if let Some(bound) = bound {
-            for arg in &self.args {
-                if !bound.contains(arg) {
-                    return Err(format!("arg {} not bound in {}", arg, self));
+        match self.body {
+            BooleanLir::None => (),
+            BooleanLir::Some => {
+                if self.args.len() > 0 {
+                    Err(format!("All args unbound - body is some"))?
+                }
+            }
+            _ => {
+                let mut bound = HashSet::new();
+                self.body
+                    .validate(&mut bound)
+                    .map_err(|s| format!("{} in {}", s, self))?;
+                for arg in &self.args {
+                    if !bound.contains(arg) {
+                        return Err(format!("arg {} not bound in {}", arg, self));
+                    }
                 }
             }
         }
@@ -394,35 +416,63 @@ impl ValueLir {
 }
 
 impl BooleanLir {
-    fn validate<'a>(&'a self, bound: &mut Option<HashSet<&'a Name>>) -> Result<(), String> {
+    fn simplify(&self) -> BooleanLir {
         use BooleanLir::*;
-
-        fn intersect_bound<'a>(
-            a_bound: Option<HashSet<&'a Name>>,
-            b_bound: Option<HashSet<&'a Name>>,
-        ) -> Option<HashSet<&'a Name>> {
-            match (a_bound, b_bound) {
-                (Option::Some(a_bound), Option::Some(b_bound)) => {
-                    Option::Some(a_bound.intersection(&b_bound).map(|name| &**name).collect())
-                }
-                (Option::Some(bound), Option::None) | (Option::None, Option::Some(bound)) => {
-                    Option::Some(bound)
-                }
-                (Option::None, Option::None) => Option::None,
-            }
-        }
-
         match self {
-            None => {
-                *bound = Option::None;
-            }
-            Some => (),
+            None => None,
+            Some => Some,
+            Union(a, b) => match (a.simplify(), b.simplify()) {
+                (None, c) | (c, None) => c,
+                (Some, _) | (_, Some) => Some,
+                (a, b) => Union(box a, box b),
+            },
+            Intersect(a, b) => match (a.simplify(), b.simplify()) {
+                (None, _) | (_, None) => None,
+                (Some, c) | (c, Some) => c,
+                (a, b) => Intersect(box a, box b),
+            },
+            If(c, t, f) => match (c.simplify(), t.simplify(), f.simplify()) {
+                (None, _, f) => f,
+                (Some, t, _) => t,
+                (_, None, None) => None,
+                (c, None, Some) => Negate(box c),
+                (c, Some, None) => c,
+                (_, Some, Some) => Some,
+                (c, t, None) => Intersect(box c, box t),
+                (c, None, f) => Intersect(box Negate(box c), box f),
+                (c, t, Some) => Union(box Negate(box c), box t),
+                (c, Some, f) => Union(box c, box f),
+                (c, t, f) => If(box c, box t, box f),
+            },
+            ScalarEqual(a, b) => match (a, b) {
+                (ScalarRef::Scalar(a), ScalarRef::Scalar(b)) => {
+                    if a == b {
+                        Some
+                    } else {
+                        None
+                    }
+                }
+                _ => ScalarEqual(a.clone(), b.clone()),
+            },
+            Negate(a) => match a.simplify() {
+                None => Some,
+                Some => None,
+                a => Negate(box a),
+            },
+            Apply(f, args) => Apply(f.clone(), args.clone()),
+        }
+    }
+
+    fn validate<'a>(&'a self, bound: &mut HashSet<&'a Name>) -> Result<(), String> {
+        use BooleanLir::*;
+        match self {
+            None | Some => Err(format!("{} nested in lir", self))?,
             Union(a, b) => {
                 let mut a_bound = bound.clone();
                 let mut b_bound = bound.clone();
                 a.validate(&mut a_bound)?;
                 b.validate(&mut b_bound)?;
-                *bound = intersect_bound(a_bound, b_bound);
+                *bound = a_bound.intersection(&b_bound).map(|n| &**n).collect();
             }
             Intersect(a, b) => {
                 a.validate(bound)?;
@@ -434,53 +484,45 @@ impl BooleanLir {
                 a.validate(&mut b_bound)?;
                 b.validate(&mut b_bound)?;
                 c.validate(&mut c_bound)?;
-                *bound = intersect_bound(b_bound, c_bound);
+                *bound = b_bound.intersection(&c_bound).map(|n| &**n).collect();
             }
             ScalarEqual(a, b) => match (a, b) {
                 (ScalarRef::Scalar(_), ScalarRef::Scalar(_)) => (),
                 (ScalarRef::Name(name), ScalarRef::Scalar(_))
                 | (ScalarRef::Scalar(_), ScalarRef::Name(name)) => {
-                    if let Option::Some(bound) = bound {
-                        bound.insert(name);
-                    }
+                    bound.insert(name);
                 }
                 (ScalarRef::Name(name_a), ScalarRef::Name(name_b)) => {
-                    if let Option::Some(bound) = bound {
-                        if bound.contains(name_a) {
-                            bound.insert(name_b);
-                        } else if bound.contains(name_b) {
-                            bound.insert(name_a);
-                        } else {
-                            return Err(format!("{}={} but neither bound yet", name_a, name_b));
-                        }
+                    if bound.contains(name_a) {
+                        bound.insert(name_b);
+                    } else if bound.contains(name_b) {
+                        bound.insert(name_a);
+                    } else {
+                        return Err(format!("{}={} but neither bound yet", name_a, name_b));
                     }
                 }
             },
             Negate(_) => (),
             Apply(v, args) => match v {
                 ValueRef::Name(_) => {
-                    if let Option::Some(bound) = bound {
-                        for arg in args {
-                            if let ScalarRef::Name(name) = arg {
-                                bound.insert(name);
-                            }
+                    for arg in args {
+                        if let ScalarRef::Name(name) = arg {
+                            bound.insert(name);
                         }
                     }
                 }
                 ValueRef::Native(native) => {
-                    if let Option::Some(bound) = bound {
-                        if args[0..native.input_arity].iter().all(|arg| match arg {
-                            ScalarRef::Scalar(_) => true,
-                            ScalarRef::Name(name) => bound.contains(name),
-                        }) {
-                            for arg in &args[native.input_arity..] {
-                                if let ScalarRef::Name(name) = arg {
-                                    bound.insert(name);
-                                }
+                    if args[0..native.input_arity].iter().all(|arg| match arg {
+                        ScalarRef::Scalar(_) => true,
+                        ScalarRef::Name(name) => bound.contains(name),
+                    }) {
+                        for arg in &args[native.input_arity..] {
+                            if let ScalarRef::Name(name) = arg {
+                                bound.insert(name);
                             }
-                        } else {
-                            return Err(format!("{} but input not bound yet", v));
                         }
+                    } else {
+                        return Err(format!("{} but input not bound yet", v));
                     }
                 }
             },

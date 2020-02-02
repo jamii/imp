@@ -17,6 +17,7 @@ fn main() {
             File::open(path).unwrap().read_to_end(&mut data).unwrap();
             fuzz_eval(&data);
         }
+        [_] => fuzz_artifacts(),
         _ => panic!("Unknown args: {:?}", args),
     }
 }

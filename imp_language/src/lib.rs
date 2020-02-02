@@ -65,22 +65,22 @@ pub fn eval_flat(
     let typ = expr
         .typecheck(&Environment::new(), &mut type_cache)
         .map_err(|e| format!("Type error: {}", e))?;
-    println!("-------");
+    debug!("-------");
     let lirs = expr.lirs(&type_cache, &gensym);
-    println!("\nlirs\n");
+    debug!("\nlirs\n");
     for lir in &lirs.lirs {
-        println!("{}", lir);
+        debug!("{}", lir);
         // lir.validate().unwrap();
     }
-    println!("-------");
+    debug!("-------");
 
     let pirs = lirs.pirs();
-    println!("\npirs\n");
+    debug!("\npirs\n");
     for (i, pir) in pirs.pirs.iter().enumerate() {
-        println!("{} = {:?}", i, pir);
+        debug!("{} = {:?}", i, pir);
         // lir.validate().unwrap();
     }
-    println!("-------");
+    debug!("-------");
 
     let set = pirs.eval()?;
     Ok((typ, set))

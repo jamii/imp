@@ -88,7 +88,7 @@ impl BooleanLir {
         pirs: &mut Pirs,
     ) -> (Slot, Vec<Name>) {
         use BooleanLir::*;
-        // dbg!(self, known_slot, known_vars);
+        // d!(self, known_slot, known_vars);
         match self {
             None | Some => panic!("{} nested in lir", self),
             Union(a, b) => {
@@ -280,7 +280,7 @@ impl Pirs {
         let mut data = self.pirs.iter().map(|_| Set::new()).collect::<Vec<_>>();
         for (slot, pir) in self.pirs.iter().enumerate() {
             use Pir::*;
-            dbg!(slot, &pir);
+            d!(slot, &pir);
             data[slot] = match pir {
                 Constant(set) => set.clone(),
                 Union(slots) => {
@@ -340,8 +340,8 @@ impl Pirs {
                     set
                 }
             };
-            dbg!(&data[slot]);
-            println!();
+            d!(&data[slot]);
+            debug!("");
         }
         Ok(data[self.slot].clone())
     }

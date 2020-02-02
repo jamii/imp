@@ -5,4 +5,9 @@ macro_rules! d {
         ::log::debug!("{} = {:#?}", stringify!($e), val);
         val
     }};
+    ($($e:expr),*) => {{
+        $(
+            ::log::debug!("{} = {:#?}", stringify!($e), $e);
+        )*
+    }};
 }

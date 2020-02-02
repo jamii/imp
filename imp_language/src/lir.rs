@@ -71,7 +71,7 @@ impl<'a> LirContext<'a> {
             args,
             body: body.simplify(),
         };
-        println!("{}", lir);
+        debug!("{}", lir);
         self.lirs.borrow_mut().push(lir);
         name
     }
@@ -119,8 +119,8 @@ impl Expression {
         use Expression::*;
         let self_type = context.type_cache.get(self);
         let self_arity = self_type.arity();
-        println!("self: {}", self);
-        dbg!(arg_names);
+        debug!("self: {}", self);
+        d!(arg_names);
         match self_arity {
             Option::None => return B::None,
             Option::Some(self_arity) => assert_eq!(self_arity, arg_names.len()),
@@ -366,7 +366,7 @@ impl Expression {
             Reduce(..) | Seal(..) | Unseal(..) | Solve(..) => panic!("Unimplemented: {:?}", self),
         };
 
-        println!("self: {}  =>  lir: {}", self, lir);
+        debug!("self: {}  =>  lir: {}", self, lir);
 
         lir
     }

@@ -1,3 +1,4 @@
+pub use log::debug;
 pub use std::cell::{Cell, RefCell};
 pub use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 pub use std::fmt;

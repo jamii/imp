@@ -26,15 +26,15 @@ impl Ord for NamedValue {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Scalar {
     String(String),
     Number(i64),
-    Sealed(
-        Environment<NamedValue>,
-        Environment<Scalar>,
-        Box<Expression>,
-    ),
+    // Sealed(
+    //     Environment<NamedValue>,
+    //     Environment<Scalar>,
+    //     Box<Expression>,
+    // ),
 }
 
 pub type Set = BTreeSet<Vec<Scalar>>;
@@ -61,17 +61,17 @@ impl Scalar {
 
     pub fn unseal(scalar: Self) -> Result<Value, String> {
         match scalar {
-            Scalar::Sealed(value_env, scalar_env, box sealed) => {
-                let mut env = Environment::new();
-                for (name, named_value) in value_env.bindings.into_iter() {
-                    env.bind(name, named_value.value)
-                }
-                for (name, scalar) in scalar_env.bindings.into_iter() {
-                    env.bind(name, Value::scalar(scalar));
-                }
-                let value = sealed.eval(&env)?;
-                Ok(value)
-            }
+            // Scalar::Sealed(value_env, scalar_env, box sealed) => {
+            //     let mut env = Environment::new();
+            //     for (name, named_value) in value_env.bindings.into_iter() {
+            //         env.bind(name, named_value.value)
+            //     }
+            //     for (name, scalar) in scalar_env.bindings.into_iter() {
+            //         env.bind(name, Value::scalar(scalar));
+            //     }
+            //     let value = sealed.eval(&env)?;
+            //     Ok(value)
+            // }
             _ => return Err(format!("${}", scalar)),
         }
     }
@@ -398,24 +398,25 @@ impl Expression {
                 Value::reduce(init.eval(env)?, vals.eval(env)?, fun.eval(env)?)?
             }
             Seal(e) => {
-                let mut value_env = Environment::new();
-                let mut scalar_env = Environment::new();
-                for name in e.free_names() {
-                    let value = env.lookup(&name).unwrap();
-                    // anything that isn't a scalar should be a top-level value, so safe to compare by name instead of value
-                    // TODO this is a bit of a hack - prefer to figure this out statically
-                    match value.as_scalar() {
-                        Ok(scalar) => scalar_env.bind(name, scalar),
-                        Err(_) => value_env.bind(
-                            name.clone(),
-                            NamedValue {
-                                name,
-                                value: value.clone(),
-                            },
-                        ),
-                    }
-                }
-                Value::scalar(self::Scalar::Sealed(value_env, scalar_env, e))
+                // let mut value_env = Environment::new();
+                // let mut scalar_env = Environment::new();
+                // for name in e.free_names() {
+                //     let value = env.lookup(&name).unwrap();
+                //     // anything that isn't a scalar should be a top-level value, so safe to compare by name instead of value
+                //     // TODO this is a bit of a hack - prefer to figure this out statically
+                //     match value.as_scalar() {
+                //         Ok(scalar) => scalar_env.bind(name, scalar),
+                //         Err(_) => value_env.bind(
+                //             name.clone(),
+                //             NamedValue {
+                //                 name,
+                //                 value: value.clone(),
+                //             },
+                //         ),
+                //     }
+                // }
+                // Value::scalar(self::Scalar::Sealed(value_env, scalar_env, e))
+                unimplemented!()
             }
             Unseal(e) => Value::unseal(e.eval(env)?)?,
             Solve(..) => return Err(format!("Unimplemented: {}", self)),

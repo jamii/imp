@@ -9,12 +9,12 @@ pub type Column = usize;
 pub enum Pir {
     Constant(Set),
     Union(Vec<Slot>),
-    Intersect(Vec<Slot>),
-    Product(Vec<Slot>),
+    Join(Slot, Slot, Vec<(usize, usize)>),
+    FilterScalar(Slot, Vec<(Column, Scalar)>),
     FilterEqual(Slot, Vec<(Column, Column)>),
     Project(Slot, Vec<Column>),
     Difference(Slot, Slot),
-    ApplyNative(Slot, Native),
+    ApplyNative(Slot, Native, Vec<usize>),
 }
 
 #[derive(Debug)]
@@ -22,353 +22,209 @@ pub struct Pirs {
     pub pirs: Vec<Pir>,
 }
 
-#[derive(Debug, Clone)]
-enum Binding<'a> {
-    Set(Slot),
-    Fun(Environment<(Vec<Name>, Binding<'a>)>, &'a Expression),
-    Scalar,
-}
-
-#[derive(Debug)]
-pub struct PirsContext<'a> {
-    pub pirs: RefCell<Vec<Pir>>,
-    env: RefCell<Environment<(Vec<Name>, Binding<'a>)>>,
-    type_cache: &'a Cache<ValueType>,
-    gensym: &'a Gensym,
-}
-
-impl<'a> PirsContext<'a> {
-    pub fn new(type_cache: &'a Cache<ValueType>, gensym: &'a Gensym) -> Self {
-        PirsContext {
-            pirs: RefCell::new(vec![Pir::Constant(Set::from_iter(vec![vec![]]))]),
-            env: RefCell::new(Environment::new()),
-            type_cache: &type_cache,
-            gensym: &gensym,
-        }
+impl Pirs {
+    fn push(&mut self, pir: Pir) -> Slot {
+        self.pirs.push(pir);
+        self.pirs.len() - 1
     }
 
-    fn arity(&self, slot: Slot) -> Option<usize> {
-        use Pir::*;
-        match &self.pirs.borrow()[slot] {
-            Constant(set) => match set.iter().next() {
-                None => None,
-                Some(tuple) => Some(tuple.len()),
-            },
-            Union(slots) => slots
-                .iter()
-                .map(|slot| self.arity(*slot))
-                .fold(None, |a, b| a.or(b)),
-            Intersect(slots) => slots
-                .iter()
-                .map(|slot| self.arity(*slot))
-                .fold(Some(0), |a, b| a.and(b)),
-            Product(slots) => slots
-                .iter()
-                .map(|slot| self.arity(*slot))
-                .fold(Some(0), |a, b| a.and_then(|a| b.map(|b| a + b))),
-            FilterEqual(a, _) => self.arity(*a),
-            Project(a, key) => self.arity(*a).and(Some(key.len())),
-            Difference(a, _) => self.arity(*a),
-            ApplyNative(a, native) => self
-                .arity(*a)
-                .map(|a_arity| a_arity - native.input_arity + native.output_arity),
-        }
-    }
-
-    fn pir(&self, pir: Pir) -> Slot {
-        let mut pirs = self.pirs.borrow_mut();
-        pirs.push(pir);
-        pirs.len() - 1
-    }
-
-    pub fn finish(self) -> Pirs {
-        Pirs {
-            pirs: self.pirs.into_inner(),
-        }
+    fn project(&mut self, slot: Slot, from: &[Name], to: &[Name]) -> Slot {
+        let permutation = to
+            .iter()
+            .map(|name| from.iter().position(|name2| name == name2).unwrap())
+            .collect();
+        self.push(Pir::Project(slot, permutation))
     }
 }
 
-// TODO
-// assumes names are unique
-// should only be applied to something with finite type
-impl Expression {
-    pub fn into_pirs<'a>(
-        &'a self,
-        outer_slot: Slot,
-        outer_names: &[Name],
-        context: &PirsContext<'a>,
-    ) -> Result<Slot, String> {
-        use Expression::*;
-        let slot = Ok(match self {
-            None => context.pir(Pir::Constant(Set::from_iter(vec![]))),
-            Some => outer_slot,
-            Scalar(scalar) => context.pir(Pir::Product(vec![
-                outer_slot,
-                context.pir(Pir::Constant(Set::from_iter(vec![vec![scalar.clone()]]))),
-            ])),
+impl Lirs {
+    pub fn pirs(&self) -> Pirs {
+        let mut pirs = Pirs { pirs: vec![] };
+        // slot 0 is always Some
+        pirs.push(Pir::Constant(Set::from_iter(vec![vec![]])));
+        let mut env = Environment::new();
+        for lir in &self.lirs {
+            let pir = lir.pir_into(&env, &mut pirs);
+            env.bind(lir.name.clone(), (pir, lir.args.clone()));
+        }
+        pirs
+    }
+}
+
+impl ValueLir {
+    fn pir_into(&self, env: &Environment<(Slot, Vec<Name>)>, pirs: &mut Pirs) -> Slot {
+        let (slot, vars) = self.body.pir_into(0, &[], env, pirs);
+        pirs.project(slot, &vars, &self.args)
+    }
+}
+
+impl BooleanLir {
+    fn pir_into(
+        &self,
+        known_slot: Slot,
+        known_vars: &[Name],
+        env: &Environment<(Slot, Vec<Name>)>,
+        pirs: &mut Pirs,
+    ) -> (Slot, Vec<Name>) {
+        use BooleanLir::*;
+        match self {
+            None => {
+                let slot = pirs.push(Pir::Constant(Set::from_iter(vec![])));
+                (slot, vec![])
+            }
+            Some => (known_slot, known_vars.to_vec()),
             Union(a, b) => {
-                let a_slot = a.into_pirs(outer_slot, outer_names, context)?;
-                let b_slot = b.into_pirs(outer_slot, outer_names, context)?;
-                context.pir(Pir::Union(vec![a_slot, b_slot]))
+                let (a_slot, a_vars) = a.pir_into(known_slot, known_vars, env, pirs);
+                let (b_slot, b_vars) = b.pir_into(known_slot, known_vars, env, pirs);
+                assert_eq!(
+                    a_vars.iter().collect::<HashSet<_>>(),
+                    b_vars.iter().collect::<HashSet<_>>(),
+                );
+                let b_slot = pirs.project(b_slot, &b_vars, &a_vars);
+                let slot = pirs.push(Pir::Union(vec![a_slot, b_slot]));
+                (slot, a_vars)
             }
             Intersect(a, b) => {
-                let a_slot = a.into_pirs(outer_slot, outer_names, context)?;
-                let b_slot = b.into_pirs(outer_slot, outer_names, context)?;
-                context.pir(Pir::Intersect(vec![a_slot, b_slot]))
+                let (a_slot, a_vars) = a.pir_into(known_slot, known_vars, env, pirs);
+                b.pir_into(a_slot, &a_vars, env, pirs)
             }
-            Product(a, b) => {
-                let a_slot = a.into_pirs(outer_slot, outer_names, context)?;
-                let b_slot = b.into_pirs(outer_slot, outer_names, context)?;
-                let outer_arity = context.arity(outer_slot).unwrap_or(0);
-                let a_arity = context.arity(a_slot).unwrap_or(0);
-                let b_arity = context.arity(b_slot).unwrap_or(0);
-                context.pir(Pir::Project(
-                    context.pir(Pir::FilterEqual(
-                        context.pir(Pir::Product(vec![a_slot, b_slot])),
-                        (0..outer_arity).map(|i| (i, a_arity + i)).collect(),
-                    )),
-                    (0..a_arity)
-                        .chain(a_arity + outer_arity..a_arity + b_arity)
-                        .collect(),
-                ))
+            If(cond, if_true, if_false) => {
+                let (cond_true_slot, cond_vars) = cond.pir_into(known_slot, known_vars, env, pirs);
+                let cond_false_slot = pirs.push(Pir::Difference(known_slot, cond_true_slot));
+                let (true_slot, true_vars) =
+                    if_true.pir_into(cond_true_slot, &cond_vars, env, pirs);
+                let (false_slot, false_vars) =
+                    if_false.pir_into(cond_false_slot, &cond_vars, env, pirs);
+                let false_slot = pirs.project(false_slot, &false_vars, &true_vars);
+                let slot = pirs.push(Pir::Union(vec![true_slot, false_slot]));
+                (slot, true_vars)
             }
-            Equal(a, b) => {
-                let a_slot = a.into_pirs(outer_slot, outer_names, context)?;
-                let b_slot = b.into_pirs(outer_slot, outer_names, context)?;
-                let outer_arity = context.arity(outer_slot).unwrap_or(0);
-                context.pir(Pir::Difference(
-                    context.pir(Pir::Difference(
-                        outer_slot,
-                        context.pir(Pir::Project(
-                            context.pir(Pir::Difference(a_slot, b_slot)),
-                            (0..outer_arity).collect(),
-                        )),
-                    )),
-                    context.pir(Pir::Project(
-                        context.pir(Pir::Difference(b_slot, a_slot)),
-                        (0..outer_arity).collect(),
-                    )),
-                ))
-            }
-            Negate(a) => {
-                let a_slot = a.into_pirs(outer_slot, outer_names, context)?;
-                let outer_arity = context.arity(outer_slot).unwrap_or(0);
-                context.pir(Pir::Difference(
-                    outer_slot,
-                    context.pir(Pir::Project(a_slot, (0..outer_arity).collect())),
-                ))
-            }
-            Name(name) => {
-                let env = context.env.borrow();
-                let (binding_names, binding) = env.lookup(name).unwrap();
-                match binding {
-                    Binding::Fun(..) => {
-                        return Err(format!("Bare fun!"));
-                    }
-                    Binding::Set(binding_slot) => {
-                        let mut join_key = vec![];
-                        let outer_arity = context.arity(outer_slot).unwrap_or(0);
-                        let binding_outer_arity = binding_names.len();
-                        let binding_arity = context.arity(*binding_slot).unwrap_or(0);
-                        for (binding_ix, name) in binding_names.iter().enumerate() {
-                            // must have come from a parent scope, so binding_names is contained in outer_names
-                            let outer_ix =
-                                outer_names.iter().position(|name2| name == name2).unwrap();
-                            join_key.push((outer_ix, outer_arity + binding_ix));
+            ScalarEqual(a, b) => match (a, b) {
+                (ScalarRef::Name(a), ScalarRef::Name(b)) => {
+                    let a_col = known_vars.iter().position(|name| name == a).unwrap();
+                    let b_col = known_vars.iter().position(|name| name == b).unwrap();
+                    let slot = pirs.push(Pir::FilterEqual(known_slot, vec![(a_col, b_col)]));
+                    (slot, known_vars.to_vec())
+                }
+                (ScalarRef::Name(a), ScalarRef::Scalar(b))
+                | (ScalarRef::Scalar(b), ScalarRef::Name(a)) => {
+                    match known_vars.iter().position(|name| name == a) {
+                        Option::Some(a_col) => {
+                            let slot =
+                                pirs.push(Pir::FilterScalar(known_slot, vec![(a_col, b.clone())]));
+                            (slot, known_vars.to_vec())
                         }
-                        context.pir(Pir::Project(
-                            context.pir(Pir::FilterEqual(
-                                context.pir(Pir::Product(vec![outer_slot, *binding_slot])),
-                                join_key,
-                            )),
-                            (0..outer_arity)
-                                .chain(
-                                    outer_arity + binding_outer_arity..outer_arity + binding_arity,
-                                )
-                                .collect(),
-                        ))
-                    }
-                    Binding::Scalar => {
-                        let outer_ix = outer_names.iter().position(|name2| name == name2).unwrap();
-                        context.pir(Pir::Project(
-                            outer_slot,
-                            (0..outer_names.len()).chain(vec![outer_ix]).collect(),
-                        ))
-                    }
-                }
-            }
-            Let(name, value, body) => {
-                if context.type_cache.get(value).is_function() {
-                    let env = (*context.env.borrow()).clone();
-                    context.env.borrow_mut().bind(
-                        name.clone(),
-                        (outer_names.to_vec(), Binding::Fun(env, value)),
-                    );
-                } else {
-                    let value_slot = value.into_pirs(outer_slot, outer_names, context)?;
-                    context.env.borrow_mut().bind(
-                        name.clone(),
-                        (outer_names.to_vec(), Binding::Set(value_slot)),
-                    );
-                }
-                let body_slot = body.into_pirs(outer_slot, outer_names, context)?;
-                context.env.borrow_mut().unbind();
-                body_slot
-            }
-            If(_cond, _if_true, _if_false) => return Err(format!("`if` should be gone by now")),
-            Abstract(_name, _body) => {
-                return Err(format!("Bare abstract!"));
-            }
-            Apply(a, b) => {
-                let mut a = a;
-                let mut b = b;
-                if context.type_cache.get(&a).is_function() {
-                    std::mem::swap(&mut a, &mut b);
-                }
-
-                let a_slot = a.into_pirs(outer_slot, outer_names, context)?;
-
-                b.apply_to(outer_slot, outer_names, a_slot, context)?
-            }
-            Native(_native) => {
-                return Err(format!("Bare native!"));
-            }
-            Reduce(..) | Seal(..) | Unseal(..) | Solve(..) => return Err(format!("TODO")),
-        });
-        assert_eq!(
-            context.arity(slot.clone().unwrap()),
-            context
-                .type_cache
-                .get(self)
-                .arity()
-                .and_then(|a| context.arity(outer_slot).map(|b| a + b))
-        );
-        slot
-    }
-
-    fn apply_to<'a>(
-        &'a self,
-        outer_slot: Slot,
-        outer_names: &[crate::Name],
-        mut a_slot: Slot,
-        context: &PirsContext<'a>,
-    ) -> Result<Slot, String> {
-        use Expression::*;
-        let b = self;
-        Ok(if !context.type_cache.get(&b).is_function() {
-            let mut b_slot = b.into_pirs(outer_slot, outer_names, context)?;
-            let mut a_arity = context.arity(a_slot).unwrap_or(0);
-            let mut b_arity = context.arity(b_slot).unwrap_or(0);
-            let outer_arity = outer_names.len();
-            if a_arity > b_arity {
-                std::mem::swap(&mut a_slot, &mut b_slot);
-                std::mem::swap(&mut a_arity, &mut b_arity);
-            }
-            context.pir(Pir::Project(
-                context.pir(Pir::FilterEqual(
-                    context.pir(Pir::Product(vec![a_slot, b_slot])),
-                    (0..a_arity).map(|i| (i, a_arity + i)).collect(),
-                )),
-                (0..outer_arity)
-                    .chain(a_arity + a_arity..a_arity + b_arity)
-                    .collect(),
-            ))
-        } else {
-            // if b is a fun, must be either name, abstract or native
-            match &b {
-                Name(name) => {
-                    // TODO gross!
-                    let mut env = Environment::new();
-                    std::mem::swap(&mut env, &mut context.env.borrow_mut());
-                    let (_binding_names, binding) = env.lookup(&name).unwrap();
-                    // don't need binding_names because must be subset of outer_names
-                    let slot = match binding {
-                        Binding::Fun(env, fun) => {
-                            let mut env = env.clone();
-                            std::mem::swap(&mut env, &mut context.env.borrow_mut());
-                            let slot = fun.apply_to(outer_slot, outer_names, a_slot, context)?;
-                            std::mem::swap(&mut env, &mut context.env.borrow_mut());
-                            slot
+                        Option::None => {
+                            let constant =
+                                pirs.push(Pir::Constant(Set::from_iter(vec![vec![b.clone()]])));
+                            let slot = pirs.push(Pir::Join(known_slot, constant, vec![]));
+                            let mut known_vars = known_vars.to_vec();
+                            known_vars.push(a.clone());
+                            (slot, known_vars)
                         }
-                        _ => unreachable!(),
-                    };
-                    std::mem::swap(&mut env, &mut context.env.borrow_mut());
-                    slot
+                    }
                 }
-                Abstract(name, body) => {
-                    let mut body = &**body;
-                    let mut names = vec![name.clone()];
-                    while let Abstract(name, body2) = body {
-                        names.push(name.clone());
-                        body = &**body2;
-                    }
-
-                    // funified!
-                    assert!(!context.type_cache.get(&body).is_function());
-                    if let Option::Some(a_arity) = context.arity(a_slot) {
-                        assert!(names.len() <= a_arity)
-                    }
-
-                    let new_outer_names = outer_names
-                        .iter()
-                        .chain(names.iter())
-                        .cloned()
-                        .collect::<Vec<_>>();
-                    let new_outer_slot =
-                        context.pir(Pir::Project(a_slot, (0..new_outer_names.len()).collect()));
-
-                    for name in &names {
-                        context
-                            .env
-                            .borrow_mut()
-                            .bind(name.clone(), (outer_names.to_vec(), Binding::Scalar));
-                    }
-                    let ab_slot =
-                        body.apply_to(new_outer_slot, &new_outer_names, a_slot, context)?;
-                    for _ in &names {
-                        context.env.borrow_mut().unbind();
-                    }
-
-                    let outer_arity = outer_names.len();
-                    let new_outer_arity = new_outer_names.len();
-                    let ab_arity = context.arity(ab_slot).unwrap_or(0);
-                    let applied = context.pir(Pir::Project(
-                        ab_slot,
-                        (0..outer_arity).chain(new_outer_arity..ab_arity).collect(),
-                    ));
-
-                    applied
-                }
-                Native(native) => {
-                    let outer_arity = context.arity(outer_slot).unwrap_or(0);
-                    if let Option::Some(a_arity) = context.arity(a_slot) {
-                        // funified!
-                        assert_eq!(outer_arity + native.input_arity, a_arity);
-                    }
-                    context.pir(Pir::ApplyNative(a_slot, native.clone()))
-                }
-                // TODO gross that we have to repeat this
-                Let(name, value, body) => {
-                    if context.type_cache.get(value).is_function() {
-                        let env = (*context.env.borrow()).clone();
-                        context
-                            .env
-                            .borrow_mut()
-                            .bind(name.clone(), (outer_names.to_vec(), Binding::Fun(env, b)));
+                (ScalarRef::Scalar(a), ScalarRef::Scalar(b)) => {
+                    if a == b {
+                        Some.pir_into(known_slot, known_vars, env, pirs)
                     } else {
-                        let value_slot = value.into_pirs(outer_slot, outer_names, context)?;
-                        context.env.borrow_mut().bind(
-                            name.clone(),
-                            (outer_names.to_vec(), Binding::Set(value_slot)),
-                        );
+                        None.pir_into(known_slot, known_vars, env, pirs)
                     }
-                    let body_slot = body.apply_to(outer_slot, outer_names, a_slot, context)?;
-                    context.env.borrow_mut().unbind();
-                    body_slot
                 }
-                other => unreachable!("What are this {:?}", other),
+            },
+            Negate(a) => {
+                let (a_slot, a_vars) = a.pir_into(known_slot, known_vars, env, pirs);
+                let a_slot = pirs.project(a_slot, &a_vars, known_vars);
+                let slot = pirs.push(Pir::Difference(known_slot, a_slot));
+                (slot, known_vars.to_vec())
             }
-        })
+            Apply(f, args) => match f {
+                ValueRef::Name(f) => {
+                    let (f_slot, f_vars) = env.lookup(f).unwrap();
+                    let mut filter_equal = vec![];
+                    let mut filter_scalar = vec![];
+                    let mut join = vec![];
+                    let mut selection = (0..known_vars.len()).collect::<Vec<_>>();
+                    let mut selected_vars = known_vars.to_vec();
+                    for (f_col, scalar_ref) in args.iter().enumerate() {
+                        match scalar_ref {
+                            ScalarRef::Name(name) => {
+                                match f_vars[0..f_col].iter().position(|name2| name == name2) {
+                                    Option::Some(prev_f_col) => {
+                                        filter_equal.push((prev_f_col, f_col));
+                                    }
+                                    Option::None => {
+                                        match known_vars.iter().position(|name2| name == name2) {
+                                            Option::Some(known_col) => {
+                                                join.push((known_col, f_col));
+                                            }
+                                            Option::None => {
+                                                selection.push(known_vars.len() + f_col);
+                                                selected_vars.push(name.clone());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            ScalarRef::Scalar(scalar) => {
+                                filter_scalar.push((f_col, scalar.clone()));
+                            }
+                        }
+                    }
+                    let f_slot = pirs.push(Pir::FilterEqual(*f_slot, filter_equal));
+                    let f_slot = pirs.push(Pir::FilterScalar(f_slot, filter_scalar));
+                    let join = pirs.push(Pir::Join(known_slot, f_slot, join));
+                    let slot = pirs.push(Pir::Project(join, selection));
+                    (slot, selected_vars)
+                }
+                ValueRef::Native(native) => {
+                    let mut constant = vec![];
+                    let mut apply = vec![];
+                    for scalar_ref in &args[..native.input_arity] {
+                        match scalar_ref {
+                            ScalarRef::Name(name) => {
+                                let known_col =
+                                    known_vars.iter().position(|name2| name == name2).unwrap();
+                                apply.push(known_col);
+                            }
+                            ScalarRef::Scalar(scalar) => {
+                                constant.push(scalar.clone());
+                                apply.push(known_vars.len() + constant.len() - 1);
+                            }
+                        }
+                    }
+                    let mut filter_equal = vec![];
+                    let mut filter_scalar = vec![];
+                    let mut selection = (0..known_vars.len()).collect::<Vec<_>>();
+                    let mut selected_vars = known_vars.to_vec();
+                    for (new_col, scalar_ref) in args[native.input_arity..].iter().enumerate() {
+                        match scalar_ref {
+                            ScalarRef::Name(name) => {
+                                match known_vars.iter().position(|name2| name == name2) {
+                                    Option::Some(known_col) => {
+                                        filter_equal.push((known_col, known_vars.len() + new_col));
+                                    }
+                                    Option::None => {
+                                        selection.push(known_vars.len() + new_col);
+                                        selected_vars.push(name.clone());
+                                    }
+                                }
+                            }
+                            ScalarRef::Scalar(scalar) => {
+                                filter_scalar.push((known_vars.len() + new_col, scalar.clone()));
+                            }
+                        }
+                    }
+                    let constant = pirs.push(Pir::Constant(Set::from_iter(vec![constant])));
+                    let product = pirs.push(Pir::Join(known_slot, constant, vec![]));
+                    let apply = pirs.push(Pir::ApplyNative(product, native.clone(), apply));
+                    let apply = pirs.push(Pir::FilterEqual(apply, filter_equal));
+                    let apply = pirs.push(Pir::FilterScalar(apply, filter_scalar));
+                    let slot = pirs.push(Pir::Project(apply, selection));
+                    (slot, selected_vars)
+                }
+            },
+        }
     }
 }
 
@@ -387,27 +243,34 @@ impl Pirs {
                     }
                     set
                 }
-                Intersect(slots) => {
-                    let mut set = data[slots[0]].clone();
-                    for slot in &slots[1..] {
-                        set = set.intersection(&data[*slot]).cloned().collect();
+                Join(a, b, key) => {
+                    let mut index = HashMap::new();
+                    for a_row in data[*a].iter() {
+                        let k = key
+                            .iter()
+                            .map(|(a_col, _)| &a_row[*a_col])
+                            .collect::<Vec<_>>();
+                        index.entry(k).or_insert_with(|| vec![]).push(a_row)
                     }
-                    set
-                }
-                Product(slots) => {
-                    let mut set = Set::from_iter(vec![vec![]]);
-                    for slot in slots {
-                        set = set
-                            .into_iter()
-                            .flat_map(|row_a| {
-                                data[*slot].iter().map(move |row_b| {
-                                    row_a.iter().chain(row_b.iter()).cloned().collect()
-                                })
-                            })
-                            .collect()
+                    let mut result = Set::new();
+                    for b_row in data[*b].iter() {
+                        let k = key
+                            .iter()
+                            .map(|(_, b_col)| &b_row[*b_col])
+                            .collect::<Vec<_>>();
+                        if let Option::Some(a_rows) = index.get(&k) {
+                            for a_row in a_rows {
+                                result.insert(a_row.iter().chain(b_row.iter()).cloned().collect());
+                            }
+                        }
                     }
-                    set
+                    result
                 }
+                FilterScalar(slot, scalars) => data[*slot]
+                    .iter()
+                    .filter(|row| scalars.iter().all(|(a, s)| row[*a] == *s))
+                    .cloned()
+                    .collect(),
                 FilterEqual(slot, eqs) => data[*slot]
                     .iter()
                     .filter(|row| eqs.iter().all(|(a, b)| row[*a] == row[*b]))
@@ -418,11 +281,11 @@ impl Pirs {
                     .map(|row| cols.iter().map(|col| row[*col].clone()).collect())
                     .collect(),
                 Difference(a, b) => data[*a].difference(&data[*b]).cloned().collect(),
-                ApplyNative(slot, native) => {
+                ApplyNative(slot, native, key) => {
                     let mut set = Set::new();
                     for row in &data[*slot] {
                         let mid = row.len() - native.input_arity;
-                        let inputs = row[mid..].to_vec();
+                        let inputs = key.iter().map(|i| row[*i].clone()).collect();
                         let outputs = (native.fun)(inputs)?;
                         for output in outputs {
                             set.insert(row[..mid].iter().cloned().chain(output).collect());

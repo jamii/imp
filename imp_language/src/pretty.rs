@@ -40,13 +40,13 @@ impl fmt::Display for Scalar {
         match self {
             Scalar::String(string) => write!(f, "{:?}", string)?,
             Scalar::Number(number) => write!(f, "{:?}", number)?,
-            Scalar::Sealed(value_env, scalar_env, expr) => {
-                write!(f, "{{")?;
-                write_environment(f, value_env)?;
-                write_environment(f, scalar_env)?;
-                write!(f, "{}", expr)?;
-                write!(f, "}}")?;
-            }
+            // Scalar::Sealed(value_env, scalar_env, expr) => {
+            //     write!(f, "{{")?;
+            //     write_environment(f, value_env)?;
+            //     write_environment(f, scalar_env)?;
+            //     write!(f, "{}", expr)?;
+            //     write!(f, "}}")?;
+            // }
         }
         Ok(())
     }

@@ -31,6 +31,5 @@ fn main() {
                 println!("{}", err);
             }
         }
-        run_flat2(&line, &mut vec![]);
     }
 }

@@ -31,24 +31,6 @@ pub fn eval_looped(
     log::debug!("with_natives: {}", expr);
     debug_info.push(format!("with_natives: {}", expr));
 
-    // let mut type_cache = Cache::new();
-    // let _typ = expr
-    //     .typecheck(&Environment::new(), &mut type_cache)
-    //     .map_err(|e| format!("Type error: {}", e))?;
-    // match expr.as_bir(&mut BirContext {
-    //     renames: vec![],
-    //     type_cache: &type_cache,
-    //     gensym: &gensym,
-    // }) {
-    //     Ok(bir) => {
-    //         debug_info.push(format!("bir: {}", d!(&bir)));
-
-    //         let dnf = bir.dnf();
-    //         debug_info.push(format!("dnf: {}", d!(&dnf)));
-    //     }
-    //     Err(err) => debug_info.push(format!("bir err: {}", err)),
-    // }
-
     let mut type_cache = Cache::new();
     let typ = expr
         .typecheck(&Environment::new(), &mut type_cache)
@@ -56,16 +38,6 @@ pub fn eval_looped(
     expr.funify(&mut type_cache, &gensym);
     log::debug!("funify: {}", expr);
     debug_info.push(format!("funify: {}", &expr));
-
-    // expr = expr.simplify(&HashSet::new());
-
-    // let mut type_cache = Cache::new();
-    // let _typ = expr
-    //     .typecheck(&Environment::new(), &mut type_cache)
-    //     .map_err(|e| format!("Type error: {}", e))?;
-    // let pirs = PirsContext::new(&type_cache, &gensym);
-    // let result = expr.into_pirs(0, &[], &pirs);
-    // debug_info.push(format!("pirs: {:?}\n{:#?}", result, pirs.pirs));
 
     let value = expr
         .clone()
@@ -89,64 +61,23 @@ pub fn eval_flat(
     log::debug!("with_unique: {}", expr);
     debug_info.push(format!("with_unique: {}", expr));
 
-    let mut expr = expr.desugar(&gensym);
-    log::debug!("desugared: {}", expr);
-    debug_info.push(format!("desugared: {}", expr));
-
     let mut type_cache = Cache::new();
     let typ = expr
         .typecheck(&Environment::new(), &mut type_cache)
         .map_err(|e| format!("Type error: {}", e))?;
-    expr.funify(&mut type_cache, &gensym);
-    log::debug!("funify: {}", expr);
-    debug_info.push(format!("funify: {}", expr));
-
-    let mut type_cache = Cache::new();
-    let _typ = expr
-        .typecheck(&Environment::new(), &mut type_cache)
-        .map_err(|e| format!("Type error: {}", e))?;
-    let pirs = PirsContext::new(&type_cache, &gensym);
-    let slot = expr.into_pirs(0, &[], &pirs)?;
-    let pirs = pirs.finish();
-
-    let set = pirs.eval(slot)?;
-
-    Ok((typ, set))
-}
-
-pub fn eval_flat2(expr: Expression, debug_info: &mut Vec<String>) -> Result<(), String> {
-    let gensym = Gensym::new();
-
-    let expr = expr.with_natives(&Native::stdlib());
-    log::debug!("with_natives: {}", expr);
-    debug_info.push(format!("with_natives: {}", expr));
-
-    let expr = expr.with_unique_names()?;
-    log::debug!("with_unique: {}", expr);
-    debug_info.push(format!("with_unique: {}", expr));
-
-    // let mut type_cache = Cache::new();
-    // let _typ = expr
-    //     .typecheck(&Environment::new(), &mut type_cache)
-    //     .map_err(|e| format!("Type error: {}", e))?;
-    // expr.funify(&mut type_cache, &gensym);
-    // log::debug!("funify: {}", expr);
-    // debug_info.push(format!("funify: {}", expr));
-
-    let mut type_cache = Cache::new();
-    let _typ = expr
-        .typecheck(&Environment::new(), &mut type_cache)
-        .map_err(|e| format!("Type error: {}", e))?;
     println!("-------");
-    let lirs = expr.lir(&type_cache, &gensym);
+    let lirs = expr.lirs(&type_cache, &gensym);
     println!("\nlirs\n");
-    for lir in lirs {
+    for lir in &lirs.lirs {
         println!("{}", lir);
-        lir.validate().unwrap();
+        // lir.validate().unwrap();
     }
     println!("-------");
 
-    Ok(())
+    let pirs = lirs.pirs();
+    let set = pirs.eval(0)?;
+
+    Ok((typ, set))
 }
 
 pub fn run_looped(code: &str, debug_info: &mut Vec<String>) -> Result<(ValueType, Value), String> {
@@ -169,15 +100,4 @@ pub fn run_flat(code: &str, debug_info: &mut Vec<String>) -> Result<(ValueType, 
     };
 
     eval_flat(expr, debug_info)
-}
-
-pub fn run_flat2(code: &str, debug_info: &mut Vec<String>) -> Result<(), String> {
-    let expr = if code.is_empty() {
-        // mild hack
-        Expression::None
-    } else {
-        parse(&code).map_err(|e| format!("Parse error: {:?}", e))?
-    };
-
-    eval_flat2(expr, debug_info)
 }

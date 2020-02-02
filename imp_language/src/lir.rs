@@ -6,7 +6,7 @@ use crate::shared::*;
 pub struct ValueLir {
     pub name: Name,
     pub typ: ValueType,
-    pub args: Vec<ScalarRef>,
+    pub args: Vec<Name>,
     pub body: BooleanLir,
 }
 
@@ -32,6 +32,11 @@ pub enum ValueRef {
 pub enum ScalarRef {
     Name(Name),
     Scalar(Scalar),
+}
+
+#[derive(Debug, Clone)]
+pub struct Lirs {
+    pub lirs: Vec<ValueLir>,
 }
 
 #[derive(Debug)]
@@ -62,7 +67,7 @@ impl<'a> LirContext<'a> {
         let lir = ValueLir {
             name: name.clone(),
             typ,
-            args: args.into_iter().map(|name| ScalarRef::Name(name)).collect(),
+            args,
             body,
         };
         println!("{}", lir);
@@ -84,7 +89,7 @@ impl<'a> LirContext<'a> {
 }
 
 impl Expression {
-    pub fn lir(&self, type_cache: &Cache<ValueType>, gensym: &Gensym) -> Vec<ValueLir> {
+    pub fn lirs(&self, type_cache: &Cache<ValueType>, gensym: &Gensym) -> Lirs {
         let mut lirs = vec![];
         let arg_names = gensym.names(type_cache.get(self).arity().unwrap_or(0));
         let context = LirContext {
@@ -96,13 +101,10 @@ impl Expression {
         lirs.push(ValueLir {
             name: "<main>".to_owned(),
             typ: type_cache.get(self).clone(),
-            args: arg_names
-                .into_iter()
-                .map(|name| ScalarRef::Name(name))
-                .collect(),
+            args: arg_names,
             body,
         });
-        lirs
+        Lirs { lirs }
     }
 
     fn lir_into(
@@ -382,10 +384,8 @@ impl ValueLir {
             .map_err(|s| format!("{} in {}", s, self))?;
         if let Some(bound) = bound {
             for arg in &self.args {
-                if let ScalarRef::Name(name) = arg {
-                    if !bound.contains(name) {
-                        return Err(format!("arg {} not bound in {}", arg, self));
-                    }
+                if !bound.contains(arg) {
+                    return Err(format!("arg {} not bound in {}", arg, self));
                 }
             }
         }

@@ -47,7 +47,7 @@ pub struct Lirs {
 struct LirContext<'a> {
     lirs: RefCell<&'a mut Vec<ValueLir>>,
     gensym: &'a Gensym,
-    type_cache: &'a Cache<ValueType>,
+    type_cache: RefCell<&'a mut Cache<ValueType>>,
 }
 
 type Bindings<'a> = Environment<Binding<'a>>;
@@ -94,18 +94,20 @@ impl<'a> LirContext<'a> {
 }
 
 impl Expression {
-    pub fn lirs(&self, type_cache: &Cache<ValueType>, gensym: &Gensym) -> Lirs {
+    pub fn lirs(&self, type_cache: &mut Cache<ValueType>, gensym: &Gensym) -> Lirs {
+        let body = self.with_unique_names(gensym, type_cache);
         let mut lirs = vec![];
         let arg_names = gensym.names(type_cache.get(self).arity().unwrap_or(0));
         let context = LirContext {
             lirs: RefCell::new(&mut lirs),
             gensym,
-            type_cache,
+            type_cache: RefCell::new(type_cache),
         };
-        let body = self.lir_into(&context, &Environment::new(), &BooleanLir::Some, &arg_names);
+        let body = body.lir_into(&context, &Environment::new(), &BooleanLir::Some, &arg_names);
+        let self_type = context.type_cache.borrow().get(self).clone();
         context.define(
             Option::Some("<main>".to_owned()),
-            type_cache.get(self).clone(),
+            self_type,
             arg_names,
             body,
         );
@@ -121,7 +123,7 @@ impl Expression {
     ) -> BooleanLir {
         use BooleanLir as B;
         use Expression::*;
-        let self_type = context.type_cache.get(self);
+        let self_type = context.type_cache.borrow().get(self).clone();
         let self_arity = self_type.arity();
         debug!("self: {}", self);
         d!(arg_names);
@@ -155,7 +157,7 @@ impl Expression {
                 B::Intersect(box a_lir, box b_lir)
             }
             Product(a, b) => {
-                let a_arity = context.type_cache.get(a).arity().unwrap();
+                let a_arity = context.type_cache.borrow().get(a).arity().unwrap();
                 let a_lir = a.lir_into(context, env, scope, &arg_names[..a_arity]);
                 // can only reach b if exists a
                 let scope = B::Intersect(box scope.clone(), box a_lir.clone());
@@ -166,7 +168,7 @@ impl Expression {
                 match (context.as_scalar_ref(env, a), context.as_scalar_ref(env, b)) {
                     (Option::Some(a_ref), Option::Some(b_ref)) => B::ScalarEqual(a_ref, b_ref),
                     _ => {
-                        let ab_arity = context.type_cache.get(a).arity().unwrap_or(0);
+                        let ab_arity = context.type_cache.borrow().get(a).arity().unwrap_or(0);
                         let scope_names = a
                             .free_names()
                             .union(&b.free_names())
@@ -187,7 +189,7 @@ impl Expression {
                             .collect::<Vec<_>>();
                         let a_name = context.define(
                             Option::None,
-                            context.type_cache.get(a).clone(),
+                            context.type_cache.borrow().get(a).clone(),
                             self_names.clone(),
                             B::Intersect(
                                 box scope.clone(),
@@ -196,7 +198,7 @@ impl Expression {
                         );
                         let b_name = context.define(
                             Option::None,
-                            context.type_cache.get(b).clone(),
+                            context.type_cache.borrow().get(b).clone(),
                             self_names.clone(),
                             B::Intersect(
                                 box scope.clone(),
@@ -229,7 +231,7 @@ impl Expression {
                 }
             }
             Negate(a) => {
-                let a_arity = context.type_cache.get(a).arity().unwrap_or(0);
+                let a_arity = context.type_cache.borrow().get(a).arity().unwrap_or(0);
                 let arg_names = context.gensym.names(a_arity);
                 B::Negate(box a.lir_into(context, env, scope, &arg_names))
             }
@@ -245,7 +247,11 @@ impl Expression {
                     ScalarRef::Name(name.clone()),
                     ScalarRef::Name(arg_names[0].clone()),
                 ),
-                Binding::LetFun { expr } => expr.lir_into(context, env, scope, arg_names),
+                Binding::LetFun { expr } => {
+                    let type_cache = &mut context.type_cache.borrow_mut();
+                    expr.with_unique_names(context.gensym, type_cache)
+                }
+                .lir_into(context, env, scope, arg_names),
                 Binding::LetSet { name, scope_names } => B::Apply(
                     ValueRef::Name(name.clone()),
                     scope_names
@@ -257,12 +263,12 @@ impl Expression {
             },
             Let(name, value, body) => {
                 let mut env = env.clone();
-                if context.type_cache.get(value).is_function() {
+                if context.type_cache.borrow().get(value).is_function() {
                     env.bind(name.clone(), Binding::LetFun { expr: value });
                 } else {
                     let value_arg_names = context
                         .gensym
-                        .names(context.type_cache.get(value).arity().unwrap_or(0));
+                        .names(context.type_cache.borrow().get(value).arity().unwrap_or(0));
                     let value_lir = value.lir_into(context, &env, scope, &value_arg_names);
                     if let B::None = value_lir {
                         env.bind(name.clone(), Binding::Constant(false));
@@ -282,7 +288,7 @@ impl Expression {
                             .collect::<Vec<_>>();
                         context.define(
                             Option::Some(name.clone()),
-                            context.type_cache.get(value).clone(),
+                            context.type_cache.borrow().get(value).clone(),
                             scope_names
                                 .iter()
                                 .chain(value_arg_names.iter())
@@ -337,11 +343,11 @@ impl Expression {
             Apply(a, b) => {
                 let mut a = &**a;
                 let mut b = &**b;
-                if context.type_cache.get(a).is_function() {
+                if context.type_cache.borrow().get(a).is_function() {
                     std::mem::swap(&mut a, &mut b);
                 }
-                let a_arity = context.type_cache.get(a).arity().unwrap_or(0);
-                let b_arity = context.type_cache.get(b).arity().unwrap_or(0);
+                let a_arity = context.type_cache.borrow().get(a).arity().unwrap_or(0);
+                let b_arity = context.type_cache.borrow().get(b).arity().unwrap_or(0);
                 let min_arity = a_arity.min(b_arity);
                 let applied_arg_names = context.gensym.names(min_arity);
                 let mut a_arg_names = applied_arg_names.clone();
@@ -352,7 +358,7 @@ impl Expression {
                     b_arg_names.extend(arg_names.iter().cloned());
                 }
                 let a_lir = a.lir_into(context, env, scope, &a_arg_names);
-                let b_lir = if context.type_cache.get(b).is_function() {
+                let b_lir = if context.type_cache.borrow().get(b).is_function() {
                     let scope = B::Intersect(box scope.clone(), box a_lir.clone());
                     b.lir_into(context, env, &scope, &b_arg_names)
                 } else {

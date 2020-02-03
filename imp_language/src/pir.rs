@@ -25,6 +25,7 @@ pub struct Pirs {
 
 impl Pirs {
     fn push(&mut self, pir: Pir) -> Slot {
+        d!(&pir);
         self.pirs.push(pir);
         self.pirs.len() - 1
     }
@@ -88,7 +89,7 @@ impl BooleanLir {
         pirs: &mut Pirs,
     ) -> (Slot, Vec<Name>) {
         use BooleanLir::*;
-        // d!(self, known_slot, known_vars);
+        d!(self, known_slot, known_vars);
         match self {
             None | Some => panic!("{} nested in lir", self),
             Union(a, b) => {

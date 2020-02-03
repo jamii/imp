@@ -4,6 +4,7 @@ use imp_language::*;
 use std::io::prelude::*;
 
 fn main() {
+    env_logger::init();
     for line in std::io::stdin().lock().lines() {
         let line = line.unwrap();
         let mut debug_info = vec![];

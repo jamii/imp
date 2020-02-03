@@ -29,7 +29,7 @@ pub fn eval_looped(
 
     let mut expr = expr.with_natives(&Native::stdlib());
     log::debug!("with_natives: {}", expr);
-    debug_info.push(format!("with_natives: {}", expr));
+    // debug_info.push(format!("with_natives: {}", expr));
 
     let mut type_cache = Cache::new();
     let typ = expr
@@ -37,7 +37,7 @@ pub fn eval_looped(
         .map_err(|e| format!("Type error: {}", e))?;
     expr.funify(&mut type_cache, &gensym);
     log::debug!("funify: {}", expr);
-    debug_info.push(format!("funify: {}", &expr));
+    // debug_info.push(format!("funify: {}", &expr));
 
     let value = expr
         .clone()
@@ -55,24 +55,21 @@ pub fn eval_flat(
 
     let expr = expr.with_natives(&Native::stdlib());
     log::debug!("with_natives: {}", expr);
-    debug_info.push(format!("with_natives: {}", expr));
-
-    let expr = expr.with_unique_names()?;
-    log::debug!("with_unique: {}", expr);
-    debug_info.push(format!("with_unique: {}", expr));
+    // debug_info.push(format!("with_natives: {}", expr));
 
     let mut type_cache = Cache::new();
     let typ = expr
         .typecheck(&Environment::new(), &mut type_cache)
         .map_err(|e| format!("Type error: {}", e))?;
     debug!("-------");
-    let lirs = expr.lirs(&type_cache, &gensym);
+    let lirs = expr.lirs(&mut type_cache, &gensym);
     debug!("\nlirs\n");
     for lir in &lirs.lirs {
         debug!("{}", lir);
         // lir.validate().unwrap();
     }
     debug!("-------");
+    debug_info.push(format!("lir:\n{}", lirs));
 
     let pirs = lirs.pirs();
     debug!("\npirs\n");
@@ -81,6 +78,7 @@ pub fn eval_flat(
         // lir.validate().unwrap();
     }
     debug!("-------");
+    debug_info.push(format!("pir:\n{}", pirs));
 
     let set = pirs.eval()?;
     Ok((typ, set))

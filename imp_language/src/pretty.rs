@@ -138,6 +138,13 @@ impl fmt::Display for ValueType {
     }
 }
 
+impl fmt::Display for Lirs {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write_delimited(f, "\n", &self.lirs, |f, lir| write!(f, "{}", lir))?;
+        Ok(())
+    }
+}
+
 impl fmt::Display for ValueLir {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} = ?(", self.name)?;
@@ -192,6 +199,15 @@ impl fmt::Display for ScalarRef {
             Name(name) => write!(f, "{}", name)?,
             Scalar(scalar) => write!(f, "{}", scalar)?,
         }
+        Ok(())
+    }
+}
+
+impl fmt::Display for Pirs {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write_delimited(f, "\n", self.pirs.iter().enumerate(), |f, (i, pir)| {
+            write!(f, "{} = {:?}", i, pir)
+        })?;
         Ok(())
     }
 }

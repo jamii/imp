@@ -36,12 +36,14 @@ pub enum Expression {
 #[derive(Debug)]
 pub struct Gensym {
     next_tmp: Cell<usize>,
+    next_names: RefCell<HashMap<String, usize>>,
 }
 
 impl Gensym {
     pub fn new() -> Self {
         Gensym {
             next_tmp: Cell::new(0),
+            next_names: RefCell::new(HashMap::new()),
         }
     }
 
@@ -61,6 +63,14 @@ impl Gensym {
             .into_iter()
             .map(|name| Expression::Name(name))
             .collect::<Vec<_>>()
+    }
+
+    pub fn unique_name(&self, name: &str) -> String {
+        let mut next_names = self.next_names.borrow_mut();
+        let i = next_names.entry(name.to_owned()).or_insert(0);
+        let unique_name = format!("{}{}", name, i);
+        *i += 1;
+        unique_name
     }
 }
 
@@ -301,42 +311,77 @@ impl Expression {
         }
     }
 
-    pub fn with_unique_names(self) -> Result<Self, String> {
+    pub fn with_unique_names(
+        &self,
+        gensym: &Gensym,
+        type_cache: &mut Cache<ValueType>,
+    ) -> Box<Expression> {
         fn map(
-            expression: Expression,
+            expression: &Expression,
             bound: &HashMap<Name, Name>,
-            last_id: &mut HashMap<Name, usize>,
-        ) -> Result<Expression, String> {
+            gensym: &Gensym,
+            type_cache: &mut Cache<ValueType>,
+        ) -> Box<Expression> {
             use Expression::*;
-            Ok(match expression {
-                Name(name) => match bound.get(&name) {
+            let typ = type_cache.get(&expression).clone();
+            let expression = match expression {
+                Name(name) => match bound.get(name) {
                     Option::Some(unique_name) => Name(unique_name.clone()),
-                    Option::None => return Err(format!("Undefined: {}", name)),
+                    Option::None => Name(name.clone()),
                 },
                 Let(name, value, body) => {
-                    let value = map(*value, bound, last_id)?;
-                    let id = last_id.entry(name.clone()).or_insert(0);
-                    *id += 1;
-                    let unique_name = format!("{}_{}", name, id);
+                    let value = map(value, bound, gensym, type_cache);
+                    let unique_name = gensym.unique_name(name);
                     let mut bound = bound.clone();
-                    bound.insert(name, unique_name.clone());
-                    let body = map(*body, &bound, last_id)?;
-                    Let(unique_name, box value, box body)
+                    bound.insert(name.clone(), unique_name.clone());
+                    let body = map(body, &bound, gensym, type_cache);
+                    Let(unique_name, value, body)
                 }
                 Abstract(name, body) => {
                     // TODO renaming abstracts makes eq on seals weird
-                    let id = last_id.entry(name.clone()).or_insert(0);
-                    *id += 1;
-                    let unique_name = format!("{}_{}", name, id);
+                    let unique_name = gensym.unique_name(name);
                     let mut bound = bound.clone();
-                    bound.insert(name, unique_name.clone());
-                    let body = map(*body, &bound, last_id)?;
-                    Abstract(unique_name, box body)
+                    bound.insert(name.clone(), unique_name.clone());
+                    let body = map(body, &bound, gensym, type_cache);
+                    Abstract(unique_name, body)
                 }
-                _ => expression.map1(|e| map(e, bound, last_id))?,
-            })
+                // rest are just an awkard map
+                None | Some | Scalar(_) | Native(_) => expression.clone(),
+                Union(a, b) => Union(
+                    map(a, bound, gensym, type_cache),
+                    map(b, bound, gensym, type_cache),
+                ),
+                Intersect(a, b) => Intersect(
+                    map(a, bound, gensym, type_cache),
+                    map(b, bound, gensym, type_cache),
+                ),
+                Product(a, b) => Product(
+                    map(a, bound, gensym, type_cache),
+                    map(b, bound, gensym, type_cache),
+                ),
+                Equal(a, b) => Equal(
+                    map(a, bound, gensym, type_cache),
+                    map(b, bound, gensym, type_cache),
+                ),
+                Negate(a) => Negate(map(a, bound, gensym, type_cache)),
+                Apply(a, b) => Apply(
+                    map(a, bound, gensym, type_cache),
+                    map(b, bound, gensym, type_cache),
+                ),
+                If(c, t, f) => If(
+                    map(c, bound, gensym, type_cache),
+                    map(t, bound, gensym, type_cache),
+                    map(f, bound, gensym, type_cache),
+                ),
+                Reduce(..) | Seal(..) | Unseal(..) | Solve(..) => {
+                    panic!("Unsupported {:?}", expression)
+                }
+            };
+            let expression = box expression;
+            type_cache.insert(&expression, typ);
+            expression
         }
-        map(self, &HashMap::new(), &mut HashMap::new())
+        map(self, &HashMap::new(), gensym, type_cache)
     }
 
     pub fn lift_lets(self) -> Self {

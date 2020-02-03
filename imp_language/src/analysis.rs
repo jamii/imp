@@ -25,7 +25,7 @@ impl<T> Cache<T> {
         }
     }
 
-    fn insert(&mut self, expr: &Expression, value: T) {
+    pub fn insert(&mut self, expr: &Expression, value: T) {
         self.cache.insert(expr as *const Expression, value);
     }
 

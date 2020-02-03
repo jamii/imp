@@ -2,6 +2,7 @@ use crate::shared::*;
 
 // Logical Intermediate Representation
 
+// TODO instead of inlining maybe-infinite types, make a FunLir that takes a single set arg
 // TODO can inline any ValueLir that is only used once
 // TODO can inline any ValueLir that is used monotonically in only one other ValueLir
 

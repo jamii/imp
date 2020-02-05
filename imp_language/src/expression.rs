@@ -373,9 +373,8 @@ impl Expression {
                     map(t, bound, gensym, type_cache),
                     map(f, bound, gensym, type_cache),
                 ),
-                Reduce(..) | Seal(..) | Unseal(..) | Solve(..) => {
-                    panic!("Unsupported {:?}", expression)
-                }
+                Solve(a) => Solve(map(a, bound, gensym, type_cache)),
+                Reduce(..) | Seal(..) | Unseal(..) => panic!("Unsupported {:?}", expression),
             };
             let expression = box expression;
             type_cache.insert(&expression, typ);

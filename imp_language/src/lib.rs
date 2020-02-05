@@ -61,12 +61,19 @@ pub fn eval_flat(
     let typ = expr
         .typecheck(&Environment::new(), &mut type_cache)
         .map_err(|e| format!("Type error: {}", e))?;
+
+    if typ.is_function() {
+        return Err(format!("Can't eval, typ is: {}", typ));
+    }
+
     debug!("-------");
-    let lirs = expr.lirs(&mut type_cache, &gensym);
+    let lirs = expr
+        .lirs(&mut type_cache, &gensym)
+        .map_err(|err| format!("Lir error: {}", err))?;
     debug!("\nlirs\n");
     for lir in &lirs.lirs {
         debug!("{}", lir);
-        // lir.validate().unwrap();
+        lir.validate().unwrap();
     }
     debug!("-------");
     debug_info.push(format!("lir:\n{}", lirs));
@@ -75,7 +82,6 @@ pub fn eval_flat(
     debug!("\npirs\n");
     for (i, pir) in pirs.pirs.iter().enumerate() {
         debug!("{} = {:?}", i, pir);
-        // lir.validate().unwrap();
     }
     debug!("-------");
     debug_info.push(format!("pir:\n{}", pirs));

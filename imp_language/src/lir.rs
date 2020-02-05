@@ -94,7 +94,7 @@ impl<'a> LirContext<'a> {
 }
 
 impl Expression {
-    pub fn lirs(&self, type_cache: &mut Cache<ValueType>, gensym: &Gensym) -> Lirs {
+    pub fn lirs(&self, type_cache: &mut Cache<ValueType>, gensym: &Gensym) -> Result<Lirs, String> {
         let body = self.with_unique_names(gensym, type_cache);
         let mut lirs = vec![];
         let arg_names = gensym.names(type_cache.get(self).arity().unwrap_or(0));
@@ -103,7 +103,7 @@ impl Expression {
             gensym,
             type_cache: RefCell::new(type_cache),
         };
-        let body = body.lir_into(&context, &Environment::new(), &BooleanLir::Some, &arg_names);
+        let body = body.lir_into(&context, &Environment::new(), &BooleanLir::Some, &arg_names)?;
         let self_type = context.type_cache.borrow().get(self).clone();
         context.define(
             Option::Some("<main>".to_owned()),
@@ -111,7 +111,7 @@ impl Expression {
             arg_names,
             body,
         );
-        Lirs { lirs }
+        Ok(Lirs { lirs })
     }
 
     fn lir_into(
@@ -120,7 +120,7 @@ impl Expression {
         env: &Bindings,
         scope: &BooleanLir,
         arg_names: &[Name],
-    ) -> BooleanLir {
+    ) -> Result<BooleanLir, String> {
         use BooleanLir as B;
         use Expression::*;
         let self_type = context.type_cache.borrow().get(self).clone();
@@ -128,7 +128,7 @@ impl Expression {
         debug!("self: {}", self);
         d!(arg_names);
         match self_arity {
-            Option::None => return B::None,
+            Option::None => return Ok(B::None),
             Option::Some(self_arity) => assert_eq!(self_arity, arg_names.len()),
         }
         let lir = match self {
@@ -139,29 +139,29 @@ impl Expression {
                 ScalarRef::Name(arg_names[0].clone()),
             ),
             Union(a, b) => {
-                let a_lir = a.lir_into(context, env, scope, arg_names);
+                let a_lir = a.lir_into(context, env, scope, arg_names)?;
                 let b_lir = if self_arity.unwrap() == 0 {
                     // can only reach b if !a
                     let scope = B::Intersect(box scope.clone(), box B::Negate(box a_lir.clone()));
-                    b.lir_into(context, env, &scope, arg_names)
+                    b.lir_into(context, env, &scope, arg_names)?
                 } else {
-                    b.lir_into(context, env, scope, arg_names)
+                    b.lir_into(context, env, scope, arg_names)?
                 };
                 B::Union(box a_lir, box b_lir)
             }
             Intersect(a, b) => {
-                let a_lir = a.lir_into(context, env, scope, arg_names);
+                let a_lir = a.lir_into(context, env, scope, arg_names)?;
                 // can only reach b if exists a
                 let scope = B::Intersect(box scope.clone(), box a_lir.clone());
-                let b_lir = b.lir_into(context, env, &scope, arg_names);
+                let b_lir = b.lir_into(context, env, &scope, arg_names)?;
                 B::Intersect(box a_lir, box b_lir)
             }
             Product(a, b) => {
                 let a_arity = context.type_cache.borrow().get(a).arity().unwrap();
-                let a_lir = a.lir_into(context, env, scope, &arg_names[..a_arity]);
+                let a_lir = a.lir_into(context, env, scope, &arg_names[..a_arity])?;
                 // can only reach b if exists a
                 let scope = B::Intersect(box scope.clone(), box a_lir.clone());
-                let b_lir = b.lir_into(context, env, &scope, &arg_names[a_arity..]);
+                let b_lir = b.lir_into(context, env, &scope, &arg_names[a_arity..])?;
                 B::Intersect(box a_lir, box b_lir)
             }
             Equal(a, b) => {
@@ -193,7 +193,7 @@ impl Expression {
                             self_names.clone(),
                             B::Intersect(
                                 box scope.clone(),
-                                box a.lir_into(context, env, scope, &arg_names),
+                                box a.lir_into(context, env, scope, &arg_names)?,
                             ),
                         );
                         let b_name = context.define(
@@ -202,7 +202,7 @@ impl Expression {
                             self_names.clone(),
                             B::Intersect(
                                 box scope.clone(),
-                                box b.lir_into(context, env, scope, &arg_names),
+                                box b.lir_into(context, env, scope, &arg_names)?,
                             ),
                         );
 
@@ -233,7 +233,7 @@ impl Expression {
             Negate(a) => {
                 let a_arity = context.type_cache.borrow().get(a).arity().unwrap_or(0);
                 let arg_names = context.gensym.names(a_arity);
-                B::Negate(box a.lir_into(context, env, scope, &arg_names))
+                B::Negate(box a.lir_into(context, env, scope, &arg_names)?)
             }
             Name(name) => match env.lookup(name).unwrap() {
                 Binding::Constant(b) => {
@@ -251,7 +251,7 @@ impl Expression {
                     let type_cache = &mut context.type_cache.borrow_mut();
                     expr.with_unique_names(context.gensym, type_cache)
                 }
-                .lir_into(context, env, scope, arg_names),
+                .lir_into(context, env, scope, arg_names)?,
                 Binding::LetSet { name, scope_names } => B::Apply(
                     ValueRef::Name(name.clone()),
                     scope_names
@@ -269,7 +269,7 @@ impl Expression {
                     let value_arg_names = context
                         .gensym
                         .names(context.type_cache.borrow().get(value).arity().unwrap_or(0));
-                    let value_lir = value.lir_into(context, &env, scope, &value_arg_names);
+                    let value_lir = value.lir_into(context, &env, scope, &value_arg_names)?;
                     if let B::None = value_lir {
                         env.bind(name.clone(), Binding::Constant(false));
                     } else if let B::Some = value_lir {
@@ -305,20 +305,20 @@ impl Expression {
                         );
                     }
                 }
-                body.lir_into(context, &env, scope, arg_names)
+                body.lir_into(context, &env, scope, arg_names)?
             }
             If(cond, if_true, if_false) => {
-                let cond_lir = cond.lir_into(context, env, scope, &[]);
+                let cond_lir = cond.lir_into(context, env, scope, &[])?;
                 let if_true_lir = {
                     // can only reach if_true if cond
                     let scope = B::Intersect(box scope.clone(), box cond_lir.clone());
-                    if_true.lir_into(context, env, &scope, arg_names)
+                    if_true.lir_into(context, env, &scope, arg_names)?
                 };
                 let if_false_lir = {
                     // can only reach if_false if !cond
                     let scope =
                         B::Intersect(box scope.clone(), box B::Negate(box cond_lir.clone()));
-                    if_false.lir_into(context, env, &scope, arg_names)
+                    if_false.lir_into(context, env, &scope, arg_names)?
                 };
                 B::If(box cond_lir, box if_true_lir, box if_false_lir)
             }
@@ -337,7 +337,7 @@ impl Expression {
                         ScalarRef::Name(name.clone()),
                         ScalarRef::Name(arg_names[0].clone()),
                     ),
-                    box body.lir_into(context, &env, &scope, &arg_names[1..]),
+                    box body.lir_into(context, &env, &scope, &arg_names[1..])?,
                 )
             }
             Apply(a, b) => {
@@ -357,12 +357,12 @@ impl Expression {
                 } else {
                     b_arg_names.extend(arg_names.iter().cloned());
                 }
-                let a_lir = a.lir_into(context, env, scope, &a_arg_names);
+                let a_lir = a.lir_into(context, env, scope, &a_arg_names)?;
                 let b_lir = if context.type_cache.borrow().get(b).is_function() {
                     let scope = B::Intersect(box scope.clone(), box a_lir.clone());
-                    b.lir_into(context, env, &scope, &b_arg_names)
+                    b.lir_into(context, env, &scope, &b_arg_names)?
                 } else {
-                    b.lir_into(context, env, scope, &b_arg_names)
+                    b.lir_into(context, env, scope, &b_arg_names)?
                 };
                 B::Intersect(box a_lir, box b_lir)
             }
@@ -373,32 +373,41 @@ impl Expression {
                     .map(|name| ScalarRef::Name(name.clone()))
                     .collect(),
             ),
-            Reduce(..) | Seal(..) | Unseal(..) | Solve(..) => panic!("Unimplemented: {:?}", self),
+            Solve(a) => {
+                let a_lir = a.lir_into(context, env, scope, arg_names)?;
+                ValueLir::validate_inner(arg_names, &a_lir)
+                    .map_err(|err| format!("unsolvable: {}", err))?;
+                a_lir
+            }
+            Reduce(..) | Seal(..) | Unseal(..) => panic!("Unimplemented: {:?}", self),
         };
 
         debug!("self: {}  =>  lir: {}", self, lir);
 
-        lir
+        Ok(lir)
     }
 }
 
 impl ValueLir {
     pub fn validate(&self) -> Result<(), String> {
-        match self.body {
+        ValueLir::validate_inner(&self.args, &self.body)
+    }
+
+    fn validate_inner(args: &[Name], body: &BooleanLir) -> Result<(), String> {
+        match body {
             BooleanLir::None => (),
             BooleanLir::Some => {
-                if self.args.len() > 0 {
+                if args.len() > 0 {
                     Err(format!("All args unbound - body is some"))?
                 }
             }
             _ => {
                 let mut bound = HashSet::new();
-                self.body
-                    .validate(&mut bound)
-                    .map_err(|s| format!("{} in {}", s, self))?;
-                for arg in &self.args {
+                body.validate(&mut bound)
+                    .map_err(|s| format!("{} in {}", s, body))?;
+                for arg in args {
                     if !bound.contains(arg) {
-                        return Err(format!("arg {} not bound in {}", arg, self));
+                        return Err(format!("arg {} not bound in {}", arg, body));
                     }
                 }
             }

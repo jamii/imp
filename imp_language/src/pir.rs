@@ -112,14 +112,6 @@ impl BooleanLir {
                 let (a_slot, a_vars) = a.pir_into(known_slot, known_vars, env, pirs);
                 b.pir_into(a_slot, &a_vars, env, pirs)
             }
-            If(cond, if_true, if_false) => {
-                // TODO want to only calc cond once, but surprisingly tricky
-                Union(
-                    box Intersect(cond.clone(), if_true.clone()),
-                    box Intersect(box Negate(cond.clone()), if_false.clone()),
-                )
-                .pir_into(known_slot, known_vars, env, pirs)
-            }
             ScalarEqual(a, b) => match (a, b) {
                 (ScalarRef::Name(a), ScalarRef::Name(b)) => {
                     let a_col = known_vars.iter().position(|name| name == a);

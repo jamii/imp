@@ -20,7 +20,6 @@ pub enum BooleanLir {
     Some,
     Union(Box<BooleanLir>, Box<BooleanLir>),
     Intersect(Box<BooleanLir>, Box<BooleanLir>),
-    If(Box<BooleanLir>, Box<BooleanLir>, Box<BooleanLir>),
     ScalarEqual(ScalarRef, ScalarRef),
     Negate(Box<BooleanLir>),
     Apply(ValueRef, Vec<ScalarRef>),
@@ -307,6 +306,7 @@ impl Expression {
                 }
                 body.lir_into(context, &env, scope, arg_names)?
             }
+            // TODO want to only calc cond once, but surprisingly tricky
             If(cond, if_true, if_false) => {
                 let cond_lir = cond.lir_into(context, env, scope, &[])?;
                 let if_true_lir = {
@@ -320,7 +320,10 @@ impl Expression {
                         B::Intersect(box scope.clone(), box B::Negate(box cond_lir.clone()));
                     if_false.lir_into(context, env, &scope, arg_names)?
                 };
-                B::If(box cond_lir, box if_true_lir, box if_false_lir)
+                B::Union(
+                    box B::Intersect(box cond_lir, box if_true_lir),
+                    box B::Intersect(box B::Negate(box cond_lir), box if_false_lir),
+                )
             }
             Abstract(name, body) => {
                 let mut env = env.clone();
@@ -432,19 +435,6 @@ impl BooleanLir {
                 (Some, c) | (c, Some) => c,
                 (a, b) => Intersect(box a, box b),
             },
-            If(c, t, f) => match (c.simplify(), t.simplify(), f.simplify()) {
-                (None, _, f) => f,
-                (Some, t, _) => t,
-                (_, None, None) => None,
-                (c, None, Some) => Negate(box c),
-                (c, Some, None) => c,
-                (_, Some, Some) => Some,
-                (c, t, None) => Intersect(box c, box t),
-                (c, None, f) => Intersect(box Negate(box c), box f),
-                (c, t, Some) => Union(box Negate(box c), box t),
-                (c, Some, f) => Union(box c, box f),
-                (c, t, f) => If(box c, box t, box f),
-            },
             ScalarEqual(a, b) => match (a, b) {
                 (ScalarRef::Scalar(a), ScalarRef::Scalar(b)) => {
                     if a == b {
@@ -478,14 +468,6 @@ impl BooleanLir {
             Intersect(a, b) => {
                 a.validate(bound)?;
                 b.validate(bound)?;
-            }
-            If(a, b, c) => {
-                let mut b_bound = bound.clone();
-                let mut c_bound = bound.clone();
-                a.validate(&mut b_bound)?;
-                b.validate(&mut b_bound)?;
-                c.validate(&mut c_bound)?;
-                *bound = b_bound.intersection(&c_bound).map(|n| &**n).collect();
             }
             ScalarEqual(a, b) => match (a, b) {
                 (ScalarRef::Scalar(_), ScalarRef::Scalar(_)) => (),

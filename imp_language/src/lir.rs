@@ -31,7 +31,7 @@ pub enum ValueRef {
     Native(Native),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ScalarRef {
     Name(Name),
     Scalar(Scalar),
@@ -377,13 +377,9 @@ impl Expression {
                     .collect(),
             ),
             Solve(a) => {
-                dbg!(arg_names);
                 let mut a_lir = a.lir_into(context, env, scope, arg_names)?;
-                d!(&a_lir);
-                a_lir.resolve_eqs(arg_names);
-                d!(&a_lir);
+                a_lir.resolve_eqs();
                 let a_lir = a_lir.simplify();
-                d!(&a_lir);
                 ValueLir::validate_inner(arg_names, &a_lir)
                     .map_err(|err| format!("unsolvable: {}", err))?;
                 a_lir
@@ -426,7 +422,7 @@ impl ValueLir {
 
     fn resolve_eqs(&self) -> Self {
         let mut body = self.body.clone();
-        body.resolve_eqs(&self.args);
+        body.resolve_eqs();
         ValueLir {
             name: self.name.clone(),
             typ: self.typ.clone(),
@@ -531,7 +527,7 @@ impl BooleanLir {
         Ok(())
     }
 
-    fn resolve_eqs(&mut self, args: &[Name]) {
+    fn resolve_eqs(&mut self) {
         use BooleanLir::*;
 
         let mut eqs: Vec<(ScalarRef, ScalarRef)> = vec![];
@@ -580,30 +576,18 @@ impl BooleanLir {
                 }
             }
         }
-        d!(&groups);
 
         let mut renames: HashMap<ScalarRef, ScalarRef> = HashMap::new();
-        let mut keeps: Vec<(ScalarRef, ScalarRef)> = vec![];
         {
             for group in groups {
                 let first_scalar = group.iter().find(|sref| match sref {
                     ScalarRef::Name(_) => false,
                     ScalarRef::Scalar(_) => true,
                 });
-                let first_arg = group.iter().find(|sref| match sref {
-                    ScalarRef::Name(name) => args.iter().any(|arg| arg == name),
-                    ScalarRef::Scalar(_) => false,
-                });
-                let target = first_scalar
-                    .unwrap_or(first_arg.unwrap_or(group.iter().next().unwrap()))
-                    .clone();
+                let target = first_scalar.unwrap_or(group.iter().next().unwrap()).clone();
                 for sref in group {
                     match &sref {
                         ScalarRef::Name(name) => {
-                            if args.iter().any(|arg| arg == name) {
-                                // need to remember the value to be able to return it from the ValueLir :(
-                                keeps.push((sref.clone(), target.clone()))
-                            }
                             renames.insert(sref, target.clone());
                         }
                         ScalarRef::Scalar(scalar) => {
@@ -619,7 +603,6 @@ impl BooleanLir {
                 }
             }
         }
-        d!(&renames);
 
         {
             let mut stack = vec![&mut *self];
@@ -665,18 +648,20 @@ impl BooleanLir {
                         stack.push(b);
                     }
                     Union(a, b) => {
-                        a.resolve_eqs(args);
-                        b.resolve_eqs(args);
+                        a.resolve_eqs();
+                        b.resolve_eqs();
                     }
                     Negate(a) => {
-                        a.resolve_eqs(args);
+                        a.resolve_eqs();
                     }
                     _ => (),
                 }
             }
         }
 
-        for (a, b) in keeps {
+        let mut renames = renames.into_iter().collect::<Vec<_>>();
+        renames.sort(); // for determinism
+        for (a, b) in renames {
             *self = Intersect(box std::mem::replace(self, None), box ScalarEqual(a, b))
         }
     }

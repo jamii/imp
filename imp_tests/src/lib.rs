@@ -22,9 +22,11 @@ pub fn fuzz_eval(data: &[u8]) {
     if let Some(expr) = build_expr(data) {
         log::debug!("--------------------\n{}\n--------------------", expr);
         let mut debug_info = vec![];
-        if let Ok((typ, Value::Set(set1))) = eval_looped(expr.clone(), &mut debug_info) {
+        let result1 = eval_looped(expr.clone(), &mut debug_info);
+        let result2 = eval_flat(expr, &mut debug_info);
+        if let Ok((typ, Value::Set(set1))) = result1 {
             if !typ.is_function() {
-                let (_typ, set2) = eval_flat(expr, &mut debug_info).unwrap();
+                let (_typ, set2) = result2.unwrap();
                 assert_eq!(set1, set2);
             }
         }
@@ -89,9 +91,7 @@ fn build_expr(data: &[u8]) -> Option<Expression> {
                 };
                 Expression::Name(name.to_owned())
             }
-            // 14 if stack.len() >= 1 => Expression::Seal(box stack.pop().unwrap()),
-            // 15 if stack.len() >= 1 => Expression::Unseal(box stack.pop().unwrap()),
-            // TODO solve
+            14 if stack.len() > 1 => Expression::Solve(box stack.pop().unwrap()),
             _ => return None,
         };
         stack.push(expr);

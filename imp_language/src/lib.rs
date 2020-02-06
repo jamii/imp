@@ -63,7 +63,7 @@ pub fn eval_flat(
         .map_err(|e| format!("Type error: {}", e))?;
 
     if typ.is_function() {
-        return Err(format!("Can't eval, typ is: {}", typ));
+        return Err(format!("Can't fully evaluate non-finite type: {}", typ));
     }
 
     debug!("-------");
@@ -77,6 +77,15 @@ pub fn eval_flat(
     }
     debug!("-------");
     debug_info.push(format!("lir:\n{}", lirs));
+
+    let lirs = lirs.resolve_eqs();
+    debug!("\nlirs (simplified)\n");
+    for lir in &lirs.lirs {
+        debug!("{}", lir);
+        lir.validate().unwrap();
+    }
+    debug!("-------");
+    debug_info.push(format!("lir (resolved):\n{}", lirs));
 
     let pirs = lirs.pirs();
     debug!("\npirs\n");

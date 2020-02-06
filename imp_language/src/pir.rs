@@ -239,16 +239,22 @@ impl BooleanLir {
                             ScalarRef::Name(name) => {
                                 match known_vars.iter().position(|name2| name == name2) {
                                     Option::Some(known_col) => {
-                                        filter_equal.push((known_col, known_vars.len() + new_col));
+                                        filter_equal.push((
+                                            known_col,
+                                            known_vars.len() + constant.len() + new_col,
+                                        ));
                                     }
                                     Option::None => {
-                                        selection.push(known_vars.len() + new_col);
+                                        selection.push(known_vars.len() + constant.len() + new_col);
                                         selected_vars.push(name.clone());
                                     }
                                 }
                             }
                             ScalarRef::Scalar(scalar) => {
-                                filter_scalar.push((known_vars.len() + new_col, scalar.clone()));
+                                filter_scalar.push((
+                                    known_vars.len() + constant.len() + new_col,
+                                    scalar.clone(),
+                                ));
                             }
                         }
                     }

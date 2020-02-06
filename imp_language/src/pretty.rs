@@ -166,9 +166,6 @@ impl fmt::Display for BooleanLir {
             Intersect(b1, b2) => {
                 write!(f, "({} & {})", b1, b2)?;
             }
-            If(cond, if_true, if_false) => {
-                write!(f, "(if {} then {} else {})", cond, if_true, if_false)?;
-            }
             ScalarEqual(e1, e2) => write!(f, "({} == {})", e1, e2)?,
             Negate(e) => write!(f, "!{}", e)?,
             Apply(fun, args) => {

@@ -27,3 +27,11 @@ let departments = "alice" x "engineering" | "bob" x "marketing" | "eve" x "espio
 error
 ---
 ("bob")
+
+# ideally these should be solveable
+
+?(a -> let b = 1 in b a)
+---
+error
+---
+error

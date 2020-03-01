@@ -377,9 +377,14 @@ impl Expression {
                     .collect(),
             ),
             Solve(a) => {
+                let num_lirs = context.lirs.borrow().len();
                 let mut a_lir = a.lir_into(context, env, scope, arg_names)?;
                 a_lir.resolve_eqs();
                 let a_lir = a_lir.simplify();
+                for lir in &context.lirs.borrow()[num_lirs..] {
+                    lir.validate()
+                        .map_err(|err| format!("unsolvable: {}", err))?;
+                }
                 ValueLir::validate_inner(arg_names, &a_lir)
                     .map_err(|err| format!("unsolvable: {}", err))?;
                 a_lir
@@ -587,7 +592,7 @@ impl BooleanLir {
                 let target = first_scalar.unwrap_or(group.iter().next().unwrap()).clone();
                 for sref in group {
                     match &sref {
-                        ScalarRef::Name(name) => {
+                        ScalarRef::Name(_) => {
                             renames.insert(sref, target.clone());
                         }
                         ScalarRef::Scalar(scalar) => {

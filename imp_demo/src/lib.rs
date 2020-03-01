@@ -137,15 +137,32 @@ fn render(value: &Value) -> Node {
 }
 
 #[wasm_bindgen]
-pub fn update(input: &str, output_node: &HtmlElement) {
+pub fn update_looped(input: &str, output_node: &HtmlElement) {
+    let mut debug_info = vec![];
+    let output = imp_language::run_looped(&input, &mut debug_info);
+    update(output, debug_info, output_node)
+}
+
+#[wasm_bindgen]
+pub fn update_flat(input: &str, output_node: &HtmlElement) {
+    let mut debug_info = vec![];
+    let output =
+        imp_language::run_flat(&input, &mut debug_info).map(|(typ, set)| (typ, Value::Set(set)));
+    update(output, debug_info, output_node)
+}
+
+pub fn update(
+    output: Result<(ValueType, Value), String>,
+    debug_info: Vec<String>,
+    output_node: &HtmlElement,
+) {
     output_node.set_inner_html("");
     let tmp = Node::tag("div")
         .attribute("class", "imp-error")
         .child(Node::text("Crashed?"));
     output_node.append_child(&tmp.node).unwrap();
 
-    let mut debug_info = vec![];
-    let output = match imp_language::run_flat(&input, &mut debug_info) {
+    let output = match output {
         Ok((typ, output)) => Node::tag("div")
             .child({
                 let mut node = Node::tag("div").attribute("class", "imp-debug-info");
@@ -163,7 +180,7 @@ pub fn update(input: &str, output_node: &HtmlElement) {
             .child(
                 Node::tag("div")
                     .attribute("class", "imp-value")
-                    .child(render(&Value::Set(output))),
+                    .child(render(&output)),
             ),
         Err(error) => Node::tag("div")
             .attribute("class", "imp-error")

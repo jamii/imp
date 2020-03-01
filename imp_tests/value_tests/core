@@ -1,0 +1,264 @@
+"hello world"
+---
+("hello world")
+
+42
+---
+(42)
+
+"a" | "b"
+---
+("a") |
+("b")
+
+"a" x "b"
+---
+("a" x "b")
+
+"a" x "b" | "c" x "d"
+---
+("a" x "b") |
+("c" x "d")
+
+("a" | "b") x ("c" | "d")
+---
+("a" x "c") |
+("a" x "d") |
+("b" x "c") |
+("b" x "d")
+
+(1 | 2) & (2 | 3)
+---
+(2)
+
+let nums = 0 | 1 in
+nums x nums
+---
+(0 x 0) |
+(0 x 1) |
+(1 x 0) |
+(1 x 1)
+
+let nums = 0 | 1 in
+let nums = nums x nums in
+nums x nums
+---
+(0 x 0 x 0 x 0) |
+(0 x 0 x 0 x 1) |
+(0 x 0 x 1 x 0) |
+(0 x 0 x 1 x 1) |
+(0 x 1 x 0 x 0) |
+(0 x 1 x 0 x 1) |
+(0 x 1 x 1 x 0) |
+(0 x 1 x 1 x 1) |
+(1 x 0 x 0 x 0) |
+(1 x 0 x 0 x 1) |
+(1 x 0 x 1 x 0) |
+(1 x 0 x 1 x 1) |
+(1 x 1 x 0 x 0) |
+(1 x 1 x 0 x 1) |
+(1 x 1 x 1 x 0) |
+(1 x 1 x 1 x 1)
+
+none
+---
+none
+
+some
+---
+some
+
+none & some
+---
+none
+
+none | some
+---
+some
+
+!some
+---
+none
+
+!none
+---
+some
+
+!("apples" x "oranges")
+---
+none
+
+none x "apples"
+---
+none
+
+some x "apples"
+---
+("apples")
+
+(some x "apples") | (none x "oranges")
+---
+("apples")
+
+let texture = "crunchy" in
+((texture "crunchy") x "apples") | (!(texture "crunchy") x "oranges")
+---
+("apples")
+
+let texture = "crunchy" in
+when texture "crunchy" then "apples"
+---
+("apples")
+
+let texture = "squishy" in
+when texture "crunchy" then "apples"
+---
+none
+
+let texture = "crunchy" in
+if texture "crunchy" then "apples" else "oranges"
+---
+("apples")
+
+(1 | 2) = (1 | 2)
+---
+some
+
+(1 | 2) = (2 | 3)
+---
+none
+
+(1 | 2) = (2 | 1)
+---
+some
+
+"apples" "oranges"
+---
+none
+
+"apples" "apples"
+---
+some
+
+let colors = "apples" x "red" | "apples" x "green" | "oranges" x "orange" in
+colors "apples"
+---
+("green") |
+("red")
+
+let colors = "apples" x "red" | "apples" x "green" | "oranges" x "orange" in
+colors "bananas"
+---
+none
+
+let colors = "apples" x "red" | "apples" x "green" | "oranges" x "orange" in
+colors ("apples" | "oranges" | "bananas")
+---
+("green") |
+("orange") |
+("red")
+
+let colors = "apples" x "red" | "apples" x "green" | "oranges" x "orange" in
+colors "apples" "red"
+---
+some
+
+let colors = "apples" x "red" | "apples" x "green" | "oranges" x "orange" in
+colors "apples" "orange"
+---
+none
+
+let colors = "apples" x "red" | "apples" x "green" | "oranges" x "orange" in
+colors "apples" ("red" | "orange")
+---
+some
+
+let colors = "apples" x "red" | "apples" x "green" | "oranges" x "orange" in
+colors ("apples" x "red" | "bananas" x "purple")
+---
+some
+
+let colors = "apples" x "red" | "apples" x "green" | "oranges" x "orange" in
+"apples" colors
+---
+("green") |
+("red")
+
+let colors = "apples" x "red" | "apples" x "green" | "oranges" x "orange" in
+let fancy = "red" x "scarlet" | "red" x "crimson" | "green" x "emerald" in
+"apples" colors fancy
+---
+("crimson") |
+("emerald") |
+("scarlet")
+
+let inc = a -> a + 1 in
+inc 0
+---
+(1)
+
+let inc = a -> a + 1 in
+0 inc inc inc
+---
+(3)
+
+a -> a + 1
+---
+a -> a + 1
+---
+error
+
+let inc = a -> a + 1 in
+let inc2 = a -> a + 2 in
+(inc x inc2) 0 1 2
+---
+(4)
+
+let colors = "apples" x "red" | "apples" x "green" | "oranges" x "orange" in
+colors (fruit color -> color x fruit)
+---
+("green" x "apples") |
+("orange" x "oranges") |
+("red" x "apples")
+
+let colors = "apples" x "red" | "apples" x "green" | "oranges" x "orange" in
+colors (fruit color -> color)
+---
+("green") |
+("orange") |
+("red")
+
+let colors = "apples" x "red" | "apples" x "green" | "oranges" x "orange" in
+colors (fruit -> some)
+---
+("green") |
+("orange") |
+("red")
+
+let colors = "apples" x "red" | "apples" x "green" | "oranges" x "orange" in
+colors (fruit -> none)
+---
+none
+
+(fruit -> none) = none
+---
+some
+
+let employees = "alice" | "bob" in
+let departments = "alice" x "engineering" | "bob" x "marketing" | "eve" x "espionage" in
+let salaries = "alice" x 10000 | "bob" x 10000 in
+(employees x departments x salaries)
+  (name name2 department name3 salary ->
+    when (name name2) & (name name3) & (department "marketing") then
+      name x salary)
+---
+("bob" x 10000)
+
+let employees = "alice" | "bob" in
+let departments = "alice" x "engineering" | "bob" x "marketing" | "eve" x "espionage" in
+let salaries = "alice" x 10000 | "bob" x 10000 in
+employees (name ->
+  when (departments name "marketing") then
+    name x (salaries name))
+---
+("bob" x 10000)

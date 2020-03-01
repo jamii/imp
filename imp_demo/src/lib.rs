@@ -122,10 +122,13 @@ fn render(value: &Value) -> Node {
                                 Node::tag("code").child(Node::text(&format!("{}", scalar))),
                             ));
                 }
-                table_row =
-                    table_row.child(Node::tag("td").style("color", "lightGrey").child(
-                        Node::tag("code").child(Node::text(if r == 0 { ")" } else { ") |" })),
-                    ));
+                table_row = table_row.child(Node::tag("td").style("color", "lightGrey").child(
+                    Node::tag("code").child(Node::text(if r == (set.len() - 1) {
+                        ")"
+                    } else {
+                        ") |"
+                    })),
+                ));
                 table = table.child(table_row);
             }
             table

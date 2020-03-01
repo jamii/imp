@@ -1,0 +1,29 @@
+?(a -> 1)
+---
+error
+
+?(a -> a 1)
+---
+error
+---
+(1)
+
+?(a -> (a = 1) | (a = 2))
+---
+error
+---
+(1) |
+(2)
+
+?(a -> (a = 1) & (a = 2))
+---
+error
+---
+none
+
+let departments = "alice" x "engineering" | "bob" x "marketing" | "eve" x "espionage" in
+?(name -> departments name "marketing")
+---
+error
+---
+("bob")

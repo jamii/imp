@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+
+set -ex
+
+cargo run -p imp_tests -- run_value_tests imp_tests/value_tests/*

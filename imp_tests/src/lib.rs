@@ -1,9 +1,94 @@
 #![feature(box_syntax)]
+#![feature(box_patterns)]
 
 use imp_language::*;
 use std::fs::File;
 use std::io::prelude::*;
 use walkdir::WalkDir;
+
+fn display_result<T, E>(result: &Result<T, E>) -> String
+where
+    T: std::fmt::Display,
+    E: std::fmt::Display,
+{
+    match result {
+        Ok(ok) => format!("Ok({})", ok),
+        Err(err) => format!("Err({})", err),
+    }
+}
+
+pub fn run_value_tests(path: &str, input: &str) {
+    for test in input.split("\n\n") {
+        if test.starts_with("#") {
+            // comment
+            continue;
+        }
+        let mut parts = test.split("---").peekable();
+        let input = parse(parts.next().unwrap()).unwrap();
+        let looped_expected = parse(parts.next().unwrap()).unwrap();
+        let flat_expected = parts
+            .next()
+            .map(|s| parse(s).unwrap())
+            .unwrap_or(looped_expected.clone());
+        let looped_output = eval_looped(input.clone(), &mut vec![]).map(|(_, value)| value);
+        let flat_output = eval_flat(input, &mut vec![]).map(|(_, value)| Value::Set(value));
+        run_value_test(path, test, "Looped", looped_output, looped_expected);
+        run_value_test(path, test, "Flat", flat_output, flat_expected);
+    }
+}
+
+fn run_value_test(
+    path: &str,
+    test: &str,
+    kind: &str,
+    output: Result<Value, String>,
+    expected: Expression,
+) {
+    match &expected {
+        // error
+        Expression::Name(name) if name == "error" => {
+            assert!(
+                output.is_err(),
+                "{} eval produced wrong output.\nPath: {}\nTest: {}\nExpected: Err(_)\nActual: {}",
+                kind,
+                path,
+                test,
+                display_result(&output)
+            );
+        }
+        // error "some error message"
+        Expression::Apply(
+            box Expression::Name(name),
+            box Expression::Scalar(Scalar::String(error)),
+        ) if name == "error" => {
+            let expected_output = Err(error.clone());
+            assert_eq!(
+                output,
+                expected_output,
+                "{} eval produced wrong output.\nPath: {}\nTest: {}\nExpected: {}\nActual: {}",
+                kind,
+                path,
+                test,
+                display_result(&expected_output),
+                display_result(&output)
+            );
+        }
+        // value
+        _ => {
+            let expected_output = Ok(eval_looped(expected, &mut vec![]).unwrap().1);
+            assert_eq!(
+                output,
+                expected_output,
+                "{} eval produced wrong output.\nPath: {}\nTest: {}\nExpected: {}\nActual: {}",
+                kind,
+                path,
+                test,
+                display_result(&expected_output),
+                display_result(&output)
+            );
+        }
+    }
+}
 
 pub fn fuzz_parse(data: &[u8]) {
     if let Ok(code) = std::str::from_utf8(data) {
@@ -99,7 +184,7 @@ fn build_expr(data: &[u8]) -> Option<Expression> {
     stack.pop()
 }
 
-pub fn fuzz_artifacts() {
+pub fn fuzz_all() {
     for (path, fun) in &[
         ("../fuzz/artifacts/parse/", fuzz_parse as fn(&[u8])),
         ("../fuzz/artifacts/eval/", fuzz_eval as fn(&[u8])),

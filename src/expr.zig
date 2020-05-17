@@ -1,6 +1,7 @@
 const common = import("./common.zig");
 const value = import("./value.zig");
 
+// ascii, non-empty
 pub const Name = []const u8;
 
 pub const Native = struct {

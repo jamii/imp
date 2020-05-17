@@ -1,5 +1,5 @@
-const expr = @import("expr.zig");
-const value = @import("value.zig");
+const parse = @import("parse.zig");
 
 pub fn main() !void {
+    try parse.test_compiles();
 }

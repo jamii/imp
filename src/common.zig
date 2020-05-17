@@ -105,9 +105,16 @@ fn dumpInner(out_stream: var, indent: u32, thing: var) !void {
     }
 }
 
-pub fn format(allocator: *Allocator, comptime fmt: str, args: var) !str {
+pub fn format(allocator: *Allocator, comptime fmt: []const u8, args: var) ![]const u8 {
     var buf = ArrayList(u8).init(allocator);
     var out = buf.outStream();
     try std.fmt.format(out, fmt, args);
     return buf.items;
+}
+
+pub fn Result(comptime Ok: type, comptime Err: type) type {
+    return union(enum) {
+        Ok: Ok,
+        Err: Err,
+    };
 }

@@ -78,6 +78,7 @@ pub fn deepEqual(a: var, b: @TypeOf(a)) bool {
                 @compileError("cannot deepEqual " ++ @typeName(T));
             }
         },
+        .Void => return true,
         else => @compileError("cannot deepEqual " ++ @typeName(T)),
     }
 }

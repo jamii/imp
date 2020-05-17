@@ -3,31 +3,23 @@ usingnamespace @import("common.zig");
 const expr = @import("./expr.zig");
 
 // TODO https://github.com/ziglang/zig/issues/2647
-pub fn parse(arena: *ArenaAllocator, source: []const u8) !Result(expr.Surface, ParseError) {
+pub fn parse(arena: *ArenaAllocator, source: []const u8, parse_error_info: ParseErrorInfo) ParseError!expr.Surface {
     var parser = Parser{
         .arena = arena,
         .source = source,
         .position = 0,
-        .parse_error = ParseError{
-            .start = 0,
-            .end = 0,
-            .message = "not an error",
-        },
+        .parse_error_info = parse_error_info,
     };
-    if (parser.expr) |expr| {
-        return Result{.Ok = expr};
-    } else |err| {
-        switch (err) {
-            .ParseError => return Result{.Err = ParseError{
-                .position = parser.chars.i,
-                .message = parser.error_message,
-            }},
-            .OutOfMemory => return error.OutOfMemory,
-        }
-    }
+    try parser.expr();
 }
 
-pub const ParseError = struct {
+pub const ParseError = error {
+    ParseError,
+    InvalidUtf8,
+    OutOfMemory,
+};
+
+pub const ParseErrorInfo = struct {
     start: usize,
     end: usize,
     message: []const u8,
@@ -73,7 +65,6 @@ const Token = union(enum) {
 
     // other
     Comment,
-    Whitespace,
     EOF,
 };
 
@@ -87,22 +78,27 @@ const Parser = struct {
     arena: *ArenaAllocator,
     source: []const u8,
     position: usize,
-    parse_error: ParseError,
+    parse_error_info: ParseErrorInfo,
 
-    fn err(self: *Parser, start: usize, end: usize, comptime message: []const u8, args: var) !noreturn {
-        self.parse_error = ParseError{
-            .start = start,
-            .end = end,
-            .message = try format(&self.arena.allocator, message, args),
-        };
-        return error.ParseError;
+    fn parse_error(self: *Parser, start: usize, end: usize, comptime fmt: []const u8, args: var) ParseError {
+        self.parse_error_info.start = start;
+        self.parse_error_info.end = end;
+        if (format(&self.arena.allocator, fmt, args)) |message| {
+            self.parse_error_info.message = message;
+            return error.ParseError;
+        } else |err| {
+            switch (err) {
+                error.OutOfMemory => self.parse_error_info.message = "out of memory",
+            }
+            return err;
+        }
     }
 
     fn expect(self: *Parser, expected: Token) !void {
         const start = self.position;
         const found = self.token().token;
         if (found != expected) {
-            try self.err(start, self.position, "Expected {}, found {}", .{expected, found});
+            return self.parse_error(start, self.position, "Expected {}, found {}", .{expected, found});
         }
     }
 
@@ -117,7 +113,6 @@ const Parser = struct {
         }
         const char = try std.unicode.utf8Decode(self.source[self.position .. self.position + len]);
         self.position += len;
-        dump(char);
         return char;
     }
 
@@ -126,9 +121,9 @@ const Parser = struct {
         if (try self.next_utf8_char()) |char| {
             const ascii_char = @intCast(u8, char & 0b0111_1111);
             if (@as(u21, char) != ascii_char) {
-                try self.err(start, self.position, "unicode characters may only appear in strings and comments", .{});
+                return self.parse_error(start, self.position, "unicode characters may only appear in strings and comments", .{});
             }
-            return char;
+            return ascii_char;
         } else {
             return null;
         }
@@ -140,28 +135,28 @@ const Parser = struct {
         const string_start = self.position - 1;
         while (true) {
             const char_start = self.position;
-            if (self.next_utf8_char()) |char| {
+            if (try self.next_utf8_char()) |char| {
                 switch (char) {
                     '\\' => {
-                        if (self.next_utf8_char()) |escaped_char| {
+                        if (try self.next_utf8_char()) |escaped_char| {
                             switch (escaped_char) {
-                                '"' => try append_char(bytes, escaped_char),
-                                _ => try self.err(char_start, self.position, "invalid string escape", .{}),
+                                '"' => try append_char(&bytes, escaped_char),
+                                else => return self.parse_error(char_start, self.position, "invalid string escape", .{}),
                             }
                         } else {
-                            try self.err(char_start, self.position, "unfinished string escape", .{});
+                            return self.parse_error(char_start, self.position, "unfinished string escape", .{});
                         }
 
                     },
                     '"' => {
                         break;
                     },
-                    _ => {
-                        try append_char(bytes, char);
+                    else => {
+                        try append_char(&bytes, char);
                     },
                 }
             } else {
-                try self.err(string_start, self.position, "unfinished string", .{});
+                return self.parse_error(string_start, self.position, "unfinished string", .{});
             }
         }
         return bytes.items;
@@ -172,9 +167,12 @@ const Parser = struct {
         const start = self.position - 1;
         while (true) {
             const position = self.position;
-            const char = try self.next_ascii_char();
-            if (!std.ascii.isAlpha(char) and !std.ascii.isDigit(char)) {
-                self.position = position;
+            if (try self.next_ascii_char()) |char| {
+                if (!std.ascii.isAlpha(char) and !std.ascii.isDigit(char)) {
+                    self.position = position;
+                    break;
+                }
+            } else {
                 break;
             }
         }
@@ -187,16 +185,19 @@ const Parser = struct {
         // first set of digits
         while (true) {
             const position = self.position;
-            const char = try self.next_ascii_char();
-            if (!std.ascii.isDigit(char)) {
-                self.position = position;
+            if (try self.next_ascii_char()) |char| {
+                if (!std.ascii.isDigit(char)) {
+                    self.position = position;
+                    break;
+                }
+            } else {
                 break;
             }
         }
         // maybe '.'
         const has_decimal_point = point: {
             const position = self.position;
-            if (try self.next_ascii_char() == '.') {
+            if ((try self.next_ascii_char()) orelse 0 == '.') {
                 break :point true;
             } else {
                 self.position = position;
@@ -207,124 +208,129 @@ const Parser = struct {
             // second set of digits
             while (true) {
                 const position = self.position;
-                const char = try self.next_ascii_char();
-                if (!std.ascii.isDigit(char)) {
-                    self.position = position;
+                if (try self.next_ascii_char()) |char| {
+                    if (!std.ascii.isDigit(char)) {
+                        self.position = position;
+                        break;
+                    }
+                } else {
                     break;
                 }
             }
         }
-        return std.fmt.parseFloat(self.source[start..self.position]);
+        return std.fmt.parseFloat(f64, self.source[start..self.position]);
     }
 
     fn next_token(self: *Parser) !Token {
         const start = self.position;
         if (try self.next_ascii_char()) |char1| {
             switch (char1) {
-                '"' => return .{.String = try self.string()},
-                '|' => return .Union,
-                '&' => return .Intersect,
-                'x' => return .Product,
-                '=' => return .Equal,
+                '"' => return Token{.String = try self.tokenize_string()},
+                '|' => return Token{.Union={}},
+                '&' => return Token{.Intersect={}},
+                'x' => return Token{.Product={}},
+                '=' => return Token{.Equal={}},
                 '-' => {
                     const position = self.position;
-                    if (try self.next_ascii_char() == '>') {
-                        return .Abstract;
+                    if ((try self.next_ascii_char()) orelse 0 == '>') {
+                        return Token{.Abstract={}};
                     } else {
                         self.position = position;
-                        return .Minus;
+                        return Token{.Minus={}};
                     }
                 },
-                '#' => return .Annotate,
-                '!' => return .Negate,
-                '{' => return .OpenBlock,
-                '}' => return .CloseBlock,
-                ';' => return .EndLet,
-                ':' => return .Lookup,
-                '+' => return .Plus,
-                '-' => return .Minus,
-                '*' => return .Times,
+                '#' => return Token{.Annotate={}},
+                '!' => return Token{.Negate={}},
+                '{' => return Token{.OpenBlock={}},
+                '}' => return Token{.CloseBlock={}},
+                ';' => return Token{.EndLet={}},
+                ':' => return Token{.Lookup={}},
+                '+' => return Token{.Plus={}},
+                '*' => return Token{.Times={}},
                 '/' => {
                     const position = self.position;
-                    if (try self.next_ascii_char() == '/') {
+                    if ((try self.next_ascii_char()) orelse 0 == '/') {
                         while (true) {
                             // utf8 chars are allowed in comments
-                            const char2 = self.next_utf8_char();
-                            if (char2 == null or char2 == '\n') {
+                            if (try self.next_utf8_char()) |char2| {
+                                if (char2 == '\n') {
+                                    break;
+                                }
+                            } else {
                                 break;
                             }
                         }
-                        return .Comment;
+                        return Token{.Comment={}};
                     } else {
                         self.position = position;
-                        return .Divide;
+                        return Token{.Divide={}};
                     }
                 },
                 '<' => {
                     const position = self.position;
-                    if (try self.next_ascii_char() == '=') {
-                        return .LessThanOrEqual;
+                    if ((try self.next_ascii_char()) orelse 0 == '=') {
+                        return Token{.LessThanOrEqual={}};
                     } else {
                         self.position = position;
-                        return .LessThan;
+                        return Token{.LessThan={}};
                     }
                 },
                 '>' => {
                     const position = self.position;
-                    if (try self.next_ascii_char() == '=') {
-                        return .GreaterThanOrEqual;
+                    if ((try self.next_ascii_char()) orelse 0 == '=') {
+                        return Token{.GreaterThanOrEqual={}};
                     } else {
                         self.position = position;
-                        return .GreaterThan;
+                        return Token{.GreaterThan={}};
                     }
                 },
                 else => {
                     const ascii_char1 = @intCast(u8, char1 & 0b0111_1111);
                     if (char1 != @as(u21, ascii_char1)) {
-                        try self.err(start, self.position, "unicode characters may only appear in strings and comments", .{});
-                    } else if (std.ascii.isWhiteSpace(ascii_char1)) {
+                        return self.parse_error(start, self.position, "unicode characters may only appear in strings and comments", .{});
+                    } else if (std.ascii.isSpace(ascii_char1)) {
                         return self.next_token();
                     } else if (std.ascii.isAlpha(ascii_char1)) {
                         const name = try self.tokenize_name();
-                        switch (name) {
-                            "none" => return .None,
-                            "some" => return .Some,
-                            "when" => return .When,
-                            "seal" => return .Seal,
-                            "unseal" => return .Unseal,
-                            "if" => return .If,
-                            "let" => return .Let,
-                            else => return .{.Name = name},
-                        }
+                        if (meta.deepEqual(name, "none")) return Token{.None={}};
+                        if (meta.deepEqual(name, "some")) return Token{.Some={}};
+                        if (meta.deepEqual(name, "when")) return Token{.When={}};
+                        if (meta.deepEqual(name, "seal")) return Token{.Seal={}};
+                        if (meta.deepEqual(name, "unseal")) return Token{.Unseal={}};
+                        if (meta.deepEqual(name, "if")) return Token{.If={}};
+                        if (meta.deepEqual(name, "let")) return Token{.Let={}};
+                        return Token{.Name = name};
                     } else if (std.ascii.isDigit(ascii_char1)) {
-                        return .{.Number = try self.tokenize_number()};
+                        return Token{.Number = try self.tokenize_number()};
                     } else {
-                        try self.err(start, self.position, "invalid token", .{});
+                        return self.parse_error(start, self.position, "invalid token", .{});
                     }
                 }
             }
         } else {
-            return .EOF;
+            return Token{.EOF={}};
         }
     }
 };
 
 test "compiles" {
-    test_compiles();
-}
-
-pub fn test_compiles() !void {
     var arena = ArenaAllocator.init(std.testing.allocator);
-    const source = "1.3 + 1";
+    defer arena.deinit();
+    const source =
+        \\ 1.3 + "foo\"bar"
+    ;
     var parser = Parser{
         .arena = &arena,
         .source = source,
         .position = 0,
-        .parse_error = ParseError{
+        .parse_error_info = ParseErrorInfo{
             .start = 0,
             .end = 0,
             .message = "not an error",
         },
     };
     expect(meta.deepEqual(try parser.next_token(), Token{.Number = 1.3}));
+    expect(meta.deepEqual(try parser.next_token(), Token.Plus));
+
+    expect(meta.deepEqual(try parser.next_token(), Token{.String = "foo\"bar"}));
 }

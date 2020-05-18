@@ -4,6 +4,8 @@ const value = import("./value.zig");
 // ascii, non-empty
 pub const Name = []const u8;
 
+pub const BoxId = u64;
+
 pub const Native = struct {
     name: Name,
     input_arity: usize,
@@ -24,31 +26,41 @@ pub const Surface = union(enum) {
     Product: Pair,
     Equal: Pair,
     Name: Name,
-    When: Pair,
+    When: When,
     Abstract: Abstract,
     Apply: Pair,
-    Native: Native,
-    Seal: *const Surface,
-    Unseal: *const Surface,
+    Box: *const Surface,
     Annotate: Annotate,
 
     Negate: *const Surface,
     If: If,
-    Block: Block,
-    Lookup: Lookup,
+    Let: Let,
+
+    // Struct: Struct,
+    // Lookup: Lookup,
 
     pub const Pair = struct {
         left: *const Surface,
         right: *const Surface,
     };
 
+    pub const When = struct {
+        condition: *const Surface,
+        true_branch: *const Surface,
+    };
+
     pub const Abstract = struct {
-        name: Name,
+        args: []const Arg,
         body: *const Surface,
     };
 
+    pub const Arg = struct {
+        name: Name,
+        unbox: bool,
+    };
+
     pub const Annotate = struct {
-        annotation: str,
+        annotation: *const Surface,
         body: *const Surface,
     };
 
@@ -58,20 +70,11 @@ pub const Surface = union(enum) {
         false_branch: *const Surface,
     };
 
-    pub const Block = struct {
-        lets: []const Let,
-        body: ?*const Surface,
-    };
-
     pub const Let = struct {
         name: Name,
         value: *const Surface,
+        body: *const Surface,
     };
-
-    pub const Lookup = struct {
-        value: *const Surface,
-        name: Name,
-    }
 };
 
 pub const Core = union(enum) {
@@ -83,34 +86,35 @@ pub const Core = union(enum) {
     Product: Pair,
     Equal: Pair,
     Name: NameIx,
+    Native: Native,
     When: Pair,
     Abstract: Abstract,
     Apply: Pair,
     Native: Native,
-    Seal: Seal,
-    Unseal: *const Core,
+    Box: Box,
+    Unbox: *const Core,
     Annotate: Annotate,
-
-    pub const NameIx = usize;
 
     pub const Pair = struct {
         left: *const Core,
         right: *const Core,
     };
 
+    pub const NameIx = usize;
+
     pub const Abstract = struct {
-        name: Name,
+        unbox: bool,
         body: *const Core,
     };
 
-    pub const Seal = struct {
-        id: u64,
+    pub const Box = struct {
+        id: BoxId,
         scope: []const NameIx,
         body: *const Core,
     };
 
     pub const Annotate = struct {
-        annotation: str,
+        annotation: *const Core,
         body: *const Core,
     };
 };

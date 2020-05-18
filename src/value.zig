@@ -4,11 +4,11 @@ const expr = @import("./expr.zig");
 pub const Scalar = union(enum) {
     String: []const u8, // valid utf8
     Number: f64,
-    Seal: Seal,
+    Box: Box,
 };
 
-pub const Seal = struct {
-    id: u64,
+pub const Box = struct {
+    id: expr.BoxId,
     scope: Tuple,
 };
 

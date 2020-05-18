@@ -64,12 +64,12 @@ pub const ParseErrorInfo = struct {
     end: usize,
     message: []const u8,
 
-    fn init() -> ParseErrorInfo {
+    fn init() ParseErrorInfo {
         return ParseErrorInfo{
             .start = 0,
             .end = 0,
             .message = "not an error",
-        }
+        };
     }
 };
 
@@ -115,11 +115,12 @@ const Token = union(enum) {
     EOF,
 
     fn binds_tighter_than(self: Token, other: Token) bool {
-        switch (self) {
+        return switch (self) {
             .Lookup => (other != .Lookup),
             .Product => (other == .Union),
-            .Times, Divide => (other == .Plus) or (other == .Minus),
-        }
+            .Times, .Divide => (other == .Plus) or (other == .Minus),
+            else => false,
+        };
     }
 };
 
@@ -396,7 +397,7 @@ const Parser = struct {
                 const expr = try self.parse_expr();
                 _ = try self.expect(.CloseGroup);
                 return expr;
-            }
+            },
             // "none"
             .None => return syntax.Expr{.None={}},
             // "some"
@@ -413,7 +414,7 @@ const Parser = struct {
                 _ = try self.expect(.Then);
                 const true_branch = try self.parse_expr();
                 return syntax.Expr{.When=.{.cond=cond,.true_branch=true_branch}};
-            }
+            },
             // "\" arg+ "->" expr
             .AbstractArgs => {
                 var args = ArrayList(syntax.Arg).init(&self.arena.allocator);
@@ -427,7 +428,7 @@ const Parser = struct {
                             const name = (try self.expect(.Name)).Name;
                             try args.append(.{.name=name, .unbox=true});
                             _ = try self.expect(.CloseBox);
-                        }
+                        },
                         .AbstractBody => break,
                         else => return self.parse_error(arg_start, "Expected name or [ or ->, found {}", .{arg_token}),
                     }
@@ -437,24 +438,24 @@ const Parser = struct {
                 }
                 const body = try self.parse_expr();
                 return syntax.Expr{.Abstract=.{.args=args.items, .body=body}};
-            }
+            },
             // "[" expr "]"
             .OpenBox => {
                 const expr = try self.parse_expr();
                 _ = try self.expect(.CloseBox);
                 return syntax.Expr{.Box=expr};
-            }
+            },
             // "#" name expr
             .Annotate => {
                 const name = (try self.expect(.Name)).Name;
                 const body = try self.parse_expr();
                 return syntax.Expr{.Annotate=.{.name=name, .body=body}};
-            }
+            },
             // "!" expr
             .Negate => {
                 const expr = try self.parse_expr();
                 return syntax.Expr{.Negate=expr};
-            }
+            },
             // "if" expr "then" expr "else" expr
             .If => {
                 const cond = try self.parse_expr();
@@ -463,7 +464,7 @@ const Parser = struct {
                 _ = try self.expect(.Else);
                 const false_branch = try self.parse_expr();
                 return syntax.Expr{.If=.{.cond=cond, .true_branch=true_branch, .false_branch=false_branch}};
-            }
+            },
             // "let" name "=" expr "in" expr
             .Let => {
                 const name = (try self.expect(.Name)).Name;
@@ -471,12 +472,12 @@ const Parser = struct {
                 const value = try self.parse_expr();
                 _ = try self.expect(.In);
                 const body = try self.parse_expr();
-            }
+            },
             // otherwise not an expression but might be rhs of apply or binop so don't error yet
             else => {
                 self.position = start;
                 return null;
-            }
+            },
         }
     }
 
@@ -537,7 +538,7 @@ const Parser = struct {
                 } else {
                     return self.parse_error(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
                 }
-            }
+            },
 
             // expr ":" name
             .Lookup => {
@@ -548,7 +549,7 @@ const Parser = struct {
                     self.position = op_start;
                     return left;
                 } else {
-                    return self.parse_error(start "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
+                    return self.parse_error(start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
                 }
             },
 
@@ -572,7 +573,7 @@ const Parser = struct {
                     self.position = op_start;
                     return left;
                 }
-            }
+            },
         }
     }
 
@@ -596,6 +597,33 @@ test "compiles" {
     expect(meta.deepEqual(try parser.next_op(), Token{.Number = 1.3}));
     expect(meta.deepEqual(try parser.next_op(), Token.Plus));
     expect(meta.deepEqual(try parser.next_op(), Token{.String = "foo\"bar"}));
+}
+
+test "binding partial order" {
+    var tokens = ArrayList(Token).init(std.testing.allocator);
+    defer tokens.deinit();
+
+    // generate examples of all posible tokens
+    inline for (@typeInfo(Token).Union.fields) |fti| {
+        try tokens.append(@unionInit(Token, fti.name, undefined));
+    }
+
+    for (tokens.items) |token1| {
+        // non-reflexive
+        expect(!token1.binds_tighter_than(token1));
+        for (tokens.items) |token2| {
+            // non-symmetric
+            if (token1.binds_tighter_than(token2)) {
+                expect(!token2.binds_tighter_than(token1));
+            }
+            for (tokens.items) |token3| {
+                // transitive
+                if (token1.binds_tighter_than(token2) and token2.binds_tighter_than(token3)) {
+                    expect(token1.binds_tighter_than(token3));
+                }
+            }
+        }
+    }
 }
 
 test "parse" {

@@ -104,9 +104,9 @@ const Token = union(enum) {
     Lookup,
 
     // natives
-    Plus,
-    Minus,
-    Times,
+    Add,
+    Subtract,
+    Multiply,
     Divide,
     LessThan,
     LessThanOrEqual,
@@ -123,7 +123,7 @@ const Token = union(enum) {
         return switch (self) {
             .Lookup => (other != .Lookup),
             .Product => (other == .Union),
-            .Times, .Divide => (other == .Plus) or (other == .Minus),
+            .Multiply, .Divide => (other == .Add) or (other == .Subtract),
             else => false,
         };
     }
@@ -330,7 +330,7 @@ const Parser = struct {
                         return Token{.AbstractBody={}};
                     } else {
                         self.position = position;
-                        return Token{.Minus={}};
+                        return Token{.Subtract={}};
                     }
                 },
                 '[' => return Token{.OpenBox={}},
@@ -338,8 +338,8 @@ const Parser = struct {
                 '#' => return Token{.Annotate={}},
                 '!' => return Token{.Negate={}},
                 ':' => return Token{.Lookup={}},
-                '+' => return Token{.Plus={}},
-                '*' => return Token{.Times={}},
+                '+' => return Token{.Add={}},
+                '*' => return Token{.Multiply={}},
                 '/' => {
                     const position = self.position;
                     if ((try self.next_ascii_char()) orelse 0 == '/') {
@@ -529,7 +529,7 @@ const Parser = struct {
             const op = try self.next_token();
             switch (op) {
                 // expr binop expr
-                .Union, .Intersect, .Product, .Equal, .Plus, .Minus, .Times, .Divide, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual => {
+                .Union, .Intersect, .Product, .Equal, .Add, .Subtract, .Multiply, .Divide, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual => {
                     if (prev_op == null or op.binds_tighter_than(prev_op.?)) {
                         const right = try self.parse_expr_outer(op);
                         left = try switch (op) {
@@ -540,9 +540,9 @@ const Parser = struct {
                             .Equal => self.store(.{.Equal = .{.left=left, .right=right}}),
 
                             // native functions
-                            .Plus => self.store_apply_op("+", left, right),
-                            .Minus => self.store_apply_op("-", left, right),
-                            .Times => self.store_apply_op("*", left, right),
+                            .Add => self.store_apply_op("+", left, right),
+                            .Subtract => self.store_apply_op("-", left, right),
+                            .Multiply => self.store_apply_op("*", left, right),
                             .Divide => self.store_apply_op("/", left, right),
                             .LessThan => self.store_apply_op("<", left, right),
                             .LessThanOrEqual => self.store_apply_op("<=", left, right),
@@ -615,7 +615,7 @@ test "compiles" {
         .parse_error_info = ParseErrorInfo.init(),
     };
     expect(meta.deepEqual(try parser.next_op(), Token{.Number = 1.3}));
-    expect(meta.deepEqual(try parser.next_op(), Token.Plus));
+    expect(meta.deepEqual(try parser.next_op(), Token.Add));
     expect(meta.deepEqual(try parser.next_op(), Token{.String = "foo\"bar"}));
 }
 
@@ -757,13 +757,19 @@ test "parse" {
     try test_parse_error(
         \\a * b / c
             ,
-        \\Ambiguous precedence for Token{ .Times = void } vs Token{ .Divide = void }
+        \\Ambiguous precedence for Token{ .Multiply = void } vs Token{ .Divide = void }
     );
 
     try test_parse_error(
         \\a | b c
             ,
         \\Ambiguous precedence for Token{ .Union = void } vs Token{ .Apply = void }
+    );
+
+    try test_parse_error(
+        \\a + b | c
+            ,
+        \\Ambiguous precedence for Token{ .Add = void } vs Token{ .Union = void }
     );
 
     try test_parse(

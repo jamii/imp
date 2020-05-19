@@ -31,7 +31,11 @@ pub fn DeepHashSet(comptime K: type) type {
     return DeepHashMap(K, void);
 }
 
-pub fn dump(thing: var) void {
+pub const DumpError = error{
+    OutOfMemory,
+};
+
+pub fn dump(thing: var) DumpError!void {
     const held = std.debug.getStderrMutex().acquire();
     defer held.release();
     const my_stderr = std.debug.getStderrStream();
@@ -39,70 +43,89 @@ pub fn dump(thing: var) void {
     my_stderr.writeAll("\n") catch return;
 }
 
-fn dumpInner(out_stream: var, indent: u32, thing: var) !void {
-    const ti = @typeInfo(@TypeOf(thing));
-    switch (ti) {
-        .Struct => |sti| {
-            try out_stream.writeAll(@typeName(@TypeOf(thing)));
-            try out_stream.writeAll("{\n");
-            inline for (sti.fields) |field| {
-                try out_stream.writeByteNTimes(' ', indent + 4);
-                try std.fmt.format(out_stream, ".{} = ", .{field.name});
-                try dumpInner(out_stream, indent + 4, @field(thing, field.name));
-                try out_stream.writeAll(",\n");
-            }
-            try out_stream.writeByteNTimes(' ', indent);
-            try out_stream.writeAll("}");
-        },
-        .Array => |ati| {
-            if (ati.child == u8) {
-                try std.fmt.format(out_stream, "\"{s}\"", .{thing});
-            } else {
-                try std.fmt.format(out_stream, "[{}]{}[\n", .{ ati.len, @typeName(ati.child) });
-                for (thing) |elem| {
+pub fn dumpInto(out_stream: var, indent: u32, thing: var) DumpError!void {
+        const ti = @typeInfo(@TypeOf(thing));
+        switch (ti) {
+            .Pointer => |pti| {
+                switch (pti.size) {
+                    .One => {
+                        try out_stream.writeAll("&");
+                        try dumpInto(out_stream, indent, thing.*);
+                    },
+                    .Many => {
+                        // bail
+                        try std.fmt.format(out_stream, "{}", .{thing});
+                    },
+                    .Slice => {
+                        if (pti.child == u8) {
+                            try std.fmt.format(out_stream, "\"{s}\"", .{thing});
+                        } else {
+                            try std.fmt.format(out_stream, "[]{}[\n", .{@typeName(pti.child)});
+                            for (thing) |elem| {
+                                try out_stream.writeByteNTimes(' ', indent + 4);
+                                try dumpInto(out_stream, indent + 4, elem);
+                                try out_stream.writeAll(",\n");
+                            }
+                            try out_stream.writeByteNTimes(' ', indent);
+                            try out_stream.writeAll("]");
+                        }
+                    },
+                    .C => {
+                        // bail
+                        try std.fmt.format(out_stream, "{}", .{thing});
+                    },
+                }
+            },
+            .Array => |ati| {
+                if (ati.child == u8) {
+                    try std.fmt.format(out_stream, "\"{s}\"", .{thing});
+                } else {
+                    try std.fmt.format(out_stream, "[{}]{}[\n", .{ ati.len, @typeName(ati.child) });
+                    for (thing) |elem| {
+                        try out_stream.writeByteNTimes(' ', indent + 4);
+                        try dumpInto(out_stream, indent + 4, elem);
+                        try out_stream.writeAll(",\n");
+                    }
+                    try out_stream.writeByteNTimes(' ', indent);
+                    try out_stream.writeAll("]");
+                }
+            },
+            .Struct => |sti| {
+                try out_stream.writeAll(@typeName(@TypeOf(thing)));
+                try out_stream.writeAll("{\n");
+                inline for (sti.fields) |field| {
                     try out_stream.writeByteNTimes(' ', indent + 4);
-                    try dumpInner(out_stream, indent + 4, elem);
+                    try std.fmt.format(out_stream, ".{} = ", .{field.name});
+                    try dumpInto(out_stream, indent + 4, @field(thing, field.name));
                     try out_stream.writeAll(",\n");
                 }
                 try out_stream.writeByteNTimes(' ', indent);
-                try out_stream.writeAll("]");
-            }
-        },
-        .Pointer => |pti| {
-            switch (pti.size) {
-                .One => {
-                    try out_stream.writeAll("&");
-                    try dumpInner(out_stream, indent, thing.*);
-                },
-                .Many => {
-                    // bail
-                    try std.fmt.format(out_stream, "{}", .{thing});
-                },
-                .Slice => {
-                    if (pti.child == u8) {
-                        try std.fmt.format(out_stream, "\"{s}\"", .{thing});
-                    } else {
-                        try std.fmt.format(out_stream, "[]{}[\n", .{@typeName(pti.child)});
-                        for (thing) |elem| {
-                            try out_stream.writeByteNTimes(' ', indent + 4);
-                            try dumpInner(out_stream, indent + 4, elem);
-                            try out_stream.writeAll(",\n");
+                try out_stream.writeAll("}");
+            },
+            .Union => |uti| {
+                if (uti.tag_type) |tag_type| {
+                    try out_stream.writeAll(@typeName(@TypeOf(thing)));
+                    try out_stream.writeAll("{\n");
+                    inline for (uti.fields) |fti| {
+                        const field = fti.enum_field.?;
+                        if (@enumToInt(std.meta.activeTag(thing)) == field.value) {
+                            try std.fmt.format(out_stream, ".{} = ", .{field.name});
+                            try dumpInto(out_stream, indent + 4, @field(thing, field.name));
+                            try out_stream.writeAll("\n");
+                            try out_stream.writeByteNTimes(' ', indent);
+                            try out_stream.writeAll("}");
                         }
-                        try out_stream.writeByteNTimes(' ', indent);
-                        try out_stream.writeAll("]");
                     }
-                },
-                .C => {
+                } else {
                     // bail
                     try std.fmt.format(out_stream, "{}", .{thing});
-                },
-            }
-        },
-        else => {
-            // bail
-            try std.fmt.format(out_stream, "{}", .{thing});
-        },
-    }
+                }
+            },
+            else => {
+                // bail
+                try std.fmt.format(out_stream, "{}", .{thing});
+            },
+        }
 }
 
 pub fn format(allocator: *Allocator, comptime fmt: []const u8, args: var) ![]const u8 {
@@ -117,4 +140,8 @@ pub fn Result(comptime Ok: type, comptime Err: type) type {
         Ok: Ok,
         Err: Err,
     };
+}
+
+pub fn tagEqual(a: var, b: @TypeOf(a)) bool {
+    return std.meta.activeTag(a) == std.meta.activeTag(b);
 }

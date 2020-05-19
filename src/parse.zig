@@ -43,21 +43,24 @@ const syntax = @import("./syntax.zig");
 //   "<="
 
 // TODO https://github.com/ziglang/zig/issues/2647
-pub fn parse(arena: *ArenaAllocator, source: []const u8, parse_error_info: ParseErrorInfo) ParseError ! syntax.Expr {
+pub fn parse(arena: *ArenaAllocator, source: []const u8, parse_error_info: ParseErrorInfo) ParseError ! *const syntax.Expr {
     var parser = Parser{
         .arena = arena,
         .source = source,
         .position = 0,
         .parse_error_info = parse_error_info,
     };
-    try parser.expr();
+    return parser.parse_expr();
 }
 
 pub const ParseError = error {
     ParseError,
-    InvalidUtf8,
     OutOfMemory,
-};
+    Utf8InvalidStartByte,
+    InvalidUtf8,
+    InvalidCharacter,
+}
+|| @TypeOf(std.unicode.utf8Decode).ReturnType.ErrorSet;
 
 pub const ParseErrorInfo = struct {
     start: usize,
@@ -126,7 +129,9 @@ const Token = union(enum) {
 
 fn append_char(bytes: *ArrayList(u8), char: u21) !void {
     var char_bytes = [4]u8{0,0,0,0};
-    const len = try std.unicode.utf8Encode(char, &char_bytes);
+    const len = std.unicode.utf8Encode(char, &char_bytes)
+        // we got this char from utf8Decode so it must be legit
+        catch unreachable;
     try bytes.appendSlice(char_bytes[0..len]);
 }
 
@@ -135,6 +140,19 @@ const Parser = struct {
     source: []const u8,
     position: usize,
     parse_error_info: ParseErrorInfo,
+
+    fn store(self: *Parser, expr: syntax.Expr) ! *const syntax.Expr {
+        const stored_expr = try self.arena.allocator.create(syntax.Expr);
+        stored_expr.* = expr;
+        return stored_expr;
+    }
+
+    fn store_apply_op(self: *Parser, name: syntax.Name, left: *const syntax.Expr, right: *const syntax.Expr) ! *const syntax.Expr {
+        const expr1 = try self.store(.{.Name=name});
+        const expr2 = try self.store(.{.Apply=.{.left=expr1, .right=left}});
+        const expr3 = try self.store(.{.Apply=.{.left=expr2, .right=right}});
+        return expr3;
+    }
 
     fn parse_error(self: *Parser, start: usize, comptime fmt: []const u8, args: var) ParseError {
         self.parse_error_info.start = start;
@@ -379,7 +397,7 @@ const Parser = struct {
 
     fn expect(self: *Parser, expected: @TagType(Token)) ! Token {
         const start = self.position;
-        const found = self.next_token();
+        const found = try self.next_token();
         if (std.meta.activeTag(found) != expected) {
             return self.parse_error(start, "Expected {}, found {}", .{expected, found});
         } else {
@@ -388,9 +406,9 @@ const Parser = struct {
     }
 
     // returns null if this isn't the start of an expression
-    fn parse_expr_inner_maybe(self: *Parser) ! ?syntax.Expr {
+    fn parse_expr_inner_maybe(self: *Parser) ParseError ! ?*const syntax.Expr {
         const start = self.position;
-        const token = self.next_token();
+        const token = try self.next_token();
         switch (token) {
             // "(" expr ")"
             .OpenGroup => {
@@ -399,21 +417,21 @@ const Parser = struct {
                 return expr;
             },
             // "none"
-            .None => return syntax.Expr{.None={}},
+            .None => return self.store(.None),
             // "some"
-            .Some => return syntax.Expr{.None={}},
+            .Some => return self.store(.Some),
             // number
-            .Number => |number| return syntax.Expr{.Scalar=.{.Number=number}},
+            .Number => |number| return self.store(.{.Scalar=.{.Number=number}}),
             // string
-            .String => |string| return syntax.Expr{.Scalar=.{.String=string}},
+            .String => |string| return self.store(.{.Scalar=.{.String=string}}),
             // name
-            .Name => |name| return syntax.Expr{.Name=name},
+            .Name => |name| return self.store(.{.Name=name}),
             // "when" expr "then" expr
             .When => {
-                const cond = try self.parse_expr();
+                const condition = try self.parse_expr();
                 _ = try self.expect(.Then);
                 const true_branch = try self.parse_expr();
-                return syntax.Expr{.When=.{.cond=cond,.true_branch=true_branch}};
+                return self.store(.{.When=.{.condition=condition,.true_branch=true_branch}});
             },
             // "\" arg+ "->" expr
             .AbstractArgs => {
@@ -437,33 +455,33 @@ const Parser = struct {
                     return self.parse_error(start, "Abstract must have at least one arg", .{});
                 }
                 const body = try self.parse_expr();
-                return syntax.Expr{.Abstract=.{.args=args.items, .body=body}};
+                return self.store(.{.Abstract=.{.args=args.items, .body=body}});
             },
             // "[" expr "]"
             .OpenBox => {
                 const expr = try self.parse_expr();
                 _ = try self.expect(.CloseBox);
-                return syntax.Expr{.Box=expr};
+                return self.store(.{.Box=expr});
             },
             // "#" name expr
             .Annotate => {
-                const name = (try self.expect(.Name)).Name;
+                const annotation = (try self.expect(.Name)).Name;
                 const body = try self.parse_expr();
-                return syntax.Expr{.Annotate=.{.name=name, .body=body}};
+                return self.store(.{.Annotate=.{.annotation=annotation, .body=body}});
             },
             // "!" expr
             .Negate => {
                 const expr = try self.parse_expr();
-                return syntax.Expr{.Negate=expr};
+                return self.store(.{.Negate=expr});
             },
             // "if" expr "then" expr "else" expr
             .If => {
-                const cond = try self.parse_expr();
+                const condition = try self.parse_expr();
                 _ = try self.expect(.Then);
                 const true_branch = try self.parse_expr();
                 _ = try self.expect(.Else);
                 const false_branch = try self.parse_expr();
-                return syntax.Expr{.If=.{.cond=cond, .true_branch=true_branch, .false_branch=false_branch}};
+                return self.store(.{.If=.{.condition=condition, .true_branch=true_branch, .false_branch=false_branch}});
             },
             // "let" name "=" expr "in" expr
             .Let => {
@@ -472,6 +490,7 @@ const Parser = struct {
                 const value = try self.parse_expr();
                 _ = try self.expect(.In);
                 const body = try self.parse_expr();
+                return self.store(.{.Let=.{.name=name, .value=value, .body=body}});
             },
             // otherwise not an expression but might be rhs of apply or binop so don't error yet
             else => {
@@ -482,32 +501,29 @@ const Parser = struct {
     }
 
     // when parsing initial expr there can't be an apply or binop so go ahead and error
-    fn parse_expr_inner(self: *Parser) ! Syntax.Expr {
+    fn parse_expr_inner(self: *Parser) ParseError ! *const syntax.Expr {
         if (try self.parse_expr_inner_maybe()) |expr| {
             return expr;
         } else {
             const start = self.position;
-            const token = try self.token();
+            const token = try self.next_token();
             return self.parse_error(start, "Expected start of expression, found {}", .{token});
         }
     }
 
-    // We're looking at:
+    // we're looking at:
     //   prev_expr prev_op left op right
-    // Possible cases are:
+    // possible cases are:
     //   * prev_op==null or op.binds_tighter_than(prev_op):
     //     prev_expr prev_op (left op right)
     //   * prev_op==op or prev_op.binds_tighter_than(op):
     //     (prev_expr prev_op left)
     //   * otherwise:
     //     parse_error "ambiguous precedence"
-    fn parse_expr_outer(self: *Parser, prev_op: ?@TagType(Token)) ! Syntax.Expr {
+    fn parse_expr_outer(self: *Parser, prev_op: ?Token) ParseError ! *const syntax.Expr {
         const left = try self.parse_expr_inner();
-        var op: Token = undefined;
-        var right: Expr = undefined;
-
         const op_start = self.position;
-        const op = self.next_token();
+        const op = try self.next_token();
         switch (op) {
             // expr binop expr
             .Union, .Intersect, .Product, .Equal, .Plus, .Minus, .Times, .Divide, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual => {
@@ -515,24 +531,24 @@ const Parser = struct {
                     const right = try self.parse_expr_outer(op);
                     switch (op) {
                         // core ops
-                        .Union => return syntax.Expr{.Union = .{.left=left, .right=right}},
-                        .Intersect => return syntax.Expr{.Intersect = .{.left=left, .right=right}},
-                        .Product => return syntax.Expr{.Product = .{.left=left, .right=right}},
-                        .Equal => return syntax.Expr{.Equal = .{.left=left, .right=right}},
+                        .Union => return self.store(.{.Union = .{.left=left, .right=right}}),
+                        .Intersect => return self.store(.{.Intersect = .{.left=left, .right=right}}),
+                        .Product => return self.store(.{.Product = .{.left=left, .right=right}}),
+                        .Equal => return self.store(.{.Equal = .{.left=left, .right=right}}),
 
                         // native functions
-                        .Plus => return syntax.Expr.apply_name("+", .{left, right}),
-                        .Minus => return syntax.Expr.apply_name("-", .{left, right}),
-                        .Times => return syntax.Expr.apply_name("*", .{left, right}),
-                        .Divide => return syntax.Expr.apply_name("/", .{left, right}),
-                        .LessThan => return syntax.Expr.apply_name("<", .{left, right}),
-                        .LessThanOrEqual => return syntax.Expr.apply_name("<=", .{left, right}),
-                        .GreaterThan => return syntax.Expr.apply_name(">", .{left, right}),
-                        .GreaterThanOrEqual => return syntax.Expr.apply_name(">=", .{left, right}),
+                        .Plus => return self.store_apply_op("+", left, right),
+                        .Minus => return self.store_apply_op("-", left, right),
+                        .Times => return self.store_apply_op("*", left, right),
+                        .Divide => return self.store_apply_op("/", left, right),
+                        .LessThan => return self.store_apply_op("<", left, right),
+                        .LessThanOrEqual => return self.store_apply_op("<=", left, right),
+                        .GreaterThan => return self.store_apply_op(">", left, right),
+                        .GreaterThanOrEqual => return self.store_apply_op(">=", left, right),
 
                         else => unreachable,
                     }
-                } else if (prev_op.? == op or prev_op.?.binds_tighter_than(op)) {
+                } else if (tagEqual(prev_op.?, op) or prev_op.?.binds_tighter_than(op)) {
                     self.position = op_start;
                     return left;
                 } else {
@@ -544,12 +560,12 @@ const Parser = struct {
             .Lookup => {
                 if (prev_op == null or op.binds_tighter_than(prev_op.?)) {
                     const name = (try self.expect(.Name)).Name;
-                    return syntax.Expr{.Lookup = .{.value = left, .name = name}};
-                } else if (prev_op.? == op or prev_op.?.binds_tighter_than(op)) {
+                    return self.store(.{.Lookup = .{.value = left, .name = name}});
+                } else if (tagEqual(prev_op.?, op) or prev_op.?.binds_tighter_than(op)) {
                     self.position = op_start;
                     return left;
                 } else {
-                    return self.parse_error(start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
+                    return self.parse_error(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
                 }
             },
 
@@ -558,15 +574,15 @@ const Parser = struct {
                 self.position = op_start;
 
                 // expr expr
-                if (self.parse_expr_inner_maybe()) |right| {
+                if (try self.parse_expr_inner_maybe()) |right| {
                     const apply: Token = .Apply;
                     if (prev_op == null or apply.binds_tighter_than(prev_op.?)) {
-                        return syntax.Expr{.Apply=.{.left=left, .right=right}};
-                    } else if (prev_op.? == apply or prev_op.?.binds_tighter_than(apply)) {
+                        return self.store(.{.Apply=.{.left=left, .right=right}});
+                    } else if (tagEqual(prev_op.?, apply) or prev_op.?.binds_tighter_than(apply)) {
                         self.position = op_start;
                         return left;
                     } else {
-                        return self.parse_error(start, "Ambiguous precedence for {} vs {}", .{prev_op.?, apply});
+                        return self.parse_error(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, apply});
                     }
                 } else {
                     // no more binary things to apply
@@ -577,7 +593,7 @@ const Parser = struct {
         }
     }
 
-    fn parse_expr(self: *Parser) ! syntax.Expr {
+    fn parse_expr(self: *Parser) ParseError ! *const syntax.Expr {
         return self.parse_expr_outer(null);
     }
 };
@@ -605,6 +621,7 @@ test "binding partial order" {
 
     // generate examples of all posible tokens
     inline for (@typeInfo(Token).Union.fields) |fti| {
+       // leave value undefined to test that binds_tighter_than doesn't access it
         try tokens.append(@unionInit(Token, fti.name, undefined));
     }
 
@@ -626,19 +643,53 @@ test "binding partial order" {
     }
 }
 
-test "parse" {
+fn test_parse(source: []const u8, expected: []const u8) !void {
     var arena = ArenaAllocator.init(std.testing.allocator);
-    const source =
-        \\ 1.3 + "foo\"bar"
-    ;
-    expect(deepEqual(
-        try parse(&arena, source, ParseErrorInfo.init()),
-        .{.Apply=.{
-            .left=.{.Apply=.{
-                .left=.{.Name="+"},
-                .right=.{.Scalar=.{.Number = 1.3}},
-            }},
-            .right = .{.Scalar=.{.String = "foo\"bar"}},
-        }},
-    ));
+    defer arena.deinit();
+    const found = try parse(&arena, source, ParseErrorInfo.init());
+    var bytes = ArrayList(u8).init(std.testing.allocator);
+    defer bytes.deinit();
+    try found.dumpInto(bytes.outStream(), 0);
+    if (!meta.deepEqual(expected, bytes.items)) {
+        panic("\nExpected:\n{}\n\nFound:\n{}", .{expected, bytes.items});
+    }
+}
+
+test "parse" {
+    try test_parse(
+        \\1.3 + "foo\"bar"
+            ,
+            \\apply
+            \\  apply
+            \\    +
+            \\    1.3
+            \\  "foo"bar"
+    );
+
+    try test_parse(
+        \\a + b * c
+            ,
+            \\apply
+            \\  apply
+            \\    +
+            \\    a
+            \\  apply
+            \\    apply
+            \\      *
+            \\      b
+            \\    c
+    );
+
+     try test_parse(
+        \\a * b + c
+             ,
+             \\apply
+             \\  +
+             \\  apply
+             \\    apply
+             \\      *
+             \\      a
+             \\    b
+             \\  c
+    );
 }

@@ -43,14 +43,16 @@ const syntax = @import("./syntax.zig");
 //   "<="
 
 // TODO https://github.com/ziglang/zig/issues/2647
-pub fn parse(arena: *ArenaAllocator, source: []const u8, parse_error_info: ParseErrorInfo) ParseError ! *const syntax.Expr {
+pub fn parse(arena: *ArenaAllocator, source: []const u8, parse_error_info: *ParseErrorInfo) ParseError ! *const syntax.Expr {
     var parser = Parser{
         .arena = arena,
         .source = source,
         .position = 0,
         .parse_error_info = parse_error_info,
     };
-    return parser.parse_expr();
+    const expr = try parser.parse_expr();
+    _ = try parser.expect(.EOF);
+    return expr;
 }
 
 pub const ParseError = error {
@@ -139,7 +141,7 @@ const Parser = struct {
     arena: *ArenaAllocator,
     source: []const u8,
     position: usize,
-    parse_error_info: ParseErrorInfo,
+    parse_error_info: *ParseErrorInfo,
 
     fn store(self: *Parser, expr: syntax.Expr) ! *const syntax.Expr {
         const stored_expr = try self.arena.allocator.create(syntax.Expr);
@@ -517,79 +519,81 @@ const Parser = struct {
     //   * prev_op==null or op.binds_tighter_than(prev_op):
     //     prev_expr prev_op (left op right)
     //   * prev_op==op or prev_op.binds_tighter_than(op):
-    //     (prev_expr prev_op left)
+    //     (prev_expr prev_op left) op right
     //   * otherwise:
     //     parse_error "ambiguous precedence"
     fn parse_expr_outer(self: *Parser, prev_op: ?Token) ParseError ! *const syntax.Expr {
-        const left = try self.parse_expr_inner();
-        const op_start = self.position;
-        const op = try self.next_token();
-        switch (op) {
-            // expr binop expr
-            .Union, .Intersect, .Product, .Equal, .Plus, .Minus, .Times, .Divide, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual => {
-                if (prev_op == null or op.binds_tighter_than(prev_op.?)) {
-                    const right = try self.parse_expr_outer(op);
-                    switch (op) {
-                        // core ops
-                        .Union => return self.store(.{.Union = .{.left=left, .right=right}}),
-                        .Intersect => return self.store(.{.Intersect = .{.left=left, .right=right}}),
-                        .Product => return self.store(.{.Product = .{.left=left, .right=right}}),
-                        .Equal => return self.store(.{.Equal = .{.left=left, .right=right}}),
+        var left = try self.parse_expr_inner();
+        while (true) {
+            const op_start = self.position;
+            const op = try self.next_token();
+            switch (op) {
+                // expr binop expr
+                .Union, .Intersect, .Product, .Equal, .Plus, .Minus, .Times, .Divide, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual => {
+                    if (prev_op == null or op.binds_tighter_than(prev_op.?)) {
+                        const right = try self.parse_expr_outer(op);
+                        left = try switch (op) {
+                            // core ops
+                            .Union => self.store(.{.Union = .{.left=left, .right=right}}),
+                            .Intersect => self.store(.{.Intersect = .{.left=left, .right=right}}),
+                            .Product => self.store(.{.Product = .{.left=left, .right=right}}),
+                            .Equal => self.store(.{.Equal = .{.left=left, .right=right}}),
 
-                        // native functions
-                        .Plus => return self.store_apply_op("+", left, right),
-                        .Minus => return self.store_apply_op("-", left, right),
-                        .Times => return self.store_apply_op("*", left, right),
-                        .Divide => return self.store_apply_op("/", left, right),
-                        .LessThan => return self.store_apply_op("<", left, right),
-                        .LessThanOrEqual => return self.store_apply_op("<=", left, right),
-                        .GreaterThan => return self.store_apply_op(">", left, right),
-                        .GreaterThanOrEqual => return self.store_apply_op(">=", left, right),
+                            // native functions
+                            .Plus => self.store_apply_op("+", left, right),
+                            .Minus => self.store_apply_op("-", left, right),
+                            .Times => self.store_apply_op("*", left, right),
+                            .Divide => self.store_apply_op("/", left, right),
+                            .LessThan => self.store_apply_op("<", left, right),
+                            .LessThanOrEqual => self.store_apply_op("<=", left, right),
+                            .GreaterThan => self.store_apply_op(">", left, right),
+                            .GreaterThanOrEqual => self.store_apply_op(">=", left, right),
 
-                        else => unreachable,
-                    }
-                } else if (tagEqual(prev_op.?, op) or prev_op.?.binds_tighter_than(op)) {
-                    self.position = op_start;
-                    return left;
-                } else {
-                    return self.parse_error(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
-                }
-            },
-
-            // expr ":" name
-            .Lookup => {
-                if (prev_op == null or op.binds_tighter_than(prev_op.?)) {
-                    const name = (try self.expect(.Name)).Name;
-                    return self.store(.{.Lookup = .{.value = left, .name = name}});
-                } else if (tagEqual(prev_op.?, op) or prev_op.?.binds_tighter_than(op)) {
-                    self.position = op_start;
-                    return left;
-                } else {
-                    return self.parse_error(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
-                }
-            },
-
-            // not a binop, might be an apply
-            else => {
-                self.position = op_start;
-
-                // expr expr
-                if (try self.parse_expr_inner_maybe()) |right| {
-                    const apply: Token = .Apply;
-                    if (prev_op == null or apply.binds_tighter_than(prev_op.?)) {
-                        return self.store(.{.Apply=.{.left=left, .right=right}});
-                    } else if (tagEqual(prev_op.?, apply) or prev_op.?.binds_tighter_than(apply)) {
+                            else => unreachable,
+                        };
+                    } else if (tagEqual(prev_op.?, op) or prev_op.?.binds_tighter_than(op)) {
                         self.position = op_start;
                         return left;
                     } else {
-                        return self.parse_error(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, apply});
+                        return self.parse_error(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
                     }
-                } else {
-                    // no more binary things to apply
+                },
+
+                // expr ":" name
+                .Lookup => {
+                    if (prev_op == null or op.binds_tighter_than(prev_op.?)) {
+                        const name = (try self.expect(.Name)).Name;
+                        left = try self.store(.{.Lookup = .{.value = left, .name = name}});
+                    } else if (tagEqual(prev_op.?, op) or prev_op.?.binds_tighter_than(op)) {
+                        self.position = op_start;
+                        return left;
+                    } else {
+                        return self.parse_error(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
+                    }
+                },
+
+                // not a binop, might be an apply
+                else => {
                     self.position = op_start;
-                    return left;
-                }
-            },
+
+                    // expr expr
+                    if (try self.parse_expr_inner_maybe()) |right| {
+                        const apply: Token = .Apply;
+                        if (prev_op == null or apply.binds_tighter_than(prev_op.?)) {
+                            left = try self.store(.{.Apply=.{.left=left, .right=right}});
+                        } else if (tagEqual(prev_op.?, apply) or prev_op.?.binds_tighter_than(apply)) {
+                            self.position = op_start;
+                            return left;
+                        } else {
+                            return self.parse_error(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, apply});
+                        }
+                    } else {
+                        // no more binary things to apply
+                        self.position = op_start;
+                        return left;
+                    }
+                },
+            }
         }
     }
 
@@ -646,13 +650,35 @@ test "binding partial order" {
 fn test_parse(source: []const u8, expected: []const u8) !void {
     var arena = ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const found = try parse(&arena, source, ParseErrorInfo.init());
-    var bytes = ArrayList(u8).init(std.testing.allocator);
-    defer bytes.deinit();
-    try found.dumpInto(bytes.outStream(), 0);
-    if (!meta.deepEqual(expected, bytes.items)) {
-        panic("\nExpected:\n{}\n\nFound:\n{}", .{expected, bytes.items});
+    var parse_error_info = ParseErrorInfo.init();
+    if (parse(&arena, source, &parse_error_info)) |found| {
+        var bytes = ArrayList(u8).init(std.testing.allocator);
+        defer bytes.deinit();
+        try found.dumpInto(bytes.outStream(), 0);
+        if (!meta.deepEqual(expected, bytes.items)) {
+            panic("\nExpected parse:\n{}\n\nFound parse:\n{}", .{expected, bytes.items});
+        }
+    } else |err| {
+        warn("\nExpected parse:\n{}\n\nFound error:\n{}\n", .{expected, parse_error_info.message});
+        return err;
     }
+}
+
+fn test_parse_error(source: []const u8, expected: []const u8) !void {
+    var arena = ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parse_error_info = ParseErrorInfo.init();
+    if (parse(&arena, source, &parse_error_info)) |found| {
+        var bytes = ArrayList(u8).init(std.testing.allocator);
+        try found.dumpInto(bytes.outStream(), 0);
+        panic("\nExpected error:\n{}\n\nFound parse:\n{}", .{expected, bytes.items});
+    } else |err| {
+        if (!meta.deepEqual(expected, parse_error_info.message)) {
+            warn("\nExpected error:\n{}\n\nFound error:\n{}\n", .{expected, parse_error_info.message});
+            return err;
+        }
+    }
+
 }
 
 test "parse" {
@@ -664,6 +690,26 @@ test "parse" {
             \\    +
             \\    1.3
             \\  "foo"bar"
+    );
+
+    try test_parse(
+        \\a . b | c
+            ,
+            \\|
+            \\  .
+            \\    a
+            \\    b
+            \\  c
+    );
+
+    try test_parse(
+        \\a | b . c
+            ,
+            \\|
+            \\  a
+            \\  .
+            \\    b
+            \\    c
     );
 
     try test_parse(
@@ -684,12 +730,64 @@ test "parse" {
         \\a * b + c
              ,
              \\apply
-             \\  +
              \\  apply
+             \\    +
              \\    apply
-             \\      *
-             \\      a
-             \\    b
+             \\      apply
+             \\        *
+             \\        a
+             \\      b
              \\  c
+    );
+
+    try test_parse(
+        \\!a:b
+            ,
+            \\!
+            \\  : b
+            \\    a
+    );
+
+    try test_parse_error(
+        \\a & b | c
+            ,
+        \\Ambiguous precedence for Token{ .Intersect = void } vs Token{ .Union = void }
+    );
+
+    try test_parse_error(
+        \\a * b / c
+            ,
+        \\Ambiguous precedence for Token{ .Times = void } vs Token{ .Divide = void }
+    );
+
+    try test_parse_error(
+        \\a | b c
+            ,
+        \\Ambiguous precedence for Token{ .Union = void } vs Token{ .Apply = void }
+    );
+
+    try test_parse(
+        \\a | (b c):d
+            ,
+            \\|
+            \\  a
+            \\  : d
+            \\    apply
+            \\      b
+            \\      c
+    );
+
+    try test_parse(
+        \\\ a [b] c d -> a . b . [c . d]
+            ,
+            \\\ a [b] c d ->
+            \\  .
+            \\    .
+            \\      a
+            \\      b
+            \\    []
+            \\      .
+            \\        c
+            \\        d
     );
 }

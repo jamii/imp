@@ -1,5 +1,6 @@
 usingnamespace @import("common.zig");
 
+const Store = @import("./store.zig").Store;
 const syntax = @import("./syntax.zig");
 
 // expr =
@@ -43,9 +44,9 @@ const syntax = @import("./syntax.zig");
 //   "<="
 
 // TODO https://github.com/ziglang/zig/issues/2647
-pub fn parse(arena: *ArenaAllocator, source: []const u8, parse_error_info: *ParseErrorInfo) ParseError ! *const syntax.Expr {
+pub fn parse(store: *Store, source: []const u8, parse_error_info: *ParseErrorInfo) ParseError ! *const syntax.Expr {
     var parser = Parser{
-        .arena = arena,
+        .store = store,
         .source = source,
         .position = 0,
         .parse_error_info = parse_error_info,
@@ -138,28 +139,22 @@ fn append_char(bytes: *ArrayList(u8), char: u21) !void {
 }
 
 const Parser = struct {
-    arena: *ArenaAllocator,
+    store: *Store,
     source: []const u8,
     position: usize,
     parse_error_info: *ParseErrorInfo,
 
-    fn store(self: *Parser, expr: syntax.Expr) ! *const syntax.Expr {
-        const stored_expr = try self.arena.allocator.create(syntax.Expr);
-        stored_expr.* = expr;
-        return stored_expr;
-    }
-
     fn store_apply_op(self: *Parser, name: syntax.Name, left: *const syntax.Expr, right: *const syntax.Expr) ! *const syntax.Expr {
-        const expr1 = try self.store(.{.Name=name});
-        const expr2 = try self.store(.{.Apply=.{.left=expr1, .right=left}});
-        const expr3 = try self.store(.{.Apply=.{.left=expr2, .right=right}});
+        const expr1 = try self.store.syntax(.{.Name=name});
+        const expr2 = try self.store.syntax(.{.Apply=.{.left=expr1, .right=left}});
+        const expr3 = try self.store.syntax(.{.Apply=.{.left=expr2, .right=right}});
         return expr3;
     }
 
     fn parse_error(self: *Parser, start: usize, comptime fmt: []const u8, args: var) ParseError {
         self.parse_error_info.start = start;
         self.parse_error_info.end = self.position;
-        if (format(&self.arena.allocator, fmt, args)) |message| {
+        if (format(&self.store.arena.allocator, fmt, args)) |message| {
             self.parse_error_info.message = message;
             return error.ParseError;
         } else |err| {
@@ -199,7 +194,7 @@ const Parser = struct {
 
     // called after seeing '"'
     fn tokenize_string(self: *Parser) ! []const u8 {
-        var bytes = ArrayList(u8).init(&self.arena.allocator);
+        var bytes = ArrayList(u8).init(&self.store.arena.allocator);
         const string_start = self.position - 1;
         while (true) {
             const char_start = self.position;
@@ -419,25 +414,25 @@ const Parser = struct {
                 return expr;
             },
             // "none"
-            .None => return self.store(.None),
+            .None => return self.store.syntax(.None),
             // "some"
-            .Some => return self.store(.Some),
+            .Some => return self.store.syntax(.Some),
             // number
-            .Number => |number| return self.store(.{.Scalar=.{.Number=number}}),
+            .Number => |number| return self.store.syntax(.{.Scalar=.{.Number=number}}),
             // string
-            .String => |string| return self.store(.{.Scalar=.{.String=string}}),
+            .String => |string| return self.store.syntax(.{.Scalar=.{.String=string}}),
             // name
-            .Name => |name| return self.store(.{.Name=name}),
+            .Name => |name| return self.store.syntax(.{.Name=name}),
             // "when" expr "then" expr
             .When => {
                 const condition = try self.parse_expr();
                 _ = try self.expect(.Then);
                 const true_branch = try self.parse_expr();
-                return self.store(.{.When=.{.condition=condition,.true_branch=true_branch}});
+                return self.store.syntax(.{.When=.{.condition=condition,.true_branch=true_branch}});
             },
             // "\" arg+ "->" expr
             .AbstractArgs => {
-                var args = ArrayList(syntax.Arg).init(&self.arena.allocator);
+                var args = ArrayList(syntax.Arg).init(&self.store.arena.allocator);
                 while (true) {
                     const arg_start = self.position;
                     const arg_token = try self.next_token();
@@ -457,24 +452,24 @@ const Parser = struct {
                     return self.parse_error(start, "Abstract must have at least one arg", .{});
                 }
                 const body = try self.parse_expr();
-                return self.store(.{.Abstract=.{.args=args.items, .body=body}});
+                return self.store.syntax(.{.Abstract=.{.args=args.items, .body=body}});
             },
             // "[" expr "]"
             .OpenBox => {
                 const expr = try self.parse_expr();
                 _ = try self.expect(.CloseBox);
-                return self.store(.{.Box=expr});
+                return self.store.syntax(.{.Box=expr});
             },
             // "#" name expr
             .Annotate => {
                 const annotation = (try self.expect(.Name)).Name;
                 const body = try self.parse_expr();
-                return self.store(.{.Annotate=.{.annotation=annotation, .body=body}});
+                return self.store.syntax(.{.Annotate=.{.annotation=annotation, .body=body}});
             },
             // "!" expr
             .Negate => {
                 const expr = try self.parse_expr();
-                return self.store(.{.Negate=expr});
+                return self.store.syntax(.{.Negate=expr});
             },
             // "if" expr "then" expr "else" expr
             .If => {
@@ -483,7 +478,7 @@ const Parser = struct {
                 const true_branch = try self.parse_expr();
                 _ = try self.expect(.Else);
                 const false_branch = try self.parse_expr();
-                return self.store(.{.If=.{.condition=condition, .true_branch=true_branch, .false_branch=false_branch}});
+                return self.store.syntax(.{.If=.{.condition=condition, .true_branch=true_branch, .false_branch=false_branch}});
             },
             // "let" name "=" expr "in" expr
             .Let => {
@@ -492,7 +487,7 @@ const Parser = struct {
                 const value = try self.parse_expr();
                 _ = try self.expect(.In);
                 const body = try self.parse_expr();
-                return self.store(.{.Let=.{.name=name, .value=value, .body=body}});
+                return self.store.syntax(.{.Let=.{.name=name, .value=value, .body=body}});
             },
             // otherwise not an expression but might be rhs of apply or binop so don't error yet
             else => {
@@ -534,10 +529,10 @@ const Parser = struct {
                         const right = try self.parse_expr_outer(op);
                         left = try switch (op) {
                             // core ops
-                            .Union => self.store(.{.Union = .{.left=left, .right=right}}),
-                            .Intersect => self.store(.{.Intersect = .{.left=left, .right=right}}),
-                            .Product => self.store(.{.Product = .{.left=left, .right=right}}),
-                            .Equal => self.store(.{.Equal = .{.left=left, .right=right}}),
+                            .Union => self.store.syntax(.{.Union = .{.left=left, .right=right}}),
+                            .Intersect => self.store.syntax(.{.Intersect = .{.left=left, .right=right}}),
+                            .Product => self.store.syntax(.{.Product = .{.left=left, .right=right}}),
+                            .Equal => self.store.syntax(.{.Equal = .{.left=left, .right=right}}),
 
                             // native functions
                             .Add => self.store_apply_op("+", left, right),
@@ -563,7 +558,7 @@ const Parser = struct {
                 .Lookup => {
                     if (prev_op == null or op.binds_tighter_than(prev_op.?)) {
                         const name = (try self.expect(.Name)).Name;
-                        left = try self.store(.{.Lookup = .{.value = left, .name = name}});
+                        left = try self.store.syntax(.{.Lookup = .{.value = left, .name = name}});
                     } else if (tagEqual(prev_op.?, op) or prev_op.?.binds_tighter_than(op)) {
                         self.position = op_start;
                         return left;
@@ -580,7 +575,7 @@ const Parser = struct {
                     if (try self.parse_expr_inner_maybe()) |right| {
                         const apply: Token = .Apply;
                         if (prev_op == null or apply.binds_tighter_than(prev_op.?)) {
-                            left = try self.store(.{.Apply=.{.left=left, .right=right}});
+                            left = try self.store.syntax(.{.Apply=.{.left=left, .right=right}});
                         } else if (tagEqual(prev_op.?, apply) or prev_op.?.binds_tighter_than(apply)) {
                             self.position = op_start;
                             return left;
@@ -601,23 +596,6 @@ const Parser = struct {
         return self.parse_expr_outer(null);
     }
 };
-
-test "compiles" {
-    var arena = ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const source =
-        \\ 1.3 + "foo\"bar"
-    ;
-    var parser = Parser{
-        .arena = &arena,
-        .source = source,
-        .position = 0,
-        .parse_error_info = ParseErrorInfo.init(),
-    };
-    expect(meta.deepEqual(try parser.next_op(), Token{.Number = 1.3}));
-    expect(meta.deepEqual(try parser.next_op(), Token.Add));
-    expect(meta.deepEqual(try parser.next_op(), Token{.String = "foo\"bar"}));
-}
 
 test "binding partial order" {
     var tokens = ArrayList(Token).init(std.testing.allocator);
@@ -650,8 +628,9 @@ test "binding partial order" {
 fn test_parse(source: []const u8, expected: []const u8) !void {
     var arena = ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
+    var store = Store.init(&arena);
     var parse_error_info = ParseErrorInfo.init();
-    if (parse(&arena, source, &parse_error_info)) |found| {
+    if (parse(&store, source, &parse_error_info)) |found| {
         var bytes = ArrayList(u8).init(std.testing.allocator);
         defer bytes.deinit();
         try found.dumpInto(bytes.outStream(), 0);
@@ -667,8 +646,9 @@ fn test_parse(source: []const u8, expected: []const u8) !void {
 fn test_parse_error(source: []const u8, expected: []const u8) !void {
     var arena = ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
+    var store = Store.init(&arena);
     var parse_error_info = ParseErrorInfo.init();
-    if (parse(&arena, source, &parse_error_info)) |found| {
+    if (parse(&store, source, &parse_error_info)) |found| {
         var bytes = ArrayList(u8).init(std.testing.allocator);
         try found.dumpInto(bytes.outStream(), 0);
         panic("\nExpected error:\n{}\n\nFound parse:\n{}", .{expected, bytes.items});

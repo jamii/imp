@@ -1,3 +1,5 @@
+usingnamespace @import("./common.zig");
+
 pub fn deepEqual(a: var, b: @TypeOf(a)) bool {
     const T = @TypeOf(a);
     const ti = @typeInfo(T);
@@ -85,7 +87,7 @@ pub fn deepEqual(a: var, b: @TypeOf(a)) bool {
 
 pub fn deepHash(key: var) u64 {
     var hasher = std.hash.Wyhash.init(0);
-    deepHashInto(hasher, key);
+    deepHashInto(&hasher, key);
     return hasher.final();
 }
 
@@ -105,7 +107,7 @@ pub fn deepHashInto(hasher: var, key: var) void {
     }
     switch (ti) {
         .Int => @call(.{ .modifier = .always_inline }, hasher.update, .{std.mem.asBytes(&key)}),
-        .Float => |info| deepHashInto(hasher, @bitCast(std.meta.IntType(false, info.bits), key), strat),
+        .Float => |info| deepHashInto(hasher, @bitCast(std.meta.IntType(false, info.bits), key)),
         .Bool => deepHashInto(hasher, @boolToInt(key)),
         .Enum => deepHashInto(hasher, @enumToInt(key)),
         .Pointer => |pti| {
@@ -132,7 +134,7 @@ pub fn deepHashInto(hasher: var, key: var) void {
         },
         .Union => |info| {
             if (info.tag_type) |tag_type| {
-                const tag = meta.activeTag(key);
+                const tag = std.meta.activeTag(key);
                 deepHashInto(hasher, tag);
                 inline for (info.fields) |field| {
                     const enum_field = field.enum_field.?;

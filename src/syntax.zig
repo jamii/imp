@@ -4,19 +4,6 @@ const value = @import("./value.zig");
 // ascii, non-empty
 pub const Name = []const u8;
 
-pub const BoxId = u64;
-
-pub const Native = struct {
-    name: Name,
-    input_arity: usize,
-    output_arity: usize,
-    fun: fn([]const value.Scalar) NativeError ! value.Set,
-};
-
-pub const NativeError = error {
-    // TODO
-};
-
 pub const Expr = union(enum) {
     None,
     Some,

@@ -16,7 +16,7 @@ pub fn DeepHashMap(comptime K: type, comptime V: type) type {
         K, V,
         struct {
             fn hash(key: K) u32 {
-                return meta.deepHash(key);
+                return @truncate(u32, meta.deepHash(key));
             }
         }.hash,
         struct {

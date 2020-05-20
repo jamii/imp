@@ -1,5 +1,5 @@
 usingnamespace @import("./common.zig");
-const expr = @import("./expr.zig");
+const core = @import("./core.zig");
 
 pub const Scalar = union(enum) {
     String: []const u8, // valid utf8
@@ -23,7 +23,7 @@ pub const Scalar = union(enum) {
 };
 
 pub const Box = struct {
-    id: expr.BoxId,
+    id: core.BoxId,
     scope: Tuple,
 };
 
@@ -33,7 +33,7 @@ pub const FiniteSet = DeepHashSet(Tuple);
 
 pub const AbstractSet = struct {
     scope: Tuple,
-    body: *const expr.Core,
+    body: *const core.Expr,
 };
 
 pub const Set = union(enum) {

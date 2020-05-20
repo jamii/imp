@@ -144,10 +144,10 @@ const Parser = struct {
     position: usize,
     parse_error_info: *ParseErrorInfo,
 
-    fn store_apply_op(self: *Parser, name: syntax.Name, left: *const syntax.Expr, right: *const syntax.Expr) ! *const syntax.Expr {
-        const expr1 = try self.store.syntax(.{.Name=name});
-        const expr2 = try self.store.syntax(.{.Apply=.{.left=expr1, .right=left}});
-        const expr3 = try self.store.syntax(.{.Apply=.{.left=expr2, .right=right}});
+    fn put_apply_op(self: *Parser, name: syntax.Name, left: *const syntax.Expr, right: *const syntax.Expr, start: usize, end: usize) ! *const syntax.Expr {
+        const expr1 = try self.store.put_syntax(.{.Name=name}, start, end);
+        const expr2 = try self.store.put_syntax(.{.Apply=.{.left=expr1, .right=left}}, start, end);
+        const expr3 = try self.store.put_syntax(.{.Apply=.{.left=expr2, .right=right}}, start, end);
         return expr3;
     }
 
@@ -414,21 +414,21 @@ const Parser = struct {
                 return expr;
             },
             // "none"
-            .None => return self.store.syntax(.None),
+            .None => return self.store.put_syntax(.None, start, self.position),
             // "some"
-            .Some => return self.store.syntax(.Some),
+            .Some => return self.store.put_syntax(.Some, start, self.position),
             // number
-            .Number => |number| return self.store.syntax(.{.Scalar=.{.Number=number}}),
+            .Number => |number| return self.store.put_syntax(.{.Scalar=.{.Number=number}}, start, self.position),
             // string
-            .String => |string| return self.store.syntax(.{.Scalar=.{.String=string}}),
+            .String => |string| return self.store.put_syntax(.{.Scalar=.{.String=string}}, start, self.position),
             // name
-            .Name => |name| return self.store.syntax(.{.Name=name}),
+            .Name => |name| return self.store.put_syntax(.{.Name=name}, start, self.position),
             // "when" expr "then" expr
             .When => {
                 const condition = try self.parse_expr();
                 _ = try self.expect(.Then);
                 const true_branch = try self.parse_expr();
-                return self.store.syntax(.{.When=.{.condition=condition,.true_branch=true_branch}});
+                return self.store.put_syntax(.{.When=.{.condition=condition,.true_branch=true_branch}}, start, self.position);
             },
             // "\" arg+ "->" expr
             .AbstractArgs => {
@@ -452,24 +452,24 @@ const Parser = struct {
                     return self.parse_error(start, "Abstract must have at least one arg", .{});
                 }
                 const body = try self.parse_expr();
-                return self.store.syntax(.{.Abstract=.{.args=args.items, .body=body}});
+                return self.store.put_syntax(.{.Abstract=.{.args=args.items, .body=body}}, start, self.position);
             },
             // "[" expr "]"
             .OpenBox => {
                 const expr = try self.parse_expr();
                 _ = try self.expect(.CloseBox);
-                return self.store.syntax(.{.Box=expr});
+                return self.store.put_syntax(.{.Box=expr}, start, self.position);
             },
             // "#" name expr
             .Annotate => {
                 const annotation = (try self.expect(.Name)).Name;
                 const body = try self.parse_expr();
-                return self.store.syntax(.{.Annotate=.{.annotation=annotation, .body=body}});
+                return self.store.put_syntax(.{.Annotate=.{.annotation=annotation, .body=body}}, start, self.position);
             },
             // "!" expr
             .Negate => {
                 const expr = try self.parse_expr();
-                return self.store.syntax(.{.Negate=expr});
+                return self.store.put_syntax(.{.Negate=expr}, start, self.position);
             },
             // "if" expr "then" expr "else" expr
             .If => {
@@ -478,7 +478,7 @@ const Parser = struct {
                 const true_branch = try self.parse_expr();
                 _ = try self.expect(.Else);
                 const false_branch = try self.parse_expr();
-                return self.store.syntax(.{.If=.{.condition=condition, .true_branch=true_branch, .false_branch=false_branch}});
+                return self.store.put_syntax(.{.If=.{.condition=condition, .true_branch=true_branch, .false_branch=false_branch}}, start, self.position);
             },
             // "let" name "=" expr "in" expr
             .Let => {
@@ -487,7 +487,7 @@ const Parser = struct {
                 const value = try self.parse_expr();
                 _ = try self.expect(.In);
                 const body = try self.parse_expr();
-                return self.store.syntax(.{.Let=.{.name=name, .value=value, .body=body}});
+                return self.store.put_syntax(.{.Let=.{.name=name, .value=value, .body=body}}, start, self.position);
             },
             // otherwise not an expression but might be rhs of apply or binop so don't error yet
             else => {
@@ -529,20 +529,20 @@ const Parser = struct {
                         const right = try self.parse_expr_outer(op);
                         left = try switch (op) {
                             // core ops
-                            .Union => self.store.syntax(.{.Union = .{.left=left, .right=right}}),
-                            .Intersect => self.store.syntax(.{.Intersect = .{.left=left, .right=right}}),
-                            .Product => self.store.syntax(.{.Product = .{.left=left, .right=right}}),
-                            .Equal => self.store.syntax(.{.Equal = .{.left=left, .right=right}}),
+                            .Union => self.store.put_syntax(.{.Union = .{.left=left, .right=right}}, op_start, self.position),
+                            .Intersect => self.store.put_syntax(.{.Intersect = .{.left=left, .right=right}}, op_start, self.position),
+                            .Product => self.store.put_syntax(.{.Product = .{.left=left, .right=right}}, op_start, self.position),
+                            .Equal => self.store.put_syntax(.{.Equal = .{.left=left, .right=right}}, op_start, self.position),
 
                             // native functions
-                            .Add => self.store_apply_op("+", left, right),
-                            .Subtract => self.store_apply_op("-", left, right),
-                            .Multiply => self.store_apply_op("*", left, right),
-                            .Divide => self.store_apply_op("/", left, right),
-                            .LessThan => self.store_apply_op("<", left, right),
-                            .LessThanOrEqual => self.store_apply_op("<=", left, right),
-                            .GreaterThan => self.store_apply_op(">", left, right),
-                            .GreaterThanOrEqual => self.store_apply_op(">=", left, right),
+                            .Add => self.put_apply_op("+", left, right, op_start, self.position),
+                            .Subtract => self.put_apply_op("-", left, right, op_start, self.position),
+                            .Multiply => self.put_apply_op("*", left, right, op_start, self.position),
+                            .Divide => self.put_apply_op("/", left, right, op_start, self.position),
+                            .LessThan => self.put_apply_op("<", left, right, op_start, self.position),
+                            .LessThanOrEqual => self.put_apply_op("<=", left, right, op_start, self.position),
+                            .GreaterThan => self.put_apply_op(">", left, right, op_start, self.position),
+                            .GreaterThanOrEqual => self.put_apply_op(">=", left, right, op_start, self.position),
 
                             else => unreachable,
                         };
@@ -558,7 +558,7 @@ const Parser = struct {
                 .Lookup => {
                     if (prev_op == null or op.binds_tighter_than(prev_op.?)) {
                         const name = (try self.expect(.Name)).Name;
-                        left = try self.store.syntax(.{.Lookup = .{.value = left, .name = name}});
+                        left = try self.store.put_syntax(.{.Lookup = .{.value = left, .name = name}}, op_start, self.position);
                     } else if (tagEqual(prev_op.?, op) or prev_op.?.binds_tighter_than(op)) {
                         self.position = op_start;
                         return left;
@@ -575,7 +575,7 @@ const Parser = struct {
                     if (try self.parse_expr_inner_maybe()) |right| {
                         const apply: Token = .Apply;
                         if (prev_op == null or apply.binds_tighter_than(prev_op.?)) {
-                            left = try self.store.syntax(.{.Apply=.{.left=left, .right=right}});
+                            left = try self.store.put_syntax(.{.Apply=.{.left=left, .right=right}}, op_start, self.position);
                         } else if (tagEqual(prev_op.?, apply) or prev_op.?.binds_tighter_than(apply)) {
                             self.position = op_start;
                             return left;

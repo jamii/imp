@@ -55,6 +55,6 @@ pub const Box = struct {
 };
 
 pub const Annotate = struct {
-    annotation: *const Expr,
+    annotation: Name,
     body: *const Expr,
 };

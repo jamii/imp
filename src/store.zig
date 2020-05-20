@@ -25,7 +25,7 @@ pub const Store = struct {
         };
     }
 
-    pub fn put_syntax(self: *Store, expr: syntax.Expr, start: usize, end: usize) ! *const syntax.Expr {
+    pub fn putSyntax(self: *Store, expr: syntax.Expr, start: usize, end: usize) ! *const syntax.Expr {
         var expr_meta = try self.arena.allocator.create(SyntaxMeta);
         expr_meta.* = SyntaxMeta {
             .expr = expr,
@@ -35,7 +35,7 @@ pub const Store = struct {
         return &expr_meta.expr;
     }
 
-    pub fn put_core(self: *Store, expr: core.Expr, from: *const syntax.Expr) ! *const core.Expr {
+    pub fn putCore(self: *Store, expr: core.Expr, from: *const syntax.Expr) ! *const core.Expr {
         var expr_meta = try self.arena.allocator.create(CoreMeta);
         expr_meta.* = SyntaxMeta {
             .expr = expr,
@@ -44,15 +44,15 @@ pub const Store = struct {
         return &expr_meta.expr;
     }
 
-    pub fn get_syntax_meta(self: *Store, expr: *const Syntax.Expr) *const SyntaxMeta {
+    pub fn getSyntaxMeta(self: *Store, expr: *const Syntax.Expr) *const SyntaxMeta {
         return @fieldParentPtr(SyntaxMeta, "expr", expr);
     }
 
-    pub fn get_core_meta(self: *Store, expr: *const Core.Expr) *const CoreMeta {
+    pub fn getCoreMeta(self: *Store, expr: *const Core.Expr) *const CoreMeta {
         return @fieldParentPtr(CoreMeta, "expr", expr);
     }
 
-    pub fn put_box(self: *Store, expr: *const core.Expr) ! core.BoxId {
+    pub fn putBox(self: *Store, expr: *const core.Expr) ! core.BoxId {
         try self.box_exprs.append(expr);
         return self.box_exprs.items.len - 1;
     }

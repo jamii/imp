@@ -51,7 +51,7 @@ pub fn parse(store: *Store, source: []const u8, parse_error_info: *ParseErrorInf
         .position = 0,
         .parse_error_info = parse_error_info,
     };
-    const expr = try parser.parse_expr();
+    const expr = try parser.parseExpr();
     _ = try parser.expect(.EOF);
     return expr;
 }
@@ -120,7 +120,7 @@ const Token = union(enum) {
     // not matched by anything but used to check that we parsed everything
     EOF,
 
-    fn binds_tighter_than(self: Token, other: Token) bool {
+    fn bindsTighterThan(self: Token, other: Token) bool {
         return switch (self) {
             .Lookup => (other != .Lookup),
             .Product => (other == .Union),
@@ -130,7 +130,7 @@ const Token = union(enum) {
     }
 };
 
-fn append_char(bytes: *ArrayList(u8), char: u21) !void {
+fn appendChar(bytes: *ArrayList(u8), char: u21) !void {
     var char_bytes = [4]u8{0,0,0,0};
     const len = std.unicode.utf8Encode(char, &char_bytes)
         // we got this char from utf8Decode so it must be legit
@@ -144,14 +144,14 @@ const Parser = struct {
     position: usize,
     parse_error_info: *ParseErrorInfo,
 
-    fn put_apply_op(self: *Parser, name: syntax.Name, left: *const syntax.Expr, right: *const syntax.Expr, start: usize, end: usize) ! *const syntax.Expr {
-        const expr1 = try self.store.put_syntax(.{.Name=name}, start, end);
-        const expr2 = try self.store.put_syntax(.{.Apply=.{.left=expr1, .right=left}}, start, end);
-        const expr3 = try self.store.put_syntax(.{.Apply=.{.left=expr2, .right=right}}, start, end);
+    fn putApplyOp(self: *Parser, name: syntax.Name, left: *const syntax.Expr, right: *const syntax.Expr, start: usize, end: usize) ! *const syntax.Expr {
+        const expr1 = try self.store.putSyntax(.{.Name=name}, start, end);
+        const expr2 = try self.store.putSyntax(.{.Apply=.{.left=expr1, .right=left}}, start, end);
+        const expr3 = try self.store.putSyntax(.{.Apply=.{.left=expr2, .right=right}}, start, end);
         return expr3;
     }
 
-    fn parse_error(self: *Parser, start: usize, comptime fmt: []const u8, args: var) ParseError {
+    fn parseError(self: *Parser, start: usize, comptime fmt: []const u8, args: var) ParseError {
         self.parse_error_info.start = start;
         self.parse_error_info.end = self.position;
         if (format(&self.store.arena.allocator, fmt, args)) |message| {
@@ -166,7 +166,7 @@ const Parser = struct {
     }
 
     // use this instead of std.unicode.Utf8Iterator because we want to return the position of any unicode error
-    fn next_utf8_char(self: *Parser) ! ?u21 {
+    fn nextUtf8Char(self: *Parser) ! ?u21 {
         if (self.position >= self.source.len) {
             return null;
         }
@@ -179,12 +179,12 @@ const Parser = struct {
         return char;
     }
 
-    fn next_ascii_char(self: *Parser) ! ?u8 {
+    fn nextAsciiChar(self: *Parser) ! ?u8 {
         const start = self.position;
-        if (try self.next_utf8_char()) |char| {
+        if (try self.nextUtf8Char()) |char| {
             const ascii_char = @intCast(u8, char & 0b0111_1111);
             if (@as(u21, char) != ascii_char) {
-                return self.parse_error(start, "unicode characters may only appear in strings and comments", .{});
+                return self.parseError(start, "unicode characters may only appear in strings and comments", .{});
             }
             return ascii_char;
         } else {
@@ -193,22 +193,22 @@ const Parser = struct {
     }
 
     // called after seeing '"'
-    fn tokenize_string(self: *Parser) ! []const u8 {
+    fn tokenizeString(self: *Parser) ! []const u8 {
         var bytes = ArrayList(u8).init(&self.store.arena.allocator);
         const string_start = self.position - 1;
         while (true) {
             const char_start = self.position;
-            if (try self.next_utf8_char()) |char| {
+            if (try self.nextUtf8Char()) |char| {
                 switch (char) {
                     '\\' => {
-                        if (try self.next_utf8_char()) |escaped_char| {
+                        if (try self.nextUtf8Char()) |escaped_char| {
                             switch (escaped_char) {
                                 '"' => try bytes.append('"'),
                                 'n' => try bytes.append('\n'),
-                                else => return self.parse_error(char_start, "invalid string escape", .{}),
+                                else => return self.parseError(char_start, "invalid string escape", .{}),
                             }
                         } else {
-                            return self.parse_error(char_start, "unfinished string escape", .{});
+                            return self.parseError(char_start, "unfinished string escape", .{});
                         }
 
                     },
@@ -216,21 +216,21 @@ const Parser = struct {
                         break;
                     },
                     else => {
-                        try append_char(&bytes, char);
+                        try appendChar(&bytes, char);
                     },
                 }
             } else {
-                return self.parse_error(string_start, "unfinished string", .{});
+                return self.parseError(string_start, "unfinished string", .{});
             }
         }
         return bytes.items;
     }
 
     // called after seeing "//"
-    fn tokenize_comment(self: *Parser) ! void {
+    fn tokenizeComment(self: *Parser) ! void {
         while (true) {
             // utf8 chars are allowed in comments
-            if (try self.next_utf8_char()) |char2| {
+            if (try self.nextUtf8Char()) |char2| {
                 if (char2 == '\n') {
                     break;
                 }
@@ -242,11 +242,11 @@ const Parser = struct {
 
     // called after seeing first char of name
     // name = alpha (alpha | digit | "_")*
-    fn tokenize_name(self: *Parser) ! []const u8 {
+    fn tokenizeName(self: *Parser) ! []const u8 {
         const start = self.position - 1;
         while (true) {
             const position = self.position;
-            if (try self.next_ascii_char()) |char| {
+            if (try self.nextAsciiChar()) |char| {
                 if (!(std.ascii.isAlpha(char) or std.ascii.isDigit(char) or char == '_')) {
                     self.position = position;
                     break;
@@ -260,12 +260,12 @@ const Parser = struct {
 
     // called after seeing first digit of number
     // number = digit+ ("." digit+)?
-    fn tokenize_number(self: *Parser) ! f64 {
+    fn tokenizeNumber(self: *Parser) ! f64 {
         const start = self.position - 1;
         // first set of digits
         while (true) {
             const position = self.position;
-            if (try self.next_ascii_char()) |char| {
+            if (try self.nextAsciiChar()) |char| {
                 if (!std.ascii.isDigit(char)) {
                     self.position = position;
                     break;
@@ -277,7 +277,7 @@ const Parser = struct {
         // maybe '.'
         const has_decimal_point = point: {
             const position = self.position;
-            if ((try self.next_ascii_char()) orelse 0 == '.') {
+            if ((try self.nextAsciiChar()) orelse 0 == '.') {
                 break :point true;
             } else {
                 self.position = position;
@@ -289,7 +289,7 @@ const Parser = struct {
             // second set of digits
             while (true) {
                 const position = self.position;
-                if (try self.next_ascii_char()) |char| {
+                if (try self.nextAsciiChar()) |char| {
                     if (!std.ascii.isDigit(char)) {
                         self.position = position;
                         break;
@@ -301,19 +301,19 @@ const Parser = struct {
         }
         if (self.position == point_end) {
             // otherwise `1.foo` can parse as `1 . foo` or `1.0 foo`
-            return self.parse_error(start, "there must be at least one digit after a decimal point", .{});
+            return self.parseError(start, "there must be at least one digit after a decimal point", .{});
         } else {
             return std.fmt.parseFloat(f64, self.source[start..self.position]);
         }
     }
 
-    fn next_token(self: *Parser) ! Token {
+    fn nextToken(self: *Parser) ! Token {
         const start = self.position;
-        if (try self.next_ascii_char()) |char1| {
+        if (try self.nextAsciiChar()) |char1| {
             switch (char1) {
                 '(' => return Token{.OpenGroup={}},
                 ')' => return Token{.CloseGroup={}},
-                '"' => return Token{.String = try self.tokenize_string()},
+                '"' => return Token{.String = try self.tokenizeString()},
                 '|' => return Token{.Union={}},
                 '&' => return Token{.Intersect={}},
                 '.' => return Token{.Product={}},
@@ -321,7 +321,7 @@ const Parser = struct {
                 '\\' => return Token{.AbstractArgs={}},
                 '-' => {
                     const position = self.position;
-                    if ((try self.next_ascii_char()) orelse 0 == '>') {
+                    if ((try self.nextAsciiChar()) orelse 0 == '>') {
                         return Token{.AbstractBody={}};
                     } else {
                         self.position = position;
@@ -337,9 +337,9 @@ const Parser = struct {
                 '*' => return Token{.Multiply={}},
                 '/' => {
                     const position = self.position;
-                    if ((try self.next_ascii_char()) orelse 0 == '/') {
-                        try self.tokenize_comment();
-                        return self.next_token();
+                    if ((try self.nextAsciiChar()) orelse 0 == '/') {
+                        try self.tokenizeComment();
+                        return self.nextToken();
                     } else {
                         self.position = position;
                         return Token{.Divide={}};
@@ -347,7 +347,7 @@ const Parser = struct {
                 },
                 '<' => {
                     const position = self.position;
-                    if ((try self.next_ascii_char()) orelse 0 == '=') {
+                    if ((try self.nextAsciiChar()) orelse 0 == '=') {
                         return Token{.LessThanOrEqual={}};
                     } else {
                         self.position = position;
@@ -356,7 +356,7 @@ const Parser = struct {
                 },
                 '>' => {
                     const position = self.position;
-                    if ((try self.next_ascii_char()) orelse 0 == '=') {
+                    if ((try self.nextAsciiChar()) orelse 0 == '=') {
                         return Token{.GreaterThanOrEqual={}};
                     } else {
                         self.position = position;
@@ -366,13 +366,13 @@ const Parser = struct {
                 else => {
                     const ascii_char1 = @intCast(u8, char1 & 0b0111_1111);
                     if (char1 != @as(u21, ascii_char1)) {
-                        return self.parse_error(start, "unicode characters may only appear in strings and comments", .{});
+                        return self.parseError(start, "unicode characters may only appear in strings and comments", .{});
                     } else if (std.ascii.isSpace(ascii_char1)) {
-                        return self.next_token();
+                        return self.nextToken();
                     } else if (std.ascii.isDigit(ascii_char1)) {
-                        return Token{.Number = try self.tokenize_number()};
+                        return Token{.Number = try self.tokenizeNumber()};
                     } else if (std.ascii.isAlpha(ascii_char1)) {
-                        const name = try self.tokenize_name();
+                        const name = try self.tokenizeName();
                         if (meta.deepEqual(name, "none")) return Token{.None={}};
                         if (meta.deepEqual(name, "some")) return Token{.Some={}};
                         if (meta.deepEqual(name, "when")) return Token{.When={}};
@@ -383,7 +383,7 @@ const Parser = struct {
                         if (meta.deepEqual(name, "in")) return Token{.Let={}};
                         return Token{.Name = name};
                     } else {
-                        return self.parse_error(start, "invalid token", .{});
+                        return self.parseError(start, "invalid token", .{});
                     }
                 }
             }
@@ -394,48 +394,48 @@ const Parser = struct {
 
     fn expect(self: *Parser, expected: @TagType(Token)) ! Token {
         const start = self.position;
-        const found = try self.next_token();
+        const found = try self.nextToken();
         if (std.meta.activeTag(found) != expected) {
-            return self.parse_error(start, "Expected {}, found {}", .{expected, found});
+            return self.parseError(start, "Expected {}, found {}", .{expected, found});
         } else {
             return found;
         }
     }
 
     // returns null if this isn't the start of an expression
-    fn parse_expr_inner_maybe(self: *Parser) ParseError ! ?*const syntax.Expr {
+    fn parseExprInnerMaybe(self: *Parser) ParseError ! ?*const syntax.Expr {
         const start = self.position;
-        const token = try self.next_token();
+        const token = try self.nextToken();
         switch (token) {
             // "(" expr ")"
             .OpenGroup => {
-                const expr = try self.parse_expr();
+                const expr = try self.parseExpr();
                 _ = try self.expect(.CloseGroup);
                 return expr;
             },
             // "none"
-            .None => return self.store.put_syntax(.None, start, self.position),
+            .None => return self.store.putSyntax(.None, start, self.position),
             // "some"
-            .Some => return self.store.put_syntax(.Some, start, self.position),
+            .Some => return self.store.putSyntax(.Some, start, self.position),
             // number
-            .Number => |number| return self.store.put_syntax(.{.Scalar=.{.Number=number}}, start, self.position),
+            .Number => |number| return self.store.putSyntax(.{.Scalar=.{.Number=number}}, start, self.position),
             // string
-            .String => |string| return self.store.put_syntax(.{.Scalar=.{.String=string}}, start, self.position),
+            .String => |string| return self.store.putSyntax(.{.Scalar=.{.String=string}}, start, self.position),
             // name
-            .Name => |name| return self.store.put_syntax(.{.Name=name}, start, self.position),
+            .Name => |name| return self.store.putSyntax(.{.Name=name}, start, self.position),
             // "when" expr "then" expr
             .When => {
-                const condition = try self.parse_expr();
+                const condition = try self.parseExpr();
                 _ = try self.expect(.Then);
-                const true_branch = try self.parse_expr();
-                return self.store.put_syntax(.{.When=.{.condition=condition,.true_branch=true_branch}}, start, self.position);
+                const true_branch = try self.parseExpr();
+                return self.store.putSyntax(.{.When=.{.condition=condition,.true_branch=true_branch}}, start, self.position);
             },
             // "\" arg+ "->" expr
             .AbstractArgs => {
                 var args = ArrayList(syntax.Arg).init(&self.store.arena.allocator);
                 while (true) {
                     const arg_start = self.position;
-                    const arg_token = try self.next_token();
+                    const arg_token = try self.nextToken();
                     // arg = name | "[" name "]"
                     switch (arg_token) {
                         .Name => |name| try args.append(.{.name=name, .unbox=false}),
@@ -445,49 +445,49 @@ const Parser = struct {
                             _ = try self.expect(.CloseBox);
                         },
                         .AbstractBody => break,
-                        else => return self.parse_error(arg_start, "Expected name or [ or ->, found {}", .{arg_token}),
+                        else => return self.parseError(arg_start, "Expected name or [ or ->, found {}", .{arg_token}),
                     }
                 }
                 if (args.items.len == 0) {
-                    return self.parse_error(start, "Abstract must have at least one arg", .{});
+                    return self.parseError(start, "Abstract must have at least one arg", .{});
                 }
-                const body = try self.parse_expr();
-                return self.store.put_syntax(.{.Abstract=.{.args=args.items, .body=body}}, start, self.position);
+                const body = try self.parseExpr();
+                return self.store.putSyntax(.{.Abstract=.{.args=args.items, .body=body}}, start, self.position);
             },
             // "[" expr "]"
             .OpenBox => {
-                const expr = try self.parse_expr();
+                const expr = try self.parseExpr();
                 _ = try self.expect(.CloseBox);
-                return self.store.put_syntax(.{.Box=expr}, start, self.position);
+                return self.store.putSyntax(.{.Box=expr}, start, self.position);
             },
             // "#" name expr
             .Annotate => {
                 const annotation = (try self.expect(.Name)).Name;
-                const body = try self.parse_expr();
-                return self.store.put_syntax(.{.Annotate=.{.annotation=annotation, .body=body}}, start, self.position);
+                const body = try self.parseExpr();
+                return self.store.putSyntax(.{.Annotate=.{.annotation=annotation, .body=body}}, start, self.position);
             },
             // "!" expr
             .Negate => {
-                const expr = try self.parse_expr();
-                return self.store.put_syntax(.{.Negate=expr}, start, self.position);
+                const expr = try self.parseExpr();
+                return self.store.putSyntax(.{.Negate=expr}, start, self.position);
             },
             // "if" expr "then" expr "else" expr
             .If => {
-                const condition = try self.parse_expr();
+                const condition = try self.parseExpr();
                 _ = try self.expect(.Then);
-                const true_branch = try self.parse_expr();
+                const true_branch = try self.parseExpr();
                 _ = try self.expect(.Else);
-                const false_branch = try self.parse_expr();
-                return self.store.put_syntax(.{.If=.{.condition=condition, .true_branch=true_branch, .false_branch=false_branch}}, start, self.position);
+                const false_branch = try self.parseExpr();
+                return self.store.putSyntax(.{.If=.{.condition=condition, .true_branch=true_branch, .false_branch=false_branch}}, start, self.position);
             },
             // "let" name "=" expr "in" expr
             .Let => {
                 const name = (try self.expect(.Name)).Name;
                 _ = try self.expect(.Equal);
-                const value = try self.parse_expr();
+                const value = try self.parseExpr();
                 _ = try self.expect(.In);
-                const body = try self.parse_expr();
-                return self.store.put_syntax(.{.Let=.{.name=name, .value=value, .body=body}}, start, self.position);
+                const body = try self.parseExpr();
+                return self.store.putSyntax(.{.Let=.{.name=name, .value=value, .body=body}}, start, self.position);
             },
             // otherwise not an expression but might be rhs of apply or binop so don't error yet
             else => {
@@ -498,72 +498,72 @@ const Parser = struct {
     }
 
     // when parsing initial expr there can't be an apply or binop so go ahead and error
-    fn parse_expr_inner(self: *Parser) ParseError ! *const syntax.Expr {
-        if (try self.parse_expr_inner_maybe()) |expr| {
+    fn parseExprInner(self: *Parser) ParseError ! *const syntax.Expr {
+        if (try self.parseExprInnerMaybe()) |expr| {
             return expr;
         } else {
             const start = self.position;
-            const token = try self.next_token();
-            return self.parse_error(start, "Expected start of expression, found {}", .{token});
+            const token = try self.nextToken();
+            return self.parseError(start, "Expected start of expression, found {}", .{token});
         }
     }
 
     // we're looking at:
     //   prev_expr prev_op left op right
     // possible cases are:
-    //   * prev_op==null or op.binds_tighter_than(prev_op):
+    //   * prev_op==null or op.bindsTighterThan(prev_op):
     //     prev_expr prev_op (left op right)
-    //   * prev_op==op or prev_op.binds_tighter_than(op):
+    //   * prev_op==op or prev_op.bindsTighterThan(op):
     //     (prev_expr prev_op left) op right
     //   * otherwise:
     //     parse_error "ambiguous precedence"
-    fn parse_expr_outer(self: *Parser, prev_op: ?Token) ParseError ! *const syntax.Expr {
-        var left = try self.parse_expr_inner();
+    fn parseExprOuter(self: *Parser, prev_op: ?Token) ParseError ! *const syntax.Expr {
+        var left = try self.parseExprInner();
         while (true) {
             const op_start = self.position;
-            const op = try self.next_token();
+            const op = try self.nextToken();
             switch (op) {
                 // expr binop expr
                 .Union, .Intersect, .Product, .Equal, .Add, .Subtract, .Multiply, .Divide, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual => {
-                    if (prev_op == null or op.binds_tighter_than(prev_op.?)) {
-                        const right = try self.parse_expr_outer(op);
+                    if (prev_op == null or op.bindsTighterThan(prev_op.?)) {
+                        const right = try self.parseExprOuter(op);
                         left = try switch (op) {
                             // core ops
-                            .Union => self.store.put_syntax(.{.Union = .{.left=left, .right=right}}, op_start, self.position),
-                            .Intersect => self.store.put_syntax(.{.Intersect = .{.left=left, .right=right}}, op_start, self.position),
-                            .Product => self.store.put_syntax(.{.Product = .{.left=left, .right=right}}, op_start, self.position),
-                            .Equal => self.store.put_syntax(.{.Equal = .{.left=left, .right=right}}, op_start, self.position),
+                            .Union => self.store.putSyntax(.{.Union = .{.left=left, .right=right}}, op_start, self.position),
+                            .Intersect => self.store.putSyntax(.{.Intersect = .{.left=left, .right=right}}, op_start, self.position),
+                            .Product => self.store.putSyntax(.{.Product = .{.left=left, .right=right}}, op_start, self.position),
+                            .Equal => self.store.putSyntax(.{.Equal = .{.left=left, .right=right}}, op_start, self.position),
 
                             // native functions
-                            .Add => self.put_apply_op("+", left, right, op_start, self.position),
-                            .Subtract => self.put_apply_op("-", left, right, op_start, self.position),
-                            .Multiply => self.put_apply_op("*", left, right, op_start, self.position),
-                            .Divide => self.put_apply_op("/", left, right, op_start, self.position),
-                            .LessThan => self.put_apply_op("<", left, right, op_start, self.position),
-                            .LessThanOrEqual => self.put_apply_op("<=", left, right, op_start, self.position),
-                            .GreaterThan => self.put_apply_op(">", left, right, op_start, self.position),
-                            .GreaterThanOrEqual => self.put_apply_op(">=", left, right, op_start, self.position),
+                            .Add => self.putApplyOp("+", left, right, op_start, self.position),
+                            .Subtract => self.putApplyOp("-", left, right, op_start, self.position),
+                            .Multiply => self.putApplyOp("*", left, right, op_start, self.position),
+                            .Divide => self.putApplyOp("/", left, right, op_start, self.position),
+                            .LessThan => self.putApplyOp("<", left, right, op_start, self.position),
+                            .LessThanOrEqual => self.putApplyOp("<=", left, right, op_start, self.position),
+                            .GreaterThan => self.putApplyOp(">", left, right, op_start, self.position),
+                            .GreaterThanOrEqual => self.putApplyOp(">=", left, right, op_start, self.position),
 
                             else => unreachable,
                         };
-                    } else if (tagEqual(prev_op.?, op) or prev_op.?.binds_tighter_than(op)) {
+                    } else if (tagEqual(prev_op.?, op) or prev_op.?.bindsTighterThan(op)) {
                         self.position = op_start;
                         return left;
                     } else {
-                        return self.parse_error(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
+                        return self.parseError(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
                     }
                 },
 
                 // expr ":" name
                 .Lookup => {
-                    if (prev_op == null or op.binds_tighter_than(prev_op.?)) {
+                    if (prev_op == null or op.bindsTighterThan(prev_op.?)) {
                         const name = (try self.expect(.Name)).Name;
-                        left = try self.store.put_syntax(.{.Lookup = .{.value = left, .name = name}}, op_start, self.position);
-                    } else if (tagEqual(prev_op.?, op) or prev_op.?.binds_tighter_than(op)) {
+                        left = try self.store.putSyntax(.{.Lookup = .{.value = left, .name = name}}, op_start, self.position);
+                    } else if (tagEqual(prev_op.?, op) or prev_op.?.bindsTighterThan(op)) {
                         self.position = op_start;
                         return left;
                     } else {
-                        return self.parse_error(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
+                        return self.parseError(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
                     }
                 },
 
@@ -572,15 +572,15 @@ const Parser = struct {
                     self.position = op_start;
 
                     // expr expr
-                    if (try self.parse_expr_inner_maybe()) |right| {
+                    if (try self.parseExprInnerMaybe()) |right| {
                         const apply: Token = .Apply;
-                        if (prev_op == null or apply.binds_tighter_than(prev_op.?)) {
-                            left = try self.store.put_syntax(.{.Apply=.{.left=left, .right=right}}, op_start, self.position);
-                        } else if (tagEqual(prev_op.?, apply) or prev_op.?.binds_tighter_than(apply)) {
+                        if (prev_op == null or apply.bindsTighterThan(prev_op.?)) {
+                            left = try self.store.putSyntax(.{.Apply=.{.left=left, .right=right}}, op_start, self.position);
+                        } else if (tagEqual(prev_op.?, apply) or prev_op.?.bindsTighterThan(apply)) {
                             self.position = op_start;
                             return left;
                         } else {
-                            return self.parse_error(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, apply});
+                            return self.parseError(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, apply});
                         }
                     } else {
                         // no more binary things to apply
@@ -592,8 +592,8 @@ const Parser = struct {
         }
     }
 
-    fn parse_expr(self: *Parser) ParseError ! *const syntax.Expr {
-        return self.parse_expr_outer(null);
+    fn parseExpr(self: *Parser) ParseError ! *const syntax.Expr {
+        return self.parseExprOuter(null);
     }
 };
 
@@ -603,29 +603,29 @@ test "binding partial order" {
 
     // generate examples of all posible tokens
     inline for (@typeInfo(Token).Union.fields) |fti| {
-       // leave value undefined to test that binds_tighter_than doesn't access it
+       // leave value undefined to test that bindsTighterThan doesn't access it
         try tokens.append(@unionInit(Token, fti.name, undefined));
     }
 
     for (tokens.items) |token1| {
         // non-reflexive
-        expect(!token1.binds_tighter_than(token1));
+        expect(!token1.bindsTighterThan(token1));
         for (tokens.items) |token2| {
             // non-symmetric
-            if (token1.binds_tighter_than(token2)) {
-                expect(!token2.binds_tighter_than(token1));
+            if (token1.bindsTighterThan(token2)) {
+                expect(!token2.bindsTighterThan(token1));
             }
             for (tokens.items) |token3| {
                 // transitive
-                if (token1.binds_tighter_than(token2) and token2.binds_tighter_than(token3)) {
-                    expect(token1.binds_tighter_than(token3));
+                if (token1.bindsTighterThan(token2) and token2.bindsTighterThan(token3)) {
+                    expect(token1.bindsTighterThan(token3));
                 }
             }
         }
     }
 }
 
-fn test_parse(source: []const u8, expected: []const u8) !void {
+fn testParse(source: []const u8, expected: []const u8) !void {
     var arena = ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var store = Store.init(&arena);
@@ -643,7 +643,7 @@ fn test_parse(source: []const u8, expected: []const u8) !void {
     }
 }
 
-fn test_parse_error(source: []const u8, expected: []const u8) !void {
+fn testParseError(source: []const u8, expected: []const u8) !void {
     var arena = ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var store = Store.init(&arena);
@@ -662,7 +662,7 @@ fn test_parse_error(source: []const u8, expected: []const u8) !void {
 }
 
 test "parse" {
-    try test_parse(
+    try testParse(
         \\1.3 + "foo\"bar"
             ,
             \\apply
@@ -672,7 +672,7 @@ test "parse" {
             \\  "foo"bar"
     );
 
-    try test_parse(
+    try testParse(
         \\a . b | c
             ,
             \\|
@@ -682,7 +682,7 @@ test "parse" {
             \\  c
     );
 
-    try test_parse(
+    try testParse(
         \\a | b . c
             ,
             \\|
@@ -692,7 +692,7 @@ test "parse" {
             \\    c
     );
 
-    try test_parse(
+    try testParse(
         \\a + b * c
             ,
             \\apply
@@ -706,7 +706,7 @@ test "parse" {
             \\    c
     );
 
-     try test_parse(
+     try testParse(
         \\a * b + c
              ,
              \\apply
@@ -720,7 +720,7 @@ test "parse" {
              \\  c
     );
 
-    try test_parse(
+    try testParse(
         \\!a:b
             ,
             \\!
@@ -728,31 +728,31 @@ test "parse" {
             \\    a
     );
 
-    try test_parse_error(
+    try testParseError(
         \\a & b | c
             ,
         \\Ambiguous precedence for Token{ .Intersect = void } vs Token{ .Union = void }
     );
 
-    try test_parse_error(
+    try testParseError(
         \\a * b / c
             ,
         \\Ambiguous precedence for Token{ .Multiply = void } vs Token{ .Divide = void }
     );
 
-    try test_parse_error(
+    try testParseError(
         \\a | b c
             ,
         \\Ambiguous precedence for Token{ .Union = void } vs Token{ .Apply = void }
     );
 
-    try test_parse_error(
+    try testParseError(
         \\a + b | c
             ,
         \\Ambiguous precedence for Token{ .Add = void } vs Token{ .Union = void }
     );
 
-    try test_parse(
+    try testParse(
         \\a | (b c):d
             ,
             \\|
@@ -763,7 +763,7 @@ test "parse" {
             \\      c
     );
 
-    try test_parse(
+    try testParse(
         \\\ a [b] c d -> a . b . [c . d]
             ,
             \\\ a [b] c d ->

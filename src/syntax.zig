@@ -24,6 +24,8 @@ pub const Expr = union(enum) {
     Let: Let,
     Lookup: Lookup,
 
+    // pub fn getChildren(self: Expr,
+
     pub fn dumpInto(self: Expr, out_stream: var, indent: u32) DumpError!void {
         if (indent != 0) {
             try out_stream.writeAll("\n");

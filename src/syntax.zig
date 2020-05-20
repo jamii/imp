@@ -24,7 +24,29 @@ pub const Expr = union(enum) {
     Let: Let,
     Lookup: Lookup,
 
-    // pub fn getChildren(self: Expr,
+    pub fn getChildren(self: Expr) FixedSizeArrayList(3, *const Expr) {
+        var children = FixedSizeArrayList(3, *const Expr).init();
+        inline for (@typeInfo(Expr).Union.fields) |expr_field| {
+            if (@enumToInt(std.meta.activeTag(self)) == expr_field.enum_field.?.value) {
+                const t = expr_field.field_type;
+                const v = @field(self, expr_field.enum_field.?.name);
+                if (t == void or t == value.Scalar or t == Name) {
+                    // nothing to do
+                } else if (t == *const Expr) {
+                    children.append(v);
+                } else if (t == Pair or t == When or t == Abstract or t == Annotate or t == If or t == Let or t == Lookup) {
+                    inline for (@typeInfo(t).Struct.fields) |value_field| {
+                        if (value_field.field_type == *const Expr) {
+                            children.append(@field(v, value_field.name));
+                        }
+                    }
+                } else {
+                    @compileError("Missed case for " ++ @typeName(t));
+                }
+            }
+        }
+        return children;
+    }
 
     pub fn dumpInto(self: Expr, out_stream: var, indent: u32) DumpError!void {
         if (indent != 0) {
@@ -35,32 +57,12 @@ pub const Expr = union(enum) {
             .None => try out_stream.writeAll("none"),
             .Some => try out_stream.writeAll("some"),
             .Scalar => |scalar| try scalar.dumpInto(out_stream),
-            .Union => |pair| {
-                try out_stream.writeAll("|");
-                try pair.left.dumpInto(out_stream, indent+2);
-                try pair.right.dumpInto(out_stream, indent+2);
-            },
-            .Intersect => |pair| {
-                try out_stream.writeAll("&");
-                try pair.left.dumpInto(out_stream, indent+2);
-                try pair.right.dumpInto(out_stream, indent+2);
-            },
-            .Product => |pair| {
-                try out_stream.writeAll(".");
-                try pair.left.dumpInto(out_stream, indent+2);
-                try pair.right.dumpInto(out_stream, indent+2);
-            },
-            .Equal => |pair| {
-                try out_stream.writeAll("=");
-                try pair.left.dumpInto(out_stream, indent+2);
-                try pair.right.dumpInto(out_stream, indent+2);
-            },
+            .Union => try out_stream.writeAll("|"),
+            .Intersect => try out_stream.writeAll("&"),
+            .Product => try out_stream.writeAll("."),
+            .Equal => try out_stream.writeAll("="),
             .Name => |name| try out_stream.writeAll(name),
-            .When => |when| {
-                try out_stream.writeAll("when");
-                try when.condition.dumpInto(out_stream, indent+2);
-                try when.true_branch.dumpInto(out_stream, indent+2);
-            },
+            .When => try out_stream.writeAll("when"),
             .Abstract => |abstract| {
                 try out_stream.writeAll("\\ ");
                 for (abstract.args) |arg| {
@@ -68,40 +70,17 @@ pub const Expr = union(enum) {
                     try out_stream.writeAll(" ");
                 }
                 try out_stream.writeAll("->");
-                try abstract.body.dumpInto(out_stream, indent+2);
             },
-            .Apply => |pair| {
-                try out_stream.writeAll("apply");
-                try pair.left.dumpInto(out_stream, indent+2);
-                try pair.right.dumpInto(out_stream, indent+2);
-            },
-            .Box => |expr| {
-                try out_stream.writeAll("[]");
-                try expr.dumpInto(out_stream, indent+2);
-            },
-            .Annotate => |annotate| {
-                try std.fmt.format(out_stream, "# {}", .{annotate.annotation});
-                try annotate.body.dumpInto(out_stream, indent+2);
-            },
-            .Negate => |expr| {
-                try out_stream.writeAll("!");
-                try expr.dumpInto(out_stream, indent+2);
-            },
-            .If => |if_| {
-                try out_stream.writeAll("when");
-                try if_.condition.dumpInto(out_stream, indent+2);
-                try if_.true_branch.dumpInto(out_stream, indent+2);
-                try if_.false_branch.dumpInto(out_stream, indent+2);
-            },
-            .Let => |let| {
-                try std.fmt.format(out_stream, "let {} =", .{let.name});
-                try let.value.dumpInto(out_stream, indent+2);
-                try let.body.dumpInto(out_stream, indent+2);
-            },
-            .Lookup => |lookup| {
-                try std.fmt.format(out_stream, ": {}", .{lookup.name});
-                try lookup.value.dumpInto(out_stream, indent+2);
-            },
+            .Apply => try out_stream.writeAll("apply"),
+            .Box => try out_stream.writeAll("[]"),
+            .Annotate => |annotate| try std.fmt.format(out_stream, "# {}", .{annotate.annotation}),
+            .Negate => try out_stream.writeAll("!"),
+            .If => try out_stream.writeAll("when"),
+            .Let => |let| try std.fmt.format(out_stream, "let {} =", .{let.name}),
+            .Lookup => |lookup| try std.fmt.format(out_stream, ": {}", .{lookup.name}),
+        }
+        for (self.getChildren().slice()) |child| {
+            try child.dumpInto(out_stream, indent+2);
         }
     }
 };

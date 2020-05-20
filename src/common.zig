@@ -145,3 +145,29 @@ pub fn Result(comptime Ok: type, comptime Err: type) type {
 pub fn tagEqual(a: var, b: @TypeOf(a)) bool {
     return std.meta.activeTag(a) == std.meta.activeTag(b);
 }
+
+pub fn FixedSizeArrayList(comptime size: usize, comptime T: type) type {
+    return struct {
+        elems: [size]T,
+        len: usize,
+
+        const Self = @This();
+
+        pub fn init() Self {
+            return Self{
+                .elems = undefined,
+                .len = 0,
+            };
+        }
+
+        pub fn append(self: *Self, elem: T) void {
+            assert(self.len < size);
+            self.elems[self.len] = elem;
+            self.len += 1;
+        }
+
+        pub fn slice(self: *Self) []T {
+            return self.elems[0..self.len];
+        }
+    };
+}

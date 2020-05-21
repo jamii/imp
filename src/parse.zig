@@ -70,7 +70,7 @@ pub const ParseErrorInfo = struct {
     end: usize,
     message: []const u8,
 
-    fn init() ParseErrorInfo {
+    pub fn init() ParseErrorInfo {
         return ParseErrorInfo{
             .start = 0,
             .end = 0,
@@ -658,7 +658,6 @@ fn testParseError(source: []const u8, expected: []const u8) !void {
             return err;
         }
     }
-
 }
 
 test "parse" {

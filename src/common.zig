@@ -171,3 +171,7 @@ pub fn FixedSizeArrayList(comptime size: usize, comptime T: type) type {
         }
     };
 }
+
+pub fn TODO() noreturn {
+    panic("TODO", .{});
+}

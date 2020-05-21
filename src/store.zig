@@ -37,7 +37,7 @@ pub const Store = struct {
 
     pub fn putCore(self: *Store, expr: core.Expr, from: *const syntax.Expr) ! *const core.Expr {
         var expr_meta = try self.arena.allocator.create(CoreMeta);
-        expr_meta.* = SyntaxMeta {
+        expr_meta.* = CoreMeta {
             .expr = expr,
             .from = from,
         };

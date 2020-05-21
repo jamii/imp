@@ -44,20 +44,20 @@ const syntax = @import("./syntax.zig");
 //   "<="
 
 // TODO https://github.com/ziglang/zig/issues/2647
-pub fn parse(store: *Store, source: []const u8, parse_error_info: *ParseErrorInfo) ParseError ! *const syntax.Expr {
+pub fn parse(store: *Store, source: []const u8, error_info: *ErrorInfo) Error ! *const syntax.Expr {
     var parser = Parser{
         .store = store,
         .source = source,
         .position = 0,
-        .parse_error_info = parse_error_info,
+        .error_info = error_info,
     };
     const expr = try parser.parseExpr();
     _ = try parser.expect(.EOF);
     return expr;
 }
 
-pub const ParseError = error {
-    ParseError,
+pub const Error = error {
+    Error,
     OutOfMemory,
     Utf8InvalidStartByte,
     InvalidUtf8,
@@ -65,13 +65,13 @@ pub const ParseError = error {
 }
 || @TypeOf(std.unicode.utf8Decode).ReturnType.ErrorSet;
 
-pub const ParseErrorInfo = struct {
+pub const ErrorInfo = struct {
     start: usize,
     end: usize,
     message: []const u8,
 
-    pub fn init() ParseErrorInfo {
-        return ParseErrorInfo{
+    pub fn init() ErrorInfo {
+        return ErrorInfo{
             .start = 0,
             .end = 0,
             .message = "not an error",
@@ -142,7 +142,7 @@ const Parser = struct {
     store: *Store,
     source: []const u8,
     position: usize,
-    parse_error_info: *ParseErrorInfo,
+    error_info: *ErrorInfo,
 
     fn putApplyOp(self: *Parser, name: syntax.Name, left: *const syntax.Expr, right: *const syntax.Expr, start: usize, end: usize) ! *const syntax.Expr {
         const expr1 = try self.store.putSyntax(.{.Name=name}, start, end);
@@ -151,15 +151,15 @@ const Parser = struct {
         return expr3;
     }
 
-    fn parseError(self: *Parser, start: usize, comptime fmt: []const u8, args: var) ParseError {
-        self.parse_error_info.start = start;
-        self.parse_error_info.end = self.position;
+    fn setError(self: *Parser, start: usize, comptime fmt: []const u8, args: var) Error {
+        self.error_info.start = start;
+        self.error_info.end = self.position;
         if (format(&self.store.arena.allocator, fmt, args)) |message| {
-            self.parse_error_info.message = message;
-            return error.ParseError;
+            self.error_info.message = message;
+            return error.Error;
         } else |err| {
             switch (err) {
-                error.OutOfMemory => self.parse_error_info.message = "out of memory",
+                error.OutOfMemory => self.error_info.message = "out of memory",
             }
             return err;
         }
@@ -184,7 +184,7 @@ const Parser = struct {
         if (try self.nextUtf8Char()) |char| {
             const ascii_char = @intCast(u8, char & 0b0111_1111);
             if (@as(u21, char) != ascii_char) {
-                return self.parseError(start, "unicode characters may only appear in strings and comments", .{});
+                return self.setError(start, "unicode characters may only appear in strings and comments", .{});
             }
             return ascii_char;
         } else {
@@ -205,10 +205,10 @@ const Parser = struct {
                             switch (escaped_char) {
                                 '"' => try bytes.append('"'),
                                 'n' => try bytes.append('\n'),
-                                else => return self.parseError(char_start, "invalid string escape", .{}),
+                                else => return self.setError(char_start, "invalid string escape", .{}),
                             }
                         } else {
-                            return self.parseError(char_start, "unfinished string escape", .{});
+                            return self.setError(char_start, "unfinished string escape", .{});
                         }
 
                     },
@@ -220,7 +220,7 @@ const Parser = struct {
                     },
                 }
             } else {
-                return self.parseError(string_start, "unfinished string", .{});
+                return self.setError(string_start, "unfinished string", .{});
             }
         }
         return bytes.items;
@@ -301,7 +301,7 @@ const Parser = struct {
         }
         if (has_decimal_point and self.position == point_end) {
             // otherwise `1.foo` can parse as `1 . foo` or `1.0 foo`
-            return self.parseError(start, "there must be at least one digit after a decimal point", .{});
+            return self.setError(start, "there must be at least one digit after a decimal point", .{});
         } else {
             return std.fmt.parseFloat(f64, self.source[start..self.position]);
         }
@@ -366,7 +366,7 @@ const Parser = struct {
                 else => {
                     const ascii_char1 = @intCast(u8, char1 & 0b0111_1111);
                     if (char1 != @as(u21, ascii_char1)) {
-                        return self.parseError(start, "unicode characters may only appear in strings and comments", .{});
+                        return self.setError(start, "unicode characters may only appear in strings and comments", .{});
                     } else if (std.ascii.isSpace(ascii_char1)) {
                         return self.nextToken();
                     } else if (std.ascii.isDigit(ascii_char1)) {
@@ -383,7 +383,7 @@ const Parser = struct {
                         if (meta.deepEqual(name, "in")) return Token{.In={}};
                         return Token{.Name = name};
                     } else {
-                        return self.parseError(start, "invalid token", .{});
+                        return self.setError(start, "invalid token", .{});
                     }
                 }
             }
@@ -396,14 +396,14 @@ const Parser = struct {
         const start = self.position;
         const found = try self.nextToken();
         if (std.meta.activeTag(found) != expected) {
-            return self.parseError(start, "Expected {}, found {}", .{expected, found});
+            return self.setError(start, "Expected {}, found {}", .{expected, found});
         } else {
             return found;
         }
     }
 
     // returns null if this isn't the start of an expression
-    fn parseExprInnerMaybe(self: *Parser) ParseError ! ?*const syntax.Expr {
+    fn parseExprInnerMaybe(self: *Parser) Error ! ?*const syntax.Expr {
         const start = self.position;
         const token = try self.nextToken();
         switch (token) {
@@ -445,11 +445,11 @@ const Parser = struct {
                             _ = try self.expect(.CloseBox);
                         },
                         .AbstractBody => break,
-                        else => return self.parseError(arg_start, "Expected name or [ or ->, found {}", .{arg_token}),
+                        else => return self.setError(arg_start, "Expected name or [ or ->, found {}", .{arg_token}),
                     }
                 }
                 if (args.items.len == 0) {
-                    return self.parseError(start, "Abstract must have at least one arg", .{});
+                    return self.setError(start, "Abstract must have at least one arg", .{});
                 }
                 const body = try self.parseExpr();
                 return self.store.putSyntax(.{.Abstract=.{.args=args.items, .body=body}}, start, self.position);
@@ -498,13 +498,13 @@ const Parser = struct {
     }
 
     // when parsing initial expr there can't be an apply or binop so go ahead and error
-    fn parseExprInner(self: *Parser) ParseError ! *const syntax.Expr {
+    fn parseExprInner(self: *Parser) Error ! *const syntax.Expr {
         if (try self.parseExprInnerMaybe()) |expr| {
             return expr;
         } else {
             const start = self.position;
             const token = try self.nextToken();
-            return self.parseError(start, "Expected start of expression, found {}", .{token});
+            return self.setError(start, "Expected start of expression, found {}", .{token});
         }
     }
 
@@ -517,7 +517,7 @@ const Parser = struct {
     //     (prev_expr prev_op left) op right
     //   * otherwise:
     //     parse_error "ambiguous precedence"
-    fn parseExprOuter(self: *Parser, prev_op: ?Token) ParseError ! *const syntax.Expr {
+    fn parseExprOuter(self: *Parser, prev_op: ?Token) Error ! *const syntax.Expr {
         var left = try self.parseExprInner();
         while (true) {
             const op_start = self.position;
@@ -550,7 +550,7 @@ const Parser = struct {
                         self.position = op_start;
                         return left;
                     } else {
-                        return self.parseError(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
+                        return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
                     }
                 },
 
@@ -563,7 +563,7 @@ const Parser = struct {
                         self.position = op_start;
                         return left;
                     } else {
-                        return self.parseError(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
+                        return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
                     }
                 },
 
@@ -580,7 +580,7 @@ const Parser = struct {
                             self.position = op_start;
                             return left;
                         } else {
-                            return self.parseError(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, apply});
+                            return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, apply});
                         }
                     } else {
                         // no more binary things to apply
@@ -592,7 +592,7 @@ const Parser = struct {
         }
     }
 
-    fn parseExpr(self: *Parser) ParseError ! *const syntax.Expr {
+    fn parseExpr(self: *Parser) Error ! *const syntax.Expr {
         return self.parseExprOuter(null);
     }
 };
@@ -629,8 +629,8 @@ fn testParse(source: []const u8, expected: []const u8) !void {
     var arena = ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var store = Store.init(&arena);
-    var parse_error_info = ParseErrorInfo.init();
-    if (parse(&store, source, &parse_error_info)) |found| {
+    var error_info = ErrorInfo.init();
+    if (parse(&store, source, &error_info)) |found| {
         var bytes = ArrayList(u8).init(std.testing.allocator);
         defer bytes.deinit();
         try found.dumpInto(bytes.outStream(), 0);
@@ -638,23 +638,23 @@ fn testParse(source: []const u8, expected: []const u8) !void {
             panic("\nExpected parse:\n{}\n\nFound parse:\n{}", .{expected, bytes.items});
         }
     } else |err| {
-        warn("\nExpected parse:\n{}\n\nFound error:\n{}\n", .{expected, parse_error_info.message});
+        warn("\nExpected parse:\n{}\n\nFound error:\n{}\n", .{expected, error_info.message});
         return err;
     }
 }
 
-fn testParseError(source: []const u8, expected: []const u8) !void {
+fn testError(source: []const u8, expected: []const u8) !void {
     var arena = ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var store = Store.init(&arena);
-    var parse_error_info = ParseErrorInfo.init();
-    if (parse(&store, source, &parse_error_info)) |found| {
+    var error_info = ErrorInfo.init();
+    if (parse(&store, source, &error_info)) |found| {
         var bytes = ArrayList(u8).init(std.testing.allocator);
         try found.dumpInto(bytes.outStream(), 0);
         panic("\nExpected error:\n{}\n\nFound parse:\n{}", .{expected, bytes.items});
     } else |err| {
-        if (!meta.deepEqual(expected, parse_error_info.message)) {
-            warn("\nExpected error:\n{}\n\nFound error:\n{}\n", .{expected, parse_error_info.message});
+        if (!meta.deepEqual(expected, error_info.message)) {
+            warn("\nExpected error:\n{}\n\nFound error:\n{}\n", .{expected, error_info.message});
             return err;
         }
     }
@@ -727,25 +727,25 @@ test "parse" {
             \\    a
     );
 
-    try testParseError(
+    try testError(
         \\a & b | c
             ,
         \\Ambiguous precedence for Token{ .Intersect = void } vs Token{ .Union = void }
     );
 
-    try testParseError(
+    try testError(
         \\a * b / c
             ,
         \\Ambiguous precedence for Token{ .Multiply = void } vs Token{ .Divide = void }
     );
 
-    try testParseError(
+    try testError(
         \\a | b c
             ,
         \\Ambiguous precedence for Token{ .Union = void } vs Token{ .Apply = void }
     );
 
-    try testParseError(
+    try testError(
         \\a + b | c
             ,
         \\Ambiguous precedence for Token{ .Add = void } vs Token{ .Union = void }

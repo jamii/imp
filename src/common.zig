@@ -31,19 +31,15 @@ pub fn DeepHashSet(comptime K: type) type {
     return DeepHashMap(K, void);
 }
 
-pub const DumpError = error{
-    OutOfMemory,
-};
-
-pub fn dump(thing: var) DumpError!void {
+pub fn dump(thing: var) void {
     const held = std.debug.getStderrMutex().acquire();
     defer held.release();
     const my_stderr = std.debug.getStderrStream();
-    dumpInner(my_stderr.*, 0, thing) catch return;
+    dumpInto(my_stderr.*, 0, thing) catch return;
     my_stderr.writeAll("\n") catch return;
 }
 
-pub fn dumpInto(out_stream: var, indent: u32, thing: var) DumpError!void {
+pub fn dumpInto(out_stream: var, indent: u32, thing: var) !void {
         const ti = @typeInfo(@TypeOf(thing));
         switch (ti) {
             .Pointer => |pti| {

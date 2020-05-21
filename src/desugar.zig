@@ -7,7 +7,8 @@ const core = @import("./core.zig");
 pub fn desugar(store: *Store, syntax_expr: *const syntax.Expr, desugar_error_info: *DesugarErrorInfo) DesugarError ! *const core.Expr {
     var desugarer = Desugarer{
         .store = store,
-        .scope = ArrayList(syntax.Arg).init(&store.arena.allocator),
+        .scope = ArrayList(?syntax.Arg).init(&store.arena.allocator),
+        .current_expr = null,
         .desugar_error_info = desugar_error_info,
     };
     return desugarer.desugar(syntax_expr);
@@ -34,149 +35,167 @@ pub const DesugarErrorInfo = struct {
 
 const Desugarer = struct {
     store: *Store,
-    scope: ArrayList(syntax.Arg),
+    scope: ArrayList(?syntax.Arg), // null when unnameable
+    current_expr: ?*const syntax.Expr,
     desugar_error_info: *DesugarErrorInfo,
 
-    fn desugarError(self: *Desugarer, syntax_expr: *const syntax.Expr, comptime fmt: []const u8, args: var) DesugarError {
-        self.desugar_error_info.expr = syntax_expr;
+    fn desugarError(self: *Desugarer, comptime fmt: []const u8, args: var) DesugarError {
+        self.desugar_error_info.expr = self.current_expr;
         self.desugar_error_info.message = try format(&self.store.arena.allocator, fmt, args);
         return error.DesugarError;
     }
 
-    // fn desugar_let
+    fn putCore(self: *Desugarer, core_expr: core.Expr) DesugarError ! *const core.Expr {
+        return self.store.putCore(core_expr, self.current_expr.?);
+    }
 
     fn desugar(self: *Desugarer, syntax_expr: *const syntax.Expr) DesugarError ! *const core.Expr {
-        switch (syntax_expr.*) {
-            .None => return try self.store.putCore(.None, syntax_expr),
-            .Some => return try self.store.putCore(.Some, syntax_expr),
-            .Scalar => |scalar| return try self.store.putCore(.{.Scalar = scalar}, syntax_expr),
-            .Union => |pair| {
-                return try self.store.putCore(
+        const prev_expr = self.current_expr;
+        self.current_expr = syntax_expr;
+        const core_expr = switch (syntax_expr.*) {
+            .None => try self.putCore(.None),
+            .Some => try self.putCore(.Some),
+            .Scalar => |scalar| try self.putCore(.{.Scalar = scalar}),
+            .Union => |pair|
+                try self.putCore(
                     .{.Union = .{
                         .left = try self.desugar(pair.left),
                         .right = try self.desugar(pair.right),
-                    }},
-                    syntax_expr
-                );
-            },
-            .Intersect => |pair| {
-                return try self.store.putCore(
+                    }}
+            ),
+            .Intersect => |pair|
+                try self.putCore(
                     .{.Intersect = .{
                         .left = try self.desugar(pair.left),
                         .right = try self.desugar(pair.right),
-                    }},
-                    syntax_expr
-                );
-            },
-            .Product => |pair| {
-                return try self.store.putCore(
+                    }}
+            ),
+            .Product => |pair|
+                try self.putCore(
                     .{.Product = .{
                         .left = try self.desugar(pair.left),
                         .right = try self.desugar(pair.right),
-                    }},
-                    syntax_expr
-                );
-            },
-            .Equal => |pair| {
-                return try self.store.putCore(
+                    }}
+            ),
+            .Equal => |pair|
+                try self.putCore(
                     .{.Equal = .{
                         .left = try self.desugar(pair.left),
                         .right = try self.desugar(pair.right),
-                    }},
-                    syntax_expr
-                );
-            },
-            .Name => |name| {
+                    }}
+                ),
+            .Name => |name| name: {
                 const args = self.scope.items;
                 var i: usize = 0;
                 while (i < args.len) : (i += 1) {
-                    const arg = args[args.len - 1 - i];
-                    if (meta.deepEqual(name, arg.name)) {
-                        return self.store.putCore(
-                            if (arg.unbox) .{.UnboxName = i} else .{.Name = i},
-                            syntax_expr,
-                        );
+                    if (args[args.len - 1 - i]) |arg| {
+                        if (meta.deepEqual(name, arg.name)) {
+                            break :name try self.putCore(
+                                if (arg.unbox) .{.UnboxName = i} else .{.Name = i},
+                            );
+                        }
                     }
                 }
-                return self.desugarError(syntax_expr, "Name not in scope: {}", .{name});
+                return self.desugarError("Name not in scope: {}", .{name});
             },
-            .When => |when| {
-                return try self.store.putCore(
+            .When => |when|
+                try self.putCore(
                     .{.When = .{
                         .condition = try self.desugar(when.condition),
                         .true_branch = try self.desugar(when.true_branch),
-                    }},
-                    syntax_expr
-                );
-            },
-            .Abstract => |abstract| {
+                    }}
+            ),
+            .Abstract => |abstract| abstract: {
                 for (abstract.args) |arg| {
                     try self.scope.append(arg);
                 }
                 var body = try self.desugar(abstract.body);
                 for (abstract.args) |_| {
                     _ = self.scope.pop();
-                    body = try self.store.putCore(
+                    body = try self.putCore(
                         .{.Abstract = body},
-                        syntax_expr,
                     );
                 }
-                return body;
+                break :abstract body;
             },
-            .Apply => |pair| {
-                return try self.store.putCore(
+            .Apply => |pair|
+                return self.putCore(
                     .{.Apply = .{
                         .left = try self.desugar(pair.left),
                         .right = try self.desugar(pair.right),
                     }},
-                    syntax_expr
-                );
-            },
-            .Box => |expr| {
-                const body = try self.desugar(expr);
-                const box_id = try self.store.putBox(body);
-                var body_name_ixes = DeepHashSet(core.NameIx).init(&self.store.arena.allocator);
-                try body.getNameIxes(&body_name_ixes);
-                var box_scope = ArrayList(core.NameIx).init(&self.store.arena.allocator);
-                var body_name_ixes_iter = body_name_ixes.iterator();
-                while (body_name_ixes_iter.next()) |kv| {
-                    try box_scope.append(kv.key);
-                }
-                return try self.store.putCore(
-                    .{.Box = .{
-                        .id = box_id,
-                        .scope = box_scope.items,
-                        .body = body,
-                    }},
-                    syntax_expr,
-                );
-            },
-            .Annotate => |annotate| {
-                return try self.store.putCore(
+            ),
+            .Box => |expr| try self.desugarBox(expr),
+            .Annotate => |annotate|
+                try self.putCore(
                     .{.Annotate = .{
                         .annotation = annotate.annotation,
                         .body = try self.desugar(annotate.body),
                     }},
-                    syntax_expr,
-                );
-            },
-            .Negate => |expr| {
+            ),
+            .Negate => |expr| negate: {
                 // `!e` => `e == none`
-                TODO();
+                const e = try self.desugar(expr);
+                const none = try self.putCore(.None);
+                break :negate try self.putCore(.{.Equal = .{.left=e, .right=none}});
             },
-            .If => |if_| {
+            .If => |if_| if_: {
                 // `if c t f` => `[c] ([g] -> (when g then t) | (when !g then f))`
-                TODO();
+                const box_c = try self.desugarBox(if_.condition);
+                try self.scope.append(null); // g
+                const t = try self.desugar(if_.true_branch);
+                const f = try self.desugar(if_.false_branch);
+                _ = self.scope.pop();
+                const left_g = try self.putCore(.{.UnboxName = 0});
+                const left = try self.putCore(.{.When = .{.condition=left_g, .true_branch=t}});
+                const right_g = try self.putCore(.{.UnboxName = 0});
+                const none = try self.putCore(.None);
+                const not_right_g = try self.putCore(.{.Equal = .{.left=right_g, .right=none}});
+                const right = try self.putCore(.{.When = .{.condition=not_right_g, .true_branch=f}});
+                const body = try self.putCore(.{.Union = .{.left=left, .right=right}});
+                const abstract = try self.putCore(.{.Abstract = body});
+                break :if_ try self.putCore(.{.Apply = .{.left=box_c, .right=abstract}});
             },
-            .Let => |let| {
+            .Let => |let| let: {
                 // `let n = v in b` => `[v] ([n] -> b)`
-                TODO();
+                const box_v = try self.desugarBox(let.value);
+                try self.scope.append(syntax.Arg{.name=let.name, .unbox=true});
+                const b = try self.desugar(let.body);
+                _ = self.scope.pop();
+                const abstract = try self.putCore(.{.Abstract = b});
+                break :let try self.putCore(.{.Apply=.{.left=box_v, .right=abstract}});
             },
-            .Lookup => |lookup| {
+            .Lookup => |lookup| lookup: {
                 // `a:b` => `(a "b") ([g] -> g)`
-                TODO();
+                const a = try self.desugar(lookup.value);
+                const b = try self.putCore(.{.Scalar = .{.String = lookup.name}});
+                const apply_ab = try self.putCore(.{.Apply = .{.left=a, .right=b}});
+                const unbox = try self.putCore(.{.UnboxName = 0});
+                const abstract = try self.putCore(.{.Abstract = unbox});
+                break :lookup try self.putCore(.{.Apply = .{.left=apply_ab, .right=abstract}});
             },
+        };
+        self.current_expr = prev_expr;
+        return core_expr;
+    }
+
+    fn desugarBox(self: *Desugarer, syntax_expr: *const syntax.Expr) DesugarError ! *const core.Expr {
+        const body = try self.desugar(syntax_expr);
+        const box_id = try self.store.putBox(body);
+        var body_name_ixes = DeepHashSet(core.NameIx).init(&self.store.arena.allocator);
+        try body.getNameIxes(&body_name_ixes);
+        var box_scope = ArrayList(core.NameIx).init(&self.store.arena.allocator);
+        var body_name_ixes_iter = body_name_ixes.iterator();
+        while (body_name_ixes_iter.next()) |kv| {
+            try box_scope.append(kv.key);
         }
+        return self.putCore(
+            .{.Box = .{
+                .id = box_id,
+                .scope = box_scope.items,
+                .body = body,
+            }}
+        );
     }
 };
 
@@ -220,6 +239,12 @@ fn testDesugarError(source: []const u8, expected: []const u8) !void {
 }
 
 test "desugar" {
+    try testDesugarError(
+        \\\ a [b] -> a | b . c
+            ,
+            \\Name not in scope: c
+    );
+
     try testDesugar(
         \\\ a [b] c -> a | b . (\ b -> b)
             ,
@@ -232,5 +257,54 @@ test "desugar" {
             \\          get unbox 1
             \\          \ _ ->
             \\            get 0
+    );
+
+    try testDesugar(
+        \\!1
+            ,
+            \\=
+            \\  1
+            \\  none
+    );
+
+    try testDesugar(
+        \\if (1 = 2) then 3 else 4
+            ,
+            \\apply
+            \\  box 0 |
+            \\    =
+            \\      1
+            \\      2
+            \\  \ _ ->
+            \\    |
+            \\      when
+            \\        get unbox 0
+            \\        3
+            \\      when
+            \\        =
+            \\          get unbox 0
+            \\          none
+            \\        4
+    );
+
+    try testDesugar(
+        \\let a = 1 in a
+            ,
+            \\apply
+            \\  box 0 |
+            \\    1
+            \\  \ _ ->
+            \\    get unbox 0
+    );
+
+    try testDesugar(
+        \\1:foo
+            ,
+            \\apply
+            \\  apply
+            \\    1
+            \\    "foo"
+            \\  \ _ ->
+            \\    get unbox 0
     );
 }

@@ -6,7 +6,7 @@ pub const Scalar = union(enum) {
     Number: f64,
     Box: Box,
 
-    fn dumpInto(self: Scalar, out_stream: var) DumpError!void {
+    fn dumpInto(self: Scalar, out_stream: var) anyerror!void {
         switch (self) {
             .String => |string| try std.fmt.format(out_stream, "\"{s}\"", .{string}),
             .Number => |number| try std.fmt.format(out_stream, "{d}", .{number}),

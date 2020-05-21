@@ -72,7 +72,7 @@ pub const Expr = union(enum) {
         }
     }
 
-    pub fn dumpInto(self: Expr, out_stream: var, indent: u32) DumpError!void {
+    pub fn dumpInto(self: Expr, out_stream: var, indent: u32) anyerror!void {
         if (indent != 0) {
             try out_stream.writeAll("\n");
             try out_stream.writeByteNTimes(' ', indent);

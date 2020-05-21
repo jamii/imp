@@ -299,7 +299,7 @@ const Parser = struct {
                 }
             }
         }
-        if (self.position == point_end) {
+        if (has_decimal_point and self.position == point_end) {
             // otherwise `1.foo` can parse as `1 . foo` or `1.0 foo`
             return self.parseError(start, "there must be at least one digit after a decimal point", .{});
         } else {
@@ -378,9 +378,9 @@ const Parser = struct {
                         if (meta.deepEqual(name, "when")) return Token{.When={}};
                         if (meta.deepEqual(name, "then")) return Token{.Then={}};
                         if (meta.deepEqual(name, "if")) return Token{.If={}};
-                        if (meta.deepEqual(name, "else")) return Token{.If={}};
+                        if (meta.deepEqual(name, "else")) return Token{.Else={}};
                         if (meta.deepEqual(name, "let")) return Token{.Let={}};
-                        if (meta.deepEqual(name, "in")) return Token{.Let={}};
+                        if (meta.deepEqual(name, "in")) return Token{.In={}};
                         return Token{.Name = name};
                     } else {
                         return self.parseError(start, "invalid token", .{});
@@ -774,5 +774,21 @@ test "parse" {
             \\      .
             \\        c
             \\        d
+    );
+
+    try testParse(
+        \\let a = b in a
+            ,
+            \\let a =
+            \\  b
+            \\  a
+    );
+
+     try testParse(
+        \\let a = 1 in a
+            ,
+            \\let a =
+            \\  1
+            \\  a
     );
 }

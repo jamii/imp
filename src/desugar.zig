@@ -15,7 +15,10 @@ pub fn desugar(store: *Store, syntax_expr: *const syntax.Expr, error_info: *?Err
 }
 
 pub const Error = error {
+    // sets error_info
     DesugarError,
+
+    // does not set error_info
     OutOfMemory,
 };
 
@@ -33,11 +36,11 @@ const Desugarer = struct {
     error_info: *?ErrorInfo,
 
     fn setError(self: *Desugarer, comptime fmt: []const u8, args: var) Error {
+        const message = try format(&self.store.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
             .expr = self.current_expr,
-            .message = "out of memory",
+            .message = message,
         };
-        self.error_info.*.?.message = try format(&self.store.arena.allocator, fmt, args);
         return error.DesugarError;
     }
 

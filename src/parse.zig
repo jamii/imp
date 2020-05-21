@@ -58,7 +58,10 @@ pub fn parse(store: *Store, source: []const u8, error_info: *?ErrorInfo) Error !
 
 // TODO clean up this errorset
 pub const Error = error {
+    // sets error_info
     ParseError,
+
+    // nothing else sets error_info
     OutOfMemory,
     Utf8InvalidStartByte,
     InvalidUtf8,
@@ -145,12 +148,12 @@ const Parser = struct {
     }
 
     fn setError(self: *Parser, start: usize, comptime fmt: []const u8, args: var) Error {
+        const message = try format(&self.store.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
             .start = start,
             .end = self.position,
-            .message = "out of memory"
+            .message = message,
         };
-        self.error_info.*.?.message = try format(&self.store.arena.allocator, fmt, args);
         return error.ParseError;
     }
 

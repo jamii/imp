@@ -4,7 +4,7 @@ const Store = @import("./store.zig").Store;
 const syntax = @import("./syntax.zig");
 const core = @import("./core.zig");
 
-pub fn desugar(store: *Store, syntax_expr: *const syntax.Expr, error_info: *ErrorInfo) Error ! *const core.Expr {
+pub fn desugar(store: *Store, syntax_expr: *const syntax.Expr, error_info: *?ErrorInfo) Error ! *const core.Expr {
     var desugarer = Desugarer{
         .store = store,
         .scope = ArrayList(?syntax.Arg).init(&store.arena.allocator),
@@ -15,20 +15,13 @@ pub fn desugar(store: *Store, syntax_expr: *const syntax.Expr, error_info: *Erro
 }
 
 pub const Error = error {
-    Error,
+    DesugarError,
     OutOfMemory,
 };
 
 pub const ErrorInfo = struct {
     expr: ?*const syntax.Expr,
     message: []const u8,
-
-    pub fn init() ErrorInfo {
-        return ErrorInfo{
-            .expr = null,
-            .message = "not an error",
-        };
-    }
 };
 
 // --------------------------------------------------------------------------------
@@ -37,12 +30,15 @@ const Desugarer = struct {
     store: *Store,
     scope: ArrayList(?syntax.Arg), // null when unnameable
     current_expr: ?*const syntax.Expr,
-    error_info: *ErrorInfo,
+    error_info: *?ErrorInfo,
 
     fn setError(self: *Desugarer, comptime fmt: []const u8, args: var) Error {
-        self.error_info.expr = self.current_expr;
-        self.error_info.message = try format(&self.store.arena.allocator, fmt, args);
-        return error.Error;
+        self.error_info.* = ErrorInfo{
+            .expr = self.current_expr,
+            .message = "out of memory",
+        };
+        self.error_info.*.?.message = try format(&self.store.arena.allocator, fmt, args);
+        return error.DesugarError;
     }
 
     fn putCore(self: *Desugarer, core_expr: core.Expr) Error ! *const core.Expr {
@@ -205,8 +201,9 @@ fn testDesugar(source: []const u8, expected: []const u8) !void {
     var arena = ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var store = Store.init(&arena);
-    const syntax_expr = try parse.parse(&store, source, &parse.ErrorInfo.init());
-    var error_info = ErrorInfo.init();
+    var parse_error_info: ?parse.ErrorInfo = null;
+    const syntax_expr = try parse.parse(&store, source, &parse_error_info);
+    var error_info: ?ErrorInfo = null;
     if (desugar(&store, syntax_expr, &error_info)) |found| {
         var bytes = ArrayList(u8).init(std.testing.allocator);
         defer bytes.deinit();
@@ -215,7 +212,7 @@ fn testDesugar(source: []const u8, expected: []const u8) !void {
             panic("\nExpected desugar:\n{}\n\nFound desugar:\n{}", .{expected, bytes.items});
         }
     } else |err| {
-        warn("\nExpected desugar:\n{}\n\nFound error:\n{}\n", .{expected, error_info.message});
+        warn("\nExpected desugar:\n{}\n\nFound error:\n{}\n", .{expected, error_info.?.message});
         return err;
     }
 }
@@ -224,15 +221,16 @@ fn testError(source: []const u8, expected: []const u8) !void {
     var arena = ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var store = Store.init(&arena);
-    const syntax_expr = try parse.parse(&store, source, &parse.ErrorInfo.init());
-    var error_info = ErrorInfo.init();
+    var parse_error_info: ?parse.ErrorInfo = null;
+    const syntax_expr = try parse.parse(&store, source, &parse_error_info);
+    var error_info: ?ErrorInfo = null;
     if (desugar(&store, syntax_expr, &error_info)) |found| {
         var bytes = ArrayList(u8).init(std.testing.allocator);
         try found.dumpInto(bytes.outStream(), 0);
         panic("\nExpected error:\n{}\n\nFound desugar:\n{}", .{expected, bytes.items});
     } else |err| {
-        if (!meta.deepEqual(expected, error_info.message)) {
-            warn("\nExpected error:\n{}\n\nFound error:\n{}\n", .{expected, error_info.message});
+        if (!meta.deepEqual(expected, error_info.?.message)) {
+            warn("\nExpected error:\n{}\n\nFound error:\n{}\n", .{expected, error_info.?.message});
             return err;
         }
     }

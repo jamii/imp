@@ -44,7 +44,7 @@ const syntax = @import("./syntax.zig");
 //   "<="
 
 // TODO https://github.com/ziglang/zig/issues/2647
-pub fn parse(store: *Store, source: []const u8, error_info: *ErrorInfo) Error ! *const syntax.Expr {
+pub fn parse(store: *Store, source: []const u8, error_info: *?ErrorInfo) Error ! *const syntax.Expr {
     var parser = Parser{
         .store = store,
         .source = source,
@@ -56,8 +56,9 @@ pub fn parse(store: *Store, source: []const u8, error_info: *ErrorInfo) Error ! 
     return expr;
 }
 
+// TODO clean up this errorset
 pub const Error = error {
-    Error,
+    ParseError,
     OutOfMemory,
     Utf8InvalidStartByte,
     InvalidUtf8,
@@ -69,14 +70,6 @@ pub const ErrorInfo = struct {
     start: usize,
     end: usize,
     message: []const u8,
-
-    pub fn init() ErrorInfo {
-        return ErrorInfo{
-            .start = 0,
-            .end = 0,
-            .message = "not an error",
-        };
-    }
 };
 
 // --------------------------------------------------------------------------------
@@ -142,7 +135,7 @@ const Parser = struct {
     store: *Store,
     source: []const u8,
     position: usize,
-    error_info: *ErrorInfo,
+    error_info: *?ErrorInfo,
 
     fn putApplyOp(self: *Parser, name: syntax.Name, left: *const syntax.Expr, right: *const syntax.Expr, start: usize, end: usize) ! *const syntax.Expr {
         const expr1 = try self.store.putSyntax(.{.Name=name}, start, end);
@@ -152,17 +145,13 @@ const Parser = struct {
     }
 
     fn setError(self: *Parser, start: usize, comptime fmt: []const u8, args: var) Error {
-        self.error_info.start = start;
-        self.error_info.end = self.position;
-        if (format(&self.store.arena.allocator, fmt, args)) |message| {
-            self.error_info.message = message;
-            return error.Error;
-        } else |err| {
-            switch (err) {
-                error.OutOfMemory => self.error_info.message = "out of memory",
-            }
-            return err;
-        }
+        self.error_info.* = ErrorInfo{
+            .start = start,
+            .end = self.position,
+            .message = "out of memory"
+        };
+        self.error_info.*.?.message = try format(&self.store.arena.allocator, fmt, args);
+        return error.ParseError;
     }
 
     // use this instead of std.unicode.Utf8Iterator because we want to return the position of any unicode error
@@ -629,7 +618,7 @@ fn testParse(source: []const u8, expected: []const u8) !void {
     var arena = ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var store = Store.init(&arena);
-    var error_info = ErrorInfo.init();
+    var error_info: ?ErrorInfo = null;
     if (parse(&store, source, &error_info)) |found| {
         var bytes = ArrayList(u8).init(std.testing.allocator);
         defer bytes.deinit();
@@ -638,7 +627,7 @@ fn testParse(source: []const u8, expected: []const u8) !void {
             panic("\nExpected parse:\n{}\n\nFound parse:\n{}", .{expected, bytes.items});
         }
     } else |err| {
-        warn("\nExpected parse:\n{}\n\nFound error:\n{}\n", .{expected, error_info.message});
+        warn("\nExpected parse:\n{}\n\nFound error:\n{}\n", .{expected, error_info.?.message});
         return err;
     }
 }
@@ -647,14 +636,14 @@ fn testError(source: []const u8, expected: []const u8) !void {
     var arena = ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var store = Store.init(&arena);
-    var error_info = ErrorInfo.init();
+    var error_info: ?ErrorInfo = null;
     if (parse(&store, source, &error_info)) |found| {
         var bytes = ArrayList(u8).init(std.testing.allocator);
         try found.dumpInto(bytes.outStream(), 0);
         panic("\nExpected error:\n{}\n\nFound parse:\n{}", .{expected, bytes.items});
     } else |err| {
-        if (!meta.deepEqual(expected, error_info.message)) {
-            warn("\nExpected error:\n{}\n\nFound error:\n{}\n", .{expected, error_info.message});
+        if (!meta.deepEqual(expected, error_info.?.message)) {
+            warn("\nExpected error:\n{}\n\nFound error:\n{}\n", .{expected, error_info.?.message});
             return err;
         }
     }

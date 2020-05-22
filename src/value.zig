@@ -39,4 +39,8 @@ pub const AbstractSet = struct {
 pub const Set = union(enum) {
     Finite: FiniteSet,
     Abstract: AbstractSet,
+
+    pub fn isFinite(self: Set) bool {
+        return std.meta.activeTag(self) == .Finite;
+    }
 };

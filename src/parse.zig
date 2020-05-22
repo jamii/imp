@@ -171,11 +171,11 @@ const Parser = struct {
         return char;
     }
 
-    fn nextAsciiChar(self: *Parser) ! ?u8 {
+    fn nextAsciiChar(self: *Parser) ! ?u7 {
         const start = self.position;
         if (try self.nextUtf8Char()) |char| {
-            const ascii_char = @intCast(u8, char & 0b0111_1111);
-            if (@as(u21, char) != ascii_char) {
+            const ascii_char = @truncate(u7, char);
+            if (ascii_char != char) {
                 return self.setError(start, "unicode characters may only appear in strings and comments", .{});
             }
             return ascii_char;

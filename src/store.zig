@@ -2,6 +2,7 @@ usingnamespace @import("./common.zig");
 
 pub const syntax = @import("./syntax.zig");
 pub const core = @import("./core.zig");
+pub const type_ = @import("./type.zig");
 
 pub const SyntaxMeta = struct {
     start: usize,
@@ -21,12 +22,12 @@ pub fn ExprAndMeta(comptime Expr: type, comptime Meta: type) type {
 
 pub const Store = struct {
     arena: *ArenaAllocator,
-    box_exprs: ArrayList(*const core.Expr),
+    types: DeepHashMap(type_.TypeOf, type_.SetType),
 
     pub fn init(arena: *ArenaAllocator) Store {
         return Store{
             .arena = arena,
-            .box_exprs = ArrayList(*const core.Expr).init(&arena.allocator),
+            .types = DeepHashMap(type_.TypeOf, type_.SetType).init(&arena.allocator),
         };
     }
 
@@ -61,8 +62,11 @@ pub const Store = struct {
         return &@fieldParentPtr(ExprAndMeta(core.Expr, CoreMeta), "expr", expr).meta;
     }
 
-    pub fn putBox(self: *Store, expr: *const core.Expr) ! core.BoxId {
-        try self.box_exprs.append(expr);
-        return self.box_exprs.items.len - 1;
+    pub fn putType(self: *Store, expr: *const core.Expr, scope: []const type_.ScalarType, set_type: type_.SetType) ! void {
+        _ = try self.types.put(.{.expr = expr, .scope = scope}, set_type);
+    }
+
+    pub fn getType(self: *Store, expr: *const core.Expr, scope: []const type_.ScalarType) ?type_.SetType {
+        return self.types.getValue(.{.expr = expr, .scope = scope});
     }
 };

@@ -5,8 +5,6 @@ const value = @import("./value.zig");
 // ascii, non-empty
 pub const Name = []const u8;
 
-pub const BoxId = u64;
-
 pub const Native = struct {
     name: Name,
     input_arity: usize,
@@ -118,7 +116,6 @@ pub const When = struct {
 };
 
 pub const Box = struct {
-    id: BoxId,
     scope: []const NameIx,
     body: *const Expr,
 };

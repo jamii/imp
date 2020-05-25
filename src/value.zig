@@ -23,8 +23,19 @@ pub const Scalar = union(enum) {
 };
 
 pub const Box = struct {
-    id: core.BoxId,
+    expr: *const core.Expr,
     scope: Tuple,
+
+    // Equality on expr pointer and scope value
+
+    pub fn deepHashInto(hasher: var, self: Box) void {
+        hasher.update(std.mem.asBytes(&@ptrToInt(self.expr)));
+        meta.deepHashInto(hasher, self.scope);
+    }
+
+    pub fn deepEqual(self: Box, other: Box) bool {
+        return self.expr == other.expr and meta.deepEqual(self.scope, other.scope);
+    }
 };
 
 pub const Tuple = []const Scalar;

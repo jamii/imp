@@ -46,6 +46,10 @@ pub const Interpreter = struct {
         return error.InterpretError;
     }
 
+    fn dupeTuple(self: *Interpreter, tuple: []const value.Scalar) ! []const value.Scalar {
+        return std.mem.dupe(&self.arena.allocator, value.Scalar, tuple);
+    }
+
     fn interpret(self: *Interpreter, expr: *const core.Expr) Error ! value.Set {
         switch (expr.*) {
             .None =>  {
@@ -59,7 +63,7 @@ pub const Interpreter = struct {
             },
             .Scalar => |scalar| {
                 var set = value.FiniteSet.init(&self.arena.allocator);
-                _ = try set.put(&[1]value.Scalar{scalar}, {});
+                _ = try set.put(try self.dupeTuple(&[1]value.Scalar{scalar}), {});
                 return value.Set{.Finite = set};
             },
             .Union => |pair| {
@@ -154,7 +158,7 @@ pub const Interpreter = struct {
             .Name => |name_ix| {
                 var set = value.FiniteSet.init(&self.arena.allocator);
                 const scalar = self.scope.items[self.scope.items.len - 1 - name_ix];
-                _ = try set.put(&[1]value.Scalar{scalar}, {});
+                _ = try set.put(try self.dupeTuple(&[1]value.Scalar{scalar}), {});
                 return value.Set{.Finite = set};
             },
             .UnboxName => |name_ix| {

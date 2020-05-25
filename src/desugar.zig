@@ -180,7 +180,6 @@ const Desugarer = struct {
 
     fn desugarBox(self: *Desugarer, syntax_expr: *const syntax.Expr) Error ! *const core.Expr {
         const body = try self.desugar(syntax_expr);
-        const box_id = try self.store.putBox(body);
         var body_name_ixes = DeepHashSet(core.NameIx).init(&self.store.arena.allocator);
         try body.getNameIxes(&body_name_ixes);
         var box_scope = ArrayList(core.NameIx).init(&self.store.arena.allocator);
@@ -190,7 +189,6 @@ const Desugarer = struct {
         }
         return self.putCore(
             .{.Box = .{
-                .id = box_id,
                 .scope = box_scope.items,
                 .body = body,
             }}

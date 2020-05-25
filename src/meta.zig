@@ -146,6 +146,7 @@ pub fn deepHashInto(hasher: var, key: var) void {
                 unreachable;
             } else @compileError("cannot deepHash " ++ @typeName(T));
         },
+        .Void => {},
         else => @compileError("cannot deepHash " ++ @typeName(T)),
     }
 }

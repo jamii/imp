@@ -196,7 +196,7 @@ const Desugarer = struct {
     }
 };
 
-pub const parse = if (@import("builtin").is_test) @import("./parse.zig");
+const parse = if (builtin.is_test) @import("./parse.zig");
 
 fn testDesugar(source: []const u8, expected: []const u8) !void {
     var arena = ArenaAllocator.init(std.testing.allocator);
@@ -270,7 +270,7 @@ test "desugar" {
         \\if (1 = 2) then 3 else 4
             ,
             \\apply
-            \\  box 0 |
+            \\  box;
             \\    =
             \\      1
             \\      2
@@ -290,10 +290,24 @@ test "desugar" {
         \\let a = 1 in a
             ,
             \\apply
-            \\  box 0 |
+            \\  box;
             \\    1
             \\  \ _ ->
             \\    get unbox 0
+    );
+
+    try testDesugar(
+        \\let a = 1 in let b = a in a
+            ,
+            \\apply
+            \\  box;
+            \\    1
+            \\  \ _ ->
+            \\    apply
+            \\      box; 0
+            \\        get unbox 0
+            \\      \ _ ->
+            \\        get unbox 1
     );
 
     try testDesugar(

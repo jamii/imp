@@ -1,4 +1,5 @@
 pub const std = @import("std");
+pub const builtin = @import("builtin");
 pub const warn = std.debug.warn;
 pub const assert = std.debug.assert;
 pub const expect = std.testing.expect;
@@ -39,7 +40,7 @@ pub fn dump(thing: var) void {
     my_stderr.writeAll("\n") catch return;
 }
 
-pub fn dumpInto(out_stream: var, indent: u32, thing: var) !void {
+pub fn dumpInto(out_stream: var, indent: u32, thing: var) anyerror!void {
         const ti = @typeInfo(@TypeOf(thing));
         switch (ti) {
             .Pointer => |pti| {

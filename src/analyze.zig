@@ -69,10 +69,7 @@ pub const Analyzer = struct {
                 const left = try self.analyze(pair.left, hint_o);
                 const right = try self.analyze(pair.right, hint_o orelse left);
                 if (left == .Abstract or right == .Abstract) {
-                   break :set_type .{.Abstract = .{
-                        .expr = expr,
-                        .scope = try self.dupeScope(self.scope.items),
-                    }};
+                    return self.setError("TODO cannot union two maybe-infinite sets", .{});
                 }
                 if (left.Finite.len != right.Finite.len) {
                     return self.setError("Mismatched arities: {} vs {}", .{left.Finite.len, right.Finite.len});
@@ -88,10 +85,7 @@ pub const Analyzer = struct {
                 const left = try self.analyze(pair.left, hint_o);
                 const right = try self.analyze(pair.right, hint_o orelse left);
                 if (left == .Abstract or right == .Abstract) {
-                   break :set_type .{.Abstract = .{
-                        .expr = expr,
-                        .scope = try self.dupeScope(self.scope.items),
-                    }};
+                   return self.setError("TODO cannot intersect two maybe-infinite sets", .{});
                 }
                 if (left.Finite.len != right.Finite.len) {
                     return self.setError("Mismatched arities: {} vs {}", .{left.Finite.len, right.Finite.len});
@@ -108,10 +102,7 @@ pub const Analyzer = struct {
                 const left = try self.analyze(pair.left, null);
                 const right = try self.analyze(pair.right, null);
                 if (left == .Abstract or right == .Abstract) {
-                    break :set_type .{.Abstract = .{
-                        .expr = expr,
-                        .scope = try self.dupeScope(self.scope.items),
-                    }};
+                    return self.setError("TODO cannot product two maybe-infinite sets", .{});
                 }
                 var columns = try self.store.arena.allocator.alloc(type_.ScalarType, left.Finite.len + right.Finite.len);
                 var i: usize = 0;
@@ -128,7 +119,7 @@ pub const Analyzer = struct {
             .Equal => |pair| {
                 // hint should be truthy, doesn't give info on left/right types
                 const left = try self.analyze(pair.left, null);
-                const right = try self.analyze(pair.right, null);
+                const right = try self.analyze(pair.right, left);
                 if (left == .Abstract or right == .Abstract) {
                     return self.setError("Cannot = two maybe-infinite sets", .{});
                 }
@@ -207,6 +198,7 @@ pub const Analyzer = struct {
         switch (set_type) {
             .Abstract => |abstract_type| {
                 const old_scope = self.scope;
+                defer self.scope = old_scope;
                 self.scope = try ArrayList(type_.ScalarType).initCapacity(&self.store.arena.allocator, abstract_type.scope.len + 1);
                 try self.scope.appendSlice(abstract_type.scope);
                 try self.scope.append(arg_type);
@@ -222,7 +214,6 @@ pub const Analyzer = struct {
                     },
                     else => panic("What are this {}", .{abstract_type.expr}),
                 }
-                self.scope = old_scope;
             },
             .Finite => |finite_type| {
                 if (finite_type.len >= 1) {
@@ -235,6 +226,192 @@ pub const Analyzer = struct {
     }
 };
 
-test "check" {
-    std.meta.refAllDecls(@This());
+fn testAnalyze(source: []const u8, expected: []const u8) !void {
+ var arena = ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var store = Store.init(&arena);
+    var parse_error_info: ?parse.ErrorInfo = null;
+    const syntax_expr = try parse.parse(&store, source, &parse_error_info);
+    var desugar_error_info: ?desugar.ErrorInfo = null;
+    const core_expr = try desugar.desugar(&store, syntax_expr, &desugar_error_info);
+    var error_info: ?ErrorInfo = null;
+    if (analyze(&store, core_expr, &error_info)) |found| {
+        var bytes = ArrayList(u8).init(std.testing.allocator);
+        defer bytes.deinit();
+        try found.dumpInto(bytes.outStream());
+        if (!meta.deepEqual(expected, bytes.items)) {
+            panic("\nSource:\n{}\nExpected analyze:\n{}\n\nFound analyze:\n{}", .{source, expected, bytes.items});
+        }
+    } else |err| {
+        warn("\nSource:\n{}\nExpected analyze:\n{}\n\nFound error:\n{}\n", .{source, expected, error_info.?.message});
+        return err;
+    }
+}
+
+const parse = if (builtin.is_test) @import("./parse.zig");
+const desugar = if (builtin.is_test) @import("./desugar.zig");
+
+fn testAnalyzeError(source: []const u8, expected: []const u8) !void {
+    var arena = ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var store = Store.init(&arena);
+    var parse_error_info: ?parse.ErrorInfo = null;
+    const syntax_expr = try parse.parse(&store, source, &parse_error_info);
+    var desugar_error_info: ?desugar.ErrorInfo = null;
+    const core_expr = try desugar.desugar(&store, syntax_expr, &desugar_error_info);
+    var error_info: ?ErrorInfo = null;
+    if (analyze(&store, core_expr, &error_info)) |found| {
+        var bytes = ArrayList(u8).init(std.testing.allocator);
+        try found.dumpInto(bytes.outStream());
+        panic("\nSource:\n{}\nExpected error:\n{}\n\nFound analyze:\n{}", .{source, expected, bytes.items});
+    } else |err| {
+        if (!meta.deepEqual(expected, error_info.?.message)) {
+            warn("\nSource:\n{}\nExpected error:\n{}\n\nFound error:\n{}\n", .{source, expected, error_info.?.message});
+            return err;
+        }
+    }
+}
+
+test "analyze" {
+    try testAnalyze(
+        \\1
+            ,
+        \\any
+    );
+
+    try testAnalyze(
+        \\1 . "foo"
+            ,
+        \\any . any
+    );
+
+    try testAnalyze(
+        \\1 . "foo" | 2 . "bar"
+            ,
+        \\any . any
+    );
+
+    try testAnalyze(
+        \\1 . ("foo" | 2) . "bar"
+            ,
+        \\any . any . any
+    );
+
+    try testAnalyzeError(
+        \\1 . "foo" | 2
+            ,
+        \\Mismatched arities: 2 vs 1
+    );
+
+    try testAnalyze(
+        \\!(1 . "foo")
+            ,
+        ""
+    );
+
+    try testAnalyze(
+        \\when some then 1 . 2
+            ,
+        \\any . any
+    );
+
+    try testAnalyze(
+        \\when none then 1 . 2
+            ,
+        \\any . any
+    );
+
+    try testAnalyze(
+        \\let a = 1 . "foo" in
+        \\a . a
+            ,
+        \\any . any . any . any
+    );
+
+    try testAnalyze(
+        \\let foo = \ a b -> a = b in
+        \\foo 1
+            ,
+        \\type_of(16845918103739231216; any)
+    );
+
+     try testAnalyze(
+        \\let foo = \ a b -> a = b in
+        \\foo 1 2
+            ,
+        ""
+    );
+
+    try testAnalyze(
+        \\let a = [1 . "foo"] in
+        \\a \ [a] -> a . a
+            ,
+        \\any . any . any . any
+    );
+
+    try testAnalyze(
+        \\let foo = \ a -> [\ b -> a . b] in
+        \\foo 1
+            ,
+        \\[type_of(12439490446328561653; any)]
+    );
+
+    try testAnalyze(
+        \\let foo = \ a -> [\ b -> a . b] in
+        \\(foo 1) | (foo 2)
+            ,
+        \\[type_of(12439490446328561653; any)]
+    );
+
+    try testAnalyze(
+        \\let foo = \ a -> [\ b -> a . b] in
+        \\(1 . (foo 1)) | (2 . (foo 2))
+            ,
+        \\any . [type_of(12439490446328561653; any)]
+    );
+
+    try testAnalyze(
+        \\let foo = \ a -> [\ b -> a . b] in
+        \\let bar = (1 . (foo 1)) | (2 . (foo 2)) in
+        \\bar \ a [f] -> a . (f 41)
+            ,
+        \\any . any . any
+    );
+
+    try testAnalyzeError(
+        \\let foo1 = \ a -> [\ b -> a . b] in
+        \\let foo2 = \ a -> [\ b -> a . b] in
+        \\let bar = (1 . (foo1 1)) | (2 . (foo2 2)) in
+        \\bar \ a [f] -> a . (f 41)
+            ,
+        \\Don't know what type will result from unboxing type ScalarType{ .Any = void }
+    );
+
+    try testAnalyze(
+        \\let foo = 1 . 1 | 2 . 2 in
+        \\foo foo
+            ,
+        ""
+    );
+
+    try testAnalyzeError(
+        \\let foo = \ a b -> a = b in
+        \\foo foo
+            ,
+        \\Cannot apply two maybe-infinite sets
+    );
+
+    try testAnalyzeError(
+        \\let foo = \ a b -> a = b in
+        \\foo = foo
+            ,
+        \\Cannot = two maybe-infinite sets
+    );
+
+    try testAnalyzeError(
+        \\let foo = \ a b -> a = b in
+        \\foo | 1 . 2
+            ,
+        \\TODO cannot union two maybe-infinite sets
+    );
 }

@@ -11,10 +11,14 @@ pub const Scalar = union(enum) {
             .String => |string| try std.fmt.format(out_stream, "\"{s}\"", .{string}),
             .Number => |number| try std.fmt.format(out_stream, "{d}", .{number}),
             .Box => |box| {
-                try std.fmt.format(out_stream, "[{} |", .{box.id});
-                for (box.scope) |scalar| {
-                    try scalar.dumpInto(out_stream);
-                    try out_stream.writeAll(" ");
+                // TODO figure out a better way to name these
+                try std.fmt.format(out_stream, "[{};", .{meta.deepHash(box)});
+                if (box.scope.len > 0) {
+                    try box.scope[0].dumpInto(out_stream);
+                    for (box.scope[1..]) |scalar| {
+                        try out_stream.writeAll(" . ");
+                        try scalar.dumpInto(out_stream);
+                    }
                 }
                 try out_stream.writeAll("]");
             }

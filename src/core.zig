@@ -10,6 +10,16 @@ pub const Native = struct {
     input_arity: usize,
     output_arity: usize,
     fun: fn([]const value.Scalar) NativeError ! value.Set,
+
+    // equality on name only
+
+    pub fn deepHashInto(hasher: var, self: Native) void {
+        meta.deepHashInto(hasher, self.name);
+    }
+
+    pub fn deepEqual(self: Native, other: Native) bool {
+        return meta.deepEqual(self.name, other.name);
+    }
 };
 
 pub const NativeError = error {
@@ -89,9 +99,12 @@ pub const Expr = union(enum) {
             .Abstract => try out_stream.writeAll("\\ _ ->"),
             .Apply => try out_stream.writeAll("apply"),
             .Box => |box| {
-                try std.fmt.format(out_stream, "box {} |", .{box.id});
-                for (box.scope) |name_ix, i| {
-                    try std.fmt.format(out_stream, " {}", .{name_ix});
+                try out_stream.writeAll("box;");
+                if (box.scope.len > 0) {
+                    try std.fmt.format(out_stream, " {}", .{box.scope[0]});
+                    for (box.scope[1..]) |name_ix, i| {
+                        try std.fmt.format(out_stream, " . {}", .{name_ix});
+                    }
                 }
             },
             .Annotate => |annotate| try std.fmt.format(out_stream, "# {}", .{annotate.annotation}),

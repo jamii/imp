@@ -196,6 +196,13 @@ pub const Analyzer = struct {
 
     fn analyzeApply(self: *Analyzer, set_type: type_.SetType, arg_type: type_.ScalarType) Error ! type_.SetType {
         switch (set_type) {
+            .Finite => |finite_type| {
+                if (finite_type.len >= 1) {
+                    return type_.SetType{.Finite = finite_type[1..]};
+                } else {
+                    return type_.SetType{.Finite = try self.dupeScope(&[1]type_.ScalarType{arg_type})};
+                }
+            },
             .Abstract => |abstract_type| {
                 const old_scope = self.scope;
                 defer self.scope = old_scope;
@@ -213,13 +220,6 @@ pub const Analyzer = struct {
                         TODO();
                     },
                     else => panic("What are this {}", .{abstract_type.expr}),
-                }
-            },
-            .Finite => |finite_type| {
-                if (finite_type.len >= 1) {
-                    return type_.SetType{.Finite = finite_type[1..]};
-                } else {
-                    return type_.SetType{.Finite = try self.dupeScope(&[1]type_.ScalarType{arg_type})};
                 }
             },
         }

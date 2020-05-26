@@ -66,7 +66,7 @@ pub const Store = struct {
         _ = try self.types.put(.{.expr = expr, .scope = scope}, set_type);
     }
 
-    pub fn getType(self: *Store, expr: *const core.Expr, scope: []const type_.ScalarType) ?type_.SetType {
+    pub fn getType(self: *const Store, expr: *const core.Expr, scope: []const type_.ScalarType) ?type_.SetType {
         return self.types.getValue(.{.expr = expr, .scope = scope});
     }
 };

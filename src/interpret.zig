@@ -426,7 +426,7 @@ test "interpret" {
         \\let foo = \ a b -> a = b in
         \\foo 1
             ,
-        \\[5777665765994302375;]
+        \\[10;]
     );
 
     try testInterpret(
@@ -454,7 +454,7 @@ test "interpret" {
         \\let foo = \ a -> [\ b -> a . b] in
         \\foo 1
             ,
-        \\[5777665765994302375;]
+        \\[10;]
     );
 
     // TODO this is a problem

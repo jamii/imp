@@ -2,6 +2,7 @@ usingnamespace @import("./common.zig");
 
 const value = @import("./value.zig");
 const core = @import("./core.zig");
+const Store = @import("./store.zig").Store;
 
 pub const ScalarType = union(enum) {
     Any,
@@ -56,7 +57,7 @@ pub const TypeOf = struct {
 
     pub fn dumpInto(self: TypeOf, out_stream: var) anyerror!void {
         // TODO figure out a better way to name these
-        try std.fmt.format(out_stream, "type_of({};", .{meta.deepHash(self.expr)});
+        try std.fmt.format(out_stream, "type_of({};", .{Store.getCoreMeta(self.expr).id});
         if (self.scope.len > 0) {
             try out_stream.writeAll(" ");
             try self.scope[0].dumpInto(out_stream);

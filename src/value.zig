@@ -1,7 +1,7 @@
 usingnamespace @import("./common.zig");
 const core = @import("./core.zig");
 const type_ = @import("./type.zig");
-const value = @import("./value.zig");
+const Store = @import("./store.zig").Store;
 
 pub const Scalar = union(enum) {
     String: []const u8, // valid utf8
@@ -92,8 +92,7 @@ pub const Set = union(enum) {
                 }
             },
             .Abstract => |abstract| {
-                // TODO would be much nicer to just print value
-                try std.fmt.format(out_stream, "[{};", .{meta.deepHash(abstract.body)});
+                try std.fmt.format(out_stream, "[{};", .{Store.getCoreMeta(abstract.body).id});
                 for (abstract.scope) |scalar, i| {
                     try out_stream.writeAll(if (i == 0) " " else " . ");
                     try scalar.dumpInto(out_stream);

@@ -180,16 +180,21 @@ const Desugarer = struct {
 
     fn desugarBox(self: *Desugarer, syntax_expr: *const syntax.Expr) Error ! *const core.Expr {
         const body = try self.desugar(syntax_expr);
-        var body_name_ixes = DeepHashSet(core.NameIx).init(&self.store.arena.allocator);
-        try body.getNameIxes(&body_name_ixes);
-        var box_scope = ArrayList(core.NameIx).init(&self.store.arena.allocator);
-        var body_name_ixes_iter = body_name_ixes.iterator();
-        while (body_name_ixes_iter.next()) |kv| {
-            try box_scope.append(kv.key);
+        // TODO this is correct, but needs to be done everywhere
+        // var body_name_ixes = DeepHashSet(core.NameIx).init(&self.store.arena.allocator);
+        // try body.getNameIxes(&body_name_ixes);
+        // var box_scope = ArrayList(core.NameIx).init(&self.store.arena.allocator);
+        // var body_name_ixes_iter = body_name_ixes.iterator();
+        // while (body_name_ixes_iter.next()) |kv| {
+        //     try box_scope.append(kv.key);
+        // }
+        var scope = try self.store.arena.allocator.alloc(core.NameIx, self.scope.items.len);
+        for (self.scope.items) |_, i| {
+            scope[i] = i;
         }
         return self.putCore(
             .{.Box = .{
-                .scope = box_scope.items,
+                .scope = scope,
                 .body = body,
             }}
         );

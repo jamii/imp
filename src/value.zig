@@ -47,11 +47,26 @@ pub const Tuple = []const Scalar;
 
 pub const FiniteSet = DeepHashSet(Tuple);
 
-pub const LazySet = struct {
-    expr: *const core.Expr,
+/// Invariant: LazySet may not evaluate to a set containing `some`
+pub const LazySet = union (enum) {
+    Abstract: LazyAbstract,
+    Apply: LazyPair,
+    Union: LazyPair,
+    Intersect: LazyPair,
+    Product: LazyPair,
+};
+
+pub const LazyAbstract = struct {
+    body: *const core.Expr,
     scope: Tuple,
 };
 
+pub const LazyPair = struct {
+    left: *Set,
+    right: *Set,
+};
+
+/// Invariant: all the tuples in a Set must be the same length
 pub const Set = union(enum) {
     Finite: FiniteSet,
     Lazy: LazySet,
@@ -85,12 +100,7 @@ pub const Set = union(enum) {
                 }
             },
             .Lazy => |lazy| {
-                try std.fmt.format(out_stream, "(lazy #{};", .{Store.getCoreMeta(lazy.expr).id});
-                for (lazy.scope) |scalar, i| {
-                    try out_stream.writeAll(if (i == 0) " " else " . ");
-                    try scalar.dumpInto(out_stream);
-                }
-                try out_stream.writeAll(")");
+                try out_stream.writeAll("(lazy)");
             },
         }
     }

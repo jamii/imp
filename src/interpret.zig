@@ -4,6 +4,10 @@ const core = @import("./core.zig");
 const value = @import("./value.zig");
 const Store = @import("./store.zig").Store;
 
+/// Guarantees:
+/// * If this returns a value.Set.Finite then it will be the correct answer
+/// * If expr typechecks then this will not return InterpretError
+/// * If expr has a finite type then this will return a value.Set.Finite
 pub fn interpret(store: *const Store, arena: *ArenaAllocator, expr: *const core.Expr, error_info: *?ErrorInfo) Error ! value.Set {
     var interpreter = Interpreter{
         .store = store,
@@ -50,6 +54,17 @@ const Interpreter = struct {
         return std.mem.dupe(&self.arena.allocator, value.Scalar, tuple);
     }
 
+    fn lazyPair(self: *Interpreter, left: value.Set, right: value.Set) Error ! value.LazyPair {
+        var left_p = try self.arena.allocator.create(value.Set);
+        var right_p = try self.arena.allocator.create(value.Set);
+        left_p.* = left;
+        right_p.* = right;
+        return value.LazyPair{
+            .left = left_p,
+            .right = right_p,
+        };
+    }
+
     fn interpret(self: *Interpreter, expr: *const core.Expr) Error ! value.Set {
         switch (expr.*) {
             .None =>  {
@@ -69,63 +84,17 @@ const Interpreter = struct {
             .Union => |pair| {
                 const left = try self.interpret(pair.left);
                 const right = try self.interpret(pair.right);
-                if (left == .Finite and right == .Finite) {
-                    var set = value.FiniteSet.init(&self.arena.allocator);
-                    var leftIter = left.Finite.iterator();
-                    while (leftIter.next()) |kv| {
-                        _ = try set.put(kv.key, {});
-                    }
-                    var rightIter = right.Finite.iterator();
-                    while (rightIter.next()) |kv| {
-                        _ = try set.put(kv.key, {});
-                    }
-                    return value.Set{.Finite = set};
-                } else {
-                    return self.setError(expr, "Cannot union two lazy sets", .{});
-                }
+                return self.union_(expr, left, right);
             },
             .Intersect => |pair| {
                 const left = try self.interpret(pair.left);
                 const right = try self.interpret(pair.right);
-                if (left == .Finite and right == .Finite) {
-                    var set = value.FiniteSet.init(&self.arena.allocator);
-                    var leftIter = left.Finite.iterator();
-                    while (leftIter.next()) |kv| {
-                        if (right.Finite.contains(kv.key)) {
-                            _ = try set.put(kv.key, {});
-                        }
-                    }
-                    return value.Set{.Finite = set};
-                } else {
-                    return self.setError(expr, "Cannot intersect two lazy sets", .{});
-                }
+                return self.intersect(expr, left, right);
             },
             .Product => |pair| {
                 const left = try self.interpret(pair.left);
                 const right = try self.interpret(pair.right);
-                if (left == .Finite and right == .Finite) {
-                    var set = value.FiniteSet.init(&self.arena.allocator);
-                    var leftIter = left.Finite.iterator();
-                    while (leftIter.next()) |lkv| {
-                        var rightIter = right.Finite.iterator();
-                        while (rightIter.next()) |rkv| {
-                            var tuple = try self.arena.allocator.alloc(value.Scalar, lkv.key.len + rkv.key.len);
-                            var i: usize = 0;
-                            for (lkv.key) |scalar| {
-                                tuple[i] = scalar;
-                                i += 1;
-                            }
-                            for (rkv.key) |scalar| {
-                                tuple[i] = scalar;
-                                i += 1;
-                            }
-                            _ = try set.put(tuple, {});
-                        }
-                    }
-                    return value.Set{.Finite = set};
-                } else {
-                    return self.setError(expr, "Cannot product two lazy sets", .{});
-                }
+                return self.product(expr, left, right);
             },
             .Equal => |pair| {
                 const left = try self.interpret(pair.left);
@@ -190,10 +159,10 @@ const Interpreter = struct {
             },
             .Abstract => |body| {
                 const scope = try std.mem.dupe(&self.arena.allocator, value.Scalar, self.scope.items);
-                return value.Set{.Lazy = .{
+                return value.Set{.Lazy = .{.Abstract = .{
+                    .body = body,
                     .scope = scope,
-                    .expr = expr,
-                }};
+                }}};
             },
             .Apply => |pair| {
                 var left = try self.interpret(pair.left);
@@ -225,6 +194,75 @@ const Interpreter = struct {
         }
     }
 
+    fn union_(self: *Interpreter, expr: *const core.Expr, left: value.Set, right: value.Set) Error ! value.Set {
+        if (left == .Finite and right == .Finite) {
+            var set = value.FiniteSet.init(&self.arena.allocator);
+            var left_iter = left.Finite.iterator();
+            var left_arity_o: ?usize = null;
+            while (left_iter.next()) |kv| {
+                left_arity_o = kv.key.len;
+                _ = try set.put(kv.key, {});
+            }
+            var right_iter = right.Finite.iterator();
+            var right_arity_o: ?usize = null;
+            while (right_iter.next()) |kv| {
+                right_arity_o = kv.key.len;
+                _ = try set.put(kv.key, {});
+            }
+            if (left_arity_o) |left_arity| {
+                if (right_arity_o) |right_arity| {
+                    if (left_arity != right_arity) {
+                        return self.setError(expr, "Tried to union sets with different arities: {} vs {}", .{left_arity, right_arity});
+                    }
+                }
+            }
+            return value.Set{.Finite = set};
+        } else {
+            return value.Set{.Lazy = .{.Union = try self.lazyPair(left, right)}};
+        }
+    }
+
+    fn intersect(self: *Interpreter, expr: *const core.Expr, left: value.Set, right: value.Set) Error ! value.Set {
+        if (left == .Finite and right == .Finite) {
+            var set = value.FiniteSet.init(&self.arena.allocator);
+            var left_iter = left.Finite.iterator();
+            while (left_iter.next()) |kv| {
+                if (right.Finite.contains(kv.key)) {
+                    _ = try set.put(kv.key, {});
+                }
+            }
+            return value.Set{.Finite = set};
+        } else {
+            return value.Set{.Lazy = .{.Intersect = try self.lazyPair(left, right)}};
+        }
+    }
+
+    fn product(self: *Interpreter, expr: *const core.Expr, left: value.Set, right: value.Set) Error ! value.Set {
+        if (left == .Finite and right == .Finite) {
+            var set = value.FiniteSet.init(&self.arena.allocator);
+            var left_iter = left.Finite.iterator();
+            while (left_iter.next()) |lkv| {
+                var right_iter = right.Finite.iterator();
+                while (right_iter.next()) |rkv| {
+                    var tuple = try self.arena.allocator.alloc(value.Scalar, lkv.key.len + rkv.key.len);
+                    var i: usize = 0;
+                    for (lkv.key) |scalar| {
+                        tuple[i] = scalar;
+                        i += 1;
+                    }
+                    for (rkv.key) |scalar| {
+                        tuple[i] = scalar;
+                        i += 1;
+                    }
+                    _ = try set.put(tuple, {});
+                }
+            }
+            return value.Set{.Finite = set};
+        } else {
+            return value.Set{.Lazy = .{.Product = try self.lazyPair(left, right)}};
+        }
+    }
+
     fn apply(self: *Interpreter, expr: *const core.Expr, left_: value.Set, right_: value.Set) Error ! value.Set {
         var left = left_;
         var right = right_;
@@ -243,12 +281,8 @@ const Interpreter = struct {
                     result = try self.apply1(expr, result, arg);
                 }
                 if (result == .Lazy) {
-                    // don't have enough values to force this yet
-                    const scope = try std.mem.dupe(&self.arena.allocator, value.Scalar, self.scope.items);
-                    return value.Set{.Lazy = .{
-                        .scope = scope,
-                        .expr = expr,
-                    }};
+                    // don't have enough values to fully force this yet
+                    return value.Set{.Lazy = .{.Apply = try self.lazyPair(left, right)}};
                 }
                 var result_iter = result.Finite.iterator();
                 while (result_iter.next()) |kv| {
@@ -276,21 +310,26 @@ const Interpreter = struct {
                 return value.Set{.Finite = set};
             },
             .Lazy => |lazy| {
-                const old_scope = self.scope;
-                defer self.scope = old_scope;
-                self.scope = try ArrayList(value.Scalar).initCapacity(&self.arena.allocator, lazy.scope.len);
-                try self.scope.appendSlice(lazy.scope);
-                switch (lazy.expr.*) {
-                    .Abstract => |body| {
+                switch (lazy) {
+                    // `(a -> body) arg` => `let a = arg in body`
+                    .Abstract => |abstract| {
+                        const old_scope = self.scope;
+                        defer self.scope = old_scope;
+                        self.scope = try ArrayList(value.Scalar).initCapacity(&self.arena.allocator, abstract.scope.len);
+                        try self.scope.appendSlice(abstract.scope);
                         try self.scope.append(arg);
-                        return self.interpret(body);
+                        return self.interpret(abstract.body);
                     },
+                    // assume left is the lazy set
+                    // we know arity(left) > arity(right) or this would have been forced already
+                    // `(left right) arg` => `left (right . arg)`
                     .Apply => |pair| {
-                        var left = try self.interpret(pair.left);
-                        var right = try self.interpret(pair.right);
+                        var left = pair.left.*;
+                        var right = pair.right.*;
                         if (right == .Lazy) {
                             std.mem.swap(value.Set, &left, &right);
                         }
+                        // if both were Lazy we would have errored out instead of creating a Lazy.Apply
                         assert(right == .Finite);
                         var new_right = value.FiniteSet.init(&self.arena.allocator);
                         var right_iter = right.Finite.iterator();
@@ -303,7 +342,37 @@ const Interpreter = struct {
                         }
                         return self.apply(expr, left, .{.Finite = new_right});
                     },
-                    else => panic("What are this? {}", .{lazy.expr.*}),
+                    // `(left | right) arg` => `(left arg | right arg)`
+                    .Union => |pair| {
+                        const new_left = try self.apply1(expr, pair.left.*, arg);
+                        const new_right = try self.apply1(expr, pair.right.*, arg);
+                        return self.union_(expr, new_left, new_right);
+                    },
+                    // `(left & right) arg` => `(left arg & right arg)`
+                    .Intersect => |pair| {
+                        const new_left = try self.apply1(expr, pair.left.*, arg);
+                        const new_right = try self.apply1(expr, pair.right.*, arg);
+                        return self.intersect(expr, new_left, new_right);
+                    },
+                    .Product => |pair| {
+                        if (pair.left.* == .Finite) {
+                            const left = pair.left.*.Finite;
+                            // `(none . right) arg` => `none`
+                            if (left.count() == 0) {
+                                return value.Set{.Finite = value.FiniteSet.init(&self.arena.allocator)};
+                            }
+                            // `(some . right) arg` => `right arg`
+                            if (left.count() == 1 and left.iterator().next().?.key.len == 0) {
+                                return self.apply1(expr, pair.right.*, arg);
+                            }
+                        }
+                        // in all other cases
+                        // `(left . right) arg` => `(left arg) . right`
+                        // (if left is `none`, the answer is none anyway)
+                        // (left cannot be `some` because the arity of a lazy set is always >= 1)
+                        const new_left = try self.apply1(expr, pair.left.*, arg);
+                        return self.product(expr, new_left, pair.right.*);
+                    },
                 }
             },
         }
@@ -332,7 +401,7 @@ fn testInterpret(source: []const u8, expected: []const u8) !void {
             return error.TestFailure;
         }
     } else |err| {
-        warn("\nExpected interpret:\n{}\n\nFound error:\n{}\n", .{expected, error_info.?.message});
+        warn("\nExpected interpret:\n{}\n\nFound error:\n{}\n", .{expected, if (err == error.InterpretError) error_info.?.message else ""});
         return err;
     }
 }
@@ -421,7 +490,7 @@ test "interpret" {
         \\let foo = \ a b -> a = b in
         \\foo 1
             ,
-        \\(lazy #10;)
+        \\(lazy)
     );
 
     try testInterpret(
@@ -505,10 +574,38 @@ test "interpret" {
         \\Cannot equal two lazy sets
     );
 
-    try testInterpretError(
+    try testInterpret(
         \\let foo = \ a b -> a = b in
         \\foo | 1 . 2
             ,
-        \\TODO cannot union two maybe-infinite sets
+        \\(lazy)
+    );
+
+    try testInterpret(
+        \\let foo = \ a b -> a = b in
+        \\(foo | 1 . 2) 1 2
+            ,
+        \\some
+    );
+
+    try testInterpret(
+        \\let foo = \ a b -> a = b in
+        \\(foo & (1 . 2)) 1 2
+            ,
+        \\none
+    );
+
+    try testInterpret(
+        \\let foo = \ a b -> a = b in
+        \\(foo . 1 . 2) 0 0 1 2
+            ,
+        \\some
+    );
+
+    try testInterpret(
+        \\let foo = \ a b -> a = b in
+        \\(foo . 1 . 2) 0 1 1 2
+            ,
+        \\none
     );
 }

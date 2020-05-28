@@ -194,8 +194,8 @@ const Desugarer = struct {
         }
         return self.putCore(
             .{.Box = .{
-                .scope = scope,
                 .body = body,
+                .scope = scope,
             }}
         );
     }

@@ -44,15 +44,17 @@ pub const TypeOf = struct {
     expr: *const core.Expr,
     scope: []const ScalarType,
 
-    // Equality on expr pointer and scope value
+    // Equality on expr id and scope value
 
     pub fn deepHashInto(hasher: var, self: TypeOf) void {
         hasher.update(std.mem.asBytes(&@ptrToInt(self.expr)));
         meta.deepHashInto(hasher, self.scope);
     }
 
-    pub fn deepEqual(self: TypeOf, other: TypeOf) bool {
-        return self.expr == other.expr and meta.deepEqual(self.scope, other.scope);
+    pub fn deepCompare(self: TypeOf, other: TypeOf) meta.Ordering {
+        const ordering = meta.deepCompare(Store.getCoreMeta(self.expr).id, Store.getCoreMeta(other.expr).id);
+        if (ordering != .Equal) return ordering;
+        return meta.deepCompare(self.scope, other.scope);
     }
 
     pub fn dumpInto(self: TypeOf, out_stream: var) anyerror!void {

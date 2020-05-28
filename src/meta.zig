@@ -1,87 +1,117 @@
 usingnamespace @import("./common.zig");
 
+pub const Ordering = enum {
+    LessThan,
+    Equal,
+    GreaterThan,
+};
+
 pub fn deepEqual(a: var, b: @TypeOf(a)) bool {
+    return deepCompare(a, b) == .Equal;
+}
+
+pub fn deepCompare(a: var, b: @TypeOf(a)) Ordering {
     const T = @TypeOf(a);
     const ti = @typeInfo(T);
     switch (ti) {
         .Struct, .Enum, .Union => {
-            if (@hasDecl(T, "deepEqual")) {
-                return T.deepEqual(a,b);
+            if (@hasDecl(T, "deepCompare")) {
+                return T.deepCompare(a,b);
             }
         },
         else => {},
     }
     switch (ti) {
         .Int, .Float, .Bool, .Enum => {
-            return a == b;
+            if (a < b) {
+                return .LessThan;
+            }
+            if (a > b) {
+                return .GreaterThan;
+            }
+            return .Equal;
         },
         .Pointer => |pti| {
             switch (pti.size) {
                 .One => {
-                    return deepEqual(a.*, b.*);
+                    return deepCompare(a.*, b.*);
                 },
                 .Slice => {
-                    if (a.len != b.len) {
-                        return false;
+                    if (a.len < b.len) {
+                        return .LessThan;
+                    }
+                    if (a.len > b.len) {
+                        return .GreaterThan;
                     }
                     for (a) |a_elem, a_ix| {
-                        if (!deepEqual(a_elem, b[a_ix])) {
-                            return false;
+                        const ordering = deepCompare(a_elem, b[a_ix]);
+                        if (ordering != .Equal) {
+                            return ordering;
                         }
                     }
-                    return true;
+                    return .Equal;
                 },
-                .Many, .C => @compileError("cannot deepEqual " ++ @typeName(T)),
+                .Many, .C => @compileError("cannot deepCompare " ++ @typeName(T)),
             }
         },
         .Optional => {
             if (a) |a_val| {
                 if (b) |b_val| {
-                    return deepEqual(a_val, b_val);
+                    return deepCompare(a_val, b_val);
                 } else {
-                    return false;
+                    return .GreaterThan;
                 }
             } else {
-                return (b == null);
+                if (b) |_| {
+                    return .LessThan;
+                } else {
+                    return .Equal;
+                }
             }
         },
         .Array => |ati| {
             for (a) |a_elem, a_ix| {
-                if (!deepEqual(a_elem, b[a_ix])) {
-                    return false;
+                const ordering = deepCompare(a_elem, b[a_ix]);
+                if (ordering != .Equal) {
+                    return ordering;
                 }
             }
-            return true;
+            return .Equal;
         },
         .Struct => |sti| {
             inline for (sti.fields) |fti| {
-                if (!deepEqual(@field(a, fti.name), @field(b, fti.name))) {
-                    return false;
+                const ordering = deepCompare(@field(a, fti.name), @field(b, fti.name));
+                if (ordering != .Equal) {
+                    return ordering;
                 }
             }
-            return true;
+            return .Equal;
         },
         .Union => |uti| {
             if (uti.tag_type) |tag_type| {
+                const a_tag = @enumToInt(@as(tag_type, a));
+                const b_tag = @enumToInt(@as(tag_type, b));
+                if (a_tag < b_tag) {
+                    return .LessThan;
+                }
+                if (a_tag > b_tag) {
+                    return .GreaterThan;
+                }
                 inline for (uti.fields) |fti| {
-                    if (@enumToInt(@as(tag_type, a)) == fti.enum_field.?.value) {
-                        if (@enumToInt(@as(tag_type, b)) == fti.enum_field.?.value) {
-                            return deepEqual(
-                                @field(a, fti.name),
-                                @field(b, fti.name),
-                            );
-                        } else {
-                            return false;
-                        }
+                    if (a_tag == fti.enum_field.?.value) {
+                        return deepCompare(
+                            @field(a, fti.name),
+                            @field(b, fti.name),
+                        );
                     }
                 }
                 unreachable;
             } else {
-                @compileError("cannot deepEqual " ++ @typeName(T));
+                @compileError("cannot deepCompare " ++ @typeName(T));
             }
         },
-        .Void => return true,
-        else => @compileError("cannot deepEqual " ++ @typeName(T)),
+        .Void => return .Equal,
+        else => @compileError("cannot deepCompare " ++ @typeName(T)),
     }
 }
 
@@ -97,9 +127,6 @@ pub fn deepHashInto(hasher: var, key: var) void {
     switch (ti) {
         .Struct, .Enum, .Union => {
             if (@hasDecl(T, "deepHashInto")) {
-                if (!@hasDecl(T, "deepEqual")) {
-                    @compileError(@typeName(T) ++ " has deepHashInto but no deepEqual");
-                }
                 return T.deepHashInto(hasher, key);
             }
         },

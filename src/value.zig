@@ -26,21 +26,20 @@ pub const Scalar = union(enum) {
 };
 
 pub const Box = struct {
-    scope: Tuple,
     expr: *const core.Expr,
-    // TODO this triggers a compiler bug :|
-    // value: Set,
+    scope: Tuple,
 
-    // Equality on expr pointer and scope value
+    // Equality on expr id and scope value
 
     pub fn deepHashInto(hasher: var, self: Box) void {
-        hasher.update(std.mem.asBytes(&@ptrToInt(self.expr)));
+        hasher.update(std.mem.asBytes(&Store.getCoreMeta(self.expr).id));
         meta.deepHashInto(hasher, self.scope);
     }
 
-    pub fn deepEqual(self: Box, other: Box) bool {
-        return self.expr == other.expr
-            and meta.deepEqual(self.scope, other.scope);
+    pub fn deepCompare(self: Box, other: Box) meta.Ordering {
+        const ordering = meta.deepCompare(Store.getCoreMeta(self.expr).id, Store.getCoreMeta(other.expr).id);
+        if (ordering != .Equal) return ordering;
+        return meta.deepCompare(self.scope, other.scope);
     }
 };
 
@@ -49,8 +48,8 @@ pub const Tuple = []const Scalar;
 pub const FiniteSet = DeepHashSet(Tuple);
 
 pub const LazySet = struct {
-    scope: Tuple,
     expr: *const core.Expr,
+    scope: Tuple,
 };
 
 pub const Set = union(enum) {
@@ -68,9 +67,7 @@ pub const Set = union(enum) {
                 }
                 std.sort.sort(Tuple, tuples.items, struct {
                     fn lessThan(a: Tuple, b: Tuple) bool {
-                        // TODO make a meta.deepCompare
-                        // TODO this won't be stable across runs for boxes
-                        return meta.deepHash(a) < meta.deepHash(b);
+                        return meta.deepCompare(a,b) == .LessThan;
                     }
                     }.lessThan);
                 if (tuples.items.len == 0) {

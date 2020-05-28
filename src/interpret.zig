@@ -229,7 +229,7 @@ const Interpreter = struct {
         var left = left_;
         var right = right_;
         if (left == .Lazy and right == .Lazy) {
-            return self.setError(expr, "Cannot apply a lazy set to a lazy set", .{});
+            return self.setError(expr, "Cannot apply two lazy sets", .{});
         } else {
             if (right == .Lazy) {
                 std.mem.swap(value.Set, &left, &right);
@@ -314,7 +314,7 @@ const parse = if (builtin.is_test) @import("./parse.zig");
 const desugar = if (builtin.is_test) @import("./desugar.zig");
 
 fn testInterpret(source: []const u8, expected: []const u8) !void {
-    warn("Source:\n{}\n", .{source});
+    errdefer warn("\nSource:\n{}\n", .{source});
     var arena = ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var store = Store.init(&arena);
@@ -328,7 +328,8 @@ fn testInterpret(source: []const u8, expected: []const u8) !void {
         defer bytes.deinit();
         try found.dumpInto(std.testing.allocator, bytes.outStream());
         if (!meta.deepEqual(expected, bytes.items)) {
-            panic("\nExpected interpret:\n{}\n\nFound interpret:\n{}", .{expected, bytes.items});
+            warn("\nExpected interpret:\n{}\n\nFound interpret:\n{}\n", .{expected, bytes.items});
+            return error.TestFailure;
         }
     } else |err| {
         warn("\nExpected interpret:\n{}\n\nFound error:\n{}\n", .{expected, error_info.?.message});
@@ -337,7 +338,7 @@ fn testInterpret(source: []const u8, expected: []const u8) !void {
 }
 
 fn testInterpretError(source: []const u8, expected: []const u8) !void {
-    warn("Source:\n{}\n", .{source});
+    errdefer warn("\nSource:\n{}\n", .{source});
     var arena = ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var store = Store.init(&arena);
@@ -349,7 +350,8 @@ fn testInterpretError(source: []const u8, expected: []const u8) !void {
     if (interpret(&store, &arena, core_expr, &error_info)) |found| {
         var bytes = ArrayList(u8).init(std.testing.allocator);
         try found.dumpInto(std.testing.allocator, bytes.outStream());
-        panic("\nExpected error:\n{}\n\nFound interpret:\n{}", .{expected, bytes.items});
+        warn("\nExpected error:\n{}\n\nFound interpret:\n{}\n", .{expected, bytes.items});
+        return error.TestFailure;
     } else |err| {
         if (!meta.deepEqual(expected, error_info.?.message)) {
             warn("\nExpected error:\n{}\n\nFound error:\n{}\n", .{expected, error_info.?.message});
@@ -374,8 +376,15 @@ test "interpret" {
     try testInterpret(
         \\1 . "foo" | 2 . "bar"
             ,
-        \\2 . "bar" | 1 . "foo"
+        \\1 . "foo" | 2 . "bar"
     );
+
+    try testInterpret(
+        \\2 . "bar" | 1 . "foo"
+            ,
+        \\1 . "foo" | 2 . "bar"
+    );
+
 
     try testInterpret(
         \\1 . ("foo" | 2) . "bar"
@@ -448,7 +457,7 @@ test "interpret" {
         \\let foo = \ a -> [\ b -> a . b] in
         \\(foo 1) | (foo 2)
             ,
-        \\[box #3; 2] | [box #3; 1]
+        \\[box #3; 1] | [box #3; 2]
     );
 
     try testInterpret(
@@ -463,37 +472,37 @@ test "interpret" {
         \\let bar = (1 . (foo 1)) | (2 . (foo 2)) in
         \\bar \ a [f] -> a . (f 41)
             ,
-        \\2 . 2 . 41 | 1 . 1 . 41
+        \\1 . 1 . 41 | 2 . 2 . 41
     );
 
-    try testInterpretError(
+    try testInterpret(
         \\let foo1 = \ a -> [\ b -> a . b] in
         \\let foo2 = \ a -> [\ b -> a . b] in
         \\let bar = (1 . (foo1 1)) | (2 . (foo2 2)) in
         \\bar \ a [f] -> a . (f 41)
             ,
-        \\Don't know what type will result from unboxing type ScalarType{ .Any = void }
+        \\1 . 1 . 41 | 2 . 2 . 41
     );
 
     try testInterpret(
         \\let foo = 1 . 1 | 2 . 2 in
         \\foo foo
             ,
-        ""
+        \\some
     );
 
     try testInterpretError(
         \\let foo = \ a b -> a = b in
         \\foo foo
             ,
-        \\Cannot apply two maybe-infinite sets
+        \\Cannot apply two lazy sets
     );
 
     try testInterpretError(
         \\let foo = \ a b -> a = b in
         \\foo = foo
             ,
-        \\Cannot = two maybe-infinite sets
+        \\Cannot equal two lazy sets
     );
 
     try testInterpretError(

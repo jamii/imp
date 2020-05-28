@@ -17,8 +17,8 @@ pub const Native = struct {
         meta.deepHashInto(hasher, self.name);
     }
 
-    pub fn deepEqual(self: Native, other: Native) bool {
-        return meta.deepEqual(self.name, other.name);
+    pub fn deepCompare(self: Native, other: Native) meta.Ordering {
+        return meta.deepCompare(self.name, other.name);
     }
 };
 
@@ -129,8 +129,8 @@ pub const When = struct {
 };
 
 pub const Box = struct {
-    scope: []const NameIx,
     body: *const Expr,
+    scope: []const NameIx,
 };
 
 pub const Annotate = struct {

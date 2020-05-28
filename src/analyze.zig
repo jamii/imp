@@ -190,6 +190,7 @@ pub const Analyzer = struct {
         //         return self.setError("Expected {}, found {}", .{hint, set_type});
         //     }
         // }
+        dump(.{"type", expr, self.scope.items, set_type});
         try self.store.putType(expr, try self.dupeScope(self.scope.items), set_type);
         return set_type;
     }

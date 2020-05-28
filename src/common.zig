@@ -106,6 +106,7 @@ pub fn dumpInto(out_stream: var, indent: u32, thing: var) anyerror!void {
                     inline for (uti.fields) |fti| {
                         const field = fti.enum_field.?;
                         if (@enumToInt(std.meta.activeTag(thing)) == field.value) {
+                            try out_stream.writeByteNTimes(' ', indent + 4);
                             try std.fmt.format(out_stream, ".{} = ", .{field.name});
                             try dumpInto(out_stream, indent + 4, @field(thing, field.name));
                             try out_stream.writeAll("\n");

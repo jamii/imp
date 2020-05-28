@@ -14,13 +14,10 @@ pub const Scalar = union(enum) {
             .Number => |number| try std.fmt.format(out_stream, "{d}", .{number}),
             .Box => |box| {
                 // TODO figure out a better way to name these
-                try std.fmt.format(out_stream, "[{};", .{meta.deepHash(box)});
-                if (box.scope.len > 0) {
-                    try box.scope[0].dumpInto(out_stream);
-                    for (box.scope[1..]) |scalar| {
-                        try out_stream.writeAll(" . ");
-                        try scalar.dumpInto(out_stream);
-                    }
+                try std.fmt.format(out_stream, "[box #{};", .{Store.getCoreMeta(box.expr).id});
+                for (box.scope) |scalar, i| {
+                    try out_stream.writeAll(if (i == 0) " " else " . ");
+                    try scalar.dumpInto(out_stream);
                 }
                 try out_stream.writeAll("]");
             }
@@ -29,8 +26,8 @@ pub const Scalar = union(enum) {
 };
 
 pub const Box = struct {
-    expr: *const core.Expr,
     scope: Tuple,
+    expr: *const core.Expr,
     // TODO this triggers a compiler bug :|
     // value: Set,
 
@@ -51,15 +48,14 @@ pub const Tuple = []const Scalar;
 
 pub const FiniteSet = DeepHashSet(Tuple);
 
-pub const AbstractSet = struct {
+pub const LazySet = struct {
     scope: Tuple,
-    scope_types: []const type_.ScalarType,
-    body: *const core.Expr,
+    expr: *const core.Expr,
 };
 
 pub const Set = union(enum) {
     Finite: FiniteSet,
-    Abstract: AbstractSet,
+    Lazy: LazySet,
 
     pub fn dumpInto(self: Set, allocator: *Allocator, out_stream: var) anyerror!void {
         switch(self) {
@@ -91,13 +87,13 @@ pub const Set = union(enum) {
                     }
                 }
             },
-            .Abstract => |abstract| {
-                try std.fmt.format(out_stream, "[{};", .{Store.getCoreMeta(abstract.body).id});
-                for (abstract.scope) |scalar, i| {
+            .Lazy => |lazy| {
+                try std.fmt.format(out_stream, "(lazy #{};", .{Store.getCoreMeta(lazy.expr).id});
+                for (lazy.scope) |scalar, i| {
                     try out_stream.writeAll(if (i == 0) " " else " . ");
                     try scalar.dumpInto(out_stream);
                 }
-                try out_stream.writeAll("]");
+                try out_stream.writeAll(")");
             },
         }
     }

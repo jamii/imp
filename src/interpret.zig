@@ -3,14 +3,12 @@ usingnamespace @import("./common.zig");
 const core = @import("./core.zig");
 const value = @import("./value.zig");
 const Store = @import("./store.zig").Store;
-const type_ = @import("./type.zig");
 
 pub fn interpret(store: *const Store, arena: *ArenaAllocator, expr: *const core.Expr, error_info: *?ErrorInfo) Error ! value.Set {
     var interpreter = Interpreter{
         .store = store,
         .arena = arena,
         .scope = ArrayList(value.Scalar).init(&store.arena.allocator),
-        .scope_types = ArrayList(type_.ScalarType).init(&store.arena.allocator),
         .boxes = DeepHashMap(value.Box, value.Set).init(&store.arena.allocator),
         .error_info = error_info,
     };
@@ -32,11 +30,10 @@ pub const ErrorInfo = struct {
 
 // --------------------------------------------------------------------------------
 
-pub const Interpreter = struct {
+const Interpreter = struct {
     store: *const Store,
     arena: *ArenaAllocator,
     scope: ArrayList(value.Scalar),
-    scope_types: ArrayList(type_.ScalarType),
     boxes: DeepHashMap(value.Box, value.Set),
     error_info: *?ErrorInfo,
 
@@ -84,7 +81,7 @@ pub const Interpreter = struct {
                     }
                     return value.Set{.Finite = set};
                 } else {
-                    return self.setError(expr, "union of maybe-infinite sets is unimplemented", .{});
+                    return self.setError(expr, "Cannot union two lazy sets", .{});
                 }
             },
             .Intersect => |pair| {
@@ -100,7 +97,7 @@ pub const Interpreter = struct {
                     }
                     return value.Set{.Finite = set};
                 } else {
-                    return self.setError(expr, "intersect of maybe-infinite sets is unimplemented", .{});
+                    return self.setError(expr, "Cannot intersect two lazy sets", .{});
                 }
             },
             .Product => |pair| {
@@ -127,7 +124,7 @@ pub const Interpreter = struct {
                     }
                     return value.Set{.Finite = set};
                 } else {
-                    return self.setError(expr, "product of maybe-infinite sets is unimplemented", .{});
+                    return self.setError(expr, "Cannot product two lazy sets", .{});
                 }
             },
             .Equal => |pair| {
@@ -155,7 +152,7 @@ pub const Interpreter = struct {
                     }
                     return value.Set{.Finite = set};
                 } else {
-                    return self.setError(expr, "equality of maybe-infinite sets is unimplemented", .{});
+                    return self.setError(expr, "Cannot equal two lazy sets", .{});
                 }
             },
             .Name => |name_ix| {
@@ -175,14 +172,14 @@ pub const Interpreter = struct {
                         }
                     },
                     else => {
-                        return self.setError(expr, "tried to unbox {}", .{scalar});
+                        return self.setError(expr, "Tried to unbox {} which is not a box", .{scalar});
                     }
                 }
             },
             .When => |when| {
                 const condition = try self.interpret(when.condition);
-                if (condition == .Abstract) {
-                    return self.setError(expr, "when of maybe-infinite sets is unimplemented", .{});
+                if (condition == .Lazy) {
+                    return self.setError(expr, "The condition for `when` cannot be a lazy set", .{});
                 }
                 if (condition.Finite.count() == 0) {
                     const set = value.FiniteSet.init(&self.arena.allocator);
@@ -193,71 +190,15 @@ pub const Interpreter = struct {
             },
             .Abstract => |body| {
                 const scope = try std.mem.dupe(&self.arena.allocator, value.Scalar, self.scope.items);
-                const scope_types = try std.mem.dupe(&self.arena.allocator, type_.ScalarType, self.scope_types.items);
-                return value.Set{.Abstract = .{
+                return value.Set{.Lazy = .{
                     .scope = scope,
-                    .scope_types = scope_types,
-                    .body = body,
+                    .expr = expr,
                 }};
             },
             .Apply => |pair| {
-                const return_type = self.store.getType(expr, self.scope_types.items)
-                    orelse panic("Missing type for {} {}", .{expr, self.scope_types.items});
-                if (return_type == .Abstract) {
-                    const scope = try std.mem.dupe(&self.arena.allocator, value.Scalar, self.scope.items);
-                    const scope_types = try std.mem.dupe(&self.arena.allocator, type_.ScalarType, self.scope_types.items);
-                    return value.Set{.Abstract = .{
-                        .scope = scope,
-                        .scope_types = scope_types,
-                        .body = expr,
-                    }};
-                }
                 var left = try self.interpret(pair.left);
                 var right = try self.interpret(pair.right);
-                var left_type = self.store.getType(pair.left, self.scope_types.items)
-                    orelse panic("Missing type for {} {}", .{left, self.scope_types.items});
-                var right_type = self.store.getType(pair.right, self.scope_types.items)
-                    orelse panic("Missing type for {} {}", .{right, self.scope_types.items});
-                if (left == .Finite and right == .Finite) {
-                    var set = value.FiniteSet.init(&self.arena.allocator);
-                    var left_iter = left.Finite.iterator();
-                    while (left_iter.next()) |lkv| {
-                        var right_iter = right.Finite.iterator();
-                        while (right_iter.next()) |rkv| {
-                            const min_len = min(lkv.key.len, rkv.key.len);
-                            if (meta.deepEqual(lkv.key[0..min_len], rkv.key[0..min_len])) {
-                                const tuple = if (lkv.key.len > min_len) lkv.key[min_len..] else rkv.key[min_len..];
-                                _ = try set.put(tuple, {});
-                            }
-                        }
-                    }
-                    return value.Set{.Finite = set};
-                }
-                if (right == .Abstract) {
-                    std.mem.swap(value.Set, &left, &right);
-                    std.mem.swap(type_.SetType, &left_type, &right_type);
-                }
-                if (right == .Finite and right_type == .Finite) {
-                    var set = value.FiniteSet.init(&self.arena.allocator);
-                    var right_iter = right.Finite.iterator();
-                    while (right_iter.next()) |rkv| {
-                        var result = left;
-                        for (rkv.key) |arg, i| {
-                            const arg_type = right_type.Finite[i];
-                            result = try self.interpretApply(result, arg, arg_type);
-                        }
-                        if (result == .Abstract) {
-                            panic("How could this happen?", .{});
-                        }
-                        var result_iter = result.Finite.iterator();
-                        while (result_iter.next()) |kv| {
-                            _ = try set.put(kv.key, {});
-                        }
-                    }
-                    return value.Set{.Finite = set};
-                } else {
-                    return self.setError(expr, "apply of two maybe-infinite sets is unimplemented", .{});
-                }
+                return self.apply(expr, left, right);
             },
             .Box => |box| {
                 var scope = try self.arena.allocator.alloc(value.Scalar, box.scope.len);
@@ -284,7 +225,41 @@ pub const Interpreter = struct {
         }
     }
 
-    fn interpretApply(self: *Interpreter, fun: value.Set, arg: value.Scalar, arg_type: type_.ScalarType) Error ! value.Set {
+    fn apply(self: *Interpreter, expr: *const core.Expr, left_: value.Set, right_: value.Set) Error ! value.Set {
+        var left = left_;
+        var right = right_;
+        if (left == .Lazy and right == .Lazy) {
+            return self.setError(expr, "Cannot apply a lazy set to a lazy set", .{});
+        } else {
+            if (right == .Lazy) {
+                std.mem.swap(value.Set, &left, &right);
+            }
+            assert(right == .Finite);
+            var set = value.FiniteSet.init(&self.arena.allocator);
+            var right_iter = right.Finite.iterator();
+            while (right_iter.next()) |rkv| {
+                var result = left;
+                for (rkv.key) |arg, i| {
+                    result = try self.apply1(expr, result, arg);
+                }
+                if (result == .Lazy) {
+                    // don't have enough values to force this yet
+                    const scope = try std.mem.dupe(&self.arena.allocator, value.Scalar, self.scope.items);
+                    return value.Set{.Lazy = .{
+                        .scope = scope,
+                        .expr = expr,
+                    }};
+                }
+                var result_iter = result.Finite.iterator();
+                while (result_iter.next()) |kv| {
+                    _ = try set.put(kv.key, {});
+                }
+            }
+            return value.Set{.Finite = set};
+        }
+    }
+
+    fn apply1(self: *Interpreter, expr: *const core.Expr, fun: value.Set, arg: value.Scalar) Error ! value.Set {
         switch (fun) {
             .Finite => |finite| {
                 var set = value.FiniteSet.init(&self.arena.allocator);
@@ -300,20 +275,36 @@ pub const Interpreter = struct {
                 }
                 return value.Set{.Finite = set};
             },
-            .Abstract => |abstract| {
+            .Lazy => |lazy| {
                 const old_scope = self.scope;
                 defer self.scope = old_scope;
-                self.scope = try ArrayList(value.Scalar).initCapacity(&self.arena.allocator, abstract.scope.len);
-                try self.scope.appendSlice(abstract.scope);
-                try self.scope.append(arg);
-
-                const old_scope_types = self.scope_types;
-                defer self.scope_types = old_scope_types;
-                self.scope_types = try ArrayList(type_.ScalarType).initCapacity(&self.arena.allocator, abstract.scope_types.len);
-                try self.scope_types.appendSlice(abstract.scope_types);
-                try self.scope_types.append(arg_type);
-
-                return self.interpret(abstract.body);
+                self.scope = try ArrayList(value.Scalar).initCapacity(&self.arena.allocator, lazy.scope.len);
+                try self.scope.appendSlice(lazy.scope);
+                switch (lazy.expr.*) {
+                    .Abstract => |body| {
+                        try self.scope.append(arg);
+                        return self.interpret(body);
+                    },
+                    .Apply => |pair| {
+                        var left = try self.interpret(pair.left);
+                        var right = try self.interpret(pair.right);
+                        if (right == .Lazy) {
+                            std.mem.swap(value.Set, &left, &right);
+                        }
+                        assert(right == .Finite);
+                        var new_right = value.FiniteSet.init(&self.arena.allocator);
+                        var right_iter = right.Finite.iterator();
+                        while (right_iter.next()) |kv| {
+                            const tuple = kv.key;
+                            var new_tuple = try ArrayList(value.Scalar).initCapacity(&self.arena.allocator, tuple.len + 1);
+                            try new_tuple.appendSlice(tuple);
+                            try new_tuple.append(arg);
+                            _ = try new_right.put(try self.dupeTuple(new_tuple.items), {});
+                        }
+                        return self.apply(expr, left, .{.Finite = new_right});
+                    },
+                    else => panic("What are this? {}", .{lazy.expr.*}),
+                }
             },
         }
     }
@@ -321,10 +312,9 @@ pub const Interpreter = struct {
 
 const parse = if (builtin.is_test) @import("./parse.zig");
 const desugar = if (builtin.is_test) @import("./desugar.zig");
-const analyze = if (builtin.is_test) @import("./analyze.zig");
 
 fn testInterpret(source: []const u8, expected: []const u8) !void {
-    warn("testing {}\n", .{source});
+    warn("Source:\n{}\n", .{source});
     var arena = ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var store = Store.init(&arena);
@@ -332,24 +322,22 @@ fn testInterpret(source: []const u8, expected: []const u8) !void {
     const syntax_expr = try parse.parse(&store, source, &parse_error_info);
     var desugar_error_info: ?desugar.ErrorInfo = null;
     const core_expr = try desugar.desugar(&store, syntax_expr, &desugar_error_info);
-    var analyze_error_info: ?analyze.ErrorInfo = null;
-    _ = try analyze.analyze(&store, core_expr, &analyze_error_info);
     var error_info: ?ErrorInfo = null;
     if (interpret(&store, &arena, core_expr, &error_info)) |found| {
         var bytes = ArrayList(u8).init(std.testing.allocator);
         defer bytes.deinit();
         try found.dumpInto(std.testing.allocator, bytes.outStream());
         if (!meta.deepEqual(expected, bytes.items)) {
-            panic("\nSource:\n{}\nExpected interpret:\n{}\n\nFound interpret:\n{}", .{source, expected, bytes.items});
+            panic("\nExpected interpret:\n{}\n\nFound interpret:\n{}", .{expected, bytes.items});
         }
     } else |err| {
-        warn("\nSource:\n{}\nExpected interpret:\n{}\n\nFound error:\n{}\n", .{source, expected, error_info.?.message});
+        warn("\nExpected interpret:\n{}\n\nFound error:\n{}\n", .{expected, error_info.?.message});
         return err;
     }
 }
 
 fn testInterpretError(source: []const u8, expected: []const u8) !void {
-    warn("testing {}\n", .{source});
+    warn("Source:\n{}\n", .{source});
     var arena = ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var store = Store.init(&arena);
@@ -357,16 +345,14 @@ fn testInterpretError(source: []const u8, expected: []const u8) !void {
     const syntax_expr = try parse.parse(&store, source, &parse_error_info);
     var desugar_error_info: ?desugar.ErrorInfo = null;
     const core_expr = try desugar.desugar(&store, syntax_expr, &desugar_error_info);
-    var analyze_error_info: ?analyze.ErrorInfo = null;
-    _ = try analyze.analyze(&store, core_expr, &analyze_error_info);
     var error_info: ?ErrorInfo = null;
     if (interpret(&store, &arena, core_expr, &error_info)) |found| {
         var bytes = ArrayList(u8).init(std.testing.allocator);
         try found.dumpInto(std.testing.allocator, bytes.outStream());
-        panic("\nSource:\n{}\nExpected error:\n{}\n\nFound interpret:\n{}", .{source, expected, bytes.items});
+        panic("\nExpected error:\n{}\n\nFound interpret:\n{}", .{expected, bytes.items});
     } else |err| {
         if (!meta.deepEqual(expected, error_info.?.message)) {
-            warn("\nSource:\n{}\nExpected error:\n{}\n\nFound error:\n{}\n", .{source, expected, error_info.?.message});
+            warn("\nExpected error:\n{}\n\nFound error:\n{}\n", .{expected, error_info.?.message});
             return err;
         }
     }
@@ -426,7 +412,7 @@ test "interpret" {
         \\let foo = \ a b -> a = b in
         \\foo 1
             ,
-        \\[10;]
+        \\(lazy #10;)
     );
 
     try testInterpret(
@@ -454,7 +440,7 @@ test "interpret" {
         \\let foo = \ a -> [\ b -> a . b] in
         \\foo 1
             ,
-        \\[10;]
+        \\[box #3; 1]
     );
 
     // TODO this is a problem
@@ -462,14 +448,14 @@ test "interpret" {
         \\let foo = \ a -> [\ b -> a . b] in
         \\(foo 1) | (foo 2)
             ,
-        \\[5777665765994302375;] | [5777665765994302375;]
+        \\[box #3; 2] | [box #3; 1]
     );
 
     try testInterpret(
         \\let foo = \ a -> [\ b -> a . b] in
         \\(1 . (foo 1)) | (2 . (foo 2))
             ,
-        \\1 . [12439490446328561653; 1] | 2 . [12439490446328561653; 2]
+        \\1 . [box #3; 1] | 2 . [box #3; 2]
     );
 
     try testInterpret(
@@ -477,7 +463,7 @@ test "interpret" {
         \\let bar = (1 . (foo 1)) | (2 . (foo 2)) in
         \\bar \ a [f] -> a . (f 41)
             ,
-        \\any . any . any
+        \\2 . 2 . 41 | 1 . 1 . 41
     );
 
     try testInterpretError(

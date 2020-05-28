@@ -324,13 +324,9 @@ const Interpreter = struct {
                     // we know arity(left) > arity(right) or this would have been forced already
                     // `(left right) arg` => `left (right . arg)`
                     .Apply => |pair| {
-                        var left = pair.left.*;
-                        var right = pair.right.*;
-                        if (right == .Lazy) {
-                            std.mem.swap(value.Set, &left, &right);
-                        }
-                        // if both were Lazy we would have errored out instead of creating a Lazy.Apply
-                        assert(right == .Finite);
+                        const left = pair.left.*;
+                        const right = pair.right.*;
+                        assert(left == .Lazy and right == .Finite);
                         var new_right = value.FiniteSet.init(&self.arena.allocator);
                         var right_iter = right.Finite.iterator();
                         while (right_iter.next()) |kv| {

@@ -47,9 +47,10 @@ pub const Tuple = []const Scalar;
 
 pub const FiniteSet = DeepHashSet(Tuple);
 
-/// Invariant: LazySet may not evaluate to a set containing `some`
+/// Invariant: LazySet may not contain `some`
 pub const LazySet = union (enum) {
     Abstract: LazyAbstract,
+    /// Invariant: left is lazy, right is finite, arity(left) > arity(right)
     Apply: LazyPair,
     Union: LazyPair,
     Intersect: LazyPair,

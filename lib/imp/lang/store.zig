@@ -1,8 +1,8 @@
-usingnamespace @import("./common.zig");
-
-pub const syntax = @import("./syntax.zig");
-pub const core = @import("./core.zig");
-pub const type_ = @import("./type.zig");
+const imp = @import("../../imp.zig");
+usingnamespace imp.common;
+const syntax = imp.lang.repr.syntax;
+const core = imp.lang.repr.core;
+const type_ = imp.lang.repr.type_;
 
 pub const SyntaxMeta = struct {
     start: usize,

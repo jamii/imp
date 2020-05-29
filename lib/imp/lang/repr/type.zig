@@ -1,8 +1,9 @@
-usingnamespace @import("./common.zig");
-
-const value = @import("./value.zig");
-const core = @import("./core.zig");
-const Store = @import("./store.zig").Store;
+const imp = @import("../../../imp.zig");
+usingnamespace imp.common;
+const meta = imp.meta;
+const Store = imp.lang.store.Store;
+const value = imp.lang.repr.value;
+const core = imp.lang.repr.core;
 
 pub const ScalarType = union(enum) {
     Any,

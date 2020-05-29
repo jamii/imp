@@ -1,4 +1,5 @@
-usingnamespace @import("./common.zig");
+const imp = @import("../imp.zig");
+usingnamespace imp.common;
 
 pub const Ordering = enum {
     LessThan,

@@ -1,3 +1,6 @@
+const imp = @import("../imp.zig");
+const meta = imp.meta;
+
 pub const std = @import("std");
 pub const builtin = @import("builtin");
 pub const warn = std.debug.warn;
@@ -9,8 +12,6 @@ pub const min = std.math.min;
 pub const Allocator = std.mem.Allocator;
 pub const ArenaAllocator = std.heap.ArenaAllocator;
 pub const ArrayList = std.ArrayList;
-
-pub const meta = @import("./meta.zig");
 
 pub fn DeepHashMap(comptime K: type, comptime V: type) type {
     return std.HashMap(

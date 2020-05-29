@@ -1,8 +1,9 @@
-usingnamespace @import("./common.zig");
-
-const core = @import("./core.zig");
-const value = @import("./value.zig");
-const Store = @import("./store.zig").Store;
+const imp = @import("../../../imp.zig");
+usingnamespace imp.common;
+const meta = imp.meta;
+const Store = imp.lang.store.Store;
+const core = imp.lang.repr.core;
+const value = imp.lang.repr.value;
 
 /// Guarantees:
 /// * If this returns a value.Set.Finite then it will be the correct answer

@@ -1,7 +1,8 @@
-usingnamespace @import("common.zig");
-
-const Store = @import("./store.zig").Store;
-const syntax = @import("./syntax.zig");
+const imp = @import("../../../imp.zig");
+usingnamespace imp.common;
+const meta = imp.meta;
+const Store = imp.lang.store.Store;
+const syntax = imp.lang.repr.syntax;
 
 // expr =
 //   "(" expr ")"

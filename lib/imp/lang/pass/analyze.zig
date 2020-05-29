@@ -1,8 +1,8 @@
-usingnamespace @import("./common.zig");
-
-const core = @import("./core.zig");
-const type_ = @import("./type.zig");
-const Store = @import("./store.zig").Store;
+const imp = @import("../../../imp.zig");
+usingnamespace imp.common;
+const Store = imp.lang.store.Store;
+const core = imp.lang.repr.core;
+const type_ = imp.lang.repr.type_;
 
 pub fn analyze(store: *Store, expr: *const core.Expr, error_info: *?ErrorInfo) Error ! type_.SetType {
     var analyzer = Analyzer{

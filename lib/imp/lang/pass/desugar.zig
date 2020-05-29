@@ -1,8 +1,9 @@
-usingnamespace @import("./common.zig");
-
-const Store = @import("./store.zig").Store;
-const syntax = @import("./syntax.zig");
-const core = @import("./core.zig");
+const imp = @import("../../../imp.zig");
+usingnamespace imp.common;
+const meta = imp.meta;
+const Store = imp.lang.store.Store;
+const core = imp.lang.repr.core;
+const syntax = imp.lang.repr.syntax;
 
 pub fn desugar(store: *Store, syntax_expr: *const syntax.Expr, error_info: *?ErrorInfo) Error ! *const core.Expr {
     var desugarer = Desugarer{

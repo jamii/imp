@@ -59,6 +59,16 @@ const Input = struct {
     }
 };
 
+fn generatorReturnType(comptime gen: type) type {
+    return std.meta.declarationInfo(gen, "generate").data.Fn.return_type;
+}
+
+const Void = struct {
+    fn generate(input: *Input) void {
+        return;
+    }
+};
+
 fn Int(comptime T: type) type {
     return struct {
         fn generate(input: *Input) T {
@@ -69,9 +79,35 @@ fn Int(comptime T: type) type {
             const bytes = input.getBytes(@sizeOf(ByteAlignedT));
             const byte_aligned_result = std.mem.readIntSliceLittle(ByteAlignedT, &bytes);
             const unsigned_result = @truncate(UnsignedT, byte_aligned_result);
-            const value = @bitCast(T, unsigned_result);
+            const output = @bitCast(T, unsigned_result);
             input.endRange();
-            return value;
+            return output;
+        }
+    };
+}
+
+fn Float(comptime T: type) type {
+    return struct {
+        fn generate(input: *Input) T {
+            input.startRange();
+            // this is copied from std.rand.Random.float
+            const output = output: {
+                switch (T) {
+                    f32 => {
+                        const s = Int(u32).generate(input);
+                        const repr = (0x7f << 23) | (s >> 9);
+                        break :output @bitCast(f32, repr) - 1.0;
+                    },
+                    f64 => {
+                        const s = Int(u64).generate(input);
+                        const repr = (0x3ff << 52) | (s >> 12);
+                        break :output @bitCast(f64, repr) - 1.0;
+                    },
+                    else => @compileError("unknown floating point type"),
+                }
+            };
+            input.endRange();
+            return output;
         }
     };
 }
@@ -82,8 +118,8 @@ const Bool = struct {
     }
 };
 
-fn Slice(comptime Elem: type, comptime min_len: usize) type {
-    const T = std.meta.declarationInfo(Elem, "generate").data.Fn.return_type;
+fn Slice(comptime elem_gen: type, comptime min_len: usize) type {
+    const T = generatorReturnType(elem_gen);
     return struct {
         fn generate(input: *Input) []T {
             var output = ArrayList(T).init(&input.arena.allocator);
@@ -92,7 +128,7 @@ fn Slice(comptime Elem: type, comptime min_len: usize) type {
                 input.startRange();
                 defer input.endRange();
                 if (output.items.len > min_len and !Bool.generate(input)) break;
-                output.append(Elem.generate(input)) catch fuzz_panic();
+                output.append(elem_gen.generate(input)) catch fuzz_panic();
             }
             input.endRange();
             return output.items;
@@ -140,15 +176,63 @@ fn Utf8(comptime min_len: usize) type {
     };
 }
 
-fn fuzz(allocator: *Allocator, seed: u64, iterations: usize, test_fn: fn(*Input) anyerror!void) void {
-    var rng = std.rand.DefaultPrng.init(seed);
+fn Struct(comptime T: type, comptime field_gens: var) type {
+    return struct {
+        fn generate(input: *Input) T {
+            input.startRange();
+            var output: T = undefined;
+            inline for (@typeInfo(T).Struct.fields) |field| {
+                @field(output, field.name) = @field(field_gens, field.name).generate(input);
+            }
+            input.endRange();
+            return output;
+        }
+    };
+}
+
+fn Union(comptime T: type, comptime field_gens: var) type {
+    return struct {
+        fn generate(input: *Input) T {
+            input.startRange();
+            var output: T = undefined;
+            const field_ix = min(Int(u8).generate(input), @typeInfo(T).Union.fields.len-1);
+            inline for (@typeInfo(T).Union.fields) |field, i| {
+                if (field_ix == i) {
+                    output = @unionInit(T, field.name, @field(field_gens, field.name).generate(input));
+                }
+            }
+            input.endRange();
+            return output;
+        }
+    };
+}
+
+fn Ptr(comptime gen: var) type {
+    const T = generatorReturnType(gen);
+    return struct {
+        fn generate(input: *Input) T {
+            var output = input.arena.allocator.create(T);
+            const value = gen.generate(input);
+            output.* = value;
+        }
+    };
+}
+
+const Options = struct {
+    seed: u64,
+    fuzz_iterations: usize,
+    shrink_iterations: usize,
+};
+
+fn fuzz(allocator: *Allocator, options: Options, test_fn: fn(*Input) anyerror!void) void {
+    var rng = std.rand.DefaultPrng.init(options.seed);
     var random = &rng.random;
-    var iteration: usize = 0;
-    while (iteration < iterations) : (iteration += 1) {
+    var fuzz_iteration: usize = 0;
+    while (fuzz_iteration < options.fuzz_iterations) : (fuzz_iteration += 1) {
 
         // generate some random bytes
         var bytes = ArrayList(u8).init(allocator);
-        var num_bytes = random.uintLessThan(usize, iteration + 1);
+        var num_bytes = random.uintLessThan(usize, fuzz_iteration + 1);
         while (num_bytes > 0) : (num_bytes -= 1) {
             bytes.append(random.int(u8)) catch fuzz_panic();
         }
@@ -162,13 +246,13 @@ fn fuzz(allocator: *Allocator, seed: u64, iterations: usize, test_fn: fn(*Input)
             bytes.deinit();
             input.deinit();
         } else |err| {
-            warn("\nIteration {} raised error {}:\n{}\n", .{iteration, err, bytes.items});
+            warn("\nIteration {} raised error {}:\n{}\n", .{fuzz_iteration, err, bytes.items});
 
             var most_shrunk_bytes = bytes;
             var most_shrunk_input = input;
             var most_shrunk_err = err;
             var shrink_iteration: usize = 0;
-            while (shrink_iteration < iterations and most_shrunk_bytes.items.len > 0) : (shrink_iteration += 1) {
+            while (shrink_iteration < options.shrink_iterations and most_shrunk_bytes.items.len > 0) : (shrink_iteration += 1) {
                 // copy most_shrunk_bytes
                 var shrunk_bytes = ArrayList(u8).initCapacity(allocator, most_shrunk_bytes.items.len) catch fuzz_panic();
                 shrunk_bytes.appendSlice(most_shrunk_bytes.items) catch fuzz_panic();
@@ -213,13 +297,173 @@ fn fuzz(allocator: *Allocator, seed: u64, iterations: usize, test_fn: fn(*Input)
     }
 }
 
-fn no_fo(input: *Input) !void {
-    const string = Ascii(1).generate(input);
-    if (std.mem.indexOf(u8, string, "fo")) |_| {
-        return error.Fail;
-    }
+// fn no_fo(input: *Input) !void {
+//     const string = Ascii(1).generate(input);
+//     if (std.mem.indexOf(u8, string, "fo")) |_| {
+//         return error.Fail;
+//     }
+// }
+
+// test "no_fo" {
+//     fuzz(std.heap.page_allocator, .{.seed=42, .fuzz_iterations=100_000, .shrink_iterations=100_000}, no_fo);
+// }
+
+// export fn LLVMFuzzerTestOneInput(data: [*c]u8, len: size_t) c_int {
+//     const bytes = data[0..len];
+//     var input = Input.init(std.heap.page_allocator, bytes);
+//     no_fo(&input) catch |err| {
+//         panic("Test failed with {}", err); // TODO trace
+//     };
+// }
+
+// TODO for some reason the fuzzer OOMs when using std.testing.allocator
+
+test "parse should never panic" {
+    fuzz(std.heap.page_allocator, .{.seed=42, .fuzz_iterations=100_000, .shrink_iterations=100_000}, fuzz_parse_no_panic);
+}
+fn fuzz_parse_no_panic(input: *Input) !void {
+    const source = Slice(Int(u8), 0).generate(input);
+    var store = imp.lang.store.Store.init(input.arena);
+    var error_info: ?imp.lang.pass.parse.ErrorInfo = null;
+    _ = imp.lang.pass.parse.parse(&store, source, &error_info) catch return;
 }
 
-test "no_fo" {
-    fuzz(std.heap.page_allocator, 40, 100_000, no_fo);
+test "parse shouldn't return unicode errors on valid utf8" {
+    fuzz(std.heap.page_allocator, .{.seed=42, .fuzz_iterations=100_000, .shrink_iterations=100_000}, fuzz_parse_valid_utf8);
 }
+fn fuzz_parse_valid_utf8(input: *Input) !void {
+    const source = Utf8(0).generate(input);
+    var store = imp.lang.store.Store.init(input.arena);
+    var error_info: ?imp.lang.pass.parse.ErrorInfo = null;
+    _ = imp.lang.pass.parse.parse(&store, source, &error_info) catch |err| {
+        switch (err) {
+            error.ParseError => return,
+            else => return err,
+        }
+    };
+}
+
+const Scalar = struct {
+    fn generate(input: *Input) imp.lang.repr.value.Scalar {
+        if (Bool.generate(input)) {
+            return .{.String = Utf8(0).generate(input)};
+        } else {
+            return .{.Number = Float(f64).generate(input)};
+        }
+        // never generate Box - it's not a valid syntax literal
+    }
+};
+
+const Pair = Struct(
+    imp.lang.repr.syntax.Pair,
+    .{
+        .left = PtrExpr,
+        .right = PtrExpr,
+    }
+);
+
+const Name = Ascii(1);
+
+const When = Struct(
+    imp.lang.repr.syntax.When,
+    .{
+        .condition = PtrExpr,
+        .true_branch = PtrExpr,
+    }
+);
+
+const Abstract = Struct(
+    imp.lang.repr.syntax.Abstract,
+    .{
+        .args = Slice(Arg, 1),
+        .body = PtrExpr,
+    }
+);
+
+const Arg = Struct(
+    imp.lang.repr.syntax.Arg,
+    .{
+        .name = Name,
+        .unbox = Bool,
+    }
+);
+
+const Annotate = Struct(
+    imp.lang.repr.syntax.Annotate,
+    .{
+        .annotation = Name,
+        .body = PtrExpr,
+    }
+);
+
+const If = Struct(
+    imp.lang.repr.syntax.If,
+    .{
+        .condition = PtrExpr,
+        .true_branch = PtrExpr,
+        .false_branch = PtrExpr,
+    }
+);
+
+const Let = Struct(
+    imp.lang.repr.syntax.Let,
+    .{
+        .name = Name,
+        .value = PtrExpr,
+        .body = PtrExpr,
+    }
+);
+
+const Lookup = Struct(
+    imp.lang.repr.syntax.Lookup,
+    .{
+        .value = PtrExpr,
+        .name = Name,
+    }
+);
+
+const Expr = Union(
+    imp.lang.repr.syntax.Expr,
+    .{
+        .None = Void,
+        .Some = Void,
+        .Scalar = Scalar,
+        .Union = Pair,
+        .Intersect = Pair,
+        .Product = Pair,
+        .Equal = Pair,
+        .Name = Name,
+        .When = When,
+        .Abstract = Abstract,
+        .Apply = Pair,
+        .Box = PtrExpr,
+        .Annotate = Annotate,
+
+        .Negate = PtrExpr,
+        .If = If,
+        .Let = Let,
+        .Lookup = Lookup,
+    }
+);
+
+const PtrExpr = struct {
+    fn generate(input: *Input) *const imp.lang.repr.syntax.Expr {
+        var output = input.arena.allocator.create(imp.lang.repr.syntax.Expr) catch fuzz_panic();
+        output.* = Expr.generate(input);
+        return output;
+    }
+};
+
+test "desugar should never panic" {
+    fuzz(std.heap.page_allocator, .{.seed=42, .fuzz_iterations=100_000, .shrink_iterations=100_000}, fuzz_desugar_no_panic);
+}
+
+fn fuzz_desugar_no_panic(input: *Input) !void {
+    const expr = PtrExpr.generate(input);
+    var store = imp.lang.store.Store.init(input.arena);
+    var error_info: ?imp.lang.pass.desugar.ErrorInfo = null;
+    _ = imp.lang.pass.desugar.desugar(&store, expr, &error_info) catch |err| return;
+}
+
+// TODO is PtrExpr going to break because it's not in the store?
+// can pass Store as var arg to generate

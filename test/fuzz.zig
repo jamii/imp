@@ -398,12 +398,16 @@ const Core = struct {
         }
     };
 
-    fn makeValid(input: *Input, invalid_expr: *const imp.lang.repr.core.Expr, scope_size: usize) *const imp.lang.repr.core.Expr {
+    fn makeValid(input: *Input, invalid_expr: *const imp.lang.repr.core.Expr, scope_size: usize) error {CantMakeValid} ! *const imp.lang.repr.core.Expr {
         var valid_expr = invalid_expr.*;
         switch (valid_expr) {
             .Name, .UnboxName => |*name_ix| {
                 // pick a valid name_ix
-                name_ix.* %= scope_size;
+                if (scope_size == 0) {
+                    return error.CantMakeValid;
+                } else {
+                    name_ix.* %= scope_size;
+                }
             },
             .Box => |*box| {
                 // set the scope that would be produced by Desugarer.desugarBox
@@ -417,19 +421,12 @@ const Core = struct {
         }
         const child_scope_size = if (valid_expr == .Abstract) scope_size + 1 else scope_size;
         for (valid_expr.getChildrenMut().slice()) |child| {
-            child.* = makeValid(input, child.*, child_scope_size);
+            child.* = try makeValid(input, child.*, child_scope_size);
         }
         var valid_expr_ptr = input.arena.allocator.create(imp.lang.repr.core.Expr) catch fuzz_panic();
         valid_expr_ptr.* = valid_expr;
         return valid_expr_ptr;
     }
-
-    const ValidPtrExpr = struct {
-        fn generate(input: *Input) *const imp.lang.repr.core.Expr {
-            const invalid_expr = PtrExpr.generate(input);
-            return makeValid(input, invalid_expr, 0);
-        }
-    };
 };
 
 const Options = struct {
@@ -449,7 +446,6 @@ fn fuzz(allocator: *Allocator, options: Options, test_fn: fn(*Input) anyerror!vo
     var random = &rng.random;
     var fuzz_iteration: usize = 0;
     while (fuzz_iteration < options.fuzz_iterations) : (fuzz_iteration += 1) {
-        warn("Iteration {}\n", .{fuzz_iteration});
         // generate some random bytes
         var bytes = ArrayList(u8).init(allocator);
         var num_bytes = random.uintLessThan(usize, fuzz_iteration + 1);
@@ -460,9 +456,7 @@ fn fuzz(allocator: *Allocator, options: Options, test_fn: fn(*Input) anyerror!vo
         // test
         // TODO catch panic somehow?
         var input = Input.init(allocator, bytes.items);
-        warn("Testing\n", .{});
         const result = test_fn(&input);
-        warn("Tested\n", .{});
         assert(input.open_ranges.items.len == 0);
         if (result) |_| {
             bytes.deinit();
@@ -470,6 +464,7 @@ fn fuzz(allocator: *Allocator, options: Options, test_fn: fn(*Input) anyerror!vo
         } else |err| {
             warn("\nIteration {} raised error {}:\n{}\n", .{fuzz_iteration, err, bytes.items});
 
+            // try to shrink input
             var most_shrunk_bytes = bytes;
             var most_shrunk_input = input;
             var most_shrunk_err = err;
@@ -569,7 +564,8 @@ test "fuzz analyze" {
     fuzz(std.heap.c_allocator, Options.default, fuzz_analyze);
 }
 fn fuzz_analyze(input: *Input) !void {
-    const expr = Core.ValidPtrExpr.generate(input);
+    const invalid_expr = Core.PtrExpr.generate(input);
+    const expr = Core.makeValid(input, invalid_expr, 0) catch return;
     var store = imp.lang.store.Store.init(input.arena);
     var error_info: ?imp.lang.pass.analyze.ErrorInfo = null;
     // should never panic on any input
@@ -587,7 +583,8 @@ test "fuzz interpret" {
     fuzz(std.heap.c_allocator, Options.default, fuzz_interpret);
 }
 fn fuzz_interpret(input: *Input) !void {
-    const expr = Core.ValidPtrExpr.generate(input);
+    const invalid_expr = Core.PtrExpr.generate(input);
+    const expr = Core.makeValid(input, invalid_expr, 0) catch return;
     var store = imp.lang.store.Store.init(input.arena);
     var analyze_error_info: ?imp.lang.pass.analyze.ErrorInfo = null;
     const analyzed = imp.lang.pass.analyze.analyze(&store, expr, &analyze_error_info);
@@ -618,6 +615,8 @@ fn fuzz_interpret(input: *Input) !void {
 
 // TODO is PtrExpr going to break because it's not in the store?
 // could pass Store as var arg to generate
+
+// TODO need to track how often we're actually generating valid inputs
 
 // fn no_fo(input: *Input) !void {
 //     const string = Ascii(1).generate(input);

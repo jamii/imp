@@ -398,7 +398,7 @@ const Core = struct {
         }
     };
 
-    fn makeValid(input: *Input, invalid_expr: *const imp.lang.repr.core.Expr, scope_size: usize) error {CantMakeValid} ! *const imp.lang.repr.core.Expr {
+    fn makeValid(arena: *ArenaAllocator, invalid_expr: *const imp.lang.repr.core.Expr, scope_size: usize) error {CantMakeValid} ! *const imp.lang.repr.core.Expr {
         var valid_expr = invalid_expr.*;
         switch (valid_expr) {
             .Name, .UnboxName => |*name_ix| {
@@ -411,7 +411,7 @@ const Core = struct {
             },
             .Box => |*box| {
                 // set the scope that would be produced by Desugarer.desugarBox
-                var scope = input.arena.allocator.alloc(imp.lang.repr.core.NameIx, scope_size) catch fuzz_panic();
+                var scope = arena.allocator.alloc(imp.lang.repr.core.NameIx, scope_size) catch fuzz_panic();
                 for (scope) |*name_ix, i| {
                     name_ix.* = i;
                 }
@@ -421,9 +421,9 @@ const Core = struct {
         }
         const child_scope_size = if (valid_expr == .Abstract) scope_size + 1 else scope_size;
         for (valid_expr.getChildrenMut().slice()) |child| {
-            child.* = try makeValid(input, child.*, child_scope_size);
+            child.* = try makeValid(arena, child.*, child_scope_size);
         }
-        var valid_expr_ptr = input.arena.allocator.create(imp.lang.repr.core.Expr) catch fuzz_panic();
+        var valid_expr_ptr = arena.allocator.create(imp.lang.repr.core.Expr) catch fuzz_panic();
         valid_expr_ptr.* = valid_expr;
         return valid_expr_ptr;
     }
@@ -441,7 +441,7 @@ const Options = struct {
     };
 };
 
-fn fuzz(allocator: *Allocator, options: Options, test_fn: fn(*Input) anyerror!void) void {
+fn fuzz(allocator: *Allocator, options: Options, generator: var, tester: var) void {
     var rng = std.rand.DefaultPrng.init(options.seed);
     var random = &rng.random;
     var fuzz_iteration: usize = 0;
@@ -456,17 +456,19 @@ fn fuzz(allocator: *Allocator, options: Options, test_fn: fn(*Input) anyerror!vo
         // test
         // TODO catch panic somehow?
         var input = Input.init(allocator, bytes.items);
-        const result = test_fn(&input);
+        const value = generator.generate(&input);
+        const result = tester(input.arena, value);
         assert(input.open_ranges.items.len == 0);
         if (result) |_| {
             bytes.deinit();
             input.deinit();
         } else |err| {
-            warn("\nIteration {} raised error {}:\n{}\n", .{fuzz_iteration, err, bytes.items});
+            warn("\nIteration {} raised error {}:\n{}\n", .{fuzz_iteration, err, value});
 
             // try to shrink input
             var most_shrunk_bytes = bytes;
             var most_shrunk_input = input;
+            var most_shrunk_value = value;
             var most_shrunk_err = err;
             var shrink_iteration: usize = 0;
             while (shrink_iteration < options.shrink_iterations and most_shrunk_bytes.items.len > 0) : (shrink_iteration += 1) {
@@ -492,7 +494,8 @@ fn fuzz(allocator: *Allocator, options: Options, test_fn: fn(*Input) anyerror!vo
 
                 // test again
                 var shrunk_input = Input.init(allocator, shrunk_bytes.items);
-                const shrunk_result = test_fn(&shrunk_input);
+                const shrunk_value = generator.generate(&shrunk_input);
+                const shrunk_result = tester(shrunk_input.arena, shrunk_value);
                 assert(input.open_ranges.items.len == 0);
                 if (shrunk_result) |_| {
                     shrunk_bytes.deinit();
@@ -502,11 +505,12 @@ fn fuzz(allocator: *Allocator, options: Options, test_fn: fn(*Input) anyerror!vo
                     most_shrunk_input.deinit();
                     most_shrunk_bytes = shrunk_bytes;
                     most_shrunk_input = shrunk_input;
+                    most_shrunk_value = shrunk_value;
                     most_shrunk_err = shrunk_err;
                 }
             }
 
-            warn("\nShrunk to {}:\n{}\n", .{most_shrunk_err, most_shrunk_bytes.items});
+            warn("\nShrunk to {}:\n{}\n", .{most_shrunk_err, value});
             most_shrunk_bytes.deinit();
             most_shrunk_input.deinit();
             return;
@@ -515,11 +519,10 @@ fn fuzz(allocator: *Allocator, options: Options, test_fn: fn(*Input) anyerror!vo
 }
 
 test "fuzz parse" {
-    fuzz(std.heap.c_allocator, Options.default, fuzz_parse);
+    fuzz(std.heap.c_allocator, Options.default, Utf8(0), fuzz_parse);
 }
-fn fuzz_parse(input: *Input) !void {
-    const source = Utf8(0).generate(input);
-    var store = imp.lang.store.Store.init(input.arena);
+fn fuzz_parse(arena: *ArenaAllocator, source: []const u8) !void {
+    var store = imp.lang.store.Store.init(arena);
     var error_info: ?imp.lang.pass.parse.ErrorInfo = null;
     // should never panic on any input
     _ = imp.lang.pass.parse.parse(&store, source, &error_info) catch |err| {
@@ -544,11 +547,10 @@ fn fuzz_parse(input: *Input) !void {
 }
 
 test "fuzz desugar" {
-    fuzz(std.heap.c_allocator, Options.default, fuzz_desugar);
+    fuzz(std.heap.c_allocator, Options.default, Syntax.PtrExpr, fuzz_desugar);
 }
-fn fuzz_desugar(input: *Input) !void {
-    const expr = Syntax.PtrExpr.generate(input);
-    var store = imp.lang.store.Store.init(input.arena);
+fn fuzz_desugar(arena: *ArenaAllocator, expr: *const imp.lang.repr.syntax.Expr) !void {
+    var store = imp.lang.store.Store.init(arena);
     var error_info: ?imp.lang.pass.desugar.ErrorInfo = null;
     // should never panic on any input
     _ = imp.lang.pass.desugar.desugar(&store, expr, &error_info) catch |err| {
@@ -561,12 +563,11 @@ fn fuzz_desugar(input: *Input) !void {
 }
 
 test "fuzz analyze" {
-    fuzz(std.heap.c_allocator, Options.default, fuzz_analyze);
+    fuzz(std.heap.c_allocator, Options.default, Core.PtrExpr, fuzz_analyze);
 }
-fn fuzz_analyze(input: *Input) !void {
-    const invalid_expr = Core.PtrExpr.generate(input);
-    const expr = Core.makeValid(input, invalid_expr, 0) catch return;
-    var store = imp.lang.store.Store.init(input.arena);
+fn fuzz_analyze(arena: *ArenaAllocator, invalid_expr: *const imp.lang.repr.core.Expr) !void {
+    const expr = Core.makeValid(arena, invalid_expr, 0) catch return;
+    var store = imp.lang.store.Store.init(arena);
     var error_info: ?imp.lang.pass.analyze.ErrorInfo = null;
     // should never panic on any input
     _ = imp.lang.pass.analyze.analyze(&store, expr, &error_info) catch |err| {
@@ -580,17 +581,16 @@ fn fuzz_analyze(input: *Input) !void {
 }
 
 test "fuzz interpret" {
-    fuzz(std.heap.c_allocator, Options.default, fuzz_interpret);
+    fuzz(std.heap.c_allocator, Options.default, Core.PtrExpr, fuzz_interpret);
 }
-fn fuzz_interpret(input: *Input) !void {
-    const invalid_expr = Core.PtrExpr.generate(input);
-    const expr = Core.makeValid(input, invalid_expr, 0) catch return;
-    var store = imp.lang.store.Store.init(input.arena);
+fn fuzz_interpret(arena: *ArenaAllocator, invalid_expr: *const imp.lang.repr.core.Expr) !void {
+    const expr = Core.makeValid(arena, invalid_expr, 0) catch return;
+    var store = imp.lang.store.Store.init(arena);
     var analyze_error_info: ?imp.lang.pass.analyze.ErrorInfo = null;
     const analyzed = imp.lang.pass.analyze.analyze(&store, expr, &analyze_error_info);
     var error_info: ?imp.lang.pass.interpret.ErrorInfo = null;
     // should never panic on any valid input
-    if (imp.lang.pass.interpret.interpret(&store, input.arena, expr, &error_info)) |set| {
+    if (imp.lang.pass.interpret.interpret(&store, arena, expr, &error_info)) |set| {
         // if type is finite, should return finite set
         if (analyzed) |set_type| {
             if (set_type == .Finite and set != .Finite) {
@@ -618,8 +618,8 @@ fn fuzz_interpret(input: *Input) !void {
 
 // TODO need to track how often we're actually generating valid inputs
 
-// fn no_fo(input: *Input) !void {
-//     const string = Ascii(1).generate(input);
+// fn no_fo(arena: *ArenaAllocator, ) !void {
+//     const string = Ascii(1);
 //     if (std.mem.indexOf(u8, string, "fo")) |_| {
 //         return error.Fail;
 //     }

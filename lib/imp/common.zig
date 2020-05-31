@@ -6,12 +6,20 @@ pub const builtin = @import("builtin");
 pub const warn = std.debug.warn;
 pub const assert = std.debug.assert;
 pub const expect = std.testing.expect;
-pub const panic = std.debug.panic;
 pub const max = std.math.max;
 pub const min = std.math.min;
 pub const Allocator = std.mem.Allocator;
 pub const ArenaAllocator = std.heap.ArenaAllocator;
 pub const ArrayList = std.ArrayList;
+
+pub fn panic(comptime fmt: []const u8, args: var) noreturn {
+    const message = format(std.heap.c_allocator, fmt, args) catch |err| message: {
+        switch (err) {
+            error.OutOfMemory => break :message "OOM inside panic",
+        }
+    };
+    @panic(message);
+}
 
 pub fn DeepHashMap(comptime K: type, comptime V: type) type {
     return std.HashMap(

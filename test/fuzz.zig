@@ -218,91 +218,6 @@ fn Ptr(comptime gen: var) type {
     };
 }
 
-const Options = struct {
-    seed: u64,
-    fuzz_iterations: usize,
-    shrink_iterations: usize,
-
-    const default = Options{
-        .seed=42,
-        .fuzz_iterations=10_000,
-        .shrink_iterations=10_000
-    };
-};
-
-fn fuzz(allocator: *Allocator, options: Options, test_fn: fn(*Input) anyerror!void) void {
-    var rng = std.rand.DefaultPrng.init(options.seed);
-    var random = &rng.random;
-    var fuzz_iteration: usize = 0;
-    while (fuzz_iteration < options.fuzz_iterations) : (fuzz_iteration += 1) {
-
-        // generate some random bytes
-        var bytes = ArrayList(u8).init(allocator);
-        var num_bytes = random.uintLessThan(usize, fuzz_iteration + 1);
-        while (num_bytes > 0) : (num_bytes -= 1) {
-            bytes.append(random.int(u8)) catch fuzz_panic();
-        }
-
-        // test
-        // TODO catch panic somehow?
-        var input = Input.init(allocator, bytes.items);
-        const result = test_fn(&input);
-        assert(input.open_ranges.items.len == 0);
-        if (result) |_| {
-            bytes.deinit();
-            input.deinit();
-        } else |err| {
-            warn("\nIteration {} raised error {}:\n{}\n", .{fuzz_iteration, err, bytes.items});
-
-            var most_shrunk_bytes = bytes;
-            var most_shrunk_input = input;
-            var most_shrunk_err = err;
-            var shrink_iteration: usize = 0;
-            while (shrink_iteration < options.shrink_iterations and most_shrunk_bytes.items.len > 0) : (shrink_iteration += 1) {
-                // copy most_shrunk_bytes
-                var shrunk_bytes = ArrayList(u8).initCapacity(allocator, most_shrunk_bytes.items.len) catch fuzz_panic();
-                shrunk_bytes.appendSlice(most_shrunk_bytes.items) catch fuzz_panic();
-
-                // decide how to shrink
-                if (random.boolean()) {
-                    // shrink a byte
-                    const i = random.uintLessThan(usize, shrunk_bytes.items.len);
-                    shrunk_bytes.items[i] = random.uintLessThan(u8, max(shrunk_bytes.items[i], 1));
-                } else {
-                    // remove a range
-                    const range_ix = random.uintLessThan(usize, most_shrunk_input.closed_ranges.items.len);
-                    const range = most_shrunk_input.closed_ranges.items[range_ix];
-                    var i = range[1];
-                    while (i < shrunk_bytes.items.len) : (i += 1) {
-                        shrunk_bytes.items[i - (range[1] - range[0])] = shrunk_bytes.items[i];
-                    }
-                    shrunk_bytes.shrink(shrunk_bytes.items.len - (range[1] - range[0]));
-                }
-
-                // test again
-                var shrunk_input = Input.init(allocator, shrunk_bytes.items);
-                const shrunk_result = test_fn(&shrunk_input);
-                assert(input.open_ranges.items.len == 0);
-                if (shrunk_result) |_| {
-                    shrunk_bytes.deinit();
-                    shrunk_input.deinit();
-                } else |shrunk_err| {
-                    most_shrunk_bytes.deinit();
-                    most_shrunk_input.deinit();
-                    most_shrunk_bytes = shrunk_bytes;
-                    most_shrunk_input = shrunk_input;
-                    most_shrunk_err = shrunk_err;
-                }
-            }
-
-            warn("\nShrunk to {}:\n{}\n", .{most_shrunk_err, most_shrunk_bytes.items});
-            most_shrunk_bytes.deinit();
-            most_shrunk_input.deinit();
-            return;
-        }
-    }
-}
-
 const Scalar = struct {
     fn generate(input: *Input) imp.lang.repr.value.Scalar {
         if (Bool.generate(input)) {
@@ -516,6 +431,93 @@ const Core = struct {
         }
     };
 };
+
+const Options = struct {
+    seed: u64,
+    fuzz_iterations: usize,
+    shrink_iterations: usize,
+
+    const default = Options{
+        .seed=42,
+        .fuzz_iterations=10_000,
+        .shrink_iterations=10_000
+    };
+};
+
+fn fuzz(allocator: *Allocator, options: Options, test_fn: fn(*Input) anyerror!void) void {
+    var rng = std.rand.DefaultPrng.init(options.seed);
+    var random = &rng.random;
+    var fuzz_iteration: usize = 0;
+    while (fuzz_iteration < options.fuzz_iterations) : (fuzz_iteration += 1) {
+        warn("Iteration {}\n", .{fuzz_iteration});
+        // generate some random bytes
+        var bytes = ArrayList(u8).init(allocator);
+        var num_bytes = random.uintLessThan(usize, fuzz_iteration + 1);
+        while (num_bytes > 0) : (num_bytes -= 1) {
+            bytes.append(random.int(u8)) catch fuzz_panic();
+        }
+
+        // test
+        // TODO catch panic somehow?
+        var input = Input.init(allocator, bytes.items);
+        warn("Testing\n", .{});
+        const result = test_fn(&input);
+        warn("Tested\n", .{});
+        assert(input.open_ranges.items.len == 0);
+        if (result) |_| {
+            bytes.deinit();
+            input.deinit();
+        } else |err| {
+            warn("\nIteration {} raised error {}:\n{}\n", .{fuzz_iteration, err, bytes.items});
+
+            var most_shrunk_bytes = bytes;
+            var most_shrunk_input = input;
+            var most_shrunk_err = err;
+            var shrink_iteration: usize = 0;
+            while (shrink_iteration < options.shrink_iterations and most_shrunk_bytes.items.len > 0) : (shrink_iteration += 1) {
+                // copy most_shrunk_bytes
+                var shrunk_bytes = ArrayList(u8).initCapacity(allocator, most_shrunk_bytes.items.len) catch fuzz_panic();
+                shrunk_bytes.appendSlice(most_shrunk_bytes.items) catch fuzz_panic();
+
+                // decide how to shrink
+                if (random.boolean()) {
+                    // shrink a byte
+                    const i = random.uintLessThan(usize, shrunk_bytes.items.len);
+                    shrunk_bytes.items[i] = random.uintLessThan(u8, max(shrunk_bytes.items[i], 1));
+                } else {
+                    // remove a range
+                    const range_ix = random.uintLessThan(usize, most_shrunk_input.closed_ranges.items.len);
+                    const range = most_shrunk_input.closed_ranges.items[range_ix];
+                    var i = range[1];
+                    while (i < shrunk_bytes.items.len) : (i += 1) {
+                        shrunk_bytes.items[i - (range[1] - range[0])] = shrunk_bytes.items[i];
+                    }
+                    shrunk_bytes.shrink(shrunk_bytes.items.len - (range[1] - range[0]));
+                }
+
+                // test again
+                var shrunk_input = Input.init(allocator, shrunk_bytes.items);
+                const shrunk_result = test_fn(&shrunk_input);
+                assert(input.open_ranges.items.len == 0);
+                if (shrunk_result) |_| {
+                    shrunk_bytes.deinit();
+                    shrunk_input.deinit();
+                } else |shrunk_err| {
+                    most_shrunk_bytes.deinit();
+                    most_shrunk_input.deinit();
+                    most_shrunk_bytes = shrunk_bytes;
+                    most_shrunk_input = shrunk_input;
+                    most_shrunk_err = shrunk_err;
+                }
+            }
+
+            warn("\nShrunk to {}:\n{}\n", .{most_shrunk_err, most_shrunk_bytes.items});
+            most_shrunk_bytes.deinit();
+            most_shrunk_input.deinit();
+            return;
+        }
+    }
+}
 
 test "fuzz parse" {
     fuzz(std.heap.c_allocator, Options.default, fuzz_parse);

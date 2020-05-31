@@ -1,5 +1,6 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
+const meta = imp.meta;
 const Store = imp.lang.store.Store;
 const core = imp.lang.repr.core;
 const type_ = imp.lang.repr.type_;
@@ -176,13 +177,13 @@ pub const Analyzer = struct {
                 // TODO some annotations affect types eg solve
                 break :set_type try self.analyze(annotate.body, hint_o);
             },
-            .Native => |native| {
-                break :set_type .{.Abstract = .{
-                    .expr = expr,
-                    // natives don't close over anything
-                    .scope = &[0]type_.ScalarType{},
-                }};
-            },
+            // .Native => |native| {
+            //     break :set_type .{.Abstract = .{
+            //         .expr = expr,
+            //         // natives don't close over anything
+            //         .scope = &[0]type_.ScalarType{},
+            //     }};
+            // },
         }};
         // TODO is this necessary?
         // if (hint_o) |hint| {
@@ -190,7 +191,6 @@ pub const Analyzer = struct {
         //         return self.setError("Expected {}, found {}", .{hint, set_type});
         //     }
         // }
-        dump(.{"type", expr, self.scope.items, set_type});
         try self.store.putType(expr, try self.dupeScope(self.scope.items), set_type);
         return set_type;
     }
@@ -214,9 +214,9 @@ pub const Analyzer = struct {
                     .Abstract => |body| {
                         return self.analyze(body, null);
                     },
-                    .Native => |native| {
-                        TODO();
-                    },
+                    // .Native => |native| {
+                    //     TODO();
+                    // },
                     .Union, .Intersect, .Product => |pair| {
                         TODO();
                     },
@@ -226,6 +226,9 @@ pub const Analyzer = struct {
         }
     }
 };
+
+const parse = if (builtin.is_test) @import("./parse.zig");
+const desugar = if (builtin.is_test) @import("./desugar.zig");
 
 fn testAnalyze(source: []const u8, expected: []const u8) !void {
  var arena = ArenaAllocator.init(std.testing.allocator);
@@ -248,9 +251,6 @@ fn testAnalyze(source: []const u8, expected: []const u8) !void {
         return err;
     }
 }
-
-const parse = if (builtin.is_test) @import("./parse.zig");
-const desugar = if (builtin.is_test) @import("./desugar.zig");
 
 fn testAnalyzeError(source: []const u8, expected: []const u8) !void {
     var arena = ArenaAllocator.init(std.testing.allocator);

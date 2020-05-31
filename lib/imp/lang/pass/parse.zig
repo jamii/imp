@@ -67,8 +67,11 @@ pub const Error = error {
     Utf8InvalidStartByte,
     InvalidUtf8,
     InvalidCharacter,
-}
-|| @TypeOf(std.unicode.utf8Decode).ReturnType.ErrorSet;
+    Utf8ExpectedContinuation,
+    Utf8OverlongEncoding,
+    Utf8EncodesSurrogateHalf,
+    Utf8CodepointTooLarge,
+};
 
 pub const ErrorInfo = struct {
     start: usize,

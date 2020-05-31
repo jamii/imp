@@ -222,6 +222,12 @@ const Options = struct {
     seed: u64,
     fuzz_iterations: usize,
     shrink_iterations: usize,
+
+    const default = Options{
+        .seed=42,
+        .fuzz_iterations=10_000,
+        .shrink_iterations=10_000
+    };
 };
 
 fn fuzz(allocator: *Allocator, options: Options, test_fn: fn(*Input) anyerror!void) void {
@@ -297,52 +303,6 @@ fn fuzz(allocator: *Allocator, options: Options, test_fn: fn(*Input) anyerror!vo
     }
 }
 
-// fn no_fo(input: *Input) !void {
-//     const string = Ascii(1).generate(input);
-//     if (std.mem.indexOf(u8, string, "fo")) |_| {
-//         return error.Fail;
-//     }
-// }
-
-// test "no_fo" {
-//     fuzz(std.heap.page_allocator, .{.seed=42, .fuzz_iterations=100_000, .shrink_iterations=100_000}, no_fo);
-// }
-
-// export fn LLVMFuzzerTestOneInput(data: [*c]u8, len: size_t) c_int {
-//     const bytes = data[0..len];
-//     var input = Input.init(std.heap.c_allocator, bytes);
-//     no_fo(&input) catch |err| {
-//         panic("Test failed with {}", err); // TODO trace
-//     };
-// }
-
-// TODO for some reason the fuzzer OOMs when using std.testing.allocator
-
-test "parse should never panic" {
-    fuzz(std.heap.c_allocator, .{.seed=42, .fuzz_iterations=100_000, .shrink_iterations=100_000}, fuzz_parse_no_panic);
-}
-fn fuzz_parse_no_panic(input: *Input) !void {
-    const source = Slice(Int(u8), 0).generate(input);
-    var store = imp.lang.store.Store.init(input.arena);
-    var error_info: ?imp.lang.pass.parse.ErrorInfo = null;
-    _ = imp.lang.pass.parse.parse(&store, source, &error_info) catch return;
-}
-
-test "parse shouldn't return unicode errors on valid utf8" {
-    fuzz(std.heap.c_allocator, .{.seed=42, .fuzz_iterations=100_000, .shrink_iterations=100_000}, fuzz_parse_valid_utf8);
-}
-fn fuzz_parse_valid_utf8(input: *Input) !void {
-    const source = Utf8(0).generate(input);
-    var store = imp.lang.store.Store.init(input.arena);
-    var error_info: ?imp.lang.pass.parse.ErrorInfo = null;
-    _ = imp.lang.pass.parse.parse(&store, source, &error_info) catch |err| {
-        switch (err) {
-            error.ParseError => return,
-            else => return err,
-        }
-    };
-}
-
 const Scalar = struct {
     fn generate(input: *Input) imp.lang.repr.value.Scalar {
         if (Bool.generate(input)) {
@@ -354,117 +314,324 @@ const Scalar = struct {
     }
 };
 
-const Pair = Struct(
-    imp.lang.repr.syntax.Pair,
-    .{
-        .left = PtrExpr,
-        .right = PtrExpr,
-    }
-);
-
 const Name = Ascii(1);
 
-const When = Struct(
-    imp.lang.repr.syntax.When,
-    .{
-        .condition = PtrExpr,
-        .true_branch = PtrExpr,
-    }
-);
+const Syntax = struct {
 
-const Abstract = Struct(
-    imp.lang.repr.syntax.Abstract,
-    .{
-        .args = Slice(Arg, 1),
-        .body = PtrExpr,
-    }
-);
+    const Pair = Struct(
+        imp.lang.repr.syntax.Pair,
+        .{
+            .left = PtrExpr,
+            .right = PtrExpr,
+        }
+    );
 
-const Arg = Struct(
-    imp.lang.repr.syntax.Arg,
-    .{
-        .name = Name,
-        .unbox = Bool,
-    }
-);
+    const When = Struct(
+        imp.lang.repr.syntax.When,
+        .{
+            .condition = PtrExpr,
+            .true_branch = PtrExpr,
+        }
+    );
 
-const Annotate = Struct(
-    imp.lang.repr.syntax.Annotate,
-    .{
-        .annotation = Name,
-        .body = PtrExpr,
-    }
-);
+    const Abstract = Struct(
+        imp.lang.repr.syntax.Abstract,
+        .{
+            .args = Slice(Arg, 1),
+            .body = PtrExpr,
+        }
+    );
 
-const If = Struct(
-    imp.lang.repr.syntax.If,
-    .{
-        .condition = PtrExpr,
-        .true_branch = PtrExpr,
-        .false_branch = PtrExpr,
-    }
-);
+    const Arg = Struct(
+        imp.lang.repr.syntax.Arg,
+        .{
+            .name = Name,
+            .unbox = Bool,
+        }
+    );
 
-const Let = Struct(
-    imp.lang.repr.syntax.Let,
-    .{
-        .name = Name,
-        .value = PtrExpr,
-        .body = PtrExpr,
-    }
-);
+    const Annotate = Struct(
+        imp.lang.repr.syntax.Annotate,
+        .{
+            .annotation = Name,
+            .body = PtrExpr,
+        }
+    );
 
-const Lookup = Struct(
-    imp.lang.repr.syntax.Lookup,
-    .{
-        .value = PtrExpr,
-        .name = Name,
-    }
-);
+    const If = Struct(
+        imp.lang.repr.syntax.If,
+        .{
+            .condition = PtrExpr,
+            .true_branch = PtrExpr,
+            .false_branch = PtrExpr,
+        }
+    );
 
-const Expr = Union(
-    imp.lang.repr.syntax.Expr,
-    .{
-        .None = Void,
-        .Some = Void,
-        .Scalar = Scalar,
-        .Union = Pair,
-        .Intersect = Pair,
-        .Product = Pair,
-        .Equal = Pair,
-        .Name = Name,
-        .When = When,
-        .Abstract = Abstract,
-        .Apply = Pair,
-        .Box = PtrExpr,
-        .Annotate = Annotate,
+    const Let = Struct(
+        imp.lang.repr.syntax.Let,
+        .{
+            .name = Name,
+            .value = PtrExpr,
+            .body = PtrExpr,
+        }
+    );
 
-        .Negate = PtrExpr,
-        .If = If,
-        .Let = Let,
-        .Lookup = Lookup,
-    }
-);
+    const Lookup = Struct(
+        imp.lang.repr.syntax.Lookup,
+        .{
+            .value = PtrExpr,
+            .name = Name,
+        }
+    );
 
-const PtrExpr = struct {
-    fn generate(input: *Input) *const imp.lang.repr.syntax.Expr {
-        var output = input.arena.allocator.create(imp.lang.repr.syntax.Expr) catch fuzz_panic();
-        output.* = Expr.generate(input);
-        return output;
-    }
+    const Expr = Union(
+        imp.lang.repr.syntax.Expr,
+        .{
+            .None = Void,
+            .Some = Void,
+            .Scalar = Scalar,
+            .Union = Pair,
+            .Intersect = Pair,
+            .Product = Pair,
+            .Equal = Pair,
+            .Name = Name,
+            .When = When,
+            .Abstract = Abstract,
+            .Apply = Pair,
+            .Box = PtrExpr,
+            .Annotate = Annotate,
+
+            .Negate = PtrExpr,
+            .If = If,
+            .Let = Let,
+            .Lookup = Lookup,
+        }
+    );
+
+    const PtrExpr = struct {
+        fn generate(input: *Input) *const imp.lang.repr.syntax.Expr {
+            var output = input.arena.allocator.create(imp.lang.repr.syntax.Expr) catch fuzz_panic();
+            output.* = Expr.generate(input);
+            return output;
+        }
+    };
 };
 
-test "desugar should never panic" {
-    fuzz(std.heap.c_allocator, .{.seed=42, .fuzz_iterations=100_000, .shrink_iterations=100_000}, fuzz_desugar_no_panic);
+const Core = struct {
+
+    const Pair = Struct(
+        imp.lang.repr.core.Pair,
+        .{
+            .left = PtrExpr,
+            .right = PtrExpr,
+        }
+    );
+
+    // will fix these up in makeValid
+    const NameIx = Int(usize);
+
+    const When = Struct(
+        imp.lang.repr.core.When,
+        .{
+            .condition = PtrExpr,
+            .true_branch = PtrExpr,
+        }
+    );
+
+    const Box = Struct(
+        imp.lang.repr.core.Box,
+        .{
+            .body = PtrExpr,
+            // will fix this up in makeValid
+            .scope = Slice(NameIx, 0),
+        }
+    );
+
+    const Annotate = Struct(
+        imp.lang.repr.core.Annotate,
+        .{
+            .annotation = Name,
+            .body = PtrExpr,
+        }
+    );
+
+    const Expr = Union(
+        imp.lang.repr.core.Expr,
+        .{
+            .None = Void,
+            .Some = Void,
+            .Scalar = Scalar,
+            .Union = Pair,
+            .Intersect = Pair,
+            .Product = Pair,
+            .Equal = Pair,
+            .Name = NameIx,
+            .UnboxName = NameIx,
+            .When = When,
+            .Abstract = PtrExpr,
+            .Apply = Pair,
+            .Box = Box,
+            .Annotate = Annotate,
+        }
+    );
+
+    const PtrExpr = struct {
+        fn generate(input: *Input) *const imp.lang.repr.core.Expr {
+            var output = input.arena.allocator.create(imp.lang.repr.core.Expr) catch fuzz_panic();
+            output.* = Expr.generate(input);
+            return output;
+        }
+    };
+
+    fn makeValid(input: *Input, invalid_expr: *const imp.lang.repr.core.Expr, scope_size: usize) *const imp.lang.repr.core.Expr {
+        var valid_expr = invalid_expr.*;
+        switch (valid_expr) {
+            .Name, .UnboxName => |*name_ix| {
+                // pick a valid name_ix
+                name_ix.* %= scope_size;
+            },
+            .Box => |*box| {
+                // set the scope that would be produced by Desugarer.desugarBox
+                var scope = input.arena.allocator.alloc(imp.lang.repr.core.NameIx, scope_size) catch fuzz_panic();
+                for (scope) |*name_ix, i| {
+                    name_ix.* = i;
+                }
+                box.scope = scope;
+            },
+            else => {},
+        }
+        const child_scope_size = if (valid_expr == .Abstract) scope_size + 1 else scope_size;
+        for (valid_expr.getChildrenMut().slice()) |child| {
+            child.* = makeValid(input, child.*, child_scope_size);
+        }
+        var valid_expr_ptr = input.arena.allocator.create(imp.lang.repr.core.Expr) catch fuzz_panic();
+        valid_expr_ptr.* = valid_expr;
+        return valid_expr_ptr;
+    }
+
+    const ValidPtrExpr = struct {
+        fn generate(input: *Input) *const imp.lang.repr.core.Expr {
+            const invalid_expr = PtrExpr.generate(input);
+            return makeValid(input, invalid_expr, 0);
+        }
+    };
+};
+
+test "fuzz parse" {
+    fuzz(std.heap.c_allocator, Options.default, fuzz_parse);
 }
-fn fuzz_desugar_no_panic(input: *Input) !void {
-    const expr = PtrExpr.generate(input);
+fn fuzz_parse(input: *Input) !void {
+    const source = Utf8(0).generate(input);
+    var store = imp.lang.store.Store.init(input.arena);
+    var error_info: ?imp.lang.pass.parse.ErrorInfo = null;
+    // should never panic on any input
+    _ = imp.lang.pass.parse.parse(&store, source, &error_info) catch |err| {
+        switch (err) {
+            error.ParseError => return,
+            // shouldn't oom unless you're running this on a potato
+            error.OutOfMemory => return err,
+            // should only return utf8 errors if input is invalid utf8
+            error.Utf8InvalidStartByte,
+            error.InvalidUtf8,
+            error.InvalidCharacter,
+            error.Utf8ExpectedContinuation,
+            error.Utf8OverlongEncoding,
+            error.Utf8EncodesSurrogateHalf,
+            error.Utf8CodepointTooLarge => {
+                if (std.unicode.utf8ValidateSlice(source)) {
+                    return err;
+                }
+            }
+        }
+    };
+}
+
+test "fuzz desugar" {
+    fuzz(std.heap.c_allocator, Options.default, fuzz_desugar);
+}
+fn fuzz_desugar(input: *Input) !void {
+    const expr = Syntax.PtrExpr.generate(input);
     var store = imp.lang.store.Store.init(input.arena);
     var error_info: ?imp.lang.pass.desugar.ErrorInfo = null;
-    _ = imp.lang.pass.desugar.desugar(&store, expr, &error_info) catch |err| return;
+    // should never panic on any input
+    _ = imp.lang.pass.desugar.desugar(&store, expr, &error_info) catch |err| {
+        switch (err) {
+            error.DesugarError => {},
+            // shouldn't oom unless you're running this on a potato
+            error.OutOfMemory => return err,
+        }
+    };
 }
 
-// TODO how to get to analyze/interpret? without coverage info probably desugar rarely succeeds, so maybe need to gen core.Expr and fix up name_ixes?
+test "fuzz analyze" {
+    fuzz(std.heap.c_allocator, Options.default, fuzz_analyze);
+}
+fn fuzz_analyze(input: *Input) !void {
+    const expr = Core.ValidPtrExpr.generate(input);
+    var store = imp.lang.store.Store.init(input.arena);
+    var error_info: ?imp.lang.pass.analyze.ErrorInfo = null;
+    // should never panic on any input
+    _ = imp.lang.pass.analyze.analyze(&store, expr, &error_info) catch |err| {
+        switch (err) {
+            error.AnalyzeError => {},
+            // shouldn't oom unless you're running this on a potato
+            // TODO might be able to write programs that require exponential specialization
+            error.OutOfMemory => return err,
+        }
+    };
+}
+
+test "fuzz interpret" {
+    fuzz(std.heap.c_allocator, Options.default, fuzz_interpret);
+}
+fn fuzz_interpret(input: *Input) !void {
+    const expr = Core.ValidPtrExpr.generate(input);
+    var store = imp.lang.store.Store.init(input.arena);
+    var analyze_error_info: ?imp.lang.pass.analyze.ErrorInfo = null;
+    const analyzed = imp.lang.pass.analyze.analyze(&store, expr, &analyze_error_info);
+    var error_info: ?imp.lang.pass.interpret.ErrorInfo = null;
+    // should never panic on any valid input
+    if (imp.lang.pass.interpret.interpret(&store, input.arena, expr, &error_info)) |set| {
+        // if type is finite, should return finite set
+        if (analyzed) |set_type| {
+            if (set_type == .Finite and set != .Finite) {
+                return error.InterpretTooLazy;
+            }
+        } else |_| {}
+    } else |err| {
+        switch (err) {
+            error.InterpretError => {
+                // should never return InterpretError on programs which typecheck
+                if (analyzed) |_| {
+                    return error.InvalidInterpretError;
+                } else |_| {}
+            },
+            // can easily oom with small programs
+            error.OutOfMemory => {},
+        }
+    }
+}
+
+// TODO for some reason the fuzzer OOMs when using std.testing.allocator
 
 // TODO is PtrExpr going to break because it's not in the store?
-// can pass Store as var arg to generate
+// could pass Store as var arg to generate
+
+// fn no_fo(input: *Input) !void {
+//     const string = Ascii(1).generate(input);
+//     if (std.mem.indexOf(u8, string, "fo")) |_| {
+//         return error.Fail;
+//     }
+// }
+
+// test "no_fo" {
+//     fuzz(std.heap.page_allocator, Options.default, no_fo);
+// }
+
+// export fn LLVMFuzzerTestOneInput(data: [*c]u8, len: size_t) c_int {
+//     const bytes = data[0..len];
+//     var input = Input.init(std.heap.c_allocator, bytes);
+//     no_fo(&input) catch |err| {
+//         panic("Test failed with {}", err); // TODO trace
+//     };
+// }

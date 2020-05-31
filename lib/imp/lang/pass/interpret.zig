@@ -189,9 +189,9 @@ const Interpreter = struct {
             .Annotate => |annotate| {
                 return self.interpret(annotate.body);
             },
-            .Native => |native| {
-                TODO();
-            },
+            // .Native => |native| {
+            //     TODO();
+            // },
         }
     }
 

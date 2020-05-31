@@ -41,9 +41,9 @@ pub const Expr = union(enum) {
     Apply: Pair,
     Box: Box,
     Annotate: Annotate,
-    Native: Native,
+    // Native: Native,
 
-    pub fn getChildren(self: Expr) FixedSizeArrayList(2, *const Expr) {
+     pub fn getChildren(self: Expr) FixedSizeArrayList(2, *const Expr) {
         var children = FixedSizeArrayList(2, *const Expr).init();
         inline for (@typeInfo(Expr).Union.fields) |expr_field| {
             if (@enumToInt(std.meta.activeTag(self)) == expr_field.enum_field.?.value) {
@@ -57,6 +57,30 @@ pub const Expr = union(enum) {
                     inline for (@typeInfo(t).Struct.fields) |value_field| {
                         if (value_field.field_type == *const Expr) {
                             children.append(@field(v, value_field.name));
+                        }
+                    }
+                } else {
+                    @compileError("Missed case for " ++ @typeName(t));
+                }
+            }
+        }
+        return children;
+    }
+
+    pub fn getChildrenMut(self: *Expr) FixedSizeArrayList(2, * *const Expr) {
+        var children = FixedSizeArrayList(2, * *const Expr).init();
+        inline for (@typeInfo(Expr).Union.fields) |expr_field| {
+            if (@enumToInt(std.meta.activeTag(self.*)) == expr_field.enum_field.?.value) {
+                const t = expr_field.field_type;
+                var v = &@field(self, expr_field.enum_field.?.name);
+                if (t == void or t == value.Scalar or t == NameIx or t == Native) {
+                    // nothing to do
+                } else if (t == *const Expr) {
+                    children.append(v);
+                } else if (t == Pair or t == When or t == Box or t == Annotate) {
+                    inline for (@typeInfo(t).Struct.fields) |value_field| {
+                        if (value_field.field_type == *const Expr) {
+                            children.append(&@field(v, value_field.name));
                         }
                     }
                 } else {
@@ -108,7 +132,7 @@ pub const Expr = union(enum) {
                 }
             },
             .Annotate => |annotate| try std.fmt.format(out_stream, "# {}", .{annotate.annotation}),
-            .Native => |native| try out_stream.writeAll(native.name),
+            // .Native => |native| try out_stream.writeAll(native.name),
         }
         for (self.getChildren().slice()) |child| {
             try child.dumpInto(out_stream, indent+2);

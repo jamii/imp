@@ -310,7 +310,7 @@ fn fuzz(allocator: *Allocator, options: Options, test_fn: fn(*Input) anyerror!vo
 
 // export fn LLVMFuzzerTestOneInput(data: [*c]u8, len: size_t) c_int {
 //     const bytes = data[0..len];
-//     var input = Input.init(std.heap.page_allocator, bytes);
+//     var input = Input.init(std.heap.c_allocator, bytes);
 //     no_fo(&input) catch |err| {
 //         panic("Test failed with {}", err); // TODO trace
 //     };
@@ -319,7 +319,7 @@ fn fuzz(allocator: *Allocator, options: Options, test_fn: fn(*Input) anyerror!vo
 // TODO for some reason the fuzzer OOMs when using std.testing.allocator
 
 test "parse should never panic" {
-    fuzz(std.heap.page_allocator, .{.seed=42, .fuzz_iterations=100_000, .shrink_iterations=100_000}, fuzz_parse_no_panic);
+    fuzz(std.heap.c_allocator, .{.seed=42, .fuzz_iterations=100_000, .shrink_iterations=100_000}, fuzz_parse_no_panic);
 }
 fn fuzz_parse_no_panic(input: *Input) !void {
     const source = Slice(Int(u8), 0).generate(input);
@@ -329,7 +329,7 @@ fn fuzz_parse_no_panic(input: *Input) !void {
 }
 
 test "parse shouldn't return unicode errors on valid utf8" {
-    fuzz(std.heap.page_allocator, .{.seed=42, .fuzz_iterations=100_000, .shrink_iterations=100_000}, fuzz_parse_valid_utf8);
+    fuzz(std.heap.c_allocator, .{.seed=42, .fuzz_iterations=100_000, .shrink_iterations=100_000}, fuzz_parse_valid_utf8);
 }
 fn fuzz_parse_valid_utf8(input: *Input) !void {
     const source = Utf8(0).generate(input);
@@ -455,15 +455,16 @@ const PtrExpr = struct {
 };
 
 test "desugar should never panic" {
-    fuzz(std.heap.page_allocator, .{.seed=42, .fuzz_iterations=100_000, .shrink_iterations=100_000}, fuzz_desugar_no_panic);
+    fuzz(std.heap.c_allocator, .{.seed=42, .fuzz_iterations=100_000, .shrink_iterations=100_000}, fuzz_desugar_no_panic);
 }
-
 fn fuzz_desugar_no_panic(input: *Input) !void {
     const expr = PtrExpr.generate(input);
     var store = imp.lang.store.Store.init(input.arena);
     var error_info: ?imp.lang.pass.desugar.ErrorInfo = null;
     _ = imp.lang.pass.desugar.desugar(&store, expr, &error_info) catch |err| return;
 }
+
+// TODO how to get to analyze/interpret? without coverage info probably desugar rarely succeeds, so maybe need to gen core.Expr and fix up name_ixes?
 
 // TODO is PtrExpr going to break because it's not in the store?
 // can pass Store as var arg to generate

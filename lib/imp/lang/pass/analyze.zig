@@ -185,12 +185,11 @@ pub const Analyzer = struct {
             //     }};
             // },
         }};
-        // TODO is this necessary?
-        // if (hint_o) |hint| {
-        //     if (!hint.isSuperTypeOrEqual(set_type)) {
-        //         return self.setError("Expected {}, found {}", .{hint, set_type});
-        //     }
-        // }
+        if (hint_o) |hint| {
+            if (!set_type.isSubTypeOrEqual(hint)) {
+                return self.setError("Expected {}, found {}", .{hint, set_type});
+            }
+        }
         try self.store.putType(expr, try self.dupeScope(self.scope.items), set_type);
         return set_type;
     }

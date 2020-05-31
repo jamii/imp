@@ -42,10 +42,10 @@ pub fn main() anyerror ! void {
             switch (err) {
                 // TODO report source position
 
-                error.ParseError => try std.fmt.format(out_stream, "Parse error: {}", .{error_info.?.Parse.message}),
-                error.DesugarError => try std.fmt.format(out_stream, "Desugar error: {}", .{error_info.?.Desugar.message}),
-                error.AnalyzeError => try std.fmt.format(out_stream, "Analyze error: {}", .{error_info.?.Analyze.message}),
-                error.InterpretError => try std.fmt.format(out_stream, "Interpret error: {}", .{error_info.?.Interpret.message}),
+                error.ParseError => try std.fmt.format(out_stream, "Parse error: {}\n", .{error_info.?.Parse.message}),
+                error.DesugarError => try std.fmt.format(out_stream, "Desugar error: {}\n", .{error_info.?.Desugar.message}),
+                error.AnalyzeError => try std.fmt.format(out_stream, "Analyze error: {}\n", .{error_info.?.Analyze.message}),
+                error.InterpretError => try std.fmt.format(out_stream, "Interpret error: {}\n", .{error_info.?.Interpret.message}),
 
                 error.Utf8InvalidStartByte,
                 error.InvalidUtf8,
@@ -53,9 +53,9 @@ pub fn main() anyerror ! void {
                 error.Utf8ExpectedContinuation,
                 error.Utf8OverlongEncoding,
                 error.Utf8EncodesSurrogateHalf,
-                error.Utf8CodepointTooLarge => try std.fmt.format(out_stream, "Invalid utf8 input: {}", .{err}),
+                error.Utf8CodepointTooLarge => try std.fmt.format(out_stream, "Invalid utf8 input: {}\n", .{err}),
 
-                error.OutOfMemory => try std.fmt.format(out_stream, "Out of memory", .{}),
+                error.OutOfMemory => try std.fmt.format(out_stream, "Out of memory\n", .{}),
             }
         }
     }

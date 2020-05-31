@@ -26,6 +26,25 @@ pub const ScalarType = union(enum) {
         }
     }
 
+    pub fn isSubTypeOrEqual(self: ScalarType, other: ScalarType) bool {
+        switch (self) {
+            .Any => {
+                switch (other) {
+                    .Any => return true,
+                    .Box => return false,
+                }
+            },
+            .Box => |self_box| {
+                switch (other) {
+                    .Any => return true,
+                    .Box => |other_box| {
+                        return self_box.isSubTypeOrEqual(other_box);
+                    }
+                }
+            }
+        }
+    }
+
     pub fn dumpInto(self: ScalarType, out_stream: var) anyerror!void {
         switch (self) {
             .Any => {
@@ -58,6 +77,16 @@ pub const TypeOf = struct {
         return meta.deepCompare(self.scope, other.scope);
     }
 
+    pub fn isSubTypeOrEqual(self: TypeOf, other: TypeOf) bool {
+        if (self.expr != other.expr) return false;
+        if (self.scope.len != other.scope.len) return false;
+        for (self.scope) |self_scalar, i| {
+            const other_scalar = other.scope[i];
+            if (!self_scalar.isSubTypeOrEqual(other_scalar)) return false;
+        }
+        return true;
+    }
+
     pub fn dumpInto(self: TypeOf, out_stream: var) anyerror!void {
         // TODO figure out a better way to name these
         try std.fmt.format(out_stream, "type_of({};", .{Store.getCoreMeta(self.expr).id});
@@ -78,6 +107,32 @@ pub const SetType = union(enum) {
     Finite: []const ScalarType,
     /// Something that we can't type until it's specialized
     Abstract: TypeOf,
+
+    pub fn isSubTypeOrEqual(self: SetType, other: SetType) bool {
+        switch (self) {
+            .Finite => |self_finite| {
+                switch (other) {
+                    .Finite => |other_finite| {
+                        if (self_finite.len != other_finite.len) return false;
+                        for (self_finite) |self_scalar, i| {
+                            const other_scalar = other_finite[i];
+                            if (!self_scalar.isSubTypeOrEqual(other_scalar)) return false;
+                        }
+                        return true;
+                    },
+                    .Abstract => return false,
+                }
+            },
+            .Abstract => |self_abstract| {
+                switch (other) {
+                    .Finite => return false,
+                    .Abstract => |other_abstract| {
+                        return self_abstract.isSubTypeOrEqual(other_abstract);
+                    }
+                }
+            },
+        }
+    }
 
     pub fn dumpInto(self: SetType, out_stream: var) anyerror!void {
         switch (self) {

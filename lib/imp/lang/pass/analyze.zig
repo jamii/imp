@@ -1,7 +1,7 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
 const meta = imp.meta;
-const Store = imp.lang.store.Store;
+const Store = imp.lang.Store;
 const core = imp.lang.repr.core;
 const type_ = imp.lang.repr.type_;
 
@@ -220,7 +220,7 @@ pub const Analyzer = struct {
                     .Union, .Intersect, .Product => |pair| {
                         TODO();
                     },
-                    else => panic("What are this {}", .{abstract_type.expr}),
+                    else => imp_panic("What are this {}", .{abstract_type.expr}),
                 }
             },
         }
@@ -244,7 +244,7 @@ fn testAnalyze(source: []const u8, expected: []const u8) !void {
         defer bytes.deinit();
         try found.dumpInto(bytes.outStream());
         if (!meta.deepEqual(expected, bytes.items)) {
-            panic("\nSource:\n{}\nExpected analyze:\n{}\n\nFound analyze:\n{}", .{source, expected, bytes.items});
+            imp_panic("\nSource:\n{}\nExpected analyze:\n{}\n\nFound analyze:\n{}", .{source, expected, bytes.items});
         }
     } else |err| {
         warn("\nSource:\n{}\nExpected analyze:\n{}\n\nFound error:\n{}\n", .{source, expected, error_info.?.message});
@@ -264,7 +264,7 @@ fn testAnalyzeError(source: []const u8, expected: []const u8) !void {
     if (analyze(&store, core_expr, &error_info)) |found| {
         var bytes = ArrayList(u8).init(std.testing.allocator);
         try found.dumpInto(bytes.outStream());
-        panic("\nSource:\n{}\nExpected error:\n{}\n\nFound analyze:\n{}", .{source, expected, bytes.items});
+        imp_panic("\nSource:\n{}\nExpected error:\n{}\n\nFound analyze:\n{}", .{source, expected, bytes.items});
     } else |err| {
         if (!meta.deepEqual(expected, error_info.?.message)) {
             warn("\nSource:\n{}\nExpected error:\n{}\n\nFound error:\n{}\n", .{source, expected, error_info.?.message});

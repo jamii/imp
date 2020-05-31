@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 
-set -x
+set -e
 
 time zig test test/fuzz.zig --main-pkg-path ./ --release-fast -lc

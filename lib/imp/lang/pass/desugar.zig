@@ -1,7 +1,7 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
 const meta = imp.meta;
-const Store = imp.lang.store.Store;
+const Store = imp.lang.Store;
 const core = imp.lang.repr.core;
 const syntax = imp.lang.repr.syntax;
 
@@ -216,7 +216,7 @@ fn testDesugar(source: []const u8, expected: []const u8) !void {
         defer bytes.deinit();
         try found.dumpInto(bytes.outStream(), 0);
         if (!meta.deepEqual(expected, bytes.items)) {
-            panic("\nExpected desugar:\n{}\n\nFound desugar:\n{}", .{expected, bytes.items});
+            imp_panic("\nExpected desugar:\n{}\n\nFound desugar:\n{}", .{expected, bytes.items});
         }
     } else |err| {
         warn("\nExpected desugar:\n{}\n\nFound error:\n{}\n", .{expected, error_info.?.message});
@@ -234,7 +234,7 @@ fn testError(source: []const u8, expected: []const u8) !void {
     if (desugar(&store, syntax_expr, &error_info)) |found| {
         var bytes = ArrayList(u8).init(std.testing.allocator);
         try found.dumpInto(bytes.outStream(), 0);
-        panic("\nExpected error:\n{}\n\nFound desugar:\n{}", .{expected, bytes.items});
+        imp_panic("\nExpected error:\n{}\n\nFound desugar:\n{}", .{expected, bytes.items});
     } else |err| {
         if (!meta.deepEqual(expected, error_info.?.message)) {
             warn("\nExpected error:\n{}\n\nFound error:\n{}\n", .{expected, error_info.?.message});

@@ -1,7 +1,7 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
 const meta = imp.meta;
-const Store = imp.lang.store.Store;
+const Store = imp.lang.Store;
 const core = imp.lang.repr.core;
 const value = imp.lang.repr.value;
 
@@ -138,7 +138,7 @@ const Interpreter = struct {
                         if (self.boxes.getValue(box)) |set| {
                             return set;
                         } else {
-                            panic("No box for {}", .{box});
+                            imp_panic("No box for {}", .{box});
                         }
                     },
                     else => {

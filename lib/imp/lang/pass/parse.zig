@@ -1,7 +1,7 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
 const meta = imp.meta;
-const Store = imp.lang.store.Store;
+const Store = imp.lang.Store;
 const syntax = imp.lang.repr.syntax;
 
 // expr =
@@ -631,7 +631,7 @@ fn testParse(source: []const u8, expected: []const u8) !void {
         defer bytes.deinit();
         try found.dumpInto(bytes.outStream(), 0);
         if (!meta.deepEqual(expected, bytes.items)) {
-            panic("\nExpected parse:\n{}\n\nFound parse:\n{}", .{expected, bytes.items});
+            imp_panic("\nExpected parse:\n{}\n\nFound parse:\n{}", .{expected, bytes.items});
         }
     } else |err| {
         warn("\nExpected parse:\n{}\n\nFound error:\n{}\n", .{expected, error_info.?.message});
@@ -647,7 +647,7 @@ fn testError(source: []const u8, expected: []const u8) !void {
     if (parse(&store, source, &error_info)) |found| {
         var bytes = ArrayList(u8).init(std.testing.allocator);
         try found.dumpInto(bytes.outStream(), 0);
-        panic("\nExpected error:\n{}\n\nFound parse:\n{}", .{expected, bytes.items});
+        imp_panic("\nExpected error:\n{}\n\nFound parse:\n{}", .{expected, bytes.items});
     } else |err| {
         if (!meta.deepEqual(expected, error_info.?.message)) {
             warn("\nExpected error:\n{}\n\nFound error:\n{}\n", .{expected, error_info.?.message});

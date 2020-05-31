@@ -12,7 +12,7 @@ pub const Allocator = std.mem.Allocator;
 pub const ArenaAllocator = std.heap.ArenaAllocator;
 pub const ArrayList = std.ArrayList;
 
-pub fn panic(comptime fmt: []const u8, args: var) noreturn {
+pub fn imp_panic(comptime fmt: []const u8, args: var) noreturn {
     const message = format(std.heap.c_allocator, fmt, args) catch |err| message: {
         switch (err) {
             error.OutOfMemory => break :message "OOM inside panic",
@@ -180,5 +180,5 @@ pub fn FixedSizeArrayList(comptime size: usize, comptime T: type) type {
 }
 
 pub fn TODO() noreturn {
-    panic("TODO", .{});
+    imp_panic("TODO", .{});
 }

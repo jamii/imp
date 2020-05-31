@@ -2,7 +2,7 @@ const imp = @import("../lib/imp.zig");
 usingnamespace imp.common;
 
 fn fuzz_panic() noreturn {
-    panic("Internal error in fuzzer", .{});
+    imp_panic("Internal error in fuzzer", .{});
 }
 
 const Input = struct {
@@ -398,13 +398,13 @@ const Core = struct {
         }
     };
 
-    fn makeValid(arena: *ArenaAllocator, invalid_expr: *const imp.lang.repr.core.Expr, scope_size: usize) error {CantMakeValid} ! *const imp.lang.repr.core.Expr {
+    fn makeValid(arena: *ArenaAllocator, invalid_expr: *const imp.lang.repr.core.Expr, scope_size: usize) *const imp.lang.repr.core.Expr {
         var valid_expr = invalid_expr.*;
         switch (valid_expr) {
             .Name, .UnboxName => |*name_ix| {
                 // pick a valid name_ix
                 if (scope_size == 0) {
-                    return error.CantMakeValid;
+                    valid_expr = .None;
                 } else {
                     name_ix.* %= scope_size;
                 }
@@ -421,24 +421,25 @@ const Core = struct {
         }
         const child_scope_size = if (valid_expr == .Abstract) scope_size + 1 else scope_size;
         for (valid_expr.getChildrenMut().slice()) |child| {
-            child.* = try makeValid(arena, child.*, child_scope_size);
+            child.* = makeValid(arena, child.*, child_scope_size);
         }
         var valid_expr_ptr = arena.allocator.create(imp.lang.repr.core.Expr) catch fuzz_panic();
         valid_expr_ptr.* = valid_expr;
         return valid_expr_ptr;
     }
+
+    const ValidPtrExpr = struct {
+        fn generate(input: *Input) *const imp.lang.repr.core.Expr {
+            const expr = PtrExpr.generate(input);
+            return makeValid(input.arena, expr, 0);
+        }
+    };
 };
 
 const Options = struct {
-    seed: u64,
-    fuzz_iterations: usize,
-    shrink_iterations: usize,
-
-    const default = Options{
-        .seed=42,
-        .fuzz_iterations=10_000,
-        .shrink_iterations=10_000
-    };
+    seed: u64 = 42,
+    fuzz_iterations: usize = 10_000,
+    shrink_iterations: usize = 10_000,
 };
 
 fn fuzz(allocator: *Allocator, options: Options, generator: var, tester: var) void {
@@ -457,13 +458,15 @@ fn fuzz(allocator: *Allocator, options: Options, generator: var, tester: var) vo
         // TODO catch panic somehow?
         var input = Input.init(allocator, bytes.items);
         const value = generator.generate(&input);
+        expect(input.open_ranges.items.len == 0);
         const result = tester(input.arena, value);
         assert(input.open_ranges.items.len == 0);
         if (result) |_| {
             bytes.deinit();
             input.deinit();
         } else |err| {
-            warn("\nIteration {} raised error {}:\n{}\n", .{fuzz_iteration, err, value});
+            warn("\nFound {} after {} fuzzes:\n", .{err, fuzz_iteration});
+            dump(value);
 
             // try to shrink input
             var most_shrunk_bytes = bytes;
@@ -494,6 +497,7 @@ fn fuzz(allocator: *Allocator, options: Options, generator: var, tester: var) vo
 
                 // test again
                 var shrunk_input = Input.init(allocator, shrunk_bytes.items);
+                expect(shrunk_input.open_ranges.items.len == 0);
                 const shrunk_value = generator.generate(&shrunk_input);
                 const shrunk_result = tester(shrunk_input.arena, shrunk_value);
                 assert(input.open_ranges.items.len == 0);
@@ -510,7 +514,8 @@ fn fuzz(allocator: *Allocator, options: Options, generator: var, tester: var) vo
                 }
             }
 
-            warn("\nShrunk to {}:\n{}\n", .{most_shrunk_err, value});
+            warn("\nFound {} after {} shrinks:\n", .{most_shrunk_err, shrink_iteration});
+            dump(most_shrunk_value);
             most_shrunk_bytes.deinit();
             most_shrunk_input.deinit();
             return;
@@ -519,10 +524,10 @@ fn fuzz(allocator: *Allocator, options: Options, generator: var, tester: var) vo
 }
 
 test "fuzz parse" {
-    fuzz(std.heap.c_allocator, Options.default, Utf8(0), fuzz_parse);
+    fuzz(std.heap.c_allocator, .{}, Utf8(0), fuzz_parse);
 }
 fn fuzz_parse(arena: *ArenaAllocator, source: []const u8) !void {
-    var store = imp.lang.store.Store.init(arena);
+    var store = imp.lang.Store.init(arena);
     var error_info: ?imp.lang.pass.parse.ErrorInfo = null;
     // should never panic on any input
     _ = imp.lang.pass.parse.parse(&store, source, &error_info) catch |err| {
@@ -547,10 +552,10 @@ fn fuzz_parse(arena: *ArenaAllocator, source: []const u8) !void {
 }
 
 test "fuzz desugar" {
-    fuzz(std.heap.c_allocator, Options.default, Syntax.PtrExpr, fuzz_desugar);
+    fuzz(std.heap.c_allocator, .{}, Syntax.PtrExpr, fuzz_desugar);
 }
 fn fuzz_desugar(arena: *ArenaAllocator, expr: *const imp.lang.repr.syntax.Expr) !void {
-    var store = imp.lang.store.Store.init(arena);
+    var store = imp.lang.Store.init(arena);
     var error_info: ?imp.lang.pass.desugar.ErrorInfo = null;
     // should never panic on any input
     _ = imp.lang.pass.desugar.desugar(&store, expr, &error_info) catch |err| {
@@ -563,11 +568,10 @@ fn fuzz_desugar(arena: *ArenaAllocator, expr: *const imp.lang.repr.syntax.Expr) 
 }
 
 test "fuzz analyze" {
-    fuzz(std.heap.c_allocator, Options.default, Core.PtrExpr, fuzz_analyze);
+    fuzz(std.heap.c_allocator, .{}, Core.ValidPtrExpr, fuzz_analyze);
 }
-fn fuzz_analyze(arena: *ArenaAllocator, invalid_expr: *const imp.lang.repr.core.Expr) !void {
-    const expr = Core.makeValid(arena, invalid_expr, 0) catch return;
-    var store = imp.lang.store.Store.init(arena);
+fn fuzz_analyze(arena: *ArenaAllocator, expr: *const imp.lang.repr.core.Expr) !void {
+    var store = imp.lang.Store.init(arena);
     var error_info: ?imp.lang.pass.analyze.ErrorInfo = null;
     // should never panic on any input
     _ = imp.lang.pass.analyze.analyze(&store, expr, &error_info) catch |err| {
@@ -581,11 +585,10 @@ fn fuzz_analyze(arena: *ArenaAllocator, invalid_expr: *const imp.lang.repr.core.
 }
 
 test "fuzz interpret" {
-    fuzz(std.heap.c_allocator, Options.default, Core.PtrExpr, fuzz_interpret);
+    fuzz(std.heap.c_allocator, .{}, Core.ValidPtrExpr, fuzz_interpret);
 }
-fn fuzz_interpret(arena: *ArenaAllocator, invalid_expr: *const imp.lang.repr.core.Expr) !void {
-    const expr = Core.makeValid(arena, invalid_expr, 0) catch return;
-    var store = imp.lang.store.Store.init(arena);
+fn fuzz_interpret(arena: *ArenaAllocator, expr: *const imp.lang.repr.core.Expr) !void {
+    var store = imp.lang.Store.init(arena);
     var analyze_error_info: ?imp.lang.pass.analyze.ErrorInfo = null;
     const analyzed = imp.lang.pass.analyze.analyze(&store, expr, &analyze_error_info);
     var error_info: ?imp.lang.pass.interpret.ErrorInfo = null;
@@ -594,6 +597,7 @@ fn fuzz_interpret(arena: *ArenaAllocator, invalid_expr: *const imp.lang.repr.cor
         // if type is finite, should return finite set
         if (analyzed) |set_type| {
             if (set_type == .Finite and set != .Finite) {
+                dump(.{set_type, set});
                 return error.InterpretTooLazy;
             }
         } else |_| {}
@@ -601,7 +605,8 @@ fn fuzz_interpret(arena: *ArenaAllocator, invalid_expr: *const imp.lang.repr.cor
         switch (err) {
             error.InterpretError => {
                 // should never return InterpretError on programs which typecheck
-                if (analyzed) |_| {
+                if (analyzed) |set_type| {
+                    dump(set_type);
                     return error.InvalidInterpretError;
                 } else |_| {}
             },
@@ -626,13 +631,13 @@ fn fuzz_interpret(arena: *ArenaAllocator, invalid_expr: *const imp.lang.repr.cor
 // }
 
 // test "no_fo" {
-//     fuzz(std.heap.page_allocator, Options.default, no_fo);
+//     fuzz(std.heap.page_allocator, .{}, no_fo);
 // }
 
 // export fn LLVMFuzzerTestOneInput(data: [*c]u8, len: size_t) c_int {
 //     const bytes = data[0..len];
 //     var input = Input.init(std.heap.c_allocator, bytes);
 //     no_fo(&input) catch |err| {
-//         panic("Test failed with {}", err); // TODO trace
+//         imp_panic("Test failed with {}", err); // TODO trace
 //     };
 // }

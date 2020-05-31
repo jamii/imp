@@ -1,7 +1,7 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
 const meta = imp.meta;
-const Store = imp.lang.store.Store;
+const Store = imp.lang.Store;
 const core = imp.lang.repr.core;
 
 pub const Scalar = union(enum) {

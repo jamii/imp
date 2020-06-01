@@ -451,7 +451,7 @@ const Options = struct {
     shrink_iterations: usize = 10_000,
 };
 
-fn fuzz(allocator: *Allocator, options: Options, generator: var, tester: var) void {
+fn fuzz(allocator: *Allocator, options: Options, generator: var, tester: var) error{FuzzFailed} ! void {
     var rng = std.rand.DefaultPrng.init(options.seed);
     var random = &rng.random;
     var fuzz_iteration: usize = 0;
@@ -527,13 +527,13 @@ fn fuzz(allocator: *Allocator, options: Options, generator: var, tester: var) vo
             dump(most_shrunk_value);
             most_shrunk_bytes.deinit();
             most_shrunk_input.deinit();
-            return;
+            return error.FuzzFailed;
         }
     }
 }
 
 test "fuzz parse" {
-    fuzz(std.heap.c_allocator, .{}, Utf8(0), fuzz_parse);
+    try fuzz(std.heap.c_allocator, .{}, Utf8(0), fuzz_parse);
 }
 fn fuzz_parse(arena: *ArenaAllocator, source: []const u8) !void {
     var store = imp.lang.Store.init(arena);
@@ -561,7 +561,7 @@ fn fuzz_parse(arena: *ArenaAllocator, source: []const u8) !void {
 }
 
 test "fuzz desugar" {
-    fuzz(std.heap.c_allocator, .{}, Syntax.PtrExpr, fuzz_desugar);
+    try fuzz(std.heap.c_allocator, .{}, Syntax.PtrExpr, fuzz_desugar);
 }
 fn fuzz_desugar(arena: *ArenaAllocator, expr: *const imp.lang.repr.syntax.Expr) !void {
     var store = imp.lang.Store.init(arena);
@@ -577,7 +577,7 @@ fn fuzz_desugar(arena: *ArenaAllocator, expr: *const imp.lang.repr.syntax.Expr) 
 }
 
 test "fuzz analyze" {
-    fuzz(std.heap.c_allocator, .{}, Core.StoreAndValidExpr, fuzz_analyze);
+    try fuzz(std.heap.c_allocator, .{}, Core.StoreAndValidExpr, fuzz_analyze);
 }
 fn fuzz_analyze(arena: *ArenaAllocator, store_and_expr: Core.StoreAndExpr) !void {
     var store = store_and_expr.store;
@@ -596,7 +596,7 @@ fn fuzz_analyze(arena: *ArenaAllocator, store_and_expr: Core.StoreAndExpr) !void
 
 
 test "fuzz analyze deterministic" {
-    fuzz(std.heap.c_allocator, .{}, Core.StoreAndValidExpr, fuzz_analyze_deterministic);
+    try fuzz(std.heap.c_allocator, .{}, Core.StoreAndValidExpr, fuzz_analyze_deterministic);
 }
 fn fuzz_analyze_deterministic(arena: *ArenaAllocator, store_and_expr: Core.StoreAndExpr) !void {
     var store = store_and_expr.store;
@@ -613,7 +613,7 @@ fn fuzz_analyze_deterministic(arena: *ArenaAllocator, store_and_expr: Core.Store
 }
 
 test "fuzz interpret" {
-    fuzz(std.heap.c_allocator, .{}, Core.StoreAndValidExpr, fuzz_interpret);
+    try fuzz(std.heap.c_allocator, .{}, Core.StoreAndValidExpr, fuzz_interpret);
 }
 fn fuzz_interpret(arena: *ArenaAllocator, store_and_expr: Core.StoreAndExpr) !void {
     var store = store_and_expr.store;
@@ -628,6 +628,7 @@ fn fuzz_interpret(arena: *ArenaAllocator, store_and_expr: Core.StoreAndExpr) !vo
             if (set_type == .Finite and set != .Finite) {
                 return error.InterpretTooLazy;
             }
+            // TODO check type agrees with value
         } else |_| {}
     } else |err| {
         switch (err) {
@@ -644,7 +645,7 @@ fn fuzz_interpret(arena: *ArenaAllocator, store_and_expr: Core.StoreAndExpr) !vo
 }
 
 test "fuzz interpret deterministic" {
-    fuzz(std.heap.c_allocator, .{}, Core.StoreAndValidExpr, fuzz_interpret_deterministic);
+    try fuzz(std.heap.c_allocator, .{}, Core.StoreAndValidExpr, fuzz_interpret_deterministic);
 }
 fn fuzz_interpret_deterministic(arena: *ArenaAllocator, store_and_expr: Core.StoreAndExpr) !void {
     var store = store_and_expr.store;
@@ -674,7 +675,7 @@ fn fuzz_interpret_deterministic(arena: *ArenaAllocator, store_and_expr: Core.Sto
 // }
 
 // test "no_fo" {
-//     fuzz(std.heap.page_allocator, .{}, no_fo);
+//     try fuzz(std.heap.page_allocator, .{}, no_fo);
 // }
 
 // export fn LLVMFuzzerTestOneInput(data: [*c]u8, len: size_t) c_int {

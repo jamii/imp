@@ -137,10 +137,11 @@ pub const SetType = union(enum) {
     pub fn dumpInto(self: SetType, out_stream: var) anyerror!void {
         switch (self) {
             .Finite => |columns| {
-                if (columns.len > 0) {
-                    try columns[0].dumpInto(out_stream);
-                    for (columns[1..]) |scalar_type| {
-                        try out_stream.writeAll(" . ");
+                if (columns.len == 0) {
+                    try out_stream.writeAll("some");
+                } else {
+                    for (columns) |scalar_type, i| {
+                        try out_stream.writeAll(if (i == 0) "" else " . ");
                         try scalar_type.dumpInto(out_stream);
                     }
                 }

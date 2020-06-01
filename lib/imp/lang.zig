@@ -53,7 +53,7 @@ pub const TypeAndSet = struct {
     }
 };
 
-pub fn interpret(arena: *ArenaAllocator, source: []u8, error_info: *?InterpretErrorInfo) InterpretError ! TypeAndSet {
+pub fn interpret(arena: *ArenaAllocator, source: []const u8, error_info: *?InterpretErrorInfo) InterpretError ! TypeAndSet {
     var store = Store.init(arena);
 
     var parse_error_info: ?pass.parse.ErrorInfo = null;

@@ -576,6 +576,7 @@ test "interpret" {
         \\foo | 1 . 2
             ,
         \\(lazy)
+
     );
 
     try testInterpret(

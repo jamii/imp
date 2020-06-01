@@ -61,6 +61,19 @@ pub const LazySet = union (enum) {
 pub const LazyAbstract = struct {
     body: *const core.Expr,
     scope: Tuple,
+
+    // Equality on expr id and scope value
+
+    pub fn deepHashInto(hasher: var, self: LazyAbstract) void {
+        hasher.update(std.mem.asBytes(&Store.getCoreMeta(self.body).id));
+        meta.deepHashInto(hasher, self.scope);
+    }
+
+    pub fn deepCompare(self: LazyAbstract, other: LazyAbstract) meta.Ordering {
+        const ordering = meta.deepCompare(Store.getCoreMeta(self.body).id, Store.getCoreMeta(other.body).id);
+        if (ordering != .Equal) return ordering;
+        return meta.deepCompare(self.scope, other.scope);
+    }
 };
 
 pub const LazyPair = struct {
@@ -72,6 +85,26 @@ pub const LazyPair = struct {
 pub const Set = union(enum) {
     Finite: FiniteSet,
     Lazy: LazySet,
+
+    // TODO this is not an ordering, only works for deepEqual
+    pub fn deepCompare(self: Set, other: Set) meta.Ordering {
+        if (self == .Finite and other == .Finite) {
+            if (self.Finite.count() != other.Finite.count()) {
+                return .LessThan;
+            }
+            var self_iter = self.Finite.iterator();
+            while (self_iter.next()) |kv| {
+                if (!other.Finite.contains(kv.key)) {
+                    return .LessThan;
+                }
+            }
+            return .Equal;
+        }
+        if (self == .Lazy and other == .Lazy) {
+            return meta.deepCompare(self.Lazy, other.Lazy);
+        }
+        return .LessThan;
+    }
 
     pub fn dumpInto(self: Set, allocator: *Allocator, out_stream: var) anyerror!void {
         switch(self) {

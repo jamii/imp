@@ -23,7 +23,12 @@ pub fn deepCompare(a: var, b: @TypeOf(a)) Ordering {
         else => {},
     }
     switch (ti) {
-        .Int, .Float, .Bool, .Enum => {
+        .Bool => {
+            if (a == b) return .Equal;
+            if (a) return .GreaterThan;
+            return .LessThan;
+        },
+        .Int, .Float, .Enum => {
             if (a < b) {
                 return .LessThan;
             }
@@ -112,6 +117,22 @@ pub fn deepCompare(a: var, b: @TypeOf(a)) Ordering {
             }
         },
         .Void => return .Equal,
+        .ErrorUnion => {
+            if (a) |a_ok| {
+                if (b) |b_ok| {
+                    return deepCompare(a_ok, b_ok);
+                } else |_| {
+                    return .LessThan;
+                }
+            } else |a_err| {
+                if (b) |_| {
+                    return .GreaterThan;
+                } else |b_err| {
+                    return deepCompare(a_err, b_err);
+                }
+            }
+        },
+        .ErrorSet => return deepCompare(@errorToInt(a), @errorToInt(b)),
         else => @compileError("cannot deepCompare " ++ @typeName(T)),
     }
 }

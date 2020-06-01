@@ -1,5 +1,6 @@
 const imp = @import("../lib/imp.zig");
 usingnamespace imp.common;
+const meta = imp.meta;
 
 fn fuzz_panic() noreturn {
     imp_panic("Internal error in fuzzer", .{});
@@ -398,7 +399,7 @@ const Core = struct {
         }
     };
 
-    fn makeValid(arena: *ArenaAllocator, invalid_expr: *const imp.lang.repr.core.Expr, scope_size: usize) *const imp.lang.repr.core.Expr {
+    fn makeValid(store: *imp.lang.Store, invalid_expr: *const imp.lang.repr.core.Expr, scope_size: usize) *const imp.lang.repr.core.Expr {
         var valid_expr = invalid_expr.*;
         switch (valid_expr) {
             .Name, .UnboxName => |*name_ix| {
@@ -411,7 +412,7 @@ const Core = struct {
             },
             .Box => |*box| {
                 // set the scope that would be produced by Desugarer.desugarBox
-                var scope = arena.allocator.alloc(imp.lang.repr.core.NameIx, scope_size) catch fuzz_panic();
+                var scope = store.arena.allocator.alloc(imp.lang.repr.core.NameIx, scope_size) catch fuzz_panic();
                 for (scope) |*name_ix, i| {
                     name_ix.* = i;
                 }
@@ -421,17 +422,25 @@ const Core = struct {
         }
         const child_scope_size = if (valid_expr == .Abstract) scope_size + 1 else scope_size;
         for (valid_expr.getChildrenMut().slice()) |child| {
-            child.* = makeValid(arena, child.*, child_scope_size);
+            child.* = makeValid(store, child.*, child_scope_size);
         }
-        var valid_expr_ptr = arena.allocator.create(imp.lang.repr.core.Expr) catch fuzz_panic();
-        valid_expr_ptr.* = valid_expr;
-        return valid_expr_ptr;
+        return store.putCore(valid_expr, undefined) catch fuzz_panic();
     }
 
-    const ValidPtrExpr = struct {
-        fn generate(input: *Input) *const imp.lang.repr.core.Expr {
-            const expr = PtrExpr.generate(input);
-            return makeValid(input.arena, expr, 0);
+    const StoreAndExpr = struct {
+        store: imp.lang.Store,
+        expr: *const imp.lang.repr.core.Expr,
+    };
+
+    const StoreAndValidExpr = struct {
+        fn generate(input: *Input) StoreAndExpr {
+            var store = imp.lang.Store.init(input.arena);
+            const invalid_expr = PtrExpr.generate(input);
+            const valid_expr = makeValid(&store, invalid_expr, 0);
+            return .{
+                .store = store,
+                .expr = valid_expr,
+            };
         }
     };
 };
@@ -568,10 +577,11 @@ fn fuzz_desugar(arena: *ArenaAllocator, expr: *const imp.lang.repr.syntax.Expr) 
 }
 
 test "fuzz analyze" {
-    fuzz(std.heap.c_allocator, .{}, Core.ValidPtrExpr, fuzz_analyze);
+    fuzz(std.heap.c_allocator, .{}, Core.StoreAndValidExpr, fuzz_analyze);
 }
-fn fuzz_analyze(arena: *ArenaAllocator, expr: *const imp.lang.repr.core.Expr) !void {
-    var store = imp.lang.Store.init(arena);
+fn fuzz_analyze(arena: *ArenaAllocator, store_and_expr: Core.StoreAndExpr) !void {
+    var store = store_and_expr.store;
+    const expr = store_and_expr.expr;
     var error_info: ?imp.lang.pass.analyze.ErrorInfo = null;
     // should never panic on any input
     _ = imp.lang.pass.analyze.analyze(&store, expr, &error_info) catch |err| {
@@ -584,20 +594,38 @@ fn fuzz_analyze(arena: *ArenaAllocator, expr: *const imp.lang.repr.core.Expr) !v
     };
 }
 
-test "fuzz interpret" {
-    fuzz(std.heap.c_allocator, .{}, Core.ValidPtrExpr, fuzz_interpret);
+
+test "fuzz analyze deterministic" {
+    fuzz(std.heap.c_allocator, .{}, Core.StoreAndValidExpr, fuzz_analyze_deterministic);
 }
-fn fuzz_interpret(arena: *ArenaAllocator, expr: *const imp.lang.repr.core.Expr) !void {
-    var store = imp.lang.Store.init(arena);
+fn fuzz_analyze_deterministic(arena: *ArenaAllocator, store_and_expr: Core.StoreAndExpr) !void {
+    var store = store_and_expr.store;
+    const expr = store_and_expr.expr;
+    var error_info: ?imp.lang.pass.analyze.ErrorInfo = null;
+    const result1 = imp.lang.pass.analyze.analyze(&store, expr, &error_info);
+    const result2 = imp.lang.pass.analyze.analyze(&store, expr, &error_info);
+    // sanity check
+    expect(meta.deepEqual(result1, result1));
+    if (!meta.deepEqual(result1, result2)) {
+        dump(.{result1, result2});
+        return error.Nondeterministic;
+    }
+}
+
+test "fuzz interpret" {
+    fuzz(std.heap.c_allocator, .{}, Core.StoreAndValidExpr, fuzz_interpret);
+}
+fn fuzz_interpret(arena: *ArenaAllocator, store_and_expr: Core.StoreAndExpr) !void {
+    var store = store_and_expr.store;
+    const expr = store_and_expr.expr;
     var analyze_error_info: ?imp.lang.pass.analyze.ErrorInfo = null;
     const analyzed = imp.lang.pass.analyze.analyze(&store, expr, &analyze_error_info);
     var error_info: ?imp.lang.pass.interpret.ErrorInfo = null;
     // should never panic on any valid input
-    if (imp.lang.pass.interpret.interpret(&store, arena, expr, &error_info)) |set| {
+    if (imp.lang.pass.interpret.interpret(&store_and_expr.store, arena, expr, &error_info)) |set| {
         // if type is finite, should return finite set
         if (analyzed) |set_type| {
             if (set_type == .Finite and set != .Finite) {
-                dump(.{set_type, set});
                 return error.InterpretTooLazy;
             }
         } else |_| {}
@@ -606,7 +634,6 @@ fn fuzz_interpret(arena: *ArenaAllocator, expr: *const imp.lang.repr.core.Expr) 
             error.InterpretError => {
                 // should never return InterpretError on programs which typecheck
                 if (analyzed) |set_type| {
-                    dump(set_type);
                     return error.InvalidInterpretError;
                 } else |_| {}
             },
@@ -616,12 +643,31 @@ fn fuzz_interpret(arena: *ArenaAllocator, expr: *const imp.lang.repr.core.Expr) 
     }
 }
 
+test "fuzz interpret deterministic" {
+    fuzz(std.heap.c_allocator, .{}, Core.StoreAndValidExpr, fuzz_interpret_deterministic);
+}
+fn fuzz_interpret_deterministic(arena: *ArenaAllocator, store_and_expr: Core.StoreAndExpr) !void {
+    var store = store_and_expr.store;
+    const expr = store_and_expr.expr;
+    var error_info: ?imp.lang.pass.interpret.ErrorInfo = null;
+    const result1 = imp.lang.pass.interpret.interpret(&store_and_expr.store, arena, expr, &error_info);
+    const result2 = imp.lang.pass.interpret.interpret(&store_and_expr.store, arena, expr, &error_info);
+    // sanity check
+    expect(meta.deepEqual(result1, result1));
+    if (!meta.deepEqual(result1, result2)) {
+        dump(.{result1, result2});
+        return error.Nondeterministic;
+    }
+}
+
 // TODO for some reason the fuzzer OOMs when using std.testing.allocator
 
 // TODO is PtrExpr going to break because it's not in the store?
 // could pass Store as var arg to generate
 
 // TODO need to track how often we're actually generating valid inputs
+
+// TODO seems to be hard to shrink by emitting a tree node - maybe shrink option that replaces a range with an inner range?
 
 // fn no_fo(arena: *ArenaAllocator, ) !void {
 //     const string = Ascii(1);

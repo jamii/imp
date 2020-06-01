@@ -662,9 +662,6 @@ fn fuzz_interpret_deterministic(arena: *ArenaAllocator, store_and_expr: Core.Sto
 
 // TODO for some reason the fuzzer OOMs when using std.testing.allocator
 
-// TODO is PtrExpr going to break because it's not in the store?
-// could pass Store as var arg to generate
-
 // TODO need to track how often we're actually generating valid inputs
 
 // TODO seems to be hard to shrink by emitting a tree node - maybe shrink option that replaces a range with an inner range?

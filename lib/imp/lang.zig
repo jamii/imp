@@ -11,6 +11,27 @@ pub const InterpretErrorInfo = union(enum) {
     Desugar: pass.desugar.ErrorInfo,
     Analyze: pass.analyze.ErrorInfo,
     Interpret: pass.interpret.ErrorInfo,
+
+    pub fn dumpInto(self: ?InterpretErrorInfo, err: InterpretError, out_stream: var) anyerror ! void {
+        switch (err) {
+            // TODO report source position
+
+            error.ParseError => try std.fmt.format(out_stream, "Parse error: {}\n", .{self.?.Parse.message}),
+            error.DesugarError => try std.fmt.format(out_stream, "Desugar error: {}\n", .{self.?.Desugar.message}),
+            error.AnalyzeError => try std.fmt.format(out_stream, "Analyze error: {}\n", .{self.?.Analyze.message}),
+            error.InterpretError => try std.fmt.format(out_stream, "Interpret error: {}\n", .{self.?.Interpret.message}),
+
+            error.Utf8InvalidStartByte,
+            error.InvalidUtf8,
+            error.InvalidCharacter,
+            error.Utf8ExpectedContinuation,
+            error.Utf8OverlongEncoding,
+            error.Utf8EncodesSurrogateHalf,
+            error.Utf8CodepointTooLarge => try std.fmt.format(out_stream, "Invalid utf8 input: {}\n", .{err}),
+
+            error.OutOfMemory => try std.fmt.format(out_stream, "Out of memory\n", .{}),
+        }
+    }
 };
 
 pub const InterpretError =
@@ -22,6 +43,14 @@ pub const InterpretError =
 pub const TypeAndSet = struct {
     set_type: repr.type_.SetType,
     set: repr.value.Set,
+
+    pub fn dumpInto(self: TypeAndSet, allocator: *Allocator, out_stream: var) anyerror ! void {
+        try out_stream.writeAll("type: ");
+        try self.set_type.dumpInto(out_stream);
+        try out_stream.writeAll("\nvalue: ");
+        try self.set.dumpInto(allocator, out_stream);
+        try out_stream.writeAll("\n");
+    }
 };
 
 pub fn interpret(arena: *ArenaAllocator, source: []u8, error_info: *?InterpretErrorInfo) InterpretError ! TypeAndSet {

@@ -87,6 +87,7 @@ const Desugarer = struct {
             .Name => |name| name: {
                 const args = self.scope.items;
                 var i: usize = 0;
+                // look for name in scope
                 while (i < args.len) : (i += 1) {
                     if (args[args.len - 1 - i]) |arg| {
                         if (meta.deepEqual(name, arg.name)) {
@@ -96,8 +97,17 @@ const Desugarer = struct {
                         }
                     }
                 }
-                return self.setError("Name not in scope: {}", .{name});
+                // otherwise look for native
+                break :name try self.putCore(.{.Native = switch (name) {
+                    "add" => .Add,
+                    else => return self.setError("Name not in scope: {}", .{name}),
+                }});
+
             },
+            .Negate => |expr|
+                try self.putCore(
+                    .{.Negate = try self.desugar(expr)}
+            ),
             .When => |when|
                 try self.putCore(
                     .{.When = .{
@@ -133,12 +143,6 @@ const Desugarer = struct {
                         .body = try self.desugar(annotate.body),
                     }},
             ),
-            .Negate => |expr| negate: {
-                // `!e` => `e == none`
-                const e = try self.desugar(expr);
-                const none = try self.putCore(.None);
-                break :negate try self.putCore(.{.Equal = .{.left=e, .right=none}});
-            },
             .If => |if_| if_: {
                 // `if c t f` => `[c] ([g] -> (when g then t) | (when !g then f))`
                 const box_c = try self.desugarBox(if_.condition);
@@ -149,8 +153,7 @@ const Desugarer = struct {
                 const left_g = try self.putCore(.{.UnboxName = 0});
                 const left = try self.putCore(.{.When = .{.condition=left_g, .true_branch=t}});
                 const right_g = try self.putCore(.{.UnboxName = 0});
-                const none = try self.putCore(.None);
-                const not_right_g = try self.putCore(.{.Equal = .{.left=right_g, .right=none}});
+                const not_right_g = try self.putCore(.{.Negate = right_g});
                 const right = try self.putCore(.{.When = .{.condition=not_right_g, .true_branch=f}});
                 const body = try self.putCore(.{.Union = .{.left=left, .right=right}});
                 const abstract = try self.putCore(.{.Abstract = body});

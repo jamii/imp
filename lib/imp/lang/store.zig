@@ -24,7 +24,6 @@ pub fn ExprAndMeta(comptime Expr: type, comptime Meta: type) type {
 
 pub const Store = struct {
     arena: *ArenaAllocator,
-    types: DeepHashMap(type_.TypeOf, type_.SetType),
     next_expr_id: usize,
 
     pub fn init(arena: *ArenaAllocator) Store {
@@ -67,13 +66,5 @@ pub const Store = struct {
 
     pub fn getCoreMeta(expr: *const core.Expr) *const CoreMeta {
         return &@fieldParentPtr(ExprAndMeta(core.Expr, CoreMeta), "expr", expr).meta;
-    }
-
-    pub fn putType(self: *Store, expr: *const core.Expr, scope: []const type_.ScalarType, set_type: type_.SetType) ! void {
-        _ = try self.types.put(.{.expr = expr, .scope = scope}, set_type);
-    }
-
-    pub fn getType(self: *const Store, expr: *const core.Expr, scope: []const type_.ScalarType) ?type_.SetType {
-        return self.types.getValue(.{.expr = expr, .scope = scope});
     }
 };

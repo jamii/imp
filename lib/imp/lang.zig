@@ -82,7 +82,7 @@ pub fn interpret(arena: *ArenaAllocator, source: []const u8, error_info: *?Inter
 
     var interpret_error_info: ?pass.interpret.ErrorInfo = null;
     const set = pass.interpret.interpret(&store, arena, core_expr, &interpret_error_info) catch |err| {
-        if (err == error.InterpretError) {
+        if (err == error.InterpretError or err == error.NativeError) {
             error_info.* = .{.Interpret = interpret_error_info.?};
         }
         return err;

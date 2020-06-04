@@ -5,13 +5,13 @@ const Store = imp.lang.Store;
 const core = imp.lang.repr.core;
 
 pub const Scalar = union(enum) {
-    String: []const u8, // valid utf8
+    Text: []const u8, // valid utf8
     Number: f64,
     Box: Box,
 
     fn dumpInto(self: Scalar, out_stream: var) anyerror!void {
         switch (self) {
-            .String => |string| try std.fmt.format(out_stream, "\"{s}\"", .{string}),
+            .Text => |text| try std.fmt.format(out_stream, "\"{s}\"", .{text}),
             .Number => |number| try std.fmt.format(out_stream, "{d}", .{number}),
             .Box => |box| {
                 // TODO figure out a better way to name these
@@ -59,18 +59,18 @@ pub const LazySet = union (enum) {
 };
 
 pub const LazyAbstract = struct {
-    body: *const core.Expr,
+    abstract: *const core.Expr,
     scope: Tuple,
 
     // Equality on expr id and scope value
 
     pub fn deepHashInto(hasher: var, self: LazyAbstract) void {
-        hasher.update(std.mem.asBytes(&Store.getCoreMeta(self.body).id));
+        hasher.update(std.mem.asBytes(&Store.getCoreMeta(self.abstract).id));
         meta.deepHashInto(hasher, self.scope);
     }
 
     pub fn deepCompare(self: LazyAbstract, other: LazyAbstract) meta.Ordering {
-        const ordering = meta.deepCompare(Store.getCoreMeta(self.body).id, Store.getCoreMeta(other.body).id);
+        const ordering = meta.deepCompare(Store.getCoreMeta(self.abstract).id, Store.getCoreMeta(other.abstract).id);
         if (ordering != .Equal) return ordering;
         return meta.deepCompare(self.scope, other.scope);
     }
@@ -135,7 +135,7 @@ pub const Set = union(enum) {
                 }
             },
             .Lazy => |lazy| {
-                try out_stream.writeAll("(lazy)");
+                try out_stream.writeAll("<lazy>");
             },
         }
     }

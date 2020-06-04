@@ -5,27 +5,6 @@ const value = imp.lang.repr.value;
 // ascii, non-empty
 pub const Name = []const u8;
 
-pub const Native = struct {
-    name: Name,
-    input_arity: usize,
-    output_arity: usize,
-    fun: fn([]const value.Scalar) NativeError ! value.Set,
-
-    // equality on name only
-
-    pub fn deepHashInto(hasher: var, self: Native) void {
-        meta.deepHashInto(hasher, self.name);
-    }
-
-    pub fn deepCompare(self: Native, other: Native) meta.Ordering {
-        return meta.deepCompare(self.name, other.name);
-    }
-};
-
-pub const NativeError = error {
-    // TODO
-};
-
 pub const Expr = union(enum) {
     None,
     Some,
@@ -36,14 +15,15 @@ pub const Expr = union(enum) {
     Equal: Pair,
     Name: NameIx,
     UnboxName: NameIx,
+    Negate: *const Expr,
     When: When,
     Abstract: *const Expr,
     Apply: Pair,
     Box: Box,
     Annotate: Annotate,
-    // Native: Native,
+    Native: Native,
 
-     pub fn getChildren(self: Expr) FixedSizeArrayList(2, *const Expr) {
+    pub fn getChildren(self: Expr) FixedSizeArrayList(2, *const Expr) {
         var children = FixedSizeArrayList(2, *const Expr).init();
         inline for (@typeInfo(Expr).Union.fields) |expr_field| {
             if (@enumToInt(std.meta.activeTag(self)) == expr_field.enum_field.?.value) {
@@ -160,4 +140,8 @@ pub const Box = struct {
 pub const Annotate = struct {
     annotation: Name,
     body: *const Expr,
+};
+
+pub const Native = enum {
+    Add,
 };

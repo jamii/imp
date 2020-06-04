@@ -23,6 +23,7 @@ pub fn interpret(store: *const Store, arena: *ArenaAllocator, expr: *const core.
 pub const Error = error {
     // sets error_info
     InterpretError,
+    NativeError,
 
     // does not set error_info
     OutOfMemory

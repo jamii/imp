@@ -13,6 +13,11 @@ value: "foo"
 type: any
 value: "foo\"bar"
 
+1 (1 . 2 . 3 . 4)
+---
+type: any . any . any
+value: 2 . 3 . 4
+
 1 . 2 | 3 . 4
 ---
 type: any . any

@@ -103,7 +103,7 @@ pub const Analyzer = struct {
                         .scope= try self.dupeScalars(self.scope.items)
                     }};
                 }
-                const right = try self.analyze(pair.right, hint[left.Concrete.columns.len..]);
+                const right = try self.analyze(pair.right, hint[min(hint.len, left.Concrete.columns.len)..]);
                 if (right == .Lazy) {
                     break :set_type .{.Lazy = .{
                         .expr=expr,
@@ -158,7 +158,19 @@ pub const Analyzer = struct {
                 const scalar_type = self.scope.items[self.scope.items.len - 1 - name_ix];
                 switch (scalar_type) {
                     .Box => |box_type| {
-                        break :set_type box_type;
+                        switch (box_type) {
+                            .Lazy => |lazy| {
+                                // try to specialize
+                                const old_scope = self.scope;
+                                defer self.scope = old_scope;
+                                self.scope = try ArrayList(type_.ScalarType).initCapacity(&self.store.arena.allocator, lazy.scope.len);
+                                try self.scope.appendSlice(lazy.scope);
+                                break :set_type try self.analyze(lazy.expr, hint);
+                            },
+                            .Concrete => {
+                                break :set_type box_type;
+                            }
+                        }
                     },
                     else => {
                         return self.setError("Don't know what type will result from unboxing type {}", .{scalar_type});
@@ -218,12 +230,15 @@ pub const Analyzer = struct {
             },
             .Apply => |pair| {
                 // analyze without hints first because we don't know how to split the hint between left and right
+                var pair_left = pair.left;
+                var pair_right = pair.right;
                 var left = try self.analyze(pair.left, &[0]type_.ScalarType{});
                 var right = try self.analyze(pair.right, &[0]type_.ScalarType{});
                 if (!left.isFinite() and !right.isFinite()) {
                     return self.setError("Cannot apply two maybe-infinite sets: {} vs {}", .{left, right});
                 }
-                if (right == .Lazy) {
+                if (!right.isFinite()) {
+                    std.mem.swap(*const core.Expr, &pair_left, &pair_right);
                     std.mem.swap(type_.SetType, &left, &right);
                 }
                 if (left == .Lazy) {
@@ -231,7 +246,7 @@ pub const Analyzer = struct {
                     var left_hint = try ArrayList(type_.ScalarType).initCapacity(&self.store.arena.allocator, right.Concrete.columns.len + hint.len);
                     try left_hint.appendSlice(right.Concrete.columns);
                     try left_hint.appendSlice(hint);
-                    left = try self.analyze(pair.left, left_hint.items);
+                    left = try self.analyze(pair_left, left_hint.items);
                 }
                 if (left == .Lazy) {
                     // couldn't fully specialize, give up

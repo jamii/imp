@@ -1,57 +1,86 @@
 42
 ---
-type: any
+type: number
 value: 42
 
 "foo"
 ---
-type: any
+type: text
 value: "foo"
 
 "foo\"bar"
 ---
-type: any
+type: text
 value: "foo\"bar"
+
+[1]
+---
+type: [number]
+value: [1]
+
+let a = 1 in
+a
+---
+type: number
+value: 1
+
+let a = [1] in
+a
+---
+type: [number]
+value: [1]
+
+let foo = \ a -> a in
+foo 1
+---
+type: number
+value: 1
+
+let foo = \ a b -> a . b in
+foo 1 2
+---
+type: number . number
+value: 1 . 2
 
 1 (1 . 2 . 3 . 4)
 ---
-type: any . any . any
+type: number . number . number
 value: 2 . 3 . 4
 
 1 . 2 | 3 . 4
 ---
-type: any . any
+type: number . number
 value: 1 . 2 | 3 . 4
 
 1 . (2 | 3) . 4
 ---
-type: any . any . any
+type: number . number . number
 value: 1 . 2 . 4 | 1 . 3 . 4
 
 1 + 2 * 3
 ---
-type: any
+type: number
 value: 7
 
 (1 + 2) * 3
 ---
-type: any
+type: number
 value: 9
 
 3 * 2 + 1
 ---
-type: any
+type: number
 value: 7
 
 3 * (2 + 1)
 ---
-type: any
+type: number
 value: 9
 
 let foo = "bar" . [1] in
 foo:bar
 ---
-type: any
+type: number
 value: 1
 
 a & b | c
@@ -80,47 +109,49 @@ Analyze error: Mismatched arities: 2 vs 1
 
 !(1 1)
 ---
-type: some
+type: maybe
 value: none
 
 !(1 2)
 ---
-type: some
+type: maybe
 value: some
 
 when some then 1 . 2
 ---
-type: any . any
+type: number . number
 value: 1 . 2
 
 when none then 1 . 2
 ---
-type: any . any
+type: number . number
 value: none
 
 let a = 1 . "foo" in
 a . a
 ---
-type: any . any . any . any
+type: number . text . number . text
 value: 1 . "foo" . 1 . "foo"
 
+// TODO
 let foo = \ a b -> a = b in
 foo 1 1
 ---
-type: some
+type: maybe
 value: some
 
+// TODO
 let foo = \ a b -> a = b in
 foo 1 2
 ---
-type: some
+type: maybe
 value: none
 
 let foo = \ a -> [\ b -> a . b] in
 foo 1 \ [bar] ->
 bar 2
 ---
-type: any . any
+type: number . number
 value: 1 . 2
 
 let foo1 = \ a -> [\ b -> a . b] in
@@ -133,7 +164,7 @@ Analyze error: Don't know what type will result from unboxing type ScalarType{ .
 let foo = 1 . 1 | 2 . 2 in
 foo foo
 ---
-type: some
+type: maybe
 value: some
 
 let foo = \ a b -> a . b in
@@ -149,7 +180,7 @@ Analyze error: Cannot equal two maybe-infinite sets
 let foo = \ a b -> a . b in
 (foo | foo) 1 2
 ---
-type: any . any
+type: number . number
 value: 1 . 2
 
 when (\ a -> none) then 1
@@ -159,11 +190,11 @@ Analyze error: The condition of `when` must have type `some`, found SetType{ .Ab
 let foo = \ a b -> a = b in
 (foo . 1 . 2) 0 0 1 2
 ---
-type: some
+type: maybe
 value: some
 
 let foo = \ a b -> a = b in
 (foo . 1 . 2) 0 1 1 2
 ---
-type: some
+type: maybe
 value: none

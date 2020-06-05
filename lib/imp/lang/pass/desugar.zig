@@ -98,9 +98,12 @@ const Desugarer = struct {
                     }
                 }
                 // otherwise look for native
-                break :name try self.putCore(.{.Native = switch (name) {
-                    "add" => .Add,
-                    else => return self.setError("Name not in scope: {}", .{name}),
+                break :name try self.putCore(.{.Native = native: {
+                    if (meta.deepEqual(name, "add")) {
+                        break :native .Add;
+                    } else {
+                        return self.setError("Name not in scope: {}", .{name});
+                    }
                 }});
 
             },
@@ -171,7 +174,7 @@ const Desugarer = struct {
             .Lookup => |lookup| lookup: {
                 // `a:b` => `(a "b") ([g] -> g)`
                 const a = try self.desugar(lookup.value);
-                const b = try self.putCore(.{.Scalar = .{.String = lookup.name}});
+                const b = try self.putCore(.{.Scalar = .{.Text = lookup.name}});
                 const apply_ab = try self.putCore(.{.Apply = .{.left=a, .right=b}});
                 const unbox = try self.putCore(.{.UnboxName = 0});
                 const abstract = try self.putCore(.{.Abstract = unbox});

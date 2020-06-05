@@ -20,6 +20,7 @@ pub const InterpretErrorInfo = union(enum) {
             error.DesugarError => try std.fmt.format(out_stream, "Desugar error: {}\n", .{self.?.Desugar.message}),
             error.AnalyzeError => try std.fmt.format(out_stream, "Analyze error: {}\n", .{self.?.Analyze.message}),
             error.InterpretError => try std.fmt.format(out_stream, "Interpret error: {}\n", .{self.?.Interpret.message}),
+            error.NativeError => try std.fmt.format(out_stream, "Native error: {}\n", .{self.?.Interpret.message}),
 
             error.Utf8InvalidStartByte,
             error.InvalidUtf8,

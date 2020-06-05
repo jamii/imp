@@ -29,7 +29,7 @@ pub const Store = struct {
     pub fn init(arena: *ArenaAllocator) Store {
         return Store{
             .arena = arena,
-            .types = DeepHashMap(type_.TypeOf, type_.SetType).init(&arena.allocator),
+            // .types = DeepHashMap(type_.TypeOf, type_.SetType).init(&arena.allocator),
             .next_expr_id = 0,
         };
     }

@@ -9,7 +9,7 @@ const syntax = imp.lang.repr.syntax;
 //   "none"
 //   "some"
 //   number
-//   string
+//   text
 //   name
 //   "when" expr "then" expr
 //   "\" arg+ "->" expr
@@ -87,7 +87,7 @@ const Token = union(enum) {
     None,
     Some,
     Number: f64,
-    String: []const u8, // valid utf8
+    Text: []const u8, // valid utf8
     Union,
     Intersect,
     Product,
@@ -180,7 +180,7 @@ const Parser = struct {
         if (try self.nextUtf8Char()) |char| {
             const ascii_char = @truncate(u7, char);
             if (ascii_char != char) {
-                return self.setError(start, "unicode characters may only appear in strings and comments", .{});
+                return self.setError(start, "unicode characters may only appear in texts and comments", .{});
             }
             return ascii_char;
         } else {
@@ -189,9 +189,9 @@ const Parser = struct {
     }
 
     // called after seeing '"'
-    fn tokenizeString(self: *Parser) ! []const u8 {
+    fn tokenizeText(self: *Parser) ! []const u8 {
         var bytes = ArrayList(u8).init(&self.store.arena.allocator);
-        const string_start = self.position - 1;
+        const text_start = self.position - 1;
         while (true) {
             const char_start = self.position;
             if (try self.nextUtf8Char()) |char| {
@@ -201,10 +201,10 @@ const Parser = struct {
                             switch (escaped_char) {
                                 '"' => try bytes.append('"'),
                                 'n' => try bytes.append('\n'),
-                                else => return self.setError(char_start, "invalid string escape", .{}),
+                                else => return self.setError(char_start, "invalid text escape", .{}),
                             }
                         } else {
-                            return self.setError(char_start, "unfinished string escape", .{});
+                            return self.setError(char_start, "unfinished text escape", .{});
                         }
 
                     },
@@ -216,7 +216,7 @@ const Parser = struct {
                     },
                 }
             } else {
-                return self.setError(string_start, "unfinished string", .{});
+                return self.setError(text_start, "unfinished text", .{});
             }
         }
         return bytes.items;
@@ -309,7 +309,7 @@ const Parser = struct {
             switch (char1) {
                 '(' => return Token{.OpenGroup={}},
                 ')' => return Token{.CloseGroup={}},
-                '"' => return Token{.String = try self.tokenizeString()},
+                '"' => return Token{.Text = try self.tokenizeText()},
                 '|' => return Token{.Union={}},
                 '&' => return Token{.Intersect={}},
                 '.' => return Token{.Product={}},
@@ -362,7 +362,7 @@ const Parser = struct {
                 else => {
                     const ascii_char1 = @intCast(u8, char1 & 0b0111_1111);
                     if (char1 != @as(u21, ascii_char1)) {
-                        return self.setError(start, "unicode characters may only appear in strings and comments", .{});
+                        return self.setError(start, "unicode characters may only appear in texts and comments", .{});
                     } else if (std.ascii.isSpace(ascii_char1)) {
                         return self.nextToken();
                     } else if (std.ascii.isDigit(ascii_char1)) {
@@ -415,8 +415,8 @@ const Parser = struct {
             .Some => return self.store.putSyntax(.Some, start, self.position),
             // number
             .Number => |number| return self.store.putSyntax(.{.Scalar=.{.Number=number}}, start, self.position),
-            // string
-            .String => |string| return self.store.putSyntax(.{.Scalar=.{.String=string}}, start, self.position),
+            // text
+            .Text => |text| return self.store.putSyntax(.{.Scalar=.{.Text=text}}, start, self.position),
             // name
             .Name => |name| return self.store.putSyntax(.{.Name=name}, start, self.position),
             // "when" expr "then" expr

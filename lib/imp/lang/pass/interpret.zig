@@ -147,6 +147,13 @@ const Interpreter = struct {
                     }
                 }
             },
+            .Negate => |body| {
+                var set = value.FiniteSet.init(&self.arena.allocator);
+                if ((try self.interpret(body)).Finite.count() == 0) {
+                    _ = try set.put(&[0]value.Scalar{}, {});
+                }
+                return value.Set{.Finite = set};
+            },
             .When => |when| {
                 const condition = try self.interpret(when.condition);
                 if (condition == .Lazy) {
@@ -190,9 +197,9 @@ const Interpreter = struct {
             .Annotate => |annotate| {
                 return self.interpret(annotate.body);
             },
-            // .Native => |native| {
-            //     TODO();
-            // },
+            .Native => |native| {
+                TODO();
+            },
         }
     }
 

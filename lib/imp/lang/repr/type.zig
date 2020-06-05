@@ -12,7 +12,7 @@ pub const SetType = union(enum) {
     Lazy: LazySetType,
 
     pub fn isFinite(self: SetType) bool {
-        return self == .Concrete and self.Concrete.abstract_arity = 0;
+        return self == .Concrete and self.Concrete.abstract_arity == 0;
     }
 
     pub fn dumpInto(self: SetType, out_stream: var) anyerror!void {
@@ -48,22 +48,22 @@ pub const LazySetType = struct {
 
     // Equality on expr id and scope value
 
-    pub fn deepHashInto(hasher: var, self: TypeOf) void {
+    pub fn deepHashInto(hasher: var, self: LazySetType) void {
         hasher.update(std.mem.asBytes(&@ptrToInt(self.expr)));
         meta.deepHashInto(hasher, self.scope);
     }
 
-    pub fn deepCompare(self: TypeOf, other: TypeOf) meta.Ordering {
+    pub fn deepCompare(self: LazySetType, other: LazySetType) meta.Ordering {
         const ordering = meta.deepCompare(Store.getCoreMeta(self.expr).id, Store.getCoreMeta(other.expr).id);
         if (ordering != .Equal) return ordering;
         return meta.deepCompare(self.scope, other.scope);
     }
 
-    pub fn dumpInto(self: TypeOf, out_stream: var) anyerror!void {
-        try std.fmt.format(out_stream, "type_of(expr {};", .{Store.getCoreMeta(self.abstract).id});
+    pub fn dumpInto(self: LazySetType, out_stream: var) anyerror!void {
+        try std.fmt.format(out_stream, "type_of(expr {};", .{Store.getCoreMeta(self.expr).id});
         for (self.scope) |scalar_type, i| {
             try out_stream.writeAll(if (i == 0) " " else " . ");
-            try self.item.dumpInto(out_stream);
+            try scalar_type.dumpInto(out_stream);
         }
         try out_stream.writeAll(")");
     }
@@ -76,9 +76,8 @@ pub const ScalarType = union(enum) {
 
     pub fn dumpInto(self: ScalarType, out_stream: var) anyerror!void {
         switch (self) {
-            .Any => {
-                try out_stream.writeAll("any");
-            },
+            .Text => try out_stream.writeAll("text"),
+            .Number => try out_stream.writeAll("number"),
             .Box => |set_type| {
                 try out_stream.writeAll("[");
                 try set_type.dumpInto(out_stream);

@@ -59,18 +59,18 @@ pub const LazySet = union (enum) {
 };
 
 pub const LazyAbstract = struct {
-    abstract: *const core.Expr,
+    body: *const core.Expr,
     scope: Tuple,
 
     // Equality on expr id and scope value
 
     pub fn deepHashInto(hasher: var, self: LazyAbstract) void {
-        hasher.update(std.mem.asBytes(&Store.getCoreMeta(self.abstract).id));
+        hasher.update(std.mem.asBytes(&Store.getCoreMeta(self.body).id));
         meta.deepHashInto(hasher, self.scope);
     }
 
     pub fn deepCompare(self: LazyAbstract, other: LazyAbstract) meta.Ordering {
-        const ordering = meta.deepCompare(Store.getCoreMeta(self.abstract).id, Store.getCoreMeta(other.abstract).id);
+        const ordering = meta.deepCompare(Store.getCoreMeta(self.body).id, Store.getCoreMeta(other.body).id);
         if (ordering != .Equal) return ordering;
         return meta.deepCompare(self.scope, other.scope);
     }

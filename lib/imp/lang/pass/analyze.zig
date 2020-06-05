@@ -11,7 +11,7 @@ pub fn analyze(store: *Store, expr: *const core.Expr, error_info: *?ErrorInfo) E
         .scope = ArrayList(type_.ScalarType).init(&store.arena.allocator),
         .error_info = error_info,
     };
-    return analyzer.analyze(expr, null);
+    return analyzer.analyze(expr, &[0]type_.ScalarType{});
 }
 
 pub const Error = error {
@@ -42,7 +42,7 @@ pub const Analyzer = struct {
         return error.AnalyzeError;
     }
 
-    fn analyze(self: *Analyzer, expr: *const core.Expr, hint: type_.FiniteSetType) Error ! type_.SetType {
+    fn analyze(self: *Analyzer, expr: *const core.Expr, hint: []const type_.ScalarType) Error ! type_.SetType {
         // TODO need to think about what the key should be
         // hint might vary in length but if > arity(expr) then should return same type
         // maybe only store concrete types?
@@ -51,15 +51,17 @@ pub const Analyzer = struct {
         //     return set_type;
         // }
         const set_type: type_.SetType = set_type: { switch(expr.*) {
-            .None, .Some => .{.Concrete = {
-                .abstract_arity = 0,
-                .columns = &[0]type_.ScalarType{},
-            }},
+            .None, .Some => {
+                break :set_type .{.Concrete = .{
+                    .abstract_arity = 0,
+                    .columns = &[0]type_.ScalarType{},
+                }};
+            },
             .Scalar => |scalar| {
-                const scalar_type: type_.ScalarType = switch scalar {
+                const scalar_type: type_.ScalarType = switch (scalar) {
                     .Text => .Text,
                     .Number => .Number,
-                    .Box => panic("Shouldn't be any box literals"),
+                    .Box => imp_panic("Shouldn't be any box literals", .{}),
                 };
                 break :set_type .{.Concrete = .{
                     .abstract_arity = 0,
@@ -71,8 +73,8 @@ pub const Analyzer = struct {
                 const right = try self.analyze(pair.right, hint);
                 if (left == .Lazy or right == .Lazy) {
                     break :set_type .{.Lazy = .{
-                        .expr=expr,
-                        .scope=self.dupeScalars(self.scope)
+                        .expr = expr,
+                        .scope = try self.dupeScalars(self.scope.items),
                     }};
                 }
                 if (left.Concrete.columns.len != right.Concrete.columns.len) {
@@ -82,13 +84,13 @@ pub const Analyzer = struct {
                 var columns = try self.store.arena.allocator.alloc(type_.ScalarType, left.Concrete.columns.len);
                 for (left.Concrete.columns) |left_type, i| {
                     const right_type = right.Concrete.columns[i];
-                    columns[i] = switch (expr) {
+                    columns[i] = switch (expr.*) {
                         .Union => try self.unionScalar(left_type, right_type),
                         .Intersect => try self.intersectScalar(left_type, right_type),
                         else => unreachable,
                     };
                 }
-                break :set_type .{.Finite = .{
+                break :set_type .{.Concrete = .{
                     .abstract_arity = abstract_arity,
                     .columns = columns,
                 }};
@@ -98,14 +100,14 @@ pub const Analyzer = struct {
                 if (left == .Lazy) {
                     break :set_type .{.Lazy = .{
                         .expr=expr,
-                        .scope=self.dupeScalars(self.scope)
+                        .scope= try self.dupeScalars(self.scope.items)
                     }};
                 }
-                const right = try self.analyze(pair.right, hint[left.Finite.len..]);
+                const right = try self.analyze(pair.right, hint[left.Concrete.columns.len..]);
                 if (right == .Lazy) {
                     break :set_type .{.Lazy = .{
                         .expr=expr,
-                        .scope=self.dupeScalars(self.scope)
+                        .scope= try self.dupeScalars(self.scope.items)
                     }};
                 }
                 const abstract_arity = if (right.Concrete.abstract_arity > 0)
@@ -122,15 +124,15 @@ pub const Analyzer = struct {
                     columns[i] = right_type;
                     i += 1;
                 }
-                break :set_type .{.Finite = .{
+                break :set_type .{.Concrete = .{
                     .abstract_arity = abstract_arity,
                     .columns = columns,
                 }};
             },
             .Equal => |pair| {
                 // the hint for expr doesn't tell us anything about left or right
-                const left = try self.analyze(pair.left, empty_set_type);
-                const right = try self.analyze(pair.right, empty_set_type);
+                const left = try self.analyze(pair.left, &[0]type_.ScalarType{});
+                const right = try self.analyze(pair.right, &[0]type_.ScalarType{});
                 if (!left.isFinite() or !right.isFinite()) {
                     return self.setError("Cannot equal one or more maybe-infinite sets", .{});
                 }
@@ -163,6 +165,17 @@ pub const Analyzer = struct {
                     }
                 }
             },
+            .Negate => |body| {
+                // the hint for expr doesn't tell us anything about body
+                const body_type = try self.analyze(body,  &[0]type_.ScalarType{});
+                if (!body_type.isFinite()) {
+                    return self.setError("The body of `!` must have finite type, found {}", .{body_type});
+                }
+                break :set_type .{.Concrete = .{
+                    .abstract_arity = 0,
+                    .columns = &[0]type_.ScalarType{},
+                }};
+            },
             .When => |when| {
                 // the hint for expr doesn't tell us anything about condition
                 const condition_type = try self.analyze(when.condition, &[0]type_.ScalarType{});
@@ -175,29 +188,29 @@ pub const Analyzer = struct {
                 if (hint.len == 0) {
                     break :set_type .{.Lazy = .{
                         .expr = expr,
-                        .scope = try self.dupeScalars(self.scope),
+                        .scope = try self.dupeScalars(self.scope.items),
                     }};
                 } else {
                     // if we have a hint we can use it to specialize the body
-                    self.scope.append(hint[0]);
+                    try self.scope.append(hint[0]);
                     const body_type = try self.analyze(body, hint[1..]);
-                    self.scope.pop();
+                    _ = self.scope.pop();
                     switch (body_type) {
                         .Concrete => |concrete| {
                             const abstract_arity = concrete.abstract_arity + 1;
-                            var columns = try ArrayList(type_.ScalarType).initCapacity(&self.arena.allocator, 1 + finite.len);
+                            var columns = try ArrayList(type_.ScalarType).initCapacity(&self.store.arena.allocator, 1 + concrete.columns.len);
                             try columns.append(hint[0]);
                             try columns.appendSlice(concrete.columns);
                             break :set_type .{.Concrete = .{
                                 .abstract_arity = abstract_arity,
-                                .columns = columns,
+                                .columns = columns.items,
                             }};
                         },
                         .Lazy => {
                             // couldn't fully specialize, give up
                             break :set_type .{.Lazy = .{
                                 .expr = expr,
-                                .scope = try self.dupeScalars(self.scope),
+                                .scope = try self.dupeScalars(self.scope.items),
                             }};
                         },
                     }
@@ -205,8 +218,8 @@ pub const Analyzer = struct {
             },
             .Apply => |pair| {
                 // analyze without hints first because we don't know how to split the hint between left and right
-                var left = try self.analyze(pair.left, empty_set_type);
-                var right = try self.analyze(pair.right, empty_set_type);
+                var left = try self.analyze(pair.left, &[0]type_.ScalarType{});
+                var right = try self.analyze(pair.right, &[0]type_.ScalarType{});
                 if (!left.isFinite() and !right.isFinite()) {
                     return self.setError("Cannot apply two maybe-infinite sets: {} vs {}", .{left, right});
                 }
@@ -215,16 +228,16 @@ pub const Analyzer = struct {
                 }
                 if (left == .Lazy) {
                     // try again but with hints this time
-                    var left_hint = try ArrayList(type_.ScalarType).initCapacity(&self.arena.allocator, right.Finite.len + hint.len);
-                    try left_hint.appendSlice(right.Finite);
+                    var left_hint = try ArrayList(type_.ScalarType).initCapacity(&self.store.arena.allocator, right.Concrete.columns.len + hint.len);
+                    try left_hint.appendSlice(right.Concrete.columns);
                     try left_hint.appendSlice(hint);
-                    left = try self.analyze(pair.left, left_hint);
+                    left = try self.analyze(pair.left, left_hint.items);
                 }
                 if (left == .Lazy) {
                     // couldn't fully specialize, give up
                     break :set_type .{.Lazy = .{
                         .expr = expr,
-                        .scope = self.dupeScalars(self.scope),
+                        .scope = try self.dupeScalars(self.scope.items),
                     }};
                 }
                 const joined_arity = min(left.Concrete.columns.len, right.Concrete.columns.len);
@@ -263,10 +276,10 @@ pub const Analyzer = struct {
                         .abstract_arity = 2,
                         .columns = try self.dupeScalars(&[3]type_.ScalarType{.Number, .Number, .Number}),
                     },
-                }}
+                }};
             },
         }};
-        try self.store.putType(expr, try self.dupeScalars(self.scope.items), set_type);
+        // try self.store.putType(expr, try self.dupeScalars(self.scope.items), set_type);
         return set_type;
     }
 
@@ -274,19 +287,19 @@ pub const Analyzer = struct {
         return std.mem.dupe(&self.store.arena.allocator, type_.ScalarType, scope);
     }
 
-    fn unionScalar(self: *Analyzer, a: ScalarType, b: ScalarType) Error ! ScalarType {
+    fn unionScalar(self: *Analyzer, a: type_.ScalarType, b: type_.ScalarType) Error ! type_.ScalarType {
         if (meta.deepEqual(a,b)) {
             return a;
         } else {
-            self.setError("Intersection of {} and {} is empty", .{a,b});
+            return self.setError("TODO type unions are not implemented yet (in unionScalar {} {})", .{a,b});
         }
     }
 
-    fn intersectScalar(self: *Analyzer, a: ScalarType, b: ScalarType) Error ! ScalarType {
+    fn intersectScalar(self: *Analyzer, a: type_.ScalarType, b: type_.ScalarType) Error ! type_.ScalarType {
         if (meta.deepEqual(a,b)) {
             return a;
         } else {
-            self.setError("Intersection of {} and {} is empty", .{a,b});
+            return self.setError("Intersection of {} and {} is empty", .{a,b});
         }
     }
-}
+};

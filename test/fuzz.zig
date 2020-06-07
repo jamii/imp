@@ -191,6 +191,23 @@ fn Struct(comptime T: type, comptime field_gens: var) type {
     };
 }
 
+fn Enum(comptime T: type) type {
+    return struct {
+        fn generate(input: *Input) T {
+            input.startRange();
+            const field_ix = Int(@typeInfo(T).Enum.tag_type).generate(input) % @typeInfo(T).Enum.fields.len;
+            var output: T = undefined;
+            inline for (@typeInfo(T).Enum.fields) |field, i| {
+                if (field_ix == i) {
+                    output = @intToEnum(T, field.value);
+                }
+            }
+            input.endRange();
+            return output;
+        }
+    };
+}
+
 fn Union(comptime T: type, comptime field_gens: var) type {
     return struct {
         fn generate(input: *Input) T {
@@ -222,7 +239,7 @@ fn Ptr(comptime gen: var) type {
 const Scalar = struct {
     fn generate(input: *Input) imp.lang.repr.value.Scalar {
         if (Bool.generate(input)) {
-            return .{.String = Utf8(0).generate(input)};
+            return .{.Text = Utf8(0).generate(input)};
         } else {
             return .{.Number = Float(f64).generate(input)};
         }
@@ -371,6 +388,8 @@ const Core = struct {
         }
     );
 
+    const Native = Enum(imp.lang.repr.core.Native);
+
     const Expr = Union(
         imp.lang.repr.core.Expr,
         .{
@@ -383,11 +402,13 @@ const Core = struct {
             .Equal = Pair,
             .Name = NameIx,
             .UnboxName = NameIx,
+            .Negate = PtrExpr,
             .When = When,
             .Abstract = PtrExpr,
             .Apply = Pair,
             .Box = Box,
             .Annotate = Annotate,
+            .Native = Native,
         }
     );
 
@@ -625,7 +646,7 @@ fn fuzz_interpret(arena: *ArenaAllocator, store_and_expr: Core.StoreAndExpr) !vo
     if (imp.lang.pass.interpret.interpret(&store_and_expr.store, arena, expr, &error_info)) |set| {
         // if type is finite, should return finite set
         if (analyzed) |set_type| {
-            if (set_type == .Finite and set != .Finite) {
+            if (set_type.isFinite() and set != .Finite) {
                 return error.InterpretTooLazy;
             }
             // TODO check type agrees with value
@@ -638,6 +659,8 @@ fn fuzz_interpret(arena: *ArenaAllocator, store_and_expr: Core.StoreAndExpr) !vo
                     return error.InvalidInterpretError;
                 } else |_| {}
             },
+            // easy to trigger eg divide by zero
+            error.NativeError => {},
             // can easily oom with small programs
             error.OutOfMemory => {},
         }
@@ -665,7 +688,7 @@ fn fuzz_interpret_deterministic(arena: *ArenaAllocator, store_and_expr: Core.Sto
 
 // TODO need to track how often we're actually generating valid inputs
 
-// TODO seems to be hard to shrink by emitting a tree node - maybe shrink option that replaces a range with an inner range?
+// TODO seems to be hard to shrink by emitting a tree node - maybe need a shrink option that replaces a range with an inner range?
 
 // fn no_fo(arena: *ArenaAllocator, ) !void {
 //     const string = Ascii(1);

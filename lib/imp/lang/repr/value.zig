@@ -12,12 +12,12 @@ pub const Set = union(enum) {
     // TODO this is not an ordering, only works for deepEqual
     pub fn deepCompare(self: Set, other: Set) meta.Ordering {
         if (self == .Finite and other == .Finite) {
-            if (self.Finite.count() != other.Finite.count()) {
+            if (self.Finite.set.count() != other.Finite.set.count()) {
                 return .LessThan;
             }
-            var self_iter = self.Finite.iterator();
+            var self_iter = self.Finite.set.iterator();
             while (self_iter.next()) |kv| {
-                if (!other.Finite.contains(kv.key)) {
+                if (!other.Finite.set.contains(kv.key)) {
                     return .LessThan;
                 }
             }

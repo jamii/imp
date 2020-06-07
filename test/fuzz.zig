@@ -468,8 +468,8 @@ const Core = struct {
 
 const Options = struct {
     seed: u64 = 42,
-    fuzz_iterations: usize = 10_000,
-    shrink_iterations: usize = 10_000,
+    fuzz_iterations: usize = 100_000,
+    shrink_iterations: usize = 100_000,
 };
 
 fn fuzz(allocator: *Allocator, options: Options, generator: var, tester: var) error{FuzzFailed} ! void {

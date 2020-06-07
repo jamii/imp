@@ -468,6 +468,7 @@ const Core = struct {
 
 const Options = struct {
     seed: u64 = 42,
+    max_bytes: usize = 10_000,
     fuzz_iterations: usize = 100_000,
     shrink_iterations: usize = 100_000,
 };
@@ -479,7 +480,7 @@ fn fuzz(allocator: *Allocator, options: Options, generator: var, tester: var) er
     while (fuzz_iteration < options.fuzz_iterations) : (fuzz_iteration += 1) {
         // generate some random bytes
         var bytes = ArrayList(u8).init(allocator);
-        var num_bytes = random.uintLessThan(usize, fuzz_iteration + 1);
+        var num_bytes = random.uintLessThan(usize, @divTrunc(options.max_bytes * fuzz_iteration, options.fuzz_iterations) + 1);
         while (num_bytes > 0) : (num_bytes -= 1) {
             bytes.append(random.int(u8)) catch fuzz_panic();
         }

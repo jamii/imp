@@ -16,7 +16,7 @@ pub const Expr = union(enum) {
     Name: Name,
     Negate: *const Expr,
     When: When,
-    Abstract: Abstract,
+    Arg: Arg,
     Apply: Pair,
     Box: *const Expr,
     Annotate: Annotate,
@@ -64,13 +64,9 @@ pub const Expr = union(enum) {
             .Equal => try out_stream.writeAll("="),
             .Name => |name| try out_stream.writeAll(name),
             .When => try out_stream.writeAll("when"),
-            .Abstract => |abstract| {
-                try out_stream.writeAll("\\ ");
-                for (abstract.args) |arg| {
-                    try arg.dumpInto(out_stream);
-                    try out_stream.writeAll(" ");
-                }
-                try out_stream.writeAll("->");
+            .Arg => |arg| {
+                try out_stream.writeAll("?");
+                try arg.dumpInto(out_stream);
             },
             .Apply => try out_stream.writeAll("apply"),
             .Box => try out_stream.writeAll("[]"),
@@ -97,21 +93,24 @@ pub const When = struct {
     true_branch: *const Expr,
 };
 
-pub const Abstract = struct {
-    args: []const Arg,
-    body: *const Expr,
-};
-
 pub const Arg = struct {
     name: Name,
     unbox: bool,
+};
 
-    fn dumpInto(self: Arg, out_stream: var) anyerror!void {
+pub const Abstract = struct {
+    name: Name,
+    unbox: bool,
+    body: *const Expr,
+
+    fn dumpInto(self: Abstract, out_stream: var) anyerror!void {
+        try out_stream.writeAll("?");
         if (self.unbox) {
             try std.fmt.format(out_stream, "[{}]", .{self.name});
         } else {
             try std.fmt.format(out_stream, "{}", .{self.name});
         }
+        try self.body.dumpInto(out_stream);
     }
 };
 

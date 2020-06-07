@@ -267,14 +267,6 @@ const Syntax = struct {
         }
     );
 
-    const Abstract = Struct(
-        imp.lang.repr.syntax.Abstract,
-        .{
-            .args = Slice(Arg, 1),
-            .body = PtrExpr,
-        }
-    );
-
     const Arg = Struct(
         imp.lang.repr.syntax.Arg,
         .{
@@ -329,7 +321,7 @@ const Syntax = struct {
             .Equal = Pair,
             .Name = Name,
             .When = When,
-            .Abstract = Abstract,
+            .Arg = Arg,
             .Apply = Pair,
             .Box = PtrExpr,
             .Annotate = Annotate,

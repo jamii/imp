@@ -38,13 +38,13 @@ a
 type: [number]
 value: [expr #0 with scope]
 
-let foo = \ a -> a in
+let foo = ?a . a in
 foo 1
 ---
 type: number
 value: 1
 
-let foo = \ a b -> a . b in
+let foo = ?a . ?b . a . b in
 foo 1 2
 ---
 type: number . number
@@ -107,7 +107,7 @@ a + b | c
 ---
 Parse error: Ambiguous precedence for Token{ .Add = void } vs Token{ .Union = void }
 
-\ a [b] -> a | b . c
+?a . ?[b] . (a | b) . c
 ---
 Desugar error: Name not in scope: c
 
@@ -141,31 +141,30 @@ a . a
 type: number . text . number . text
 value: 1 . "foo" . 1 . "foo"
 
-// TODO
-let foo = \ a b -> a = b in
+let foo = ?a . ?b . (a = b) in
 foo 1 1
 ---
 type: maybe
 value: some
 
-// TODO
-let foo = \ a b -> a = b in
+let foo = ?a . ?b . (a = b) in
 foo 1 2
 ---
 type: maybe
 value: none
 
-let foo = \ a -> [\ b -> a . b] in
-foo 1 \ [bar] ->
-bar 2
+let foo = ?a . [?b . a . b] in
+foo 1 (?[bar] . (
+  bar 2
+))
 ---
 type: number . number
 value: 1 . 2
 
-let foo1 = \ a -> [\ b -> a . b] in
-let foo2 = \ a -> [\ b -> a . b] in
+let foo1 = ?a . [?b . a . b] in
+let foo2 = ?a . [?b . a . b] in
 let bar = (foo1 1) | (foo2 2) in
-bar \ [f] -> f 3
+bar (?[f] . (f 3))
 ---
 Analyze error: TODO type unions are not implemented yet (in unionScalar ScalarType{ .Box = SetType{ .Lazy = LazySetType{ .expr = Expr{ ... }, .scope = ScalarType@1de4690 } } } ScalarType{ .Box = SetType{ .Lazy = LazySetType{ .expr = Expr{ ... }, .scope = ScalarType@1de4c30 } } })
 
@@ -175,34 +174,43 @@ foo foo
 type: maybe
 value: some
 
-let foo = \ a b -> a . b in
+let foo = ?a . ?b . a . b in
 foo foo
 ---
 Analyze error: Cannot apply two maybe-infinite sets: SetType{ .Lazy = LazySetType{ .expr = Expr{ .Abstract = Expr{ ... } }, .scope = ScalarType@0 } } vs SetType{ .Lazy = LazySetType{ .expr = Expr{ .Abstract = Expr{ ... } }, .scope = ScalarType@0 } }
 
-let foo = \ a b -> a . b in
+let foo = ?a . ?b . a . b in
 foo = 1
 ---
 Analyze error: Cannot equal one or more maybe-infinite sets
 
-let foo = \ a b -> a . b in
+let foo = ?a . ?b . a . b in
 (foo | foo) 1 2
 ---
 type: number . number
 value: 1 . 2
 
-when (\ a -> none) then 1
+when (?a . none) then 1
 ---
 Analyze error: The condition of `when` must have type `maybe`, found SetType{ .Lazy = LazySetType{ .expr = Expr{ .Abstract = Expr{ ... } }, .scope = ScalarType@0 } }
 
-let foo = \ a b -> a = b in
+let foo = ?a . ?b . (a = b) in
 (foo . 1 . 2) 0 0 1 2
 ---
 type: maybe
 value: some
 
-let foo = \ a b -> a = b in
+let foo = ?a . ?b . (a = b) in
 (foo . 1 . 2) 0 1 1 2
 ---
 type: maybe
 value: none
+
+?a . ?b . a = b
+---
+Parse error: Ambiguous precedence for Token{ .Product = void } vs Token{ .Equal = void }
+
+// Parses as (?a . ?b . a) | b
+?a . ?b . a | b
+---
+Desugar error: Name not in scope: b

@@ -12,7 +12,7 @@ const syntax = imp.lang.repr.syntax;
 //   text
 //   name
 //   "when" expr "then" expr
-//   "\" arg+ "->" expr
+//   "?" arg "." expr
 //   "[" expr "]"
 //   "#" name expr
 //   "!" expr
@@ -94,7 +94,7 @@ const Token = union(enum) {
     Equal,
     Name: []const u8, // ascii, non-empty
     When, Then,
-    AbstractArgs, AbstractBody,
+    Arg,
     OpenBox, CloseBox,
     Annotate,
 
@@ -122,9 +122,12 @@ const Token = union(enum) {
 
     fn bindsTighterThan(self: Token, other: Token) bool {
         return switch (self) {
-            .Lookup => (other != .Lookup),
-            .Product => (other == .Union),
-            .Multiply, .Divide => (other == .Add) or (other == .Subtract),
+            .Lookup => other != .Lookup,
+            // we want:
+            //   ?a.?b.c == ?a.(?b.c)
+            // so bindsTighterThan(.Product, .Product) = true
+            .Product => other == .Union or other == .Product,
+            .Multiply, .Divide => other == .Add or other == .Subtract,
             else => false,
         };
     }
@@ -314,16 +317,8 @@ const Parser = struct {
                 '&' => return Token{.Intersect={}},
                 '.' => return Token{.Product={}},
                 '=' => return Token{.Equal={}},
-                '\\' => return Token{.AbstractArgs={}},
-                '-' => {
-                    const position = self.position;
-                    if ((try self.nextAsciiChar()) orelse 0 == '>') {
-                        return Token{.AbstractBody={}};
-                    } else {
-                        self.position = position;
-                        return Token{.Subtract={}};
-                    }
-                },
+                '?' => return Token{.Arg={}},
+                '-' => return Token{.Subtract={}},
                 '[' => return Token{.OpenBox={}},
                 ']' => return Token{.CloseBox={}},
                 '#' => return Token{.Annotate={}},
@@ -426,29 +421,28 @@ const Parser = struct {
                 const true_branch = try self.parseExpr();
                 return self.store.putSyntax(.{.When=.{.condition=condition,.true_branch=true_branch}}, start, self.position);
             },
-            // "\" arg+ "->" expr
-            .AbstractArgs => {
-                var args = ArrayList(syntax.Arg).init(&self.store.arena.allocator);
-                while (true) {
-                    const arg_start = self.position;
-                    const arg_token = try self.nextToken();
-                    // arg = name | "[" name "]"
+            // syntax is:
+            //   expr = ... | "?" arg "." expr
+            // but we parse as:
+            //   expr = ... | "?" arg
+            // and disambiguate later so that we can make `?arg . expr` bind exactly as tightly as `expr . expr`
+            .Arg => {
+                const arg_start = self.position;
+                const arg_token = try self.nextToken();
+                const arg = arg: {
                     switch (arg_token) {
-                        .Name => |name| try args.append(.{.name=name, .unbox=false}),
+                        .Name => |name| {
+                            break :arg syntax.Arg{.name=name, .unbox=false};
+                        },
                         .OpenBox => {
                             const name = (try self.expect(.Name)).Name;
-                            try args.append(.{.name=name, .unbox=true});
                             _ = try self.expect(.CloseBox);
+                            break :arg syntax.Arg{.name=name, .unbox=true};
                         },
-                        .AbstractBody => break,
-                        else => return self.setError(arg_start, "Expected name or [ or ->, found {}", .{arg_token}),
+                        else => return self.setError(start, "Expected ?name or ?[name], found {}", .{arg_token}),
                     }
-                }
-                if (args.items.len == 0) {
-                    return self.setError(start, "Abstract must have at least one arg", .{});
-                }
-                const body = try self.parseExpr();
-                return self.store.putSyntax(.{.Abstract=.{.args=args.items, .body=body}}, start, self.position);
+                };
+                return self.store.putSyntax(.{.Arg=arg}, start, self.position);
             },
             // "[" expr "]"
             .OpenBox => {

@@ -70,20 +70,28 @@ const Desugarer = struct {
                         .right = try self.desugar(pair.right),
                     }}
             ),
-            .Product => |pair|
-                try self.putCore(
-                    .{.Product = .{
-                        .left = try self.desugar(pair.left),
-                        .right = try self.desugar(pair.right),
-                    }}
-            ),
+            .Product => |pair| product: {
+                if (pair.left.* == .Arg) {
+                    // this is parsed late because we want `?name . expr` to bind exactly as tightly as `expr . expr`
+                    try self.scope.append(pair.left.Arg);
+                    const body = try self.desugar(pair.right);
+                    _ = self.scope.pop();
+                    break :product try self.putCore(.{.Abstract = body});
+                } else {
+                    break :product try self.putCore(
+                        .{.Product = .{
+                            .left = try self.desugar(pair.left),
+                            .right = try self.desugar(pair.right),
+                    }});
+                }
+            },
             .Equal => |pair|
                 try self.putCore(
                     .{.Equal = .{
                         .left = try self.desugar(pair.left),
                         .right = try self.desugar(pair.right),
                     }}
-                ),
+            ),
             .Name => |name| name: {
                 const args = self.scope.items;
                 var i: usize = 0;
@@ -124,18 +132,9 @@ const Desugarer = struct {
                         .true_branch = try self.desugar(when.true_branch),
                     }}
             ),
-            .Abstract => |abstract| abstract: {
-                for (abstract.args) |arg| {
-                    try self.scope.append(arg);
-                }
-                var body = try self.desugar(abstract.body);
-                for (abstract.args) |_| {
-                    _ = self.scope.pop();
-                    body = try self.putCore(
-                        .{.Abstract = body},
-                    );
-                }
-                break :abstract body;
+            .Arg => {
+                // TODO actually want to put parent expr in message
+                return self.setError("Arg without body: expected ?name.expr or ?[name].expr", .{});
             },
             .Apply => |pair|
                 return self.putCore(
@@ -153,7 +152,7 @@ const Desugarer = struct {
                     }},
             ),
             .If => |if_| if_: {
-                // `if c t f` => `[c] ([g] -> (when g then t) | (when !g then f))`
+                // `if c t f` => `[c] (?[g] . ((when g then t) | (when !g then f)))`
                 const box_c = try self.desugarBox(if_.condition);
                 try self.scope.append(null); // g
                 const t = try self.desugar(if_.true_branch);
@@ -169,7 +168,7 @@ const Desugarer = struct {
                 break :if_ try self.putCore(.{.Apply = .{.left=box_c, .right=abstract}});
             },
             .Let => |let| let: {
-                // `let n = v in b` => `[v] ([n] -> b)`
+                // `let n = v in b` => `[v] (?[n] . b)`
                 const box_v = try self.desugarBox(let.value);
                 try self.scope.append(syntax.Arg{.name=let.name, .unbox=true});
                 const b = try self.desugar(let.body);
@@ -178,7 +177,7 @@ const Desugarer = struct {
                 break :let try self.putCore(.{.Apply=.{.left=box_v, .right=abstract}});
             },
             .Lookup => |lookup| lookup: {
-                // `a:b` => `(a "b") ([g] -> g)`
+                // `a:b` => `(a "b") (?[g] . g)`
                 const a = try self.desugar(lookup.value);
                 const b = try self.putCore(.{.Scalar = .{.Text = lookup.name}});
                 const apply_ab = try self.putCore(.{.Apply = .{.left=a, .right=b}});

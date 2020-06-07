@@ -79,6 +79,7 @@ pub const Scalar = union(enum) {
 
     fn dumpInto(self: Scalar, out_stream: var) anyerror!void {
         switch (self) {
+            // TODO proper escaping
             .Text => |text| try std.fmt.format(out_stream, "\"{s}\"", .{text}),
             .Number => |number| try std.fmt.format(out_stream, "{d}", .{number}),
             .Box => |box| {

@@ -81,7 +81,89 @@ pub const ErrorInfo = struct {
 
 // --------------------------------------------------------------------------------
 
-const Token = union(enum) {
+const TokenTag = enum {
+    // core
+    OpenGroup, CloseGroup,
+    None,
+    Some,
+    Number,
+    Text,
+    Union,
+    Intersect,
+    Product,
+    Equal,
+    Name,
+    When, Then,
+    Arg,
+    OpenBox, CloseBox,
+    Annotate,
+
+    // sugar
+    Negate,
+    If, Else,
+    Let, In,
+    Lookup,
+
+    // natives
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
+
+    // not an actual token but used for precedence
+    Apply,
+
+    // not matched by anything but used to check that we parsed everything
+    EOF,
+
+    pub fn format(self: TokenTag, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
+        switch (self) {
+            .OpenGroup => try out_stream.writeAll("`(`"),
+            .CloseGroup => try out_stream.writeAll("`)`"),
+            .None => try out_stream.writeAll("`none`"),
+            .Some => try out_stream.writeAll("`some`"),
+            .Number => try out_stream.writeAll("number"),
+            .Text => try out_stream.writeAll("text"),
+            .Union => try out_stream.writeAll("`|`"),
+            .Intersect => try out_stream.writeAll("`&`"),
+            .Product => try out_stream.writeAll("`.`"),
+            .Equal => try out_stream.writeAll("`=`"),
+            .Name => try out_stream.writeAll("name"),
+            .When => try out_stream.writeAll("`when`"),
+            .Then => try out_stream.writeAll("`then`"),
+            .Arg => try out_stream.writeAll("`?`"),
+            .OpenBox => try out_stream.writeAll("`[`"),
+            .CloseBox => try out_stream.writeAll("`]`"),
+            .Annotate => try out_stream.writeAll("`#`"),
+
+            .Negate => try out_stream.writeAll("`!`"),
+            .If => try out_stream.writeAll("`if`"),
+            .Else => try out_stream.writeAll("`else`"),
+            .Let => try out_stream.writeAll("`let`"),
+            .In => try out_stream.writeAll("`in`"),
+            .Lookup => try out_stream.writeAll("`:`"),
+
+            .Add => try out_stream.writeAll("`+`"),
+            .Subtract => try out_stream.writeAll("`-`"),
+            .Multiply => try out_stream.writeAll("`*`"),
+            .Divide => try out_stream.writeAll("`/`"),
+            .LessThan => try out_stream.writeAll("`<`"),
+            .LessThanOrEqual => try out_stream.writeAll("`<=`"),
+            .GreaterThan => try out_stream.writeAll("`>`"),
+            .GreaterThanOrEqual => try out_stream.writeAll("`>=`"),
+
+            .Apply => try out_stream.writeAll("` `"),
+
+            .EOF => try out_stream.writeAll("end of file"),
+        }
+    }
+};
+
+const Token = union(TokenTag) {
     // core
     OpenGroup, CloseGroup,
     None,
@@ -130,6 +212,17 @@ const Token = union(enum) {
             .Multiply, .Divide => other == .Add or other == .Subtract,
             else => false,
         };
+    }
+
+    pub fn format(self: Token, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
+        try (std.meta.activeTag(self)).format(fmt, options, out_stream);
+        switch (self) {
+            .Number => |number| try std.fmt.format(out_stream, " `{d}`", .{number}),
+            // TODO proper escaping
+            .Text => |text| try std.fmt.format(out_stream, " `\"{s}\"`", .{text}),
+            .Name => |name| try std.fmt.format(out_stream, " `{s}`", .{name}),
+            else => {},
+        }
     }
 };
 
@@ -383,7 +476,7 @@ const Parser = struct {
         }
     }
 
-    fn expect(self: *Parser, expected: @TagType(Token)) ! Token {
+    fn expect(self: *Parser, expected: TokenTag) ! Token {
         const start = self.position;
         const found = try self.nextToken();
         if (std.meta.activeTag(found) != expected) {

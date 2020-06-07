@@ -3,10 +3,10 @@
 type: number
 value: 42
 
-3.14
+3.14 . 4.5
 ---
-type: number
-value: 3.14
+type: number . number
+value: 3.14 . 4.5
 
 "foo"
 ---
@@ -93,19 +93,19 @@ value: 1
 
 a & b | c
 ---
-Parse error: Ambiguous precedence for Token{ .Intersect = void } vs Token{ .Union = void }
+Parse error: Ambiguous precedence for `&` vs `|`
 
 a * b / c
 ---
-Parse error: Ambiguous precedence for Token{ .Multiply = void } vs Token{ .Divide = void }
+Parse error: Ambiguous precedence for `*` vs `/`
 
 a | b c
 ---
-Parse error: Ambiguous precedence for Token{ .Union = void } vs Token{ .Apply = void }
+Parse error: Ambiguous precedence for `|` vs ` `
 
 a + b | c
 ---
-Parse error: Ambiguous precedence for Token{ .Add = void } vs Token{ .Union = void }
+Parse error: Ambiguous precedence for `+` vs `|`
 
 ?a . ?[b] . (a | b) . c
 ---
@@ -208,9 +208,13 @@ value: none
 
 ?a . ?b . a = b
 ---
-Parse error: Ambiguous precedence for Token{ .Product = void } vs Token{ .Equal = void }
+Parse error: Ambiguous precedence for `.` vs `=`
 
 // Parses as (?a . ?b . a) | b
 ?a . ?b . a | b
 ---
 Desugar error: Name not in scope: b
+
+let 3 = 4 in 5
+---
+Parse error: Expected name, found number `3`

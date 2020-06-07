@@ -166,7 +166,7 @@ let foo2 = ?a . [?b . a . b] in
 let bar = (foo1 1) | (foo2 2) in
 bar (?[f] . (f 3))
 ---
-Analyze error: TODO type unions are not implemented yet (in unionScalar ScalarType{ .Box = SetType{ .Lazy = LazySetType{ .expr = Expr{ ... }, .scope = ScalarType@1de4690 } } } ScalarType{ .Box = SetType{ .Lazy = LazySetType{ .expr = Expr{ ... }, .scope = ScalarType@1de4c30 } } })
+Analyze error: TODO type unions are not implemented yet: [(type of expr 3 with scope number)] | [(type of expr 10 with scope [(type of expr 5 with scope)] number)]
 
 let foo = 1 . 1 | 2 . 2 in
 foo foo
@@ -177,12 +177,12 @@ value: some
 let foo = ?a . ?b . a . b in
 foo foo
 ---
-Analyze error: Cannot apply two maybe-infinite sets: SetType{ .Lazy = LazySetType{ .expr = Expr{ .Abstract = Expr{ ... } }, .scope = ScalarType@0 } } vs SetType{ .Lazy = LazySetType{ .expr = Expr{ .Abstract = Expr{ ... } }, .scope = ScalarType@0 } }
+Analyze error: Cannot apply two maybe-infinite sets: (type of expr 4 with scope) applied to (type of expr 4 with scope)
 
 let foo = ?a . ?b . a . b in
 foo = 1
 ---
-Analyze error: Cannot equal one or more maybe-infinite sets
+Analyze error: Cannot equal one or more maybe-infinite sets: (type of expr 4 with scope) = number
 
 let foo = ?a . ?b . a . b in
 (foo | foo) 1 2
@@ -192,7 +192,7 @@ value: 1 . 2
 
 when (?a . none) then 1
 ---
-Analyze error: The condition of `when` must have type `maybe`, found SetType{ .Lazy = LazySetType{ .expr = Expr{ .Abstract = Expr{ ... } }, .scope = ScalarType@0 } }
+Analyze error: The condition of `when` must have type `maybe`, found (type of expr 1 with scope)
 
 let foo = ?a . ?b . (a = b) in
 (foo . 1 . 2) 0 0 1 2

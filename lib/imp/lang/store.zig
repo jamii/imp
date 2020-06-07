@@ -23,11 +23,13 @@ pub fn ExprAndMeta(comptime Expr: type, comptime Meta: type) type {
 }
 
 pub const Store = struct {
+    source: []const u8,
     arena: *ArenaAllocator,
     next_expr_id: usize,
 
-    pub fn init(arena: *ArenaAllocator) Store {
+    pub fn init(source: []const u8, arena: *ArenaAllocator) Store {
         return Store{
+            .source = source,
             .arena = arena,
             // .types = DeepHashMap(type_.TypeOf, type_.SetType).init(&arena.allocator),
             .next_expr_id = 0,
@@ -66,5 +68,15 @@ pub const Store = struct {
 
     pub fn getCoreMeta(expr: *const core.Expr) *const CoreMeta {
         return &@fieldParentPtr(ExprAndMeta(core.Expr, CoreMeta), "expr", expr).meta;
+    }
+
+    pub fn getSyntaxSource(self: *Store, expr: *const syntax.Expr) []const u8 {
+        const meta = Store.getSyntaxMeta(expr);
+        return self.source[meta.start..meta.end];
+    }
+
+    pub fn getCoreSource(self: *Store, expr: *const core.Expr) []const u8 {
+        const meta = Store.getCoreMeta(expr);
+        return self.getSyntaxSource(meta.from);
     }
 };

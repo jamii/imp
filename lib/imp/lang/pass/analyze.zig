@@ -134,7 +134,7 @@ pub const Analyzer = struct {
                 const left = try self.analyze(pair.left, &[0]type_.ScalarType{});
                 const right = try self.analyze(pair.right, &[0]type_.ScalarType{});
                 if (!left.isFinite() or !right.isFinite()) {
-                    return self.setError("Cannot equal one or more maybe-infinite sets", .{});
+                    return self.setError("Cannot equal one or more maybe-infinite sets: {} = {}", .{left, right});
                 }
                 if (left.Concrete.columns.len != right.Concrete.columns.len) {
                     return self.setError("Mismatched arities: {} vs {}", .{left.Concrete.columns.len, right.Concrete.columns.len});
@@ -235,7 +235,7 @@ pub const Analyzer = struct {
                 var left = try self.analyze(pair.left, &[0]type_.ScalarType{});
                 var right = try self.analyze(pair.right, &[0]type_.ScalarType{});
                 if (!left.isFinite() and !right.isFinite()) {
-                    return self.setError("Cannot apply two maybe-infinite sets: {} vs {}", .{left, right});
+                    return self.setError("Cannot apply two maybe-infinite sets: {} applied to {}", .{left, right});
                 }
                 if (!right.isFinite()) {
                     std.mem.swap(*const core.Expr, &pair_left, &pair_right);
@@ -306,7 +306,7 @@ pub const Analyzer = struct {
         if (meta.deepEqual(a,b)) {
             return a;
         } else {
-            return self.setError("TODO type unions are not implemented yet (in unionScalar {} {})", .{a,b});
+            return self.setError("TODO type unions are not implemented yet: {} | {}", .{a,b});
         }
     }
 

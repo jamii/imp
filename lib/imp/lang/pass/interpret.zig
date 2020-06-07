@@ -310,14 +310,15 @@ const Interpreter = struct {
                 }
             },
             .Apply => |pair| {
+                // analyze without hints first because we don't know how to split the hint between left and right
                 var pair_left = pair.left;
                 var pair_right = pair.right;
-                var left = try self.interpret(pair.left, hint);
-                var right = try self.interpret(pair.right, hint);
-                if (left == .Lazy or right == .Lazy) {
-                    return self.setError(expr, "Cannot apply one or more lazy sets", .{});
+                var left = try self.interpret(pair.left, &[0]value.Scalar{});
+                var right = try self.interpret(pair.right, &[0]value.Scalar{});
+                if (left == .Lazy and right == .Lazy) {
+                    return self.setError(expr, "Cannot apply two lazy sets", .{});
                 }
-                if (right != .Finite) {
+                if (right == .Lazy) {
                     std.mem.swap(*const core.Expr, &pair_left, &pair_right);
                     std.mem.swap(value.Set, &left, &right);
                 }
@@ -355,8 +356,8 @@ const Interpreter = struct {
                         .set = left_set,
                     }};
                 }
-                const arity = left.Finite.arity + right.Finite.arity;
                 const joined_arity = min(left.Finite.arity, right.Finite.arity);
+                const arity = max(left.Finite.arity, right.Finite.arity) - joined_arity;
                 var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 var left_iter = left.Finite.set.iterator();
                 while (left_iter.next()) |lkv| {
@@ -396,7 +397,7 @@ const Interpreter = struct {
             },
             .Native => |native| {
                 switch (native) {
-                    .Add => {
+                    .Add, .Subtract, .Multiply, .Divide => {
                         if (hint.len < 2) {
                             return value.Set{.Lazy = .{
                                 .expr = expr,
@@ -406,7 +407,16 @@ const Interpreter = struct {
                         if (hint[0] != .Number or hint[1] != .Number) {
                             return self.setNativeError(expr, "Inputs to + must be numbers, found {} + {}", .{hint[0], hint[1]});
                         }
-                        const tuple = try self.dupeScalars(&[3]value.Scalar{hint[0], hint[1], .{.Number = hint[0].Number + hint[1].Number}});
+                        if (native == .Divide and hint[1].Number == 0) {
+                            return self.setNativeError(expr, "Divide by 0", .{});
+                        }
+                        const result = switch (native) {
+                            .Add => hint[0].Number + hint[1].Number,
+                            .Subtract => hint[0].Number - hint[1].Number,
+                            .Multiply => hint[0].Number * hint[1].Number,
+                            .Divide => hint[0].Number / hint[1].Number,
+                        };
+                        const tuple = try self.dupeScalars(&[3]value.Scalar{hint[0], hint[1], .{.Number = result}});
                         var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                         _ = try set.put(tuple, {});
                         return value.Set{.Finite = .{

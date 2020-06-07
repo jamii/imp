@@ -59,7 +59,7 @@ pub fn main() anyerror ! void {
             num_tests += 1;
             if (!std.mem.eql(u8, expected, found)) {
                 num_failed += 1;
-                warn("Filename:\n{}\nSource:\n{}\n\nExpected:\n{}\n\nFound:\n{}\n\n---\n\n", .{filename, input, expected, found});
+                warn("Filename:\n\n{}\nSource:\n{}\n\nExpected:\n{}\n\nFound:\n{}\n\n---\n\n", .{filename, input, expected, found});
             }
         }
 

@@ -287,7 +287,7 @@ pub const Analyzer = struct {
             },
             .Native => |native| {
                 break :set_type .{.Concrete = switch (native) {
-                    .Add => .{
+                    .Add, .Subtract, .Multiply, .Divide => .{
                         .abstract_arity = 2,
                         .columns = try self.dupeScalars(&[3]type_.ScalarType{.Number, .Number, .Number}),
                     },

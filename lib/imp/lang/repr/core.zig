@@ -144,4 +144,7 @@ pub const Annotate = struct {
 
 pub const Native = enum {
     Add,
+    Subtract,
+    Multiply,
+    Divide,
 };

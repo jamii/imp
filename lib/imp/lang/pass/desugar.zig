@@ -99,8 +99,14 @@ const Desugarer = struct {
                 }
                 // otherwise look for native
                 break :name try self.putCore(.{.Native = native: {
-                    if (meta.deepEqual(name, "add")) {
+                    if (meta.deepEqual(name, "+")) {
                         break :native .Add;
+                    } else if (meta.deepEqual(name, "-")) {
+                        break :native .Subtract;
+                    }  else if (meta.deepEqual(name, "*")) {
+                        break :native .Multiply;
+                    }  else if (meta.deepEqual(name, "/")) {
+                        break :native .Divide;
                     } else {
                         return self.setError("Name not in scope: {}", .{name});
                     }

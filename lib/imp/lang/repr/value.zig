@@ -83,9 +83,9 @@ pub const Scalar = union(enum) {
             .Number => |number| try std.fmt.format(out_stream, "{d}", .{number}),
             .Box => |box| {
                 // TODO figure out a better way to name these
-                try std.fmt.format(out_stream, "[box #{};", .{Store.getCoreMeta(box.expr).id});
-                for (box.scope) |scalar, i| {
-                    try out_stream.writeAll(if (i == 0) " " else " . ");
+                try std.fmt.format(out_stream, "[expr #{} with scope", .{Store.getCoreMeta(box.expr).id});
+                for (box.scope) |scalar| {
+                    try out_stream.writeAll(" ");
                     try scalar.dumpInto(out_stream);
                 }
                 try out_stream.writeAll("]");
@@ -130,11 +130,11 @@ pub const LazySet = struct {
     }
 
     pub fn dumpInto(self: LazySet, out_stream: var) anyerror ! void {
-        try std.fmt.format(out_stream, "(value_of <expr {}> [", .{Store.getCoreMeta(self.expr).id});
-        for (self.scope) |scalar, i| {
-            try out_stream.writeAll(if (i == 0) " " else " . ");
+        try std.fmt.format(out_stream, "(value of expr {} with scope ", .{Store.getCoreMeta(self.expr).id});
+        for (self.scope) |scalar| {
+            try out_stream.writeAll(" ");
             try scalar.dumpInto(out_stream);
         }
-        try out_stream.writeAll("])");
+        try out_stream.writeAll(")");
     }
 };

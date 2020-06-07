@@ -2,4 +2,4 @@
 
 set -e
 
-time zig test test/fuzz.zig --main-pkg-path ./ --release-fast -lc --test-filter fuzz
+time zig test test/fuzz.zig --main-pkg-path ./ --release-safe -lc --test-filter fuzz

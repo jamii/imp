@@ -19,6 +19,7 @@ pub const Expr = union(enum) {
     Arg: Arg,
     Apply: Pair,
     Box: *const Expr,
+    Fix: Fix,
     Annotate: Annotate,
 
     If: If,
@@ -96,6 +97,11 @@ pub const When = struct {
 pub const Arg = struct {
     name: Name,
     unbox: bool,
+};
+
+pub const Fix = struct {
+    init: *const Expr,
+    next: *const Expr,
 };
 
 pub const Abstract = struct {

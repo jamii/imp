@@ -20,6 +20,7 @@ pub const Expr = union(enum) {
     Abstract: *const Expr,
     Apply: Pair,
     Box: Box,
+    Fix: Fix,
     Annotate: Annotate,
     Native: Native,
 
@@ -112,7 +113,7 @@ pub const Expr = union(enum) {
                 }
             },
             .Annotate => |annotate| try std.fmt.format(out_stream, "# {}", .{annotate.annotation}),
-            // .Native => |native| try out_stream.writeAll(native.name),
+            .Native => |native| try native.dumpInto(out_stream),
         }
         for (self.getChildren().slice()) |child| {
             try child.dumpInto(out_stream, indent+2);
@@ -135,6 +136,11 @@ pub const When = struct {
 pub const Box = struct {
     body: *const Expr,
     scope: []const NameIx,
+};
+
+pub const Fix = struct {
+    init: *const Expr,
+    next: *const Expr,
 };
 
 pub const Annotate = struct {

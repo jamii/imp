@@ -11,11 +11,12 @@ const syntax = imp.lang.repr.syntax;
 //   number
 //   text
 //   name
+//   "!" expr
 //   "when" expr "then" expr
 //   "?" arg "." expr
 //   "[" expr "]"
+//   "fix" expr expr
 //   "#" name expr
-//   "!" expr
 //   "if" expr "then" expr "else" expr
 //   "let" name "=" expr "in" expr
 //   "//" ^"\n" "\n"
@@ -96,6 +97,7 @@ const TokenTag = enum {
     When, Then,
     Arg,
     OpenBox, CloseBox,
+    Fix,
     Annotate,
 
     // sugar
@@ -138,6 +140,7 @@ const TokenTag = enum {
             .Arg => try out_stream.writeAll("`?`"),
             .OpenBox => try out_stream.writeAll("`[`"),
             .CloseBox => try out_stream.writeAll("`]`"),
+            .Fix => try out_stream.writeAll("`fix`"),
             .Annotate => try out_stream.writeAll("`#`"),
 
             .Negate => try out_stream.writeAll("`!`"),
@@ -178,6 +181,7 @@ const Token = union(TokenTag) {
     When, Then,
     Arg,
     OpenBox, CloseBox,
+    Fix,
     Annotate,
 
     // sugar
@@ -461,6 +465,7 @@ const Parser = struct {
                         if (meta.deepEqual(name, "some")) return Token{.Some={}};
                         if (meta.deepEqual(name, "when")) return Token{.When={}};
                         if (meta.deepEqual(name, "then")) return Token{.Then={}};
+                        if (meta.deepEqual(name, "fix")) return Token{.Fix={}};
                         if (meta.deepEqual(name, "if")) return Token{.If={}};
                         if (meta.deepEqual(name, "else")) return Token{.Else={}};
                         if (meta.deepEqual(name, "let")) return Token{.Let={}};
@@ -542,6 +547,12 @@ const Parser = struct {
                 const expr = try self.parseExpr();
                 _ = try self.expect(.CloseBox);
                 return self.store.putSyntax(.{.Box=expr}, start, self.position);
+            },
+            // "fix" expr expr
+            .Fix => {
+                const init = try self.parseExpr();
+                const next = try self.parseExpr();
+                return self.store.putSyntax(.{.Fix=.{.init=init, .next=next}}, start, self.position);
             },
             // "#" name expr
             .Annotate => {

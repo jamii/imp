@@ -107,17 +107,11 @@ const Desugarer = struct {
                 }
                 // otherwise look for native
                 break :name try self.putCore(.{.Native = native: {
-                    if (meta.deepEqual(name, "+")) {
-                        break :native .Add;
-                    } else if (meta.deepEqual(name, "-")) {
-                        break :native .Subtract;
-                    }  else if (meta.deepEqual(name, "*")) {
-                        break :native .Multiply;
-                    }  else if (meta.deepEqual(name, "/")) {
-                        break :native .Divide;
-                    } else {
-                        return self.setError("Name not in scope: {}", .{name});
-                    }
+                    if (meta.deepEqual(name, "+")) break :native .Add;
+                    if (meta.deepEqual(name, "-")) break :native .Subtract;
+                    if (meta.deepEqual(name, "*")) break :native .Multiply;
+                    if (meta.deepEqual(name, "/")) break :native .Divide;
+                    return self.setError("Name not in scope: {}", .{name});
                 }});
 
             },
@@ -144,6 +138,13 @@ const Desugarer = struct {
                     }},
             ),
             .Box => |expr| try self.desugarBox(expr),
+            .Fix => |fix|
+                try self.putCore(
+                    .{.Fix = .{
+                        .init = try self.desugar(fix.init),
+                        .next = try self.desugar(fix.next),
+                    }}
+            ),
             .Annotate => |annotate|
                 try self.putCore(
                     .{.Annotate = .{

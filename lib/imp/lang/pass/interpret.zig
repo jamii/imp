@@ -392,6 +392,7 @@ const Interpreter = struct {
                     .set = set,
                 }};
             },
+            .Fix => TODO(),
             .Annotate => |annotate| {
                 return self.interpret(annotate.body, hint);
             },

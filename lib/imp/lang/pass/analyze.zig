@@ -281,6 +281,7 @@ pub const Analyzer = struct {
                     .columns = try self.dupeScalars(&[1]type_.ScalarType{box_type}),
                 }};
             },
+            .Fix => TODO(),
             .Annotate => |annotate| {
                 // TODO some annotations affect types eg solve
                 break :set_type try self.analyze(annotate.body, hint);

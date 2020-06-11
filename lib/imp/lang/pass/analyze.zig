@@ -157,20 +157,13 @@ pub const Analyzer = struct {
             .UnboxName => |name_ix| {
                 const scalar_type = self.scope.items[self.scope.items.len - 1 - name_ix];
                 switch (scalar_type) {
-                    .Box => |box_type| {
-                        switch (box_type) {
-                            .Lazy => |lazy| {
-                                // try to specialize
-                                const old_scope = self.scope;
-                                defer self.scope = old_scope;
-                                self.scope = try ArrayList(type_.ScalarType).initCapacity(&self.store.arena.allocator, lazy.scope.len);
-                                try self.scope.appendSlice(lazy.scope);
-                                break :set_type try self.analyze(lazy.expr, hint);
-                            },
-                            .Concrete => {
-                                break :set_type box_type;
-                            }
-                        }
+                    .Box => |lazy| {
+                        // try to specialize
+                        const old_scope = self.scope;
+                        defer self.scope = old_scope;
+                        self.scope = try ArrayList(type_.ScalarType).initCapacity(&self.store.arena.allocator, lazy.scope.len);
+                        try self.scope.appendSlice(lazy.scope);
+                        break :set_type try self.analyze(lazy.expr, hint);
                     },
                     else => {
                         return self.setError("Don't know what type will result from unboxing type {}", .{scalar_type});
@@ -273,8 +266,11 @@ pub const Analyzer = struct {
                 }};
             },
             .Box => |box| {
-                // hint for expr tells us nothing about box body
-                const body_type = try self.analyze(box.body, &[0]type_.ScalarType{});
+                // ignore actual body type because box types are nominal
+                const body_type = type_.LazySetType{
+                    .expr = box.body,
+                    .scope = try self.dupeScalars(self.scope.items),
+                };
                 const box_type = type_.ScalarType{.Box = body_type};
                 break :set_type .{.Concrete = .{
                     .abstract_arity = 0,

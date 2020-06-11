@@ -22,7 +22,7 @@ value: "foo"bar"
 // TODO expand boxes
 [1]
 ---
-type: [number]
+type: [(type of expr 0 with scope)]
 value: [expr #0 with scope]
 
 let a = 1 in
@@ -35,7 +35,7 @@ value: 1
 let a = [1] in
 a
 ---
-type: [number]
+type: [(type of expr 0 with scope)]
 value: [expr #0 with scope]
 
 let foo = ?a . a in

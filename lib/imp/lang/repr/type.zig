@@ -88,7 +88,7 @@ pub const LazySetType = struct {
 pub const ScalarType = union(enum) {
     Text,
     Number,
-    Box: SetType,
+    Box: LazySetType,
 
     pub fn dumpInto(self: ScalarType, out_stream: var) error{OutOfMemory}!void {
         switch (self) {

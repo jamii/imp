@@ -353,7 +353,7 @@ const Interpreter = struct {
                             }};
                         }
                         if (left_arity_o) |left_arity| {
-                            if (left_arity != left_part.Finite.arity and left_part.Finite.count() > 0) {
+                            if (left_arity != left_part.Finite.arity and left_part.Finite.set.count() > 0) {
                                 return self.setError(expr, "Apply resulted in unions over sets of different arities: {} vs {}", .{left_arity, left_part.Finite.arity});
                             }
                         } else {

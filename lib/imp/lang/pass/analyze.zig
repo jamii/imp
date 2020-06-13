@@ -320,8 +320,8 @@ pub const Analyzer = struct {
                     try self.time.append(.Iteration);
                     const body_type = try self.analyze(fix.next, fix_hint);
                     _ = self.time.pop();
-                    if (!body_type.isFinite()) {
-                        return self.setError("The body for fix must have finite type, found {}", .{init_type});
+                    if (body_type != .Concrete or body_type.Concrete.abstract_arity > 1) {
+                        return self.setError("The body for fix must have finite type, found {}", .{body_type});
                     }
                     if (body_type.Concrete.columns.len == 0) {
                         return self.setError("The body for fix cannot have type maybe", .{});

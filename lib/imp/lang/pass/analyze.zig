@@ -9,6 +9,7 @@ pub fn analyze(store: *Store, expr: *const core.Expr, error_info: *?ErrorInfo) E
     var analyzer = Analyzer{
         .store = store,
         .scope = ArrayList(type_.ScalarType).init(&store.arena.allocator),
+        .time = ArrayList(type_.TimeType).init(&store.arena.allocator),
         .error_info = error_info,
     };
     return analyzer.analyze(expr, &[0]type_.ScalarType{});
@@ -32,6 +33,7 @@ pub const ErrorInfo = struct {
 pub const Analyzer = struct {
     store: *Store,
     scope: ArrayList(type_.ScalarType),
+    time: ArrayList(type_.TimeType),
     error_info: *?ErrorInfo,
 
     fn setError(self: *Analyzer, comptime fmt: []const u8, args: var) Error {
@@ -75,6 +77,7 @@ pub const Analyzer = struct {
                     break :set_type .{.Lazy = .{
                         .expr = expr,
                         .scope = try self.dupeScalars(self.scope.items),
+                        .time = try self.dupeTime(self.time.items),
                     }};
                 }
                 if (left.Concrete.columns.len != right.Concrete.columns.len) {
@@ -99,15 +102,17 @@ pub const Analyzer = struct {
                 const left = try self.analyze(pair.left, hint);
                 if (left == .Lazy) {
                     break :set_type .{.Lazy = .{
-                        .expr=expr,
-                        .scope= try self.dupeScalars(self.scope.items)
+                        .expr = expr,
+                        .scope = try self.dupeScalars(self.scope.items),
+                        .time = try self.dupeTime(self.time.items),
                     }};
                 }
                 const right = try self.analyze(pair.right, hint[min(hint.len, left.Concrete.columns.len)..]);
                 if (right == .Lazy) {
                     break :set_type .{.Lazy = .{
-                        .expr=expr,
-                        .scope= try self.dupeScalars(self.scope.items)
+                        .expr = expr,
+                        .scope = try self.dupeScalars(self.scope.items),
+                        .time = try self.dupeTime(self.time.items),
                     }};
                 }
                 const abstract_arity = if (right.Concrete.abstract_arity > 0)
@@ -157,13 +162,22 @@ pub const Analyzer = struct {
             .UnboxName => |name_ix| {
                 const scalar_type = self.scope.items[self.scope.items.len - 1 - name_ix];
                 switch (scalar_type) {
-                    .Box => |lazy| {
-                        // try to specialize
-                        const old_scope = self.scope;
-                        defer self.scope = old_scope;
-                        self.scope = try ArrayList(type_.ScalarType).initCapacity(&self.store.arena.allocator, lazy.scope.len);
-                        try self.scope.appendSlice(lazy.scope);
-                        break :set_type try self.analyze(lazy.expr, hint);
+                    .Box => |box| {
+                        if (box.concrete) |concrete| {
+                            // only reachable when analyzing `fix`
+                            break :set_type .{.Concrete = concrete};
+                        } else {
+                            // try to specialize
+                            const old_scope = self.scope;
+                            defer self.scope = old_scope;
+                            self.scope = try ArrayList(type_.ScalarType).initCapacity(&self.store.arena.allocator, box.lazy.scope.len);
+                            try self.scope.appendSlice(box.lazy.scope);
+                            const old_time = self.time;
+                            defer self.time = old_time;
+                            self.time = try ArrayList(type_.TimeType).initCapacity(&self.store.arena.allocator, box.lazy.time.len);
+                            try self.time.appendSlice(box.lazy.time);
+                            break :set_type try self.analyze(box.lazy.expr, hint);
+                        }
                     },
                     else => {
                         return self.setError("Don't know what type will result from unboxing type {}", .{scalar_type});
@@ -194,6 +208,7 @@ pub const Analyzer = struct {
                     break :set_type .{.Lazy = .{
                         .expr = expr,
                         .scope = try self.dupeScalars(self.scope.items),
+                        .time = try self.dupeTime(self.time.items),
                     }};
                 } else {
                     // if we have a hint we can use it to specialize the body
@@ -216,6 +231,7 @@ pub const Analyzer = struct {
                             break :set_type .{.Lazy = .{
                                 .expr = expr,
                                 .scope = try self.dupeScalars(self.scope.items),
+                                .time = try self.dupeTime(self.time.items),
                             }};
                         },
                     }
@@ -246,6 +262,7 @@ pub const Analyzer = struct {
                     break :set_type .{.Lazy = .{
                         .expr = expr,
                         .scope = try self.dupeScalars(self.scope.items),
+                        .time = try self.dupeTime(self.time.items),
                     }};
                 }
                 const joined_arity = min(left.Concrete.columns.len, right.Concrete.columns.len);
@@ -267,17 +284,67 @@ pub const Analyzer = struct {
             },
             .Box => |box| {
                 // ignore actual body type because box types are nominal
-                const body_type = type_.LazySetType{
-                    .expr = box.body,
-                    .scope = try self.dupeScalars(self.scope.items),
-                };
-                const box_type = type_.ScalarType{.Box = body_type};
+                const box_type = type_.ScalarType{.Box = .{
+                    .lazy = .{
+                        .expr = box.body,
+                        .scope = try self.dupeScalars(self.scope.items),
+                        .time = try self.dupeTime(self.time.items),
+                    },
+                    .concrete = null,
+                }};
                 break :set_type .{.Concrete = .{
                     .abstract_arity = 0,
                     .columns = try self.dupeScalars(&[1]type_.ScalarType{box_type}),
                 }};
             },
-            .Fix => TODO(),
+            .Fix => |fix| {
+                const init_type = try self.analyze(fix.init, &[0]type_.ScalarType{});
+                if (!init_type.isFinite()) {
+                    return self.setError("The initial value for fix must have finite type, found {}", .{init_type});
+                }
+
+                var fix_hint = try self.store.arena.allocator.alloc(type_.ScalarType, 1);
+                var fix_type = init_type;
+                var fix_box_type = type_.BoxType{
+                    .lazy = type_.LazySetType{
+                        .expr = expr,
+                        .scope = try self.dupeScalars(self.scope.items),
+                        .time = try self.dupeTime(self.time.items),
+                    },
+                    .concrete = init_type.Concrete,
+                };
+                var max_iterations: usize = 100;
+                while (max_iterations > 0) : (max_iterations -= 1) {
+                    // next looks like `?[prev] . stuff` so need to add self type as hint
+                    fix_hint[0] = .{.Box = fix_box_type};
+                    try self.time.append(.Iteration);
+                    const body_type = try self.analyze(fix.next, fix_hint);
+                    _ = self.time.pop();
+                    if (!body_type.isFinite()) {
+                        return self.setError("The body for fix must have finite type, found {}", .{init_type});
+                    }
+                    if (body_type.Concrete.columns.len == 0) {
+                        return self.setError("The body for fix cannot have type maybe", .{});
+                    }
+                    if (body_type.Concrete.columns[0] != .Box or !meta.deepEqual(body_type.Concrete.columns[0].Box, fix_box_type)) {
+                        return self.setError("The body for fix must be able to be applied to it's own result, found {}", .{body_type});
+                    }
+                    // drop the type for `prev`
+                    const fix_columns = body_type.Concrete.columns[1..];
+                    if (meta.deepEqual(fix_type.Concrete.columns, fix_columns)) {
+                        // reached fixpoint
+                        return fix_type;
+                    }
+                    if (fix_type.Concrete.columns.len != fix_columns.len) {
+                        return self.setError("The body for fix must have constant arity, changed from {} to {}", .{fix_type.Concrete.columns.len, fix_columns.len});
+                    }
+                    for (fix_columns) |column, i| {
+                        fix_type.Concrete.columns[i] = try self.unionScalar(fix_type.Concrete.columns[i], column);
+                    }
+                    fix_box_type.concrete = fix_type.Concrete;
+                }
+                return self.setError("Type of fixpoint failed to converge, reached {}", .{fix_type});
+            },
             .Annotate => |annotate| {
                 // TODO some annotations affect types eg solve
                 break :set_type try self.analyze(annotate.body, hint);
@@ -297,6 +364,10 @@ pub const Analyzer = struct {
 
     fn dupeScalars(self: *Analyzer, scope: []const type_.ScalarType) Error ! []type_.ScalarType {
         return std.mem.dupe(&self.store.arena.allocator, type_.ScalarType, scope);
+    }
+
+    fn dupeTime(self: *Analyzer, time: []const type_.TimeType) ! []const type_.TimeType {
+        return std.mem.dupe(&self.store.arena.allocator, type_.TimeType, time);
     }
 
     fn unionScalar(self: *Analyzer, a: type_.ScalarType, b: type_.ScalarType) Error ! type_.ScalarType {

@@ -57,6 +57,7 @@ pub const ConcreteSetType = struct {
 pub const LazySetType = struct {
     expr: *const core.Expr,
     scope: []const ScalarType,
+    time: []const TimeType,
 
     // Equality on expr id and scope value
 
@@ -85,21 +86,43 @@ pub const LazySetType = struct {
     }
 };
 
+pub const TimeType = enum {
+    Iteration,
+
+    // this is here because can't use slices on zero-sized types
+    Unused,
+};
+
 pub const ScalarType = union(enum) {
     Text,
     Number,
-    Box: LazySetType,
+    Box: BoxType,
 
     pub fn dumpInto(self: ScalarType, out_stream: var) error{OutOfMemory}!void {
         switch (self) {
             .Text => try out_stream.writeAll("text"),
             .Number => try out_stream.writeAll("number"),
-            .Box => |set_type| {
+            .Box => |box_type| {
                 try out_stream.writeAll("[");
-                try set_type.dumpInto(out_stream);
+                try box_type.dumpInto(out_stream);
                 try out_stream.writeAll("]");
             },
         }
+    }
+
+    pub fn format(self: ScalarType, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
+        try self.dumpInto(out_stream);
+    }
+};
+
+pub const BoxType = struct {
+    // always need a lazy type because box types are nominal - determined by the expr itself
+    lazy: LazySetType,
+    // need to store the concrete type when analyzing fixpoints to avoid infinite recursion
+    concrete: ?ConcreteSetType,
+
+    pub fn dumpInto(self: BoxType, out_stream: var) error{OutOfMemory}!void {
+        try self.lazy.dumpInto(out_stream);
     }
 
     pub fn format(self: ScalarType, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {

@@ -23,7 +23,7 @@ value: "foo"bar"
 [1]
 ---
 type: [(type of expr #0 with scope ())]
-value: [expr #0 with scope ()]
+value: [(value of expr #0 with scope ())]
 
 let a = 1 in
 a
@@ -36,7 +36,7 @@ let a = [1] in
 a
 ---
 type: [(type of expr #0 with scope ())]
-value: [expr #0 with scope ()]
+value: [(value of expr #0 with scope ())]
 
 let foo = ?a . a in
 foo 1

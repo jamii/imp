@@ -75,7 +75,7 @@ pub const FiniteSet = struct {
 pub const Scalar = union(enum) {
     Text: []const u8, // valid utf8
     Number: f64,
-    Box: Box,
+    Box: LazySet,
 
     fn dumpInto(self: Scalar, out_stream: var) anyerror!void {
         switch (self) {
@@ -83,39 +83,20 @@ pub const Scalar = union(enum) {
             .Text => |text| try std.fmt.format(out_stream, "\"{s}\"", .{text}),
             .Number => |number| try std.fmt.format(out_stream, "{d}", .{number}),
             .Box => |box| {
-                // TODO figure out a better way to name these
-                try std.fmt.format(out_stream, "[expr #{} with scope (", .{Store.getCoreMeta(box.expr).id});
-                for (box.scope) |scalar, i| {
-                    try out_stream.writeAll(if (i == 0) "" else " . ");
-                    try scalar.dumpInto(out_stream);
-                }
-                try out_stream.writeAll(")]");
+                try out_stream.writeAll("[");
+                try box.dumpInto(out_stream);
+                try out_stream.writeAll("]");
             }
         }
     }
 };
 
-pub const Box = struct {
-    expr: *const core.Expr,
-    scope: Tuple,
-
-    // Equality on expr id and scope value
-
-    pub fn deepHashInto(hasher: var, self: Box) void {
-        hasher.update(std.mem.asBytes(&Store.getCoreMeta(self.expr).id));
-        meta.deepHashInto(hasher, self.scope);
-    }
-
-    pub fn deepCompare(self: Box, other: Box) meta.Ordering {
-        const ordering = meta.deepCompare(Store.getCoreMeta(self.expr).id, Store.getCoreMeta(other.expr).id);
-        if (ordering != .Equal) return ordering;
-        return meta.deepCompare(self.scope, other.scope);
-    }
-};
+pub const Time = usize;
 
 pub const LazySet = struct {
     expr: *const core.Expr,
     scope: Tuple,
+    time: []const Time,
 
     // Equality on expr id and scope value
 

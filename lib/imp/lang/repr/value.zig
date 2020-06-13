@@ -9,26 +9,6 @@ pub const Set = union(enum) {
     Finite: FiniteSet,
     Lazy: LazySet,
 
-    // TODO this is not an ordering, only works for deepEqual
-    pub fn deepCompare(self: Set, other: Set) meta.Ordering {
-        if (self == .Finite and other == .Finite) {
-            if (self.Finite.set.count() != other.Finite.set.count()) {
-                return .LessThan;
-            }
-            var self_iter = self.Finite.set.iterator();
-            while (self_iter.next()) |kv| {
-                if (!other.Finite.set.contains(kv.key)) {
-                    return .LessThan;
-                }
-            }
-            return .Equal;
-        }
-        if (self == .Lazy and other == .Lazy) {
-            return meta.deepCompare(self.Lazy, other.Lazy);
-        }
-        return .LessThan;
-    }
-
     pub fn dumpInto(self: Set, allocator: *Allocator, out_stream: var) anyerror!void {
         switch(self) {
             .Finite => |finite| try finite.dumpInto(allocator, out_stream),
@@ -43,6 +23,19 @@ pub const FiniteSet = struct {
     arity: usize,
     set: DeepHashSet(Tuple),
 
+    // TODO this is not an ordering, only works for deepEqual
+    pub fn deepCompare(self: FiniteSet, other: FiniteSet) meta.Ordering {
+        if (self.set.count() != other.set.count()) {
+            return .LessThan;
+        }
+        var self_iter = self.set.iterator();
+        while (self_iter.next()) |kv| {
+            if (!other.set.contains(kv.key)) {
+                return .LessThan;
+            }
+        }
+        return .Equal;
+    }
 
     pub fn dumpInto(self: FiniteSet, allocator: *Allocator, out_stream: var) anyerror!void {
         var tuples = ArrayList(Tuple).init(allocator);

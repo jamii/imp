@@ -15,7 +15,7 @@ const syntax = imp.lang.repr.syntax;
 //   "when" expr "then" expr
 //   "?" arg "." expr
 //   "[" expr "]"
-//   "fix" expr expr
+//   "fix" expr "in" expr
 //   "#" name expr
 //   "if" expr "then" expr "else" expr
 //   "let" name "=" expr "in" expr
@@ -548,9 +548,10 @@ const Parser = struct {
                 _ = try self.expect(.CloseBox);
                 return self.store.putSyntax(.{.Box=expr}, start, self.position);
             },
-            // "fix" expr expr
+            // "fix" expr "in" expr
             .Fix => {
                 const init = try self.parseExpr();
+                _ = try self.expect(.In);
                 const next = try self.parseExpr();
                 return self.store.putSyntax(.{.Fix=.{.init=init, .next=next}}, start, self.position);
             },

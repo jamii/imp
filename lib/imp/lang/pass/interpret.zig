@@ -98,7 +98,7 @@ const Interpreter = struct {
                         .time = try self.dupeTime(self.time.items),
                     }};
                 }
-                if (left.Finite.arity != right.Finite.arity) {
+                if (left.Finite.arity != right.Finite.arity and left.Finite.set.count() > 0 and right.Finite.set.count() > 0) {
                     return self.setError(expr, "Tried to union sets with different arities: {} vs {}", .{left.Finite.arity, right.Finite.arity});
                 }
                 var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
@@ -111,7 +111,7 @@ const Interpreter = struct {
                     _ = try set.put(kv.key, {});
                 }
                 return value.Set{.Finite = .{
-                    .arity = left.Finite.arity,
+                    .arity = max(left.Finite.arity, right.Finite.arity),
                     .set = set,
                 }};
             },
@@ -125,7 +125,7 @@ const Interpreter = struct {
                         .time = try self.dupeTime(self.time.items),
                     }};
                 }
-                if (left.Finite.arity != right.Finite.arity) {
+                if (left.Finite.arity != right.Finite.arity and left.Finite.set.count() > 0 and right.Finite.set.count() > 0) {
                     return self.setError(expr, "Tried to intersect sets with different arities: {} vs {}", .{left.Finite.arity, right.Finite.arity});
                 }
                 var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
@@ -136,7 +136,7 @@ const Interpreter = struct {
                     }
                 }
                 return value.Set{.Finite = .{
-                    .arity = left.Finite.arity,
+                    .arity = max(left.Finite.arity, right.Finite.arity),
                     .set = set,
                 }};
             },
@@ -353,11 +353,12 @@ const Interpreter = struct {
                             }};
                         }
                         if (left_arity_o) |left_arity| {
-                            if (left_arity != left_part.Finite.arity) {
+                            if (left_arity != left_part.Finite.arity and left_part.Finite.count() > 0) {
                                 return self.setError(expr, "Apply resulted in unions over sets of different arities: {} vs {}", .{left_arity, left_part.Finite.arity});
                             }
+                        } else {
+                            left_arity_o = left_part.Finite.arity;
                         }
-                        left_arity_o = left_part.Finite.arity;
                         var left_part_iter = left_part.Finite.set.iterator();
                         while (left_part_iter.next()) |lkv| {
                             _ = try left_set.put(lkv.key, {});

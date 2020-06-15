@@ -433,7 +433,7 @@ const Interpreter = struct {
                     if (body_set != .Finite) {
                         return self.setError(expr, "The body for fix must be finite, found {}", .{body_set});
                     }
-                    if (body_set.Finite.arity == 0) {
+                    if (body_set.Finite.arity == 0 and body_set.Finite.set.count() > 0) {
                         return self.setError(expr, "The body for fix must not have arity 0", .{});
                     }
                     var new_fix_set = value.Set{.Finite = .{

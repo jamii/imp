@@ -259,6 +259,14 @@ const Syntax = struct {
         }
     );
 
+    const Fix = Struct(
+        imp.lang.repr.syntax.Fix,
+        .{
+            .init = PtrExpr,
+            .next = PtrExpr,
+        }
+    );
+
     const When = Struct(
         imp.lang.repr.syntax.When,
         .{
@@ -324,6 +332,7 @@ const Syntax = struct {
             .Arg = Arg,
             .Apply = Pair,
             .Box = PtrExpr,
+            .Fix = Fix,
             .Annotate = Annotate,
 
             .Negate = PtrExpr,
@@ -372,6 +381,14 @@ const Core = struct {
         }
     );
 
+    const Fix = Struct(
+        imp.lang.repr.core.Fix,
+        .{
+            .init = PtrExpr,
+            .next = PtrExpr,
+        }
+    );
+
     const Annotate = Struct(
         imp.lang.repr.core.Annotate,
         .{
@@ -399,6 +416,7 @@ const Core = struct {
             .Abstract = PtrExpr,
             .Apply = Pair,
             .Box = Box,
+            .Fix = Fix,
             .Annotate = Annotate,
             .Native = Native,
         }
@@ -621,7 +639,7 @@ fn fuzz_analyze_deterministic(arena: *ArenaAllocator, store_and_expr: Core.Store
     // sanity check
     expect(meta.deepEqual(result1, result1));
     if (!meta.deepEqual(result1, result2)) {
-        dump(.{result1, result2});
+        // dump(.{result1, result2});
         return error.Nondeterministic;
     }
 }
@@ -672,7 +690,7 @@ fn fuzz_interpret_deterministic(arena: *ArenaAllocator, store_and_expr: Core.Sto
     // sanity check
     expect(meta.deepEqual(result1, result1));
     if (!meta.deepEqual(result1, result2)) {
-        dump(.{result1, result2});
+        // dump(.{result1, result2});
         return error.Nondeterministic;
     }
 }

@@ -55,7 +55,7 @@ pub const TypeAndSet = struct {
 };
 
 pub fn interpret(arena: *ArenaAllocator, source: []const u8, error_info: *?InterpretErrorInfo) InterpretError ! TypeAndSet {
-    var store = Store.init(source, arena);
+    var store = Store.init(arena);
 
     var parse_error_info: ?pass.parse.ErrorInfo = null;
     const syntax_expr = pass.parse.parse(&store, source, &parse_error_info) catch |err| {

@@ -34,7 +34,7 @@ pub const Expr = union(enum) {
                     // nothing to do
                 } else if (t == *const Expr) {
                     children.append(v);
-                } else if (t == Pair or t == When or t == Box or t == Annotate) {
+                } else if (t == Pair or t == When or t == Box or t == Fix or t == Annotate) {
                     inline for (@typeInfo(t).Struct.fields) |value_field| {
                         if (value_field.field_type == *const Expr) {
                             children.append(@field(v, value_field.name));
@@ -58,7 +58,7 @@ pub const Expr = union(enum) {
                     // nothing to do
                 } else if (t == *const Expr) {
                     children.append(v);
-                } else if (t == Pair or t == When or t == Box or t == Annotate) {
+                } else if (t == Pair or t == When or t == Box or t == Fix or t == Annotate) {
                     inline for (@typeInfo(t).Struct.fields) |value_field| {
                         if (value_field.field_type == *const Expr) {
                             children.append(&@field(v, value_field.name));

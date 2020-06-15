@@ -219,7 +219,7 @@ let 3 = 4 in 5
 ---
 Parse error: Expected name, found number `3`
 
-fix 1 in (?[prev] . if (prev 10) then 10 else (prev + 1))
+fix 1 in ?[prev] . if (prev 10) then 10 else (prev + 1)
 ---
 type: number
 value: 10

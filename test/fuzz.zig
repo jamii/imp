@@ -667,6 +667,7 @@ fn fuzz_interpret(arena: *ArenaAllocator, store_and_expr: Core.StoreAndExpr) !vo
             error.InterpretError => {
                 // should never return InterpretError on programs which typecheck
                 if (analyzed) |set_type| {
+                    dump(set_type);
                     return error.InvalidInterpretError;
                 } else |_| {}
             },

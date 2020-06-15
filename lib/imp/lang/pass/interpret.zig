@@ -365,7 +365,7 @@ const Interpreter = struct {
                         }
                     }
                     left = .{.Finite = .{
-                    // TODO if left_arity is never set then arity of apply could be wrong - not sure if this matters
+                        // TODO if left_arity is never set then arity of apply could be wrong - not sure if this matters
                         .arity = left_arity_o orelse 0,
                         .set = left_set,
                     }};
@@ -437,7 +437,7 @@ const Interpreter = struct {
                         return self.setError(expr, "The body for fix must not have arity 0", .{});
                     }
                     var new_fix_set = value.Set{.Finite = .{
-                        .arity = body_set.Finite.arity - 1,
+                        .arity = if (body_set.Finite.arity == 0) 0 else body_set.Finite.arity - 1,
                         .set = DeepHashSet(value.Tuple).init(&self.arena.allocator),
                     }};
                     var body_iter = body_set.Finite.set.iterator();

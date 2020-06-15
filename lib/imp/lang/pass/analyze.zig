@@ -284,6 +284,7 @@ pub const Analyzer = struct {
             },
             .Box => |box| {
                 // ignore actual body type because box types are nominal
+                _ = try self.analyze(box.body, &[0]type_.ScalarType{});
                 const box_type = type_.ScalarType{.Box = .{
                     .lazy = .{
                         .expr = box.body,

@@ -15,7 +15,7 @@ pub const SetType = union(enum) {
         return self == .Concrete and self.Concrete.abstract_arity == 0;
     }
 
-    pub fn dumpInto(self: SetType, out_stream: var) error{OutOfMemory}!void {
+    pub fn dumpInto(self: SetType, out_stream: var) outStreamError(@TypeOf(out_stream))!void {
         switch (self) {
             .Concrete => |concrete| {
                 try concrete.dumpInto(out_stream);
@@ -35,7 +35,7 @@ pub const ConcreteSetType = struct {
     abstract_arity: usize,
     columns: []ScalarType,
 
-    pub fn dumpInto(self: ConcreteSetType, out_stream: var) error{OutOfMemory}!void {
+    pub fn dumpInto(self: ConcreteSetType, out_stream: var) outStreamError(@TypeOf(out_stream))!void {
         if (self.columns.len == 0) {
             try out_stream.writeAll("maybe");
         } else {
@@ -72,7 +72,7 @@ pub const LazySetType = struct {
         return meta.deepCompare(self.scope, other.scope);
     }
 
-    pub fn dumpInto(self: LazySetType, out_stream: var) error{OutOfMemory}!void {
+    pub fn dumpInto(self: LazySetType, out_stream: var) outStreamError(@TypeOf(out_stream))!void {
         try std.fmt.format(out_stream, "(type of expr #{} with scope (", .{Store.getCoreMeta(self.expr).id});
         for (self.scope) |scalar_type, i| {
             try out_stream.writeAll(if (i == 0) "" else " . ");
@@ -98,7 +98,7 @@ pub const ScalarType = union(enum) {
     Number,
     Box: BoxType,
 
-    pub fn dumpInto(self: ScalarType, out_stream: var) error{OutOfMemory}!void {
+    pub fn dumpInto(self: ScalarType, out_stream: var) outStreamError(@TypeOf(out_stream))!void {
         switch (self) {
             .Text => try out_stream.writeAll("text"),
             .Number => try out_stream.writeAll("number"),
@@ -121,7 +121,7 @@ pub const BoxType = struct {
     // need to store the concrete type when analyzing fixpoints to avoid infinite recursion
     concrete: ?ConcreteSetType,
 
-    pub fn dumpInto(self: BoxType, out_stream: var) error{OutOfMemory}!void {
+    pub fn dumpInto(self: BoxType, out_stream: var) outStreamError(@TypeOf(out_stream))!void {
         try self.lazy.dumpInto(out_stream);
     }
 

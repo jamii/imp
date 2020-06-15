@@ -33,10 +33,7 @@ pub fn main() anyerror ! void {
         const result = imp.lang.interpret(&arena, source.items, &error_info);
         const out_stream = std.io.getStdOut().outStream();
         if (result) |type_and_set| {
-            // TODO can't dump directly into stdout because can't infer error type for mutually recursive dumpInto so hardcoded them to error{OutOfMemory}
-            var buf = ArrayList(u8).init(allocator);
-            try type_and_set.dumpInto(allocator, buf.outStream());
-            try out_stream.writeAll(buf.items);
+            try type_and_set.dumpInto(allocator, out_stream);
         } else |err| {
             try imp.lang.InterpretErrorInfo.dumpInto(error_info, err, out_stream);
         }

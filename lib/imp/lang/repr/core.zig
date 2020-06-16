@@ -1,5 +1,6 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
+const meta = imp.meta;
 const value = imp.lang.repr.value;
 
 // ascii, non-empty
@@ -153,4 +154,25 @@ pub const Native = enum {
     Subtract,
     Multiply,
     Divide,
+
+    pub fn toName(self: Native) []const u8 {
+        return switch (self) {
+            .Add => "+",
+            .Subtract => "-",
+            .Multiply => "*",
+            .Divide => "/",
+        };
+    }
+
+    pub fn fromName(name: []const u8) ?Native {
+        inline for (@typeInfo(Native).Enum.fields) |field| {
+            const native = @intToEnum(Native, field.value);
+            if (meta.deepEqual(name, comptime native.toName())) return native;
+        }
+        return null;
+    }
+
+    pub fn dumpInto(self: Native, out_stream: var, indent: u32) anyerror!void {
+        try out_stream.writeAll(self.toName());
+    }
 };

@@ -154,6 +154,7 @@ pub const Native = enum {
     Subtract,
     Multiply,
     Divide,
+    Range,
 
     pub fn toName(self: Native) []const u8 {
         return switch (self) {
@@ -161,6 +162,7 @@ pub const Native = enum {
             .Subtract => "-",
             .Multiply => "*",
             .Divide => "/",
+            .Range => "range",
         };
     }
 

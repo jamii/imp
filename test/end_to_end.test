@@ -250,3 +250,17 @@ Analyze error: The body for fix must be able to be applied to it's own result, f
 fix 1 in ?[prev] . prev . 2
 ---
 Analyze error: The body for fix must have constant arity, changed from 1 to 2
+
+range (0 - 3) 3
+---
+type: number
+value: -3 | -2 | -1 | 0 | 1 | 2 | 3
+
+range 3 2
+---
+type: number
+value: none
+
+range 0.5 1.5
+---
+Native error: Inputs to `range` must be whole numbers, found `range 0.5 1.5`

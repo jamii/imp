@@ -9,7 +9,7 @@ pub const Set = union(enum) {
     Finite: FiniteSet,
     Lazy: LazySet,
 
-    pub fn dumpInto(self: Set, allocator: *Allocator, out_stream: var) anyerror!void {
+    pub fn dumpInto(self: Set, allocator: *Allocator, out_stream: var) OutStreamError(@TypeOf(out_stream))!void {
         switch(self) {
             .Finite => |finite| try finite.dumpInto(allocator, out_stream),
             .Lazy => |lazy| try lazy.dumpInto(out_stream),
@@ -37,7 +37,7 @@ pub const FiniteSet = struct {
         return .Equal;
     }
 
-    pub fn dumpInto(self: FiniteSet, allocator: *Allocator, out_stream: var) anyerror!void {
+    pub fn dumpInto(self: FiniteSet, allocator: *Allocator, out_stream: var) OutStreamError(@TypeOf(out_stream))!void {
         var tuples = ArrayList(Tuple).init(allocator);
         defer tuples.deinit();
         var iter = self.set.iterator();
@@ -70,7 +70,7 @@ pub const Scalar = union(enum) {
     Number: f64,
     Box: LazySet,
 
-    fn dumpInto(self: Scalar, out_stream: var) anyerror!void {
+    fn dumpInto(self: Scalar, out_stream: var) OutStreamError(@TypeOf(out_stream))!void {
         switch (self) {
             // TODO proper escaping
             .Text => |text| try std.fmt.format(out_stream, "\"{s}\"", .{text}),
@@ -81,6 +81,10 @@ pub const Scalar = union(enum) {
                 try out_stream.writeAll("]");
             }
         }
+    }
+
+    pub fn format(self: Scalar, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
+        try self.dumpInto(out_stream);
     }
 };
 
@@ -104,7 +108,7 @@ pub const LazySet = struct {
         return meta.deepCompare(self.scope, other.scope);
     }
 
-    pub fn dumpInto(self: LazySet, out_stream: var) anyerror ! void {
+    pub fn dumpInto(self: LazySet, out_stream: var) OutStreamError(@TypeOf(out_stream)) ! void {
         try std.fmt.format(out_stream, "(value of expr #{} with scope (", .{Store.getCoreMeta(self.expr).id});
         for (self.scope) |scalar| {
             try out_stream.writeAll(" ");

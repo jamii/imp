@@ -472,7 +472,7 @@ const Interpreter = struct {
                             }};
                         }
                         if (hint[0] != .Number or hint[1] != .Number) {
-                            return self.setNativeError(expr, "Inputs to + must be numbers, found {} + {}", .{hint[0], hint[1]});
+                            return self.setNativeError(expr, "Inputs to `{}` must be numbers, found `{} {} {}`", .{native.toName(), hint[0], native.toName(), hint[1]});
                         }
                         if (native == .Divide and hint[1].Number == 0) {
                             return self.setNativeError(expr, "Divide by 0", .{});
@@ -482,10 +482,38 @@ const Interpreter = struct {
                             .Subtract => hint[0].Number - hint[1].Number,
                             .Multiply => hint[0].Number * hint[1].Number,
                             .Divide => hint[0].Number / hint[1].Number,
+                            else => unreachable,
                         };
                         const tuple = try self.dupeScalars(&[3]value.Scalar{hint[0], hint[1], .{.Number = result}});
                         var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                         _ = try set.put(tuple, {});
+                        return value.Set{.Finite = .{
+                            .arity = 3,
+                            .set = set,
+                        }};
+                    },
+                    .Range => {
+                        if (hint.len < 2) {
+                            return value.Set{.Lazy = .{
+                                .expr = expr,
+                                .scope = try self.dupeScalars(self.scope.items),
+                                .time = try self.dupeTime(self.time.items),
+                            }};
+                        }
+                        if (hint[0] != .Number or hint[1] != .Number) {
+                            return self.setNativeError(expr, "Inputs to `range` must be numbers, found `range {} {}`", .{hint[0], hint[1]});
+                        }
+                        const lo = @floatToInt(i64, hint[0].Number);
+                        const hi = @floatToInt(i64, hint[1].Number);
+                        if (@intToFloat(f64, lo) != hint[0].Number or @intToFloat(f64, hi) != hint[1].Number) {
+                              return self.setNativeError(expr, "Inputs to `range` must be whole numbers, found `range {} {}`", .{hint[0], hint[1]});
+                        }
+                        var i = lo;
+                        var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                        while (i <= hi) : (i += 1) {
+                            const tuple = try self.dupeScalars(&[3]value.Scalar{hint[0], hint[1], .{.Number=@intToFloat(f64, i)}});
+                            _ = try set.put(tuple, {});
+                        }
                         return value.Set{.Finite = .{
                             .arity = 3,
                             .set = set,

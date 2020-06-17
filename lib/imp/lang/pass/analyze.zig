@@ -346,6 +346,19 @@ pub const Analyzer = struct {
                 }
                 return self.setError("Type of fixpoint failed to converge, reached {}", .{fix_type});
             },
+            .Enumerate => |body| {
+                const body_type = try self.analyze(body, &[0]type_.ScalarType{});
+                if (!body_type.isFinite()) {
+                    return self.setError("The body of `enumerate` must have finite type, found {}", .{body_type});
+                }
+                var columns = try ArrayList(type_.ScalarType).initCapacity(&self.store.arena.allocator, 1 + body_type.Concrete.columns.len);
+                try columns.append(.Number);
+                try columns.appendSlice(body_type.Concrete.columns);
+                break :set_type .{.Concrete = .{
+                    .abstract_arity = 0,
+                    .columns = columns.items,
+                }};
+            },
             .Annotate => |annotate| {
                 // TODO some annotations affect types eg solve
                 break :set_type try self.analyze(annotate.body, hint);

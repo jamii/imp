@@ -22,6 +22,7 @@ pub const Expr = union(enum) {
     Apply: Pair,
     Box: Box,
     Fix: Fix,
+    Enumerate: *const Expr,
     Annotate: Annotate,
     Native: Native,
 

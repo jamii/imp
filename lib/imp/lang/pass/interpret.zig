@@ -458,6 +458,35 @@ const Interpreter = struct {
                     _ = self.time.pop();
                 }
             },
+            .Enumerate => |body| {
+                const body_set = try self.interpret(body, &[0]value.Scalar{});
+                if (body_set != .Finite) {
+                    return self.setError(expr, "The body for `enumerate` must be finite, found {}", .{body_set});
+                }
+                var tuples = try ArrayList(value.Tuple).initCapacity(&self.arena.allocator, body_set.Finite.set.count());
+                var body_iter = body_set.Finite.set.iterator();
+                while (body_iter.next()) |kv| {
+                    try tuples.append(kv.key);
+                }
+                std.sort.sort(value.Tuple, tuples.items, struct {
+                    fn lessThan(a: value.Tuple, b: value.Tuple) bool {
+                        return meta.deepCompare(a,b) == .LessThan;
+                    }
+                    }.lessThan);
+                // TODO HashMap.initCapacity is private?
+                var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                for (tuples.items) |tuple, i| {
+                    var enumerated_tuple = try ArrayList(value.Scalar).initCapacity(&self.arena.allocator, 1 + tuple.len);
+                    // TODO can we allocate enough tuples to overflow this conversion?
+                    try enumerated_tuple.append(.{.Number = @intToFloat(f64, i+1)});
+                    try enumerated_tuple.appendSlice(tuple);
+                    _ = try set.put(enumerated_tuple.items, {});
+                }
+                return value.Set{.Finite = .{
+                    .arity = body_set.Finite.arity + 1,
+                    .set = set,
+                }};
+            },
             .Annotate => |annotate| {
                 return self.interpret(annotate.body, hint);
             },

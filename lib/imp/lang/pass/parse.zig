@@ -16,6 +16,7 @@ const syntax = imp.lang.repr.syntax;
 //   "?" arg "." expr
 //   "[" expr "]"
 //   "fix" expr "in" expr
+//   "enumerate" expr
 //   "#" name expr
 //   "if" expr "then" expr "else" expr
 //   "let" name "=" expr "in" expr
@@ -98,6 +99,7 @@ const TokenTag = enum {
     Arg,
     OpenBox, CloseBox,
     Fix,
+    Enumerate,
     Annotate,
 
     // sugar
@@ -123,46 +125,47 @@ const TokenTag = enum {
     EOF,
 
     pub fn format(self: TokenTag, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
-        switch (self) {
-            .OpenGroup => try out_stream.writeAll("`(`"),
-            .CloseGroup => try out_stream.writeAll("`)`"),
-            .None => try out_stream.writeAll("`none`"),
-            .Some => try out_stream.writeAll("`some`"),
-            .Number => try out_stream.writeAll("number"),
-            .Text => try out_stream.writeAll("text"),
-            .Union => try out_stream.writeAll("`|`"),
-            .Intersect => try out_stream.writeAll("`&`"),
-            .Product => try out_stream.writeAll("`.`"),
-            .Equal => try out_stream.writeAll("`=`"),
-            .Name => try out_stream.writeAll("name"),
-            .When => try out_stream.writeAll("`when`"),
-            .Then => try out_stream.writeAll("`then`"),
-            .Arg => try out_stream.writeAll("`?`"),
-            .OpenBox => try out_stream.writeAll("`[`"),
-            .CloseBox => try out_stream.writeAll("`]`"),
-            .Fix => try out_stream.writeAll("`fix`"),
-            .Annotate => try out_stream.writeAll("`#`"),
+        try out_stream.writeAll(switch (self) {
+            .OpenGroup => "`(`",
+            .CloseGroup => "`)`",
+            .None => "`none`",
+            .Some => "`some`",
+            .Number => "number",
+            .Text => "text",
+            .Union => "`|`",
+            .Intersect => "`&`",
+            .Product => "`.`",
+            .Equal => "`=`",
+            .Name => "name",
+            .When => "`when`",
+            .Then => "`then`",
+            .Arg => "`?`",
+            .OpenBox => "`[`",
+            .CloseBox => "`]`",
+            .Fix => "`fix`",
+            .Enumerate => "`enumerate`",
+            .Annotate => "`#`",
 
-            .Negate => try out_stream.writeAll("`!`"),
-            .If => try out_stream.writeAll("`if`"),
-            .Else => try out_stream.writeAll("`else`"),
-            .Let => try out_stream.writeAll("`let`"),
-            .In => try out_stream.writeAll("`in`"),
-            .Lookup => try out_stream.writeAll("`:`"),
+            .Negate => "`!`",
+            .If => "`if`",
+            .Else => "`else`",
+            .Let => "`let`",
+            .In => "`in`",
+            .Lookup => "`:`",
 
-            .Add => try out_stream.writeAll("`+`"),
-            .Subtract => try out_stream.writeAll("`-`"),
-            .Multiply => try out_stream.writeAll("`*`"),
-            .Divide => try out_stream.writeAll("`/`"),
-            .LessThan => try out_stream.writeAll("`<`"),
-            .LessThanOrEqual => try out_stream.writeAll("`<=`"),
-            .GreaterThan => try out_stream.writeAll("`>`"),
-            .GreaterThanOrEqual => try out_stream.writeAll("`>=`"),
+            .Add => "`+`",
+            .Subtract => "`-`",
+            .Multiply => "`*`",
+            .Divide => "`/`",
+            .LessThan => "`<`",
+            .LessThanOrEqual => "`<=`",
+            .GreaterThan => "`>`",
+            .GreaterThanOrEqual => "`>=`",
 
-            .Apply => try out_stream.writeAll("` `"),
+            .Apply => "` `",
 
-            .EOF => try out_stream.writeAll("end of file"),
-        }
+            .EOF => "end of file",
+        });
     }
 };
 
@@ -182,6 +185,7 @@ const Token = union(TokenTag) {
     Arg,
     OpenBox, CloseBox,
     Fix,
+    Enumerate,
     Annotate,
 
     // sugar
@@ -403,7 +407,8 @@ const Parser = struct {
         }
     }
 
-    fn nextToken(self: *Parser) ! Token {
+    // returns null for comments/whitespace so we can easily skip them
+    fn nextTokenMaybe(self: *Parser) !?Token {
         const start = self.position;
         if (try self.nextAsciiChar()) |char1| {
             switch (char1) {
@@ -427,7 +432,7 @@ const Parser = struct {
                     const position = self.position;
                     if ((try self.nextAsciiChar()) orelse 0 == '/') {
                         try self.tokenizeComment();
-                        return self.nextToken();
+                        return null;
                     } else {
                         self.position = position;
                         return Token{.Divide={}};
@@ -456,7 +461,7 @@ const Parser = struct {
                     if (char1 != @as(u21, ascii_char1)) {
                         return self.setError(start, "unicode characters may only appear in texts and comments", .{});
                     } else if (std.ascii.isSpace(ascii_char1)) {
-                        return self.nextToken();
+                        return null;
                     } else if (std.ascii.isDigit(ascii_char1)) {
                         return Token{.Number = try self.tokenizeNumber()};
                     } else if (std.ascii.isAlpha(ascii_char1)) {
@@ -466,6 +471,7 @@ const Parser = struct {
                         if (meta.deepEqual(name, "when")) return Token{.When={}};
                         if (meta.deepEqual(name, "then")) return Token{.Then={}};
                         if (meta.deepEqual(name, "fix")) return Token{.Fix={}};
+                        if (meta.deepEqual(name, "enumerate")) return Token{.Enumerate={}};
                         if (meta.deepEqual(name, "if")) return Token{.If={}};
                         if (meta.deepEqual(name, "else")) return Token{.Else={}};
                         if (meta.deepEqual(name, "let")) return Token{.Let={}};
@@ -478,6 +484,14 @@ const Parser = struct {
             }
         } else {
             return Token{.EOF={}};
+        }
+    }
+
+    fn nextToken(self: *Parser) !Token {
+        while (true) {
+            if (try self.nextTokenMaybe()) |token| {
+                return token;
+            }
         }
     }
 
@@ -554,6 +568,11 @@ const Parser = struct {
                 _ = try self.expect(.In);
                 const next = try self.parseExpr();
                 return self.store.putSyntax(.{.Fix=.{.init=init, .next=next}}, start, self.position);
+            },
+            // "enumerate" expr
+            .Enumerate => {
+                const body = try self.parseExpr();
+                return self.store.putSyntax(.{.Enumerate=body}, start, self.position);
             },
             // "#" name expr
             .Annotate => {

@@ -5,25 +5,28 @@ const Store = imp.lang.Store;
 const syntax = imp.lang.repr.syntax;
 
 // expr =
+//   expr_inner
+//   expr_inner expr
+//   expr_inner binop expr
+//   "//" ^"\n" "\n"
+
+// expr_inner =
 //   "(" expr ")"
 //   "none"
 //   "some"
 //   number
 //   text
 //   name
-//   "!" expr
-//   "when" expr "then" expr
+//   "!" expr_inner
+//   "when" expr_inner expr_inner
 //   "?" arg "." expr
 //   "[" expr "]"
-//   "fix" expr "in" expr
-//   "enumerate" expr
-//   "#" name expr
-//   "if" expr "then" expr "else" expr
+//   "fix" expr_inner expr_inner
+//   "enumerate" expr_inner
+//   "#" name expr_inner
+//   "if" expr_inner expr_inner expr_inner
 //   "let" name "=" expr "in" expr
-//   "//" ^"\n" "\n"
-//   expr expr
-//   expr binop expr
-//   expr ":" name
+//   expr_inner ":" name
 
 // name =
 //   alpha (alpha | digit | "_")*
@@ -95,7 +98,7 @@ const TokenTag = enum {
     Product,
     Equal,
     Name,
-    When, Then,
+    When,
     Arg,
     OpenBox, CloseBox,
     Fix,
@@ -104,7 +107,7 @@ const TokenTag = enum {
 
     // sugar
     Negate,
-    If, Else,
+    If,
     Let, In,
     Lookup,
 
@@ -138,7 +141,6 @@ const TokenTag = enum {
             .Equal => "`=`",
             .Name => "name",
             .When => "`when`",
-            .Then => "`then`",
             .Arg => "`?`",
             .OpenBox => "`[`",
             .CloseBox => "`]`",
@@ -148,7 +150,6 @@ const TokenTag = enum {
 
             .Negate => "`!`",
             .If => "`if`",
-            .Else => "`else`",
             .Let => "`let`",
             .In => "`in`",
             .Lookup => "`:`",
@@ -181,7 +182,7 @@ const Token = union(TokenTag) {
     Product,
     Equal,
     Name: []const u8, // ascii, non-empty
-    When, Then,
+    When,
     Arg,
     OpenBox, CloseBox,
     Fix,
@@ -190,7 +191,7 @@ const Token = union(TokenTag) {
 
     // sugar
     Negate,
-    If, Else,
+    If,
     Let, In,
     Lookup,
 
@@ -469,11 +470,9 @@ const Parser = struct {
                         if (meta.deepEqual(name, "none")) return Token{.None={}};
                         if (meta.deepEqual(name, "some")) return Token{.Some={}};
                         if (meta.deepEqual(name, "when")) return Token{.When={}};
-                        if (meta.deepEqual(name, "then")) return Token{.Then={}};
                         if (meta.deepEqual(name, "fix")) return Token{.Fix={}};
                         if (meta.deepEqual(name, "enumerate")) return Token{.Enumerate={}};
                         if (meta.deepEqual(name, "if")) return Token{.If={}};
-                        if (meta.deepEqual(name, "else")) return Token{.Else={}};
                         if (meta.deepEqual(name, "let")) return Token{.Let={}};
                         if (meta.deepEqual(name, "in")) return Token{.In={}};
                         return Token{.Name = name};
@@ -526,11 +525,10 @@ const Parser = struct {
             .Text => |text| return self.store.putSyntax(.{.Scalar=.{.Text=text}}, start, self.position),
             // name
             .Name => |name| return self.store.putSyntax(.{.Name=name}, start, self.position),
-            // "when" expr "then" expr
+            // "when" expr_inner expr_inner
             .When => {
-                const condition = try self.parseExpr();
-                _ = try self.expect(.Then);
-                const true_branch = try self.parseExpr();
+                const condition = try self.parseExprInner();
+                const true_branch = try self.parseExprInner();
                 return self.store.putSyntax(.{.When=.{.condition=condition,.true_branch=true_branch}}, start, self.position);
             },
             // syntax is:
@@ -562,36 +560,33 @@ const Parser = struct {
                 _ = try self.expect(.CloseBox);
                 return self.store.putSyntax(.{.Box=expr}, start, self.position);
             },
-            // "fix" expr "in" expr
+            // "fix" expr_inner expr_inner
             .Fix => {
-                const init = try self.parseExpr();
-                _ = try self.expect(.In);
-                const next = try self.parseExpr();
+                const init = try self.parseExprInner();
+                const next = try self.parseExprInner();
                 return self.store.putSyntax(.{.Fix=.{.init=init, .next=next}}, start, self.position);
             },
-            // "enumerate" expr
+            // "enumerate" expr_inner
             .Enumerate => {
-                const body = try self.parseExpr();
+                const body = try self.parseExprInner();
                 return self.store.putSyntax(.{.Enumerate=body}, start, self.position);
             },
-            // "#" name expr
+            // "#" name expr_inner
             .Annotate => {
                 const annotation = (try self.expect(.Name)).Name;
-                const body = try self.parseExpr();
+                const body = try self.parseExprInner();
                 return self.store.putSyntax(.{.Annotate=.{.annotation=annotation, .body=body}}, start, self.position);
             },
-            // "!" expr
+            // "!" expr_inner
             .Negate => {
-                const expr = try self.parseExpr();
+                const expr = try self.parseExprInner();
                 return self.store.putSyntax(.{.Negate=expr}, start, self.position);
             },
-            // "if" expr "then" expr "else" expr
+            // "if" expr_inner expr_inner expr_inner
             .If => {
-                const condition = try self.parseExpr();
-                _ = try self.expect(.Then);
-                const true_branch = try self.parseExpr();
-                _ = try self.expect(.Else);
-                const false_branch = try self.parseExpr();
+                const condition = try self.parseExprInner();
+                const true_branch = try self.parseExprInner();
+                const false_branch = try self.parseExprInner();
                 return self.store.putSyntax(.{.If=.{.condition=condition, .true_branch=true_branch, .false_branch=false_branch}}, start, self.position);
             },
             // "let" name "=" expr "in" expr
@@ -637,7 +632,7 @@ const Parser = struct {
             const op_start = self.position;
             const op = try self.nextToken();
             switch (op) {
-                // expr binop expr
+                // expr_inner binop expr
                 .Union, .Intersect, .Product, .Equal, .Add, .Subtract, .Multiply, .Divide, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual => {
                     if (prev_op == null or op.bindsTighterThan(prev_op.?)) {
                         const right = try self.parseExprOuter(op);
@@ -668,7 +663,7 @@ const Parser = struct {
                     }
                 },
 
-                // expr ":" name
+                // expr_inner ":" name
                 .Lookup => {
                     if (prev_op == null or op.bindsTighterThan(prev_op.?)) {
                         const name = (try self.expect(.Name)).Name;
@@ -685,7 +680,7 @@ const Parser = struct {
                 else => {
                     self.position = op_start;
 
-                    // expr expr
+                    // expr_inner expr
                     if (try self.parseExprInnerMaybe()) |right| {
                         const apply: Token = .Apply;
                         if (prev_op == null or apply.bindsTighterThan(prev_op.?)) {

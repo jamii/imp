@@ -125,12 +125,12 @@ value: none
 type: maybe
 value: some
 
-when some then 1 . 2
+when some (1 . 2)
 ---
 type: number . number
 value: 1 . 2
 
-when none then 1 . 2
+when none (1 . 2)
 ---
 type: number . number
 value: none
@@ -190,7 +190,7 @@ let foo = ?a . ?b . a . b in
 type: number . number
 value: 1 . 2
 
-when (?a . none) then 1
+when (?a . none) 1
 ---
 Analyze error: The condition of `when` must have type `maybe`, found (type of expr #1 with scope ())
 
@@ -219,35 +219,35 @@ let 3 = 4 in 5
 ---
 Parse error: Expected name, found number `3`
 
-fix 1 in ?[prev] . if (prev 10) then 10 else (prev + 1)
+fix 1 (?[prev] . if (prev 10) 10 (prev + 1))
 ---
 type: number
 value: 10
 
 let edge = 1 . 2 | 2 . 3 | 3 . 4 | 3 . 1 in
-fix edge in ?[reach] . (reach | (reach (?a . ?b . a . (edge b))))
+fix edge (?[reach] . (reach | (reach (?a . ?b . a . (edge b)))))
 ---
 type: number . number
 value: 1 . 1 | 1 . 2 | 1 . 3 | 1 . 4 | 2 . 1 | 2 . 2 | 2 . 3 | 2 . 4 | 3 . 1 | 3 . 2 | 3 . 3 | 3 . 4
 
 let edge = 1 . 2 | 2 . 3 | 3 . 4 | 3 . 1 in
 let node = (edge (?a.?b.a)) | (edge (?a.?b.b)) in
-node (?a . a . fix a in (?[reach] . (reach | (reach (?a . (edge a))))))
+node (?a . a . fix a ((?[reach] . (reach | (reach (?a . (edge a)))))))
 ---
 type: number . number
 value: 1 . 1 | 1 . 2 | 1 . 3 | 1 . 4 | 2 . 1 | 2 . 2 | 2 . 3 | 2 . 4 | 3 . 1 | 3 . 2 | 3 . 3 | 3 . 4 | 4 . 4
 
-let closure = ?[edge] . (fix edge in (?[reach] . (reach | (reach (?a . ?b . a . (edge b)))))) in
+let closure = ?[edge] . (fix edge (?[reach] . (reach | (reach (?a . ?b . a . (edge b)))))) in
 closure [1 . 2 | 2 . 3 | 3 . 4 | 3 . 1]
 ---
 type: number . number
 value: 1 . 1 | 1 . 2 | 1 . 3 | 1 . 4 | 2 . 1 | 2 . 2 | 2 . 3 | 2 . 4 | 3 . 1 | 3 . 2 | 3 . 3 | 3 . 4
 
-fix 1 in 2
+fix 1 2
 ---
 Analyze error: The body for fix must be able to be applied to it's own result, found number
 
-fix 1 in ?[prev] . prev . 2
+fix 1 (?[prev] . prev . 2)
 ---
 Analyze error: The body for fix must have constant arity, changed from 1 to 2
 
@@ -270,7 +270,7 @@ enumerate ("c" . 0 | "a" . 0 | "b" . 1 | "b" . 0.1)
 type: number . text . number
 value: 1 . "a" . 0 | 2 . "b" . 0.1 | 3 . "b" . 1 | 4 . "c" . 0
 
-(enumerate ("c" . 0 | "a" . 0 | "b" . 1 | "b" . 0.1)) (range 2 3)
+enumerate ("c" . 0 | "a" . 0 | "b" . 1 | "b" . 0.1) (range 2 3)
 ---
 type: text . number
 value: "b" . 0.1 | "b" . 1

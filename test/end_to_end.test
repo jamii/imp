@@ -224,6 +224,12 @@ fix 1 (?[prev] . if (prev 10) 10 (prev + 1))
 type: number
 value: 10
 
+
+fix 1 (?[prev] . if (prev 5) prev (prev | (prev (?a . (a + 1)))))
+---
+type: number
+value: 1 | 2 | 3 | 4 | 5
+
 let edge = 1 . 2 | 2 . 3 | 3 . 4 | 3 . 1 in
 fix edge (?[reach] . (reach | (reach (?a . ?b . a . (edge b)))))
 ---

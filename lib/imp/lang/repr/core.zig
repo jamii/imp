@@ -28,7 +28,7 @@ pub const Expr = union(enum) {
     Native: Native,
 
     pub fn getChildren(self: Expr) FixedSizeArrayList(3, *const Expr) {
-        var children = FixedSizeArrayList(2, *const Expr).init();
+        var children = FixedSizeArrayList(3, *const Expr).init();
         inline for (@typeInfo(Expr).Union.fields) |expr_field| {
             if (@enumToInt(std.meta.activeTag(self)) == expr_field.enum_field.?.value) {
                 const t = expr_field.field_type;
@@ -51,8 +51,8 @@ pub const Expr = union(enum) {
         return children;
     }
 
-    pub fn getChildrenMut(self: *Expr) FixedSizeArrayList(2, * *const Expr) {
-        var children = FixedSizeArrayList(2, * *const Expr).init();
+    pub fn getChildrenMut(self: *Expr) FixedSizeArrayList(3, * *const Expr) {
+        var children = FixedSizeArrayList(3, * *const Expr).init();
         inline for (@typeInfo(Expr).Union.fields) |expr_field| {
             if (@enumToInt(std.meta.activeTag(self.*)) == expr_field.enum_field.?.value) {
                 const t = expr_field.field_type;

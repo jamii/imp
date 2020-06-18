@@ -27,7 +27,7 @@ pub const Expr = union(enum) {
     Annotate: Annotate,
     Native: Native,
 
-    pub fn getChildren(self: Expr) FixedSizeArrayList(2, *const Expr) {
+    pub fn getChildren(self: Expr) FixedSizeArrayList(3, *const Expr) {
         var children = FixedSizeArrayList(2, *const Expr).init();
         inline for (@typeInfo(Expr).Union.fields) |expr_field| {
             if (@enumToInt(std.meta.activeTag(self)) == expr_field.enum_field.?.value) {
@@ -37,7 +37,7 @@ pub const Expr = union(enum) {
                     // nothing to do
                 } else if (t == *const Expr) {
                     children.append(v);
-                } else if (t == Pair or t == When or t == Box or t == Fix or t == Annotate) {
+                } else if (t == Pair or t == When or t == Box or t == Fix or t == Reduce or t == Annotate) {
                     inline for (@typeInfo(t).Struct.fields) |value_field| {
                         if (value_field.field_type == *const Expr) {
                             children.append(@field(v, value_field.name));
@@ -61,7 +61,7 @@ pub const Expr = union(enum) {
                     // nothing to do
                 } else if (t == *const Expr) {
                     children.append(v);
-                } else if (t == Pair or t == When or t == Box or t == Fix or t == Annotate) {
+                } else if (t == Pair or t == When or t == Box or t == Fix or t == Reduce or t == Annotate) {
                     inline for (@typeInfo(t).Struct.fields) |value_field| {
                         if (value_field.field_type == *const Expr) {
                             children.append(&@field(v, value_field.name));

@@ -267,6 +267,15 @@ const Syntax = struct {
         }
     );
 
+    const Reduce = Struct(
+        imp.lang.repr.syntax.Reduce,
+        .{
+            .input = PtrExpr,
+            .init = PtrExpr,
+            .next = PtrExpr,
+        }
+    );
+
     const When = Struct(
         imp.lang.repr.syntax.When,
         .{
@@ -333,6 +342,8 @@ const Syntax = struct {
             .Apply = Pair,
             .Box = PtrExpr,
             .Fix = Fix,
+            .Reduce = Reduce,
+            .Enumerate = PtrExpr,
             .Annotate = Annotate,
 
             .Negate = PtrExpr,
@@ -389,6 +400,15 @@ const Core = struct {
         }
     );
 
+    const Reduce = Struct(
+        imp.lang.repr.core.Reduce,
+        .{
+            .input = PtrExpr,
+            .init = PtrExpr,
+            .next = PtrExpr,
+        }
+    );
+
     const Annotate = Struct(
         imp.lang.repr.core.Annotate,
         .{
@@ -417,6 +437,8 @@ const Core = struct {
             .Apply = Pair,
             .Box = Box,
             .Fix = Fix,
+            .Reduce = Reduce,
+            .Enumerate = PtrExpr,
             .Annotate = Annotate,
             .Native = Native,
         }

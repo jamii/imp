@@ -433,8 +433,8 @@ const Interpreter = struct {
                     if (body_set != .Finite) {
                         return self.setError(expr, "The body for fix must be finite, found {}", .{body_set});
                     }
-                    if (body_set.Finite.arity == 0 and body_set.Finite.set.count() > 0) {
-                        return self.setError(expr, "The body for fix must not have arity 0", .{});
+                    if (body_set.Finite.arity < 1 and body_set.Finite.set.count() > 0) {
+                        return self.setError(expr, "The body for fix must not have arity >= 1", .{});
                     }
                     var new_fix_set = value.Set{.Finite = .{
                         .arity = if (body_set.Finite.arity == 0) 0 else body_set.Finite.arity - 1,
@@ -457,6 +457,81 @@ const Interpreter = struct {
                     fix_set = new_fix_set;
                     _ = self.time.pop();
                 }
+            },
+            .Reduce => |reduce| {
+                const input_set = try self.interpret(reduce.input, &[0]value.Scalar{});
+                if (input_set != .Finite) {
+                    return self.setError(expr, "The input for reduce must be finite, found {}", .{input_set});
+                }
+                var input_tuples = try ArrayList(value.Tuple).initCapacity(&self.arena.allocator, input_set.Finite.set.count());
+                var input_iter = input_set.Finite.set.iterator();
+                while (input_iter.next()) |kv| {
+                    try input_tuples.append(kv.key);
+                }
+                std.sort.sort(value.Tuple, input_tuples.items, struct {
+                    fn lessThan(a: value.Tuple, b: value.Tuple) bool {
+                        return meta.deepCompare(a,b) == .LessThan;
+                    }
+                    }.lessThan);
+
+                try self.time.append(0);
+                const init_key = value.LazySet{
+                    .expr = expr,
+                    .scope = try self.dupeScalars(self.scope.items),
+                    .time = try self.dupeTime(self.time.items),
+                };
+                const init_set = try self.interpret(reduce.init, &[0]value.Scalar{});
+                _ = self.time.pop();
+                if (init_set != .Finite) {
+                    return self.setError(expr, "The initial value for reduce must be finite, found {}", .{init_set});
+                }
+
+                var reduce_hint = try self.arena.allocator.alloc(value.Scalar, 2);
+
+                var reduce_key = init_key;
+                var reduce_set = init_set;
+                for (input_tuples.items) |input_tuple, iteration| {
+                    try self.time.append(iteration);
+                    _ = try self.boxes.put(reduce_key, reduce_set);
+                    var tuple_set = value.Set{.Finite = .{
+                        .arity = input_tuple.len,
+                        .set = DeepHashSet(value.Tuple).init(&self.arena.allocator),
+                    }};
+                    _ = try tuple_set.Finite.set.put(input_tuple, {});
+                    const tuple_key = value.LazySet{
+                        .expr = reduce.input,
+                        .scope = try self.dupeScalars(self.scope.items),
+                        .time = try self.dupeTime(self.time.items),
+                    };
+                    _ = try self.boxes.put(tuple_key, tuple_set);
+                    reduce_hint[0] = .{.Box = reduce_key};
+                    reduce_hint[1] = .{.Box = tuple_key};
+                    const body_set = try self.interpret(reduce.next, reduce_hint);
+                    if (body_set != .Finite) {
+                        return self.setError(expr, "The body for reduce must be finite, found {}", .{body_set});
+                    }
+                    if (body_set.Finite.arity < 2 and body_set.Finite.set.count() > 0) {
+                        return self.setError(expr, "The body for reduce must arity >= 2", .{});
+                    }
+                    var new_reduce_set = value.Set{.Finite = .{
+                        .arity = if (body_set.Finite.arity == 0) 0 else body_set.Finite.arity - 2,
+                        .set = DeepHashSet(value.Tuple).init(&self.arena.allocator),
+                    }};
+                    var body_iter = body_set.Finite.set.iterator();
+                    while (body_iter.next()) |kv| {
+                        if (meta.deepEqual(kv.key[0], value.Scalar{.Box = reduce_key}) and meta.deepEqual(kv.key[1], value.Scalar{.Box = tuple_key})) {
+                            _ = try new_reduce_set.Finite.set.put(kv.key[2..], {});
+                        }
+                    }
+                    const new_reduce_key = value.LazySet{
+                        .expr = expr,
+                        .scope = try self.dupeScalars(self.scope.items),
+                        .time = try self.dupeTime(self.time.items),
+                    };
+                    reduce_set = new_reduce_set;
+                    _ = self.time.pop();
+                }
+                return reduce_set;
             },
             .Enumerate => |body| {
                 const body_set = try self.interpret(body, &[0]value.Scalar{});

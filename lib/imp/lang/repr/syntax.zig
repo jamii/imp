@@ -20,6 +20,7 @@ pub const Expr = union(enum) {
     Apply: Pair,
     Box: *const Expr,
     Fix: Fix,
+    Reduce: Reduce,
     Enumerate: *const Expr,
     Annotate: Annotate,
 
@@ -101,6 +102,12 @@ pub const Arg = struct {
 };
 
 pub const Fix = struct {
+    init: *const Expr,
+    next: *const Expr,
+};
+
+pub const Reduce = struct {
+    input: *const Expr,
     init: *const Expr,
     next: *const Expr,
 };

@@ -316,7 +316,7 @@ pub const Analyzer = struct {
                 };
                 var max_iterations: usize = 100;
                 while (max_iterations > 0) : (max_iterations -= 1) {
-                    // next looks like `?[prev] . stuff` so need to add self type as hint
+                    // next looks like `?[prev] . stuff`
                     fix_hint[0] = .{.Box = fix_box_type};
                     try self.time.append(.Iteration);
                     const body_type = try self.analyze(fix.next, fix_hint);
@@ -324,8 +324,8 @@ pub const Analyzer = struct {
                     if (body_type != .Concrete or body_type.Concrete.abstract_arity > 1) {
                         return self.setError("The body for fix must have finite type, found {}", .{body_type});
                     }
-                    if (body_type.Concrete.columns.len == 0) {
-                        return self.setError("The body for fix cannot have type maybe", .{});
+                    if (body_type.Concrete.columns.len < 1) {
+                        return self.setError("The body for fix must have arity >= 1", .{});
                     }
                     if (body_type.Concrete.columns[0] != .Box or !meta.deepEqual(body_type.Concrete.columns[0].Box, fix_box_type)) {
                         return self.setError("The body for fix must be able to be applied to it's own result, found {}", .{body_type});
@@ -344,7 +344,72 @@ pub const Analyzer = struct {
                     }
                     fix_box_type.concrete = fix_type.Concrete;
                 }
-                return self.setError("Type of fixpoint failed to converge, reached {}", .{fix_type});
+                return self.setError("Type of fix failed to converge, reached {}", .{fix_type});
+            },
+            .Reduce => |reduce| {
+                const input_type = try self.analyze(reduce.input, &[0]type_.ScalarType{});
+                if (!input_type.isFinite()) {
+                    return self.setError("The input for reduce must have finite type, found {}", .{input_type});
+                }
+
+                const input_box_type = type_.BoxType{
+                    .lazy = type_.LazySetType{
+                        .expr = reduce.input,
+                        .scope = try self.dupeScalars(self.scope.items),
+                        .time = try self.dupeTime(self.time.items),
+                    },
+                    .concrete = input_type.Concrete,
+                };
+
+                const init_type = try self.analyze(reduce.init, &[0]type_.ScalarType{});
+                if (!init_type.isFinite()) {
+                    return self.setError("The initial value for reduce must have finite type, found {}", .{init_type});
+                }
+
+                var reduce_hint = try self.store.arena.allocator.alloc(type_.ScalarType, 2);
+                var reduce_type = init_type;
+                var reduce_box_type = type_.BoxType{
+                    .lazy = type_.LazySetType{
+                        .expr = expr,
+                        .scope = try self.dupeScalars(self.scope.items),
+                        .time = try self.dupeTime(self.time.items),
+                    },
+                    .concrete = init_type.Concrete,
+                };
+
+                var max_iterations: usize = 100;
+                while (max_iterations > 0) : (max_iterations -= 1) {
+                    // next looks like `?[prev] . ?[input] . stuff`
+                    reduce_hint[0] = .{.Box = reduce_box_type};
+                    reduce_hint[1] = .{.Box = input_box_type};
+                    // TODO should time be input row instead of iteration number?
+                    try self.time.append(.Iteration);
+                    const body_type = try self.analyze(reduce.next, reduce_hint);
+                    _ = self.time.pop();
+                    if (body_type != .Concrete or body_type.Concrete.abstract_arity > 2) {
+                        return self.setError("The body for reduce must have finite type, found {}", .{body_type});
+                    }
+                    if (body_type.Concrete.columns.len < 2) {
+                        return self.setError("The body for reduce must have arity >= 2", .{});
+                    }
+                    if (body_type.Concrete.columns[0] != .Box or !meta.deepEqual(body_type.Concrete.columns[0].Box, reduce_box_type) or body_type.Concrete.columns[1] != .Box or !meta.deepEqual(body_type.Concrete.columns[1].Box, input_box_type)) {
+                        return self.setError("The body for reduce must be able to be applied to it's own result and it's input, found {}", .{body_type});
+                    }
+                    // drop the types for `prev` and `input`
+                    const reduce_columns = body_type.Concrete.columns[2..];
+                    if (meta.deepEqual(reduce_type.Concrete.columns, reduce_columns)) {
+                        // reached fixpoint
+                        return reduce_type;
+                    }
+                    if (reduce_type.Concrete.columns.len != reduce_columns.len) {
+                        return self.setError("The body for reduce must have constant arity, changed from {} to {}", .{reduce_type.Concrete.columns.len, reduce_columns.len});
+                    }
+                    for (reduce_columns) |column, i| {
+                        reduce_type.Concrete.columns[i] = try self.unionScalar(reduce_type.Concrete.columns[i], column);
+                    }
+                    reduce_box_type.concrete = reduce_type.Concrete;
+                }
+                return self.setError("Type of reduce failed to converge, reached {}", .{reduce_type});
             },
             .Enumerate => |body| {
                 const body_type = try self.analyze(body, &[0]type_.ScalarType{});

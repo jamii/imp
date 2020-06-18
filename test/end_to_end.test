@@ -274,3 +274,19 @@ enumerate ("c" . 0 | "a" . 0 | "b" . 1 | "b" . 0.1) (range 2 3)
 ---
 type: text . number
 value: "b" . 0.1 | "b" . 1
+
+reduce (3 | 4 | 5) 0 (?[prev] . ?[i] . (prev + i))
+---
+type: number
+value: 12
+
+// TODO
+// reduce (none :: number) 0 (?[prev] . ?[i] . (prev + i))
+reduce ((1 . 2) 3) 0 (?[prev] . ?[i] . (prev + i))
+---
+type: number
+value: 0
+
+reduce (3 | 4 | 5) 0 (?a . ?b . (a + b))
+---
+Analyze error: Intersection of number and [(type of expr #13 with scope ())] is empty

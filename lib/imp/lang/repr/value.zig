@@ -15,6 +15,13 @@ pub const Set = union(enum) {
             .Lazy => |lazy| try lazy.dumpInto(out_stream),
         }
     }
+
+    pub fn format(self: Set, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
+        switch(self) {
+            .Finite => |finite| try finite.format(fmt, options, out_stream),
+            .Lazy => |lazy| try lazy.dumpInto(out_stream),
+        }
+    }
 };
 
 pub const Tuple = []const Scalar;
@@ -57,6 +64,24 @@ pub const FiniteSet = struct {
             for (tuples.items) |tuple, i| {
                 try out_stream.writeAll(if (i == 0) "" else " | ");
                 for (tuple) |scalar, j| {
+                    try out_stream.writeAll(if (j == 0) "" else " . ");
+                    try scalar.dumpInto(out_stream);
+                }
+            }
+        }
+    }
+
+    pub fn format(self: FiniteSet, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
+        if (self.set.count() == 0) {
+            try out_stream.writeAll("none");
+        } else if (self.set.count() == 1 and self.set.iterator().next().?.key.len == 0) {
+            try out_stream.writeAll("some");
+        } else {
+            var iter = self.set.iterator();
+            var i: usize = 0;
+            while (iter.next()) |kv| : (i += 1) {
+                try out_stream.writeAll(if (i == 0) "" else " | ");
+                for (kv.key) |scalar, j| {
                     try out_stream.writeAll(if (j == 0) "" else " . ");
                     try scalar.dumpInto(out_stream);
                 }

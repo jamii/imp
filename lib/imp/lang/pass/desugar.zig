@@ -141,6 +141,14 @@ const Desugarer = struct {
                         .next = try self.desugar(fix.next),
                     }}
             ),
+            .Reduce => |reduce|
+                try self.putCore(
+                    .{.Reduce = .{
+                        .input = try self.desugar(reduce.input),
+                        .init = try self.desugar(reduce.init),
+                        .next = try self.desugar(reduce.next),
+                    }}
+            ),
             .Enumerate => |body|
                 return self.putCore(
                     .{.Enumerate = try self.desugar(body)}

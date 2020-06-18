@@ -22,6 +22,7 @@ const syntax = imp.lang.repr.syntax;
 //   "?" arg "." expr
 //   "[" expr "]"
 //   "fix" expr_inner expr_inner
+//   "reduce" expr_inner expr_inner expr_inner
 //   "enumerate" expr_inner
 //   "#" name expr_inner
 //   "if" expr_inner expr_inner expr_inner
@@ -102,6 +103,7 @@ const TokenTag = enum {
     Arg,
     OpenBox, CloseBox,
     Fix,
+    Reduce,
     Enumerate,
     Annotate,
 
@@ -145,6 +147,7 @@ const TokenTag = enum {
             .OpenBox => "`[`",
             .CloseBox => "`]`",
             .Fix => "`fix`",
+            .Reduce => "`reduce`",
             .Enumerate => "`enumerate`",
             .Annotate => "`#`",
 
@@ -186,6 +189,7 @@ const Token = union(TokenTag) {
     Arg,
     OpenBox, CloseBox,
     Fix,
+    Reduce,
     Enumerate,
     Annotate,
 
@@ -216,7 +220,7 @@ const Token = union(TokenTag) {
             .Lookup => other != .Lookup,
             // we want:
             //   ?a.?b.c == ?a.(?b.c)
-            // so bindsTighterThan(.Product, .Product) = true
+            // so bindsTighterThan(.Product, .Product) must return true
             .Product => other == .Union or other == .Product,
             .Multiply, .Divide => other == .Add or other == .Subtract,
             else => false,
@@ -471,6 +475,7 @@ const Parser = struct {
                         if (meta.deepEqual(name, "some")) return Token{.Some={}};
                         if (meta.deepEqual(name, "when")) return Token{.When={}};
                         if (meta.deepEqual(name, "fix")) return Token{.Fix={}};
+                        if (meta.deepEqual(name, "reduce")) return Token{.Reduce={}};
                         if (meta.deepEqual(name, "enumerate")) return Token{.Enumerate={}};
                         if (meta.deepEqual(name, "if")) return Token{.If={}};
                         if (meta.deepEqual(name, "let")) return Token{.Let={}};
@@ -565,6 +570,13 @@ const Parser = struct {
                 const init = try self.parseExprInner();
                 const next = try self.parseExprInner();
                 return self.store.putSyntax(.{.Fix=.{.init=init, .next=next}}, start, self.position);
+            },
+            // "reduce" expr_inner expr_inner expr_inner
+            .Reduce => {
+                const input = try self.parseExprInner();
+                const init = try self.parseExprInner();
+                const next = try self.parseExprInner();
+                return self.store.putSyntax(.{.Reduce=.{.input=input, .init=init, .next=next}}, start, self.position);
             },
             // "enumerate" expr_inner
             .Enumerate => {

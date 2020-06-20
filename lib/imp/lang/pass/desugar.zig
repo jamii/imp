@@ -52,6 +52,7 @@ const Desugarer = struct {
     fn desugar(self: *Desugarer, syntax_expr: *const syntax.Expr) Error ! *const core.Expr {
         const prev_expr = self.current_expr;
         self.current_expr = syntax_expr;
+        defer self.current_expr = prev_expr;
         const core_expr = switch (syntax_expr.*) {
             .None => try self.putCore(.None),
             .Some => try self.putCore(.Some),
@@ -195,7 +196,6 @@ const Desugarer = struct {
                 break :lookup try self.putCore(.{.Apply = .{.left=apply_ab, .right=abstract}});
             },
         };
-        self.current_expr = prev_expr;
         return core_expr;
     }
 

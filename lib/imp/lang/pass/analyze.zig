@@ -45,13 +45,15 @@ pub const Analyzer = struct {
     }
 
     fn analyze(self: *Analyzer, expr: *const core.Expr, hint: []const type_.ScalarType) Error ! type_.SetType {
-        // TODO need to think about what the key should be
-        // hint might vary in length but if > arity(expr) then should return same type
-        // maybe only store concrete types?
-        // if (self.store.getType(expr, self.scope.items)) |set_type| {
-        //     // already analyzed
-        //     return set_type;
-        // }
+        const lazy = type_.LazySetType{
+            .expr = expr,
+            .scope = try self.dupeScalars(self.scope.items),
+            .time = try self.dupeTime(self.time.items),
+        };
+        if (self.store.getSpecialization(lazy, hint)) |set_type| {
+            // already analyzed
+            return set_type;
+        }
         const set_type: type_.SetType = set_type: { switch(expr.*) {
             .None, .Some => {
                 break :set_type .{.Concrete = .{
@@ -74,11 +76,7 @@ pub const Analyzer = struct {
                 const left = try self.analyze(pair.left, hint);
                 const right = try self.analyze(pair.right, hint);
                 if (left == .Lazy or right == .Lazy) {
-                    break :set_type .{.Lazy = .{
-                        .expr = expr,
-                        .scope = try self.dupeScalars(self.scope.items),
-                        .time = try self.dupeTime(self.time.items),
-                    }};
+                    break :set_type .{.Lazy = lazy};
                 }
                 if (left.Concrete.columns.len != right.Concrete.columns.len) {
                     return self.setError("Mismatched arities: {} vs {}", .{left.Concrete.columns.len, right.Concrete.columns.len});
@@ -101,19 +99,11 @@ pub const Analyzer = struct {
             .Product => |pair| {
                 const left = try self.analyze(pair.left, hint);
                 if (left == .Lazy) {
-                    break :set_type .{.Lazy = .{
-                        .expr = expr,
-                        .scope = try self.dupeScalars(self.scope.items),
-                        .time = try self.dupeTime(self.time.items),
-                    }};
+                    break :set_type .{.Lazy = lazy};
                 }
                 const right = try self.analyze(pair.right, hint[min(hint.len, left.Concrete.columns.len)..]);
                 if (right == .Lazy) {
-                    break :set_type .{.Lazy = .{
-                        .expr = expr,
-                        .scope = try self.dupeScalars(self.scope.items),
-                        .time = try self.dupeTime(self.time.items),
-                    }};
+                    break :set_type .{.Lazy = lazy};
                 }
                 const abstract_arity = if (right.Concrete.abstract_arity > 0)
                     left.Concrete.columns.len + right.Concrete.abstract_arity
@@ -205,11 +195,7 @@ pub const Analyzer = struct {
             },
             .Abstract => |body| {
                 if (hint.len == 0) {
-                    break :set_type .{.Lazy = .{
-                        .expr = expr,
-                        .scope = try self.dupeScalars(self.scope.items),
-                        .time = try self.dupeTime(self.time.items),
-                    }};
+                    break :set_type .{.Lazy = lazy};
                 } else {
                     // if we have a hint we can use it to specialize the body
                     try self.scope.append(hint[0]);
@@ -228,11 +214,7 @@ pub const Analyzer = struct {
                         },
                         .Lazy => {
                             // couldn't fully specialize, give up
-                            break :set_type .{.Lazy = .{
-                                .expr = expr,
-                                .scope = try self.dupeScalars(self.scope.items),
-                                .time = try self.dupeTime(self.time.items),
-                            }};
+                            break :set_type .{.Lazy = lazy};
                         },
                     }
                 }
@@ -259,11 +241,7 @@ pub const Analyzer = struct {
                 }
                 if (left == .Lazy) {
                     // couldn't fully specialize, give up
-                    break :set_type .{.Lazy = .{
-                        .expr = expr,
-                        .scope = try self.dupeScalars(self.scope.items),
-                        .time = try self.dupeTime(self.time.items),
-                    }};
+                    break :set_type .{.Lazy = lazy};
                 }
                 const joined_arity = min(left.Concrete.columns.len, right.Concrete.columns.len);
                 for (left.Concrete.columns[0..joined_arity]) |column, i| {
@@ -339,9 +317,11 @@ pub const Analyzer = struct {
                     if (fix_type.Concrete.columns.len != fix_columns.len) {
                         return self.setError("The body for fix must have constant arity, changed from {} to {}", .{fix_type.Concrete.columns.len, fix_columns.len});
                     }
+                    var columns = try self.store.arena.allocator.alloc(type_.ScalarType, fix_type.Concrete.columns.len);
                     for (fix_columns) |column, i| {
-                        fix_type.Concrete.columns[i] = try self.unionScalar(fix_type.Concrete.columns[i], column);
+                        columns[i] = try self.unionScalar(fix_type.Concrete.columns[i], column);
                     }
+                    fix_type.Concrete.columns = columns;
                     fix_box_type.concrete = fix_type.Concrete;
                 }
                 return self.setError("Type of fix failed to converge, reached {}", .{fix_type});
@@ -404,9 +384,11 @@ pub const Analyzer = struct {
                     if (reduce_type.Concrete.columns.len != reduce_columns.len) {
                         return self.setError("The body for reduce must have constant arity, changed from {} to {}", .{reduce_type.Concrete.columns.len, reduce_columns.len});
                     }
+                    var columns = try self.store.arena.allocator.alloc(type_.ScalarType, reduce_type.Concrete.columns.len);
                     for (reduce_columns) |column, i| {
-                        reduce_type.Concrete.columns[i] = try self.unionScalar(reduce_type.Concrete.columns[i], column);
+                        columns[i] = try self.unionScalar(reduce_type.Concrete.columns[i], column);
                     }
+                    reduce_type.Concrete.columns = columns;
                     reduce_box_type.concrete = reduce_type.Concrete;
                 }
                 return self.setError("Type of reduce failed to converge, reached {}", .{reduce_type});
@@ -437,7 +419,7 @@ pub const Analyzer = struct {
                 }};
             },
         }};
-        // try self.store.putType(expr, try self.dupeScalars(self.scope.items), set_type);
+        try self.store.putSpecialization(lazy, hint, set_type);
         return set_type;
     }
 

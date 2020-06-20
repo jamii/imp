@@ -307,3 +307,10 @@ value: 0
 reduce (3 | 4 | 5) 0 (?a . ?b . (a + b))
 ---
 Analyze error: Intersection of number and [(type of expr #13 with scope ())] is empty
+
+// testing specialization caching
+let f = ?i . (i + 1) in
+(f 1) . (f 2) . (f 3 4) . (f 5 6)
+---
+type: number . number
+value: 2 . 3

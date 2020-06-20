@@ -33,7 +33,7 @@ pub const SetType = union(enum) {
 
 pub const ConcreteSetType = struct {
     abstract_arity: usize,
-    columns: []ScalarType,
+    columns: []const ScalarType,
 
     pub fn dumpInto(self: ConcreteSetType, out_stream: var) OutStreamError(@TypeOf(out_stream))!void {
         if (self.columns.len == 0) {

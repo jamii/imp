@@ -28,7 +28,7 @@ pub fn deepCompare(a: var, b: @TypeOf(a)) Ordering {
             if (a) return .GreaterThan;
             return .LessThan;
         },
-        .Int, .Float, .Enum => {
+        .Int, .Float => {
             if (a < b) {
                 return .LessThan;
             }
@@ -36,6 +36,9 @@ pub fn deepCompare(a: var, b: @TypeOf(a)) Ordering {
                 return .GreaterThan;
             }
             return .Equal;
+        },
+        .Enum => {
+            return deepCompare(@enumToInt(a), @enumToInt(b));
         },
         .Pointer => |pti| {
             switch (pti.size) {

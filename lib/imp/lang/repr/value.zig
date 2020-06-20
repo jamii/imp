@@ -120,17 +120,20 @@ pub const LazySet = struct {
     scope: Tuple,
     time: []const Time,
 
-    // Equality on expr id and scope value
+    // Equality on expr id and scope/time value
 
     pub fn deepHashInto(hasher: var, self: LazySet) void {
         hasher.update(std.mem.asBytes(&Store.getCoreMeta(self.expr).id));
         meta.deepHashInto(hasher, self.scope);
+        meta.deepHashInto(hasher, self.time);
     }
 
     pub fn deepCompare(self: LazySet, other: LazySet) meta.Ordering {
-        const ordering = meta.deepCompare(Store.getCoreMeta(self.expr).id, Store.getCoreMeta(other.expr).id);
-        if (ordering != .Equal) return ordering;
-        return meta.deepCompare(self.scope, other.scope);
+        const id_ordering = meta.deepCompare(Store.getCoreMeta(self.expr).id, Store.getCoreMeta(other.expr).id);
+        if (id_ordering != .Equal) return id_ordering;
+        const scope_ordering = meta.deepCompare(self.scope, other.scope);
+        if (scope_ordering != .Equal) return scope_ordering;
+        return meta.deepCompare(self.time, other.time);
     }
 
     pub fn dumpInto(self: LazySet, out_stream: var) OutStreamError(@TypeOf(out_stream)) ! void {

@@ -142,13 +142,6 @@ pub fn format(allocator: *Allocator, comptime fmt: []const u8, args: var) ![]con
     return buf.items;
 }
 
-pub fn Result(comptime Ok: type, comptime Err: type) type {
-    return union(enum) {
-        Ok: Ok,
-        Err: Err,
-    };
-}
-
 pub fn tagEqual(a: var, b: @TypeOf(a)) bool {
     return std.meta.activeTag(a) == std.meta.activeTag(b);
 }

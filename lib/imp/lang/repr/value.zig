@@ -49,7 +49,8 @@ pub const FiniteSet = struct {
         defer tuples.deinit();
         var iter = self.set.iterator();
         while (iter.next()) |kv| {
-            try tuples.append(kv.key);
+            // TODO errors for printing are funky
+            tuples.append(kv.key) catch imp_panic("oom", .{});
         }
         std.sort.sort(Tuple, tuples.items, struct {
             fn lessThan(a: Tuple, b: Tuple) bool {

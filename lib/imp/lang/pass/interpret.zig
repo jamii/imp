@@ -567,7 +567,7 @@ const Interpreter = struct {
             },
             .Native => |native| {
                 switch (native) {
-                    .Add, .Subtract, .Multiply, .Divide => {
+                    .Add, .Subtract, .Multiply, .Divide, .Modulus => {
                         if (hint.len < 2) {
                             return value.Set{.Lazy = .{
                                 .expr = expr,
@@ -586,6 +586,7 @@ const Interpreter = struct {
                             .Subtract => hint[0].Number - hint[1].Number,
                             .Multiply => hint[0].Number * hint[1].Number,
                             .Divide => hint[0].Number / hint[1].Number,
+                            .Modulus => @mod(hint[0].Number, hint[1].Number),
                             else => unreachable,
                         };
                         const tuple = try self.dupeScalars(&[3]value.Scalar{hint[0], hint[1], .{.Number = result}});

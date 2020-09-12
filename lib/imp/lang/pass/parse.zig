@@ -45,6 +45,7 @@ const syntax = imp.lang.repr.syntax;
 //   "-"
 //   "*"
 //   "/"
+//   "%"
 //   ">"
 //   ">="
 //   "<"
@@ -118,6 +119,7 @@ const TokenTag = enum {
     Subtract,
     Multiply,
     Divide,
+    Modulus,
     LessThan,
     LessThanOrEqual,
     GreaterThan,
@@ -161,6 +163,7 @@ const TokenTag = enum {
             .Subtract => "`-`",
             .Multiply => "`*`",
             .Divide => "`/`",
+            .Modulus => "%",
             .LessThan => "`<`",
             .LessThanOrEqual => "`<=`",
             .GreaterThan => "`>`",
@@ -204,6 +207,7 @@ const Token = union(TokenTag) {
     Subtract,
     Multiply,
     Divide,
+    Modulus,
     LessThan,
     LessThanOrEqual,
     GreaterThan,
@@ -443,6 +447,7 @@ const Parser = struct {
                         return Token{.Divide={}};
                     }
                 },
+                '%' => return Token{.Modulus={}},
                 '<' => {
                     const position = self.position;
                     if ((try self.nextAsciiChar()) orelse 0 == '=') {
@@ -645,7 +650,7 @@ const Parser = struct {
             const op = try self.nextToken();
             switch (op) {
                 // expr_inner binop expr
-                .Union, .Intersect, .Product, .Equal, .Add, .Subtract, .Multiply, .Divide, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual => {
+                .Union, .Intersect, .Product, .Equal, .Add, .Subtract, .Multiply, .Divide, .Modulus, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual => {
                     if (prev_op == null or op.bindsTighterThan(prev_op.?)) {
                         const right = try self.parseExprOuter(op);
                         left = try switch (op) {
@@ -660,6 +665,7 @@ const Parser = struct {
                             .Subtract => self.putApplyOp("-", left, right, op_start, self.position),
                             .Multiply => self.putApplyOp("*", left, right, op_start, self.position),
                             .Divide => self.putApplyOp("/", left, right, op_start, self.position),
+                            .Modulus => self.putApplyOp("%", left, right, op_start, self.position),
                             .LessThan => self.putApplyOp("<", left, right, op_start, self.position),
                             .LessThanOrEqual => self.putApplyOp("<=", left, right, op_start, self.position),
                             .GreaterThan => self.putApplyOp(">", left, right, op_start, self.position),

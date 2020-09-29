@@ -51,8 +51,8 @@ pub const Expr = union(enum) {
         return children;
     }
 
-    pub fn getChildrenMut(self: *Expr) FixedSizeArrayList(3, * *const Expr) {
-        var children = FixedSizeArrayList(3, * *const Expr).init();
+    pub fn getChildrenMut(self: *Expr) FixedSizeArrayList(3, **const Expr) {
+        var children = FixedSizeArrayList(3, **const Expr).init();
         inline for (@typeInfo(Expr).Union.fields) |expr_field| {
             if (@enumToInt(std.meta.activeTag(self.*)) == expr_field.enum_field.?.value) {
                 const t = expr_field.field_type;
@@ -75,7 +75,7 @@ pub const Expr = union(enum) {
         return children;
     }
 
-    pub fn getNameIxes(self: Expr, name_ixes: *DeepHashSet(NameIx)) error{OutOfMemory} ! void {
+    pub fn getNameIxes(self: Expr, name_ixes: *DeepHashSet(NameIx)) error{OutOfMemory}!void {
         switch (self) {
             .Name, .UnboxName => |name_ix| {
                 _ = try name_ixes.put(name_ix, {});
@@ -88,7 +88,7 @@ pub const Expr = union(enum) {
         }
     }
 
-    pub fn dumpInto(self: Expr, out_stream: var, indent: u32) anyerror!void {
+    pub fn dumpInto(self: Expr, out_stream: anytype, indent: u32) anyerror!void {
         if (indent != 0) {
             try out_stream.writeAll("\n");
             try out_stream.writeByteNTimes(' ', indent);
@@ -119,7 +119,7 @@ pub const Expr = union(enum) {
             .Native => |native| try native.dumpInto(out_stream),
         }
         for (self.getChildren().slice()) |child| {
-            try child.dumpInto(out_stream, indent+2);
+            try child.dumpInto(out_stream, indent + 2);
         }
     }
 };
@@ -184,7 +184,7 @@ pub const Native = enum {
         return null;
     }
 
-    pub fn dumpInto(self: Native, out_stream: var, indent: u32) anyerror!void {
+    pub fn dumpInto(self: Native, out_stream: anytype, indent: u32) anyerror!void {
         try out_stream.writeAll(self.toName());
     }
 };

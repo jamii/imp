@@ -52,7 +52,7 @@ const syntax = imp.lang.repr.syntax;
 //   "<="
 
 // TODO https://github.com/ziglang/zig/issues/2647
-pub fn parse(store: *Store, source: []const u8, error_info: *?ErrorInfo) Error ! *const syntax.Expr {
+pub fn parse(store: *Store, source: []const u8, error_info: *?ErrorInfo) Error!*const syntax.Expr {
     var parser = Parser{
         .store = store,
         .source = source,
@@ -65,7 +65,7 @@ pub fn parse(store: *Store, source: []const u8, error_info: *?ErrorInfo) Error !
 }
 
 // TODO clean up this errorset
-pub const Error = error {
+pub const Error = error{
     // sets error_info
     ParseError,
 
@@ -90,7 +90,8 @@ pub const ErrorInfo = struct {
 
 const TokenTag = enum {
     // core
-    OpenGroup, CloseGroup,
+    OpenGroup,
+    CloseGroup,
     None,
     Some,
     Number,
@@ -102,7 +103,8 @@ const TokenTag = enum {
     Name,
     When,
     Arg,
-    OpenBox, CloseBox,
+    OpenBox,
+    CloseBox,
     Fix,
     Reduce,
     Enumerate,
@@ -111,7 +113,8 @@ const TokenTag = enum {
     // sugar
     Negate,
     If,
-    Let, In,
+    Let,
+    In,
     Lookup,
 
     // natives
@@ -131,7 +134,7 @@ const TokenTag = enum {
     // not matched by anything but used to check that we parsed everything
     EOF,
 
-    pub fn format(self: TokenTag, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
+    pub fn format(self: TokenTag, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
         try out_stream.writeAll(switch (self) {
             .OpenGroup => "`(`",
             .CloseGroup => "`)`",
@@ -178,7 +181,8 @@ const TokenTag = enum {
 
 const Token = union(TokenTag) {
     // core
-    OpenGroup, CloseGroup,
+    OpenGroup,
+    CloseGroup,
     None,
     Some,
     Number: f64,
@@ -190,7 +194,8 @@ const Token = union(TokenTag) {
     Name: []const u8, // ascii, non-empty
     When,
     Arg,
-    OpenBox, CloseBox,
+    OpenBox,
+    CloseBox,
     Fix,
     Reduce,
     Enumerate,
@@ -199,7 +204,8 @@ const Token = union(TokenTag) {
     // sugar
     Negate,
     If,
-    Let, In,
+    Let,
+    In,
     Lookup,
 
     // natives
@@ -231,7 +237,7 @@ const Token = union(TokenTag) {
         };
     }
 
-    pub fn format(self: Token, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
+    pub fn format(self: Token, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
         try (std.meta.activeTag(self)).format(fmt, options, out_stream);
         switch (self) {
             .Number => |number| try std.fmt.format(out_stream, " `{d}`", .{number}),
@@ -244,10 +250,10 @@ const Token = union(TokenTag) {
 };
 
 fn appendChar(bytes: *ArrayList(u8), char: u21) !void {
-    var char_bytes = [4]u8{0,0,0,0};
+    var char_bytes = [4]u8{ 0, 0, 0, 0 };
     const len = std.unicode.utf8Encode(char, &char_bytes)
-        // we got this char from utf8Decode so it must be legit
-        catch unreachable;
+    // we got this char from utf8Decode so it must be legit
+    catch unreachable;
     try bytes.appendSlice(char_bytes[0..len]);
 }
 
@@ -257,14 +263,14 @@ const Parser = struct {
     position: usize,
     error_info: *?ErrorInfo,
 
-    fn putApplyOp(self: *Parser, name: syntax.Name, left: *const syntax.Expr, right: *const syntax.Expr, start: usize, end: usize) ! *const syntax.Expr {
-        const expr1 = try self.store.putSyntax(.{.Name=name}, start, end);
-        const expr2 = try self.store.putSyntax(.{.Apply=.{.left=expr1, .right=left}}, start, end);
-        const expr3 = try self.store.putSyntax(.{.Apply=.{.left=expr2, .right=right}}, start, end);
+    fn putApplyOp(self: *Parser, name: syntax.Name, left: *const syntax.Expr, right: *const syntax.Expr, start: usize, end: usize) !*const syntax.Expr {
+        const expr1 = try self.store.putSyntax(.{ .Name = name }, start, end);
+        const expr2 = try self.store.putSyntax(.{ .Apply = .{ .left = expr1, .right = left } }, start, end);
+        const expr3 = try self.store.putSyntax(.{ .Apply = .{ .left = expr2, .right = right } }, start, end);
         return expr3;
     }
 
-    fn setError(self: *Parser, start: usize, comptime fmt: []const u8, args: var) Error {
+    fn setError(self: *Parser, start: usize, comptime fmt: []const u8, args: anytype) Error {
         const message = try format(&self.store.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
             .start = start,
@@ -275,7 +281,7 @@ const Parser = struct {
     }
 
     // use this instead of std.unicode.Utf8Iterator because we want to return the position of any unicode error
-    fn nextUtf8Char(self: *Parser) ! ?u21 {
+    fn nextUtf8Char(self: *Parser) !?u21 {
         if (self.position >= self.source.len) {
             return null;
         }
@@ -288,7 +294,7 @@ const Parser = struct {
         return char;
     }
 
-    fn nextAsciiChar(self: *Parser) ! ?u7 {
+    fn nextAsciiChar(self: *Parser) !?u7 {
         const start = self.position;
         if (try self.nextUtf8Char()) |char| {
             const ascii_char = @truncate(u7, char);
@@ -302,7 +308,7 @@ const Parser = struct {
     }
 
     // called after seeing '"'
-    fn tokenizeText(self: *Parser) ! []const u8 {
+    fn tokenizeText(self: *Parser) ![]const u8 {
         var bytes = ArrayList(u8).init(&self.store.arena.allocator);
         const text_start = self.position - 1;
         while (true) {
@@ -319,7 +325,6 @@ const Parser = struct {
                         } else {
                             return self.setError(char_start, "unfinished text escape", .{});
                         }
-
                     },
                     '"' => {
                         break;
@@ -336,7 +341,7 @@ const Parser = struct {
     }
 
     // called after seeing "//"
-    fn tokenizeComment(self: *Parser) ! void {
+    fn tokenizeComment(self: *Parser) !void {
         while (true) {
             // utf8 chars are allowed in comments
             if (try self.nextUtf8Char()) |char2| {
@@ -351,7 +356,7 @@ const Parser = struct {
 
     // called after seeing first char of name
     // name = alpha (alpha | digit | "_")*
-    fn tokenizeName(self: *Parser) ! []const u8 {
+    fn tokenizeName(self: *Parser) ![]const u8 {
         const start = self.position - 1;
         while (true) {
             const position = self.position;
@@ -369,7 +374,7 @@ const Parser = struct {
 
     // called after seeing first digit of number
     // number = digit+ ("." digit+)?
-    fn tokenizeNumber(self: *Parser) ! f64 {
+    fn tokenizeNumber(self: *Parser) !f64 {
         const start = self.position - 1;
         // first set of digits
         while (true) {
@@ -421,22 +426,22 @@ const Parser = struct {
         const start = self.position;
         if (try self.nextAsciiChar()) |char1| {
             switch (char1) {
-                '(' => return Token{.OpenGroup={}},
-                ')' => return Token{.CloseGroup={}},
-                '"' => return Token{.Text = try self.tokenizeText()},
-                '|' => return Token{.Union={}},
-                '&' => return Token{.Intersect={}},
-                '.' => return Token{.Product={}},
-                '=' => return Token{.Equal={}},
-                '?' => return Token{.Arg={}},
-                '-' => return Token{.Subtract={}},
-                '[' => return Token{.OpenBox={}},
-                ']' => return Token{.CloseBox={}},
-                '#' => return Token{.Annotate={}},
-                '!' => return Token{.Negate={}},
-                ':' => return Token{.Lookup={}},
-                '+' => return Token{.Add={}},
-                '*' => return Token{.Multiply={}},
+                '(' => return Token{ .OpenGroup = {} },
+                ')' => return Token{ .CloseGroup = {} },
+                '"' => return Token{ .Text = try self.tokenizeText() },
+                '|' => return Token{ .Union = {} },
+                '&' => return Token{ .Intersect = {} },
+                '.' => return Token{ .Product = {} },
+                '=' => return Token{ .Equal = {} },
+                '?' => return Token{ .Arg = {} },
+                '-' => return Token{ .Subtract = {} },
+                '[' => return Token{ .OpenBox = {} },
+                ']' => return Token{ .CloseBox = {} },
+                '#' => return Token{ .Annotate = {} },
+                '!' => return Token{ .Negate = {} },
+                ':' => return Token{ .Lookup = {} },
+                '+' => return Token{ .Add = {} },
+                '*' => return Token{ .Multiply = {} },
                 '/' => {
                     const position = self.position;
                     if ((try self.nextAsciiChar()) orelse 0 == '/') {
@@ -444,26 +449,26 @@ const Parser = struct {
                         return null;
                     } else {
                         self.position = position;
-                        return Token{.Divide={}};
+                        return Token{ .Divide = {} };
                     }
                 },
-                '%' => return Token{.Modulus={}},
+                '%' => return Token{ .Modulus = {} },
                 '<' => {
                     const position = self.position;
                     if ((try self.nextAsciiChar()) orelse 0 == '=') {
-                        return Token{.LessThanOrEqual={}};
+                        return Token{ .LessThanOrEqual = {} };
                     } else {
                         self.position = position;
-                        return Token{.LessThan={}};
+                        return Token{ .LessThan = {} };
                     }
                 },
                 '>' => {
                     const position = self.position;
                     if ((try self.nextAsciiChar()) orelse 0 == '=') {
-                        return Token{.GreaterThanOrEqual={}};
+                        return Token{ .GreaterThanOrEqual = {} };
                     } else {
                         self.position = position;
-                        return Token{.GreaterThan={}};
+                        return Token{ .GreaterThan = {} };
                     }
                 },
                 else => {
@@ -473,26 +478,26 @@ const Parser = struct {
                     } else if (std.ascii.isSpace(ascii_char1)) {
                         return null;
                     } else if (std.ascii.isDigit(ascii_char1)) {
-                        return Token{.Number = try self.tokenizeNumber()};
+                        return Token{ .Number = try self.tokenizeNumber() };
                     } else if (std.ascii.isAlpha(ascii_char1)) {
                         const name = try self.tokenizeName();
-                        if (meta.deepEqual(name, "none")) return Token{.None={}};
-                        if (meta.deepEqual(name, "some")) return Token{.Some={}};
-                        if (meta.deepEqual(name, "when")) return Token{.When={}};
-                        if (meta.deepEqual(name, "fix")) return Token{.Fix={}};
-                        if (meta.deepEqual(name, "reduce")) return Token{.Reduce={}};
-                        if (meta.deepEqual(name, "enumerate")) return Token{.Enumerate={}};
-                        if (meta.deepEqual(name, "if")) return Token{.If={}};
-                        if (meta.deepEqual(name, "let")) return Token{.Let={}};
-                        if (meta.deepEqual(name, "in")) return Token{.In={}};
-                        return Token{.Name = name};
+                        if (meta.deepEqual(name, "none")) return Token{ .None = {} };
+                        if (meta.deepEqual(name, "some")) return Token{ .Some = {} };
+                        if (meta.deepEqual(name, "when")) return Token{ .When = {} };
+                        if (meta.deepEqual(name, "fix")) return Token{ .Fix = {} };
+                        if (meta.deepEqual(name, "reduce")) return Token{ .Reduce = {} };
+                        if (meta.deepEqual(name, "enumerate")) return Token{ .Enumerate = {} };
+                        if (meta.deepEqual(name, "if")) return Token{ .If = {} };
+                        if (meta.deepEqual(name, "let")) return Token{ .Let = {} };
+                        if (meta.deepEqual(name, "in")) return Token{ .In = {} };
+                        return Token{ .Name = name };
                     } else {
                         return self.setError(start, "invalid token", .{});
                     }
-                }
+                },
             }
         } else {
-            return Token{.EOF={}};
+            return Token{ .EOF = {} };
         }
     }
 
@@ -504,18 +509,18 @@ const Parser = struct {
         }
     }
 
-    fn expect(self: *Parser, expected: TokenTag) ! Token {
+    fn expect(self: *Parser, expected: TokenTag) !Token {
         const start = self.position;
         const found = try self.nextToken();
         if (std.meta.activeTag(found) != expected) {
-            return self.setError(start, "Expected {}, found {}", .{expected, found});
+            return self.setError(start, "Expected {}, found {}", .{ expected, found });
         } else {
             return found;
         }
     }
 
     // returns null if this isn't the start of an expression
-    fn parseExprInnerMaybe(self: *Parser) Error ! ?*const syntax.Expr {
+    fn parseExprInnerMaybe(self: *Parser) Error!?*const syntax.Expr {
         const start = self.position;
         const token = try self.nextToken();
         switch (token) {
@@ -530,16 +535,16 @@ const Parser = struct {
             // "some"
             .Some => return self.store.putSyntax(.Some, start, self.position),
             // number
-            .Number => |number| return self.store.putSyntax(.{.Scalar=.{.Number=number}}, start, self.position),
+            .Number => |number| return self.store.putSyntax(.{ .Scalar = .{ .Number = number } }, start, self.position),
             // text
-            .Text => |text| return self.store.putSyntax(.{.Scalar=.{.Text=text}}, start, self.position),
+            .Text => |text| return self.store.putSyntax(.{ .Scalar = .{ .Text = text } }, start, self.position),
             // name
-            .Name => |name| return self.store.putSyntax(.{.Name=name}, start, self.position),
+            .Name => |name| return self.store.putSyntax(.{ .Name = name }, start, self.position),
             // "when" expr_inner expr_inner
             .When => {
                 const condition = try self.parseExprInner();
                 const true_branch = try self.parseExprInner();
-                return self.store.putSyntax(.{.When=.{.condition=condition,.true_branch=true_branch}}, start, self.position);
+                return self.store.putSyntax(.{ .When = .{ .condition = condition, .true_branch = true_branch } }, start, self.position);
             },
             // syntax is:
             //   expr = ... | "?" arg "." expr
@@ -552,59 +557,59 @@ const Parser = struct {
                 const arg = arg: {
                     switch (arg_token) {
                         .Name => |name| {
-                            break :arg syntax.Arg{.name=name, .unbox=false};
+                            break :arg syntax.Arg{ .name = name, .unbox = false };
                         },
                         .OpenBox => {
                             const name = (try self.expect(.Name)).Name;
                             _ = try self.expect(.CloseBox);
-                            break :arg syntax.Arg{.name=name, .unbox=true};
+                            break :arg syntax.Arg{ .name = name, .unbox = true };
                         },
                         else => return self.setError(start, "Expected ?name or ?[name], found {}", .{arg_token}),
                     }
                 };
-                return self.store.putSyntax(.{.Arg=arg}, start, self.position);
+                return self.store.putSyntax(.{ .Arg = arg }, start, self.position);
             },
             // "[" expr "]"
             .OpenBox => {
                 const expr = try self.parseExpr();
                 _ = try self.expect(.CloseBox);
-                return self.store.putSyntax(.{.Box=expr}, start, self.position);
+                return self.store.putSyntax(.{ .Box = expr }, start, self.position);
             },
             // "fix" expr_inner expr_inner
             .Fix => {
                 const init = try self.parseExprInner();
                 const next = try self.parseExprInner();
-                return self.store.putSyntax(.{.Fix=.{.init=init, .next=next}}, start, self.position);
+                return self.store.putSyntax(.{ .Fix = .{ .init = init, .next = next } }, start, self.position);
             },
             // "reduce" expr_inner expr_inner expr_inner
             .Reduce => {
                 const input = try self.parseExprInner();
                 const init = try self.parseExprInner();
                 const next = try self.parseExprInner();
-                return self.store.putSyntax(.{.Reduce=.{.input=input, .init=init, .next=next}}, start, self.position);
+                return self.store.putSyntax(.{ .Reduce = .{ .input = input, .init = init, .next = next } }, start, self.position);
             },
             // "enumerate" expr_inner
             .Enumerate => {
                 const body = try self.parseExprInner();
-                return self.store.putSyntax(.{.Enumerate=body}, start, self.position);
+                return self.store.putSyntax(.{ .Enumerate = body }, start, self.position);
             },
             // "#" name expr_inner
             .Annotate => {
                 const annotation = (try self.expect(.Name)).Name;
                 const body = try self.parseExprInner();
-                return self.store.putSyntax(.{.Annotate=.{.annotation=annotation, .body=body}}, start, self.position);
+                return self.store.putSyntax(.{ .Annotate = .{ .annotation = annotation, .body = body } }, start, self.position);
             },
             // "!" expr_inner
             .Negate => {
                 const expr = try self.parseExprInner();
-                return self.store.putSyntax(.{.Negate=expr}, start, self.position);
+                return self.store.putSyntax(.{ .Negate = expr }, start, self.position);
             },
             // "if" expr_inner expr_inner expr_inner
             .If => {
                 const condition = try self.parseExprInner();
                 const true_branch = try self.parseExprInner();
                 const false_branch = try self.parseExprInner();
-                return self.store.putSyntax(.{.If=.{.condition=condition, .true_branch=true_branch, .false_branch=false_branch}}, start, self.position);
+                return self.store.putSyntax(.{ .If = .{ .condition = condition, .true_branch = true_branch, .false_branch = false_branch } }, start, self.position);
             },
             // "let" name "=" expr "in" expr
             .Let => {
@@ -613,7 +618,7 @@ const Parser = struct {
                 const value = try self.parseExpr();
                 _ = try self.expect(.In);
                 const body = try self.parseExpr();
-                return self.store.putSyntax(.{.Let=.{.name=name, .value=value, .body=body}}, start, self.position);
+                return self.store.putSyntax(.{ .Let = .{ .name = name, .value = value, .body = body } }, start, self.position);
             },
             // otherwise not an expression but might be rhs of apply or binop so don't error yet
             else => {
@@ -624,7 +629,7 @@ const Parser = struct {
     }
 
     // when parsing initial expr there can't be an apply or binop so go ahead and error
-    fn parseExprInner(self: *Parser) Error ! *const syntax.Expr {
+    fn parseExprInner(self: *Parser) Error!*const syntax.Expr {
         if (try self.parseExprInnerMaybe()) |expr| {
             return expr;
         } else {
@@ -643,7 +648,7 @@ const Parser = struct {
     //     (prev_expr prev_op left) op right
     //   * otherwise:
     //     parse_error "ambiguous precedence"
-    fn parseExprOuter(self: *Parser, prev_op: ?Token) Error ! *const syntax.Expr {
+    fn parseExprOuter(self: *Parser, prev_op: ?Token) Error!*const syntax.Expr {
         var left = try self.parseExprInner();
         while (true) {
             const op_start = self.position;
@@ -655,10 +660,10 @@ const Parser = struct {
                         const right = try self.parseExprOuter(op);
                         left = try switch (op) {
                             // core ops
-                            .Union => self.store.putSyntax(.{.Union = .{.left=left, .right=right}}, op_start, self.position),
-                            .Intersect => self.store.putSyntax(.{.Intersect = .{.left=left, .right=right}}, op_start, self.position),
-                            .Product => self.store.putSyntax(.{.Product = .{.left=left, .right=right}}, op_start, self.position),
-                            .Equal => self.store.putSyntax(.{.Equal = .{.left=left, .right=right}}, op_start, self.position),
+                            .Union => self.store.putSyntax(.{ .Union = .{ .left = left, .right = right } }, op_start, self.position),
+                            .Intersect => self.store.putSyntax(.{ .Intersect = .{ .left = left, .right = right } }, op_start, self.position),
+                            .Product => self.store.putSyntax(.{ .Product = .{ .left = left, .right = right } }, op_start, self.position),
+                            .Equal => self.store.putSyntax(.{ .Equal = .{ .left = left, .right = right } }, op_start, self.position),
 
                             // native functions
                             .Add => self.putApplyOp("+", left, right, op_start, self.position),
@@ -677,7 +682,7 @@ const Parser = struct {
                         self.position = op_start;
                         return left;
                     } else {
-                        return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
+                        return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{ prev_op.?, op });
                     }
                 },
 
@@ -685,12 +690,12 @@ const Parser = struct {
                 .Lookup => {
                     if (prev_op == null or op.bindsTighterThan(prev_op.?)) {
                         const name = (try self.expect(.Name)).Name;
-                        left = try self.store.putSyntax(.{.Lookup = .{.value = left, .name = name}}, op_start, self.position);
+                        left = try self.store.putSyntax(.{ .Lookup = .{ .value = left, .name = name } }, op_start, self.position);
                     } else if (tagEqual(prev_op.?, op) or prev_op.?.bindsTighterThan(op)) {
                         self.position = op_start;
                         return left;
                     } else {
-                        return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, op});
+                        return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{ prev_op.?, op });
                     }
                 },
 
@@ -702,12 +707,12 @@ const Parser = struct {
                     if (try self.parseExprInnerMaybe()) |right| {
                         const apply: Token = .Apply;
                         if (prev_op == null or apply.bindsTighterThan(prev_op.?)) {
-                            left = try self.store.putSyntax(.{.Apply=.{.left=left, .right=right}}, op_start, self.position);
+                            left = try self.store.putSyntax(.{ .Apply = .{ .left = left, .right = right } }, op_start, self.position);
                         } else if (tagEqual(prev_op.?, apply) or prev_op.?.bindsTighterThan(apply)) {
                             self.position = op_start;
                             return left;
                         } else {
-                            return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{prev_op.?, apply});
+                            return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{ prev_op.?, apply });
                         }
                     } else {
                         // no more binary things to apply
@@ -719,7 +724,7 @@ const Parser = struct {
         }
     }
 
-    fn parseExpr(self: *Parser) Error ! *const syntax.Expr {
+    fn parseExpr(self: *Parser) Error!*const syntax.Expr {
         return self.parseExprOuter(null);
     }
 };
@@ -730,7 +735,7 @@ test "binding partial order" {
 
     // generate examples of all posible tokens
     inline for (@typeInfo(Token).Union.fields) |fti| {
-       // leave value undefined to test that bindsTighterThan doesn't access it
+        // leave value undefined to test that bindsTighterThan doesn't access it
         try tokens.append(@unionInit(Token, fti.name, undefined));
     }
 

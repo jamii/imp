@@ -15,7 +15,7 @@ pub const SetType = union(enum) {
         return self == .Concrete and self.Concrete.abstract_arity == 0;
     }
 
-    pub fn dumpInto(self: SetType, out_stream: var) OutStreamError(@TypeOf(out_stream))!void {
+    pub fn dumpInto(self: SetType, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
         switch (self) {
             .Concrete => |concrete| {
                 try concrete.dumpInto(out_stream);
@@ -26,7 +26,7 @@ pub const SetType = union(enum) {
         }
     }
 
-    pub fn format(self: SetType, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
+    pub fn format(self: SetType, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
         try self.dumpInto(out_stream);
     }
 };
@@ -35,7 +35,7 @@ pub const ConcreteSetType = struct {
     abstract_arity: usize,
     columns: []const ScalarType,
 
-    pub fn dumpInto(self: ConcreteSetType, out_stream: var) OutStreamError(@TypeOf(out_stream))!void {
+    pub fn dumpInto(self: ConcreteSetType, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
         if (self.columns.len == 0) {
             try out_stream.writeAll("maybe");
         } else {
@@ -47,7 +47,7 @@ pub const ConcreteSetType = struct {
         }
     }
 
-    pub fn format(self: ConcreteSetType, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
+    pub fn format(self: ConcreteSetType, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
         try self.dumpInto(out_stream);
     }
 };
@@ -59,7 +59,7 @@ pub const LazySetType = struct {
 
     // Equality on expr id and scope/time value
 
-    pub fn deepHashInto(hasher: var, self: LazySetType) void {
+    pub fn deepHashInto(hasher: anytype, self: LazySetType) void {
         hasher.update(std.mem.asBytes(&Store.getCoreMeta(self.expr).id));
         meta.deepHashInto(hasher, self.scope);
         meta.deepHashInto(hasher, self.time);
@@ -73,7 +73,7 @@ pub const LazySetType = struct {
         return meta.deepCompare(self.time, other.time);
     }
 
-    pub fn dumpInto(self: LazySetType, out_stream: var) OutStreamError(@TypeOf(out_stream))!void {
+    pub fn dumpInto(self: LazySetType, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
         try std.fmt.format(out_stream, "(type of expr #{} with scope (", .{Store.getCoreMeta(self.expr).id});
         for (self.scope) |scalar_type, i| {
             try out_stream.writeAll(if (i == 0) "" else " . ");
@@ -82,7 +82,7 @@ pub const LazySetType = struct {
         try out_stream.writeAll("))");
     }
 
-    pub fn format(self: LazySetType, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
+    pub fn format(self: LazySetType, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
         try self.dumpInto(out_stream);
     }
 };
@@ -99,7 +99,7 @@ pub const ScalarType = union(enum) {
     Number,
     Box: BoxType,
 
-    pub fn dumpInto(self: ScalarType, out_stream: var) OutStreamError(@TypeOf(out_stream))!void {
+    pub fn dumpInto(self: ScalarType, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
         switch (self) {
             .Text => try out_stream.writeAll("text"),
             .Number => try out_stream.writeAll("number"),
@@ -111,7 +111,7 @@ pub const ScalarType = union(enum) {
         }
     }
 
-    pub fn format(self: ScalarType, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
+    pub fn format(self: ScalarType, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
         try self.dumpInto(out_stream);
     }
 };
@@ -122,11 +122,11 @@ pub const BoxType = struct {
     // need to store the concrete type when analyzing fixpoints to avoid infinite recursion
     concrete: ?ConcreteSetType,
 
-    pub fn dumpInto(self: BoxType, out_stream: var) OutStreamError(@TypeOf(out_stream))!void {
+    pub fn dumpInto(self: BoxType, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
         try self.lazy.dumpInto(out_stream);
     }
 
-    pub fn format(self: ScalarType, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
+    pub fn format(self: ScalarType, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
         try self.dumpInto(out_stream);
     }
 };

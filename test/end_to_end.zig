@@ -2,7 +2,7 @@ const imp = @import("../lib/imp.zig");
 usingnamespace imp.common;
 const meta = imp.meta;
 
-pub fn main() anyerror ! void {
+pub fn main() anyerror!void {
     var allocator = std.heap.c_allocator;
 
     var num_tests: usize = 0;
@@ -16,7 +16,7 @@ pub fn main() anyerror ! void {
 
         var file = if (std.mem.eql(u8, filename, "-"))
             std.io.getStdIn()
-            else
+        else
             try std.fs.cwd().openFile(filename, .{});
 
         // TODO can't use readFileAlloc on stdin
@@ -59,12 +59,12 @@ pub fn main() anyerror ! void {
             num_tests += 1;
             if (!std.mem.eql(u8, expected, found)) {
                 num_failed += 1;
-                warn("Filename:\n\n{}\nSource:\n{}\n\nExpected:\n{}\n\nFound:\n{}\n\n---\n\n", .{filename, input, expected, found});
+                warn("Filename:\n\n{}\nSource:\n{}\n\nExpected:\n{}\n\nFound:\n{}\n\n---\n\n", .{ filename, input, expected, found });
             }
         }
 
         if (num_failed > 0) {
-            warn("{}/{} tests failed!\n", .{num_failed, num_tests});
+            warn("{}/{} tests failed!\n", .{ num_failed, num_tests });
             std.os.exit(1);
         } else {
             warn("All {} tests passed\n", .{num_tests});

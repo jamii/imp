@@ -12,7 +12,7 @@ pub const Allocator = std.mem.Allocator;
 pub const ArenaAllocator = std.heap.ArenaAllocator;
 pub const ArrayList = std.ArrayList;
 
-pub fn imp_panic(comptime fmt: []const u8, args: var) noreturn {
+pub fn imp_panic(comptime fmt: []const u8, args: anytype) noreturn {
     const message = format(std.heap.c_allocator, fmt, args) catch |err| message: {
         switch (err) {
             error.OutOfMemory => break :message "OOM inside panic",
@@ -22,26 +22,22 @@ pub fn imp_panic(comptime fmt: []const u8, args: var) noreturn {
 }
 
 pub fn DeepHashMap(comptime K: type, comptime V: type) type {
-    return std.HashMap(
-        K, V,
-        struct {
-            fn hash(key: K) u32 {
-                return @truncate(u32, meta.deepHash(key));
-            }
-        }.hash,
-        struct {
-            fn equal(a: K, b: K) bool {
-                return meta.deepEqual(a,b);
-            }
-        }.equal
-    );
+    return std.HashMap(K, V, struct {
+        fn hash(key: K) u64 {
+            return meta.deepHash(key);
+        }
+    }.hash, struct {
+        fn equal(a: K, b: K) bool {
+            return meta.deepEqual(a, b);
+        }
+    }.equal, std.hash_map.DefaultMaxLoadPercentage);
 }
 
 pub fn DeepHashSet(comptime K: type) type {
     return DeepHashMap(K, void);
 }
 
-pub fn dump(thing: var) void {
+pub fn dump(thing: anytype) void {
     const held = std.debug.getStderrMutex().acquire();
     defer held.release();
     const my_stderr = std.debug.getStderrStream();
@@ -49,7 +45,7 @@ pub fn dump(thing: var) void {
     my_stderr.writeAll("\n") catch return;
 }
 
-pub fn dumpInto(out_stream: var, indent: u32, thing: var) anyerror!void {
+pub fn dumpInto(out_stream: anytype, indent: u32, thing: anytype) anyerror!void {
     const ti = @typeInfo(@TypeOf(thing));
     switch (ti) {
         .Pointer => |pti| {
@@ -135,14 +131,14 @@ pub fn dumpInto(out_stream: var, indent: u32, thing: var) anyerror!void {
     }
 }
 
-pub fn format(allocator: *Allocator, comptime fmt: []const u8, args: var) ![]const u8 {
+pub fn format(allocator: *Allocator, comptime fmt: []const u8, args: anytype) ![]const u8 {
     var buf = ArrayList(u8).init(allocator);
     var out = buf.outStream();
     try std.fmt.format(out, fmt, args);
     return buf.items;
 }
 
-pub fn tagEqual(a: var, b: @TypeOf(a)) bool {
+pub fn tagEqual(a: anytype, b: @TypeOf(a)) bool {
     return std.meta.activeTag(a) == std.meta.activeTag(b);
 }
 

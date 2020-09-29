@@ -1,7 +1,7 @@
 const imp = @import("../lib/imp.zig");
 usingnamespace imp.common;
 
-pub fn main() anyerror ! void {
+pub fn main() anyerror!void {
     var allocator = std.heap.c_allocator;
     var args = std.process.args();
     // arg 0 is executable

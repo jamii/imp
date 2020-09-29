@@ -37,7 +37,10 @@ const Input = struct {
     fn getBytes(self: *Input, comptime len: usize) [len]u8 {
         var bytes: [len]u8 = undefined;
         var i: usize = 0;
-        while (i < len) : ({i += 1; self.i += 1;}) {
+        while (i < len) : ({
+            i += 1;
+            self.i += 1;
+        }) {
             if (self.i < self.bytes.len) {
                 bytes[i] = self.bytes[self.i];
             } else {
@@ -55,7 +58,7 @@ const Input = struct {
         const lo = self.open_ranges.pop();
         const hi = min(self.i, self.bytes.len);
         if (lo < self.bytes.len) {
-            self.closed_ranges.append(.{lo, hi}) catch fuzz_panic();
+            self.closed_ranges.append(.{ lo, hi }) catch fuzz_panic();
         }
     }
 };
@@ -162,7 +165,7 @@ fn Utf8(comptime min_len: usize) type {
                 while (true) {
                     // 0 is a valid char so this won't loop forever
                     const char = Int(u21).generate(input);
-                    var bytes = [4]u8{0,0,0,0};
+                    var bytes = [4]u8{ 0, 0, 0, 0 };
                     if (std.unicode.utf8Encode(char, &bytes)) |len| {
                         output.appendSlice(bytes[0..len]) catch fuzz_panic();
                         break;
@@ -177,7 +180,7 @@ fn Utf8(comptime min_len: usize) type {
     };
 }
 
-fn Struct(comptime T: type, comptime field_gens: var) type {
+fn Struct(comptime T: type, comptime field_gens: anytype) type {
     return struct {
         fn generate(input: *Input) T {
             input.startRange();
@@ -208,12 +211,12 @@ fn Enum(comptime T: type) type {
     };
 }
 
-fn Union(comptime T: type, comptime field_gens: var) type {
+fn Union(comptime T: type, comptime field_gens: anytype) type {
     return struct {
         fn generate(input: *Input) T {
             input.startRange();
             var output: T = undefined;
-            const field_ix = min(Int(u8).generate(input), @typeInfo(T).Union.fields.len-1);
+            const field_ix = min(Int(u8).generate(input), @typeInfo(T).Union.fields.len - 1);
             inline for (@typeInfo(T).Union.fields) |field, i| {
                 if (field_ix == i) {
                     output = @unionInit(T, field.name, @field(field_gens, field.name).generate(input));
@@ -225,7 +228,7 @@ fn Union(comptime T: type, comptime field_gens: var) type {
     };
 }
 
-fn Ptr(comptime gen: var) type {
+fn Ptr(comptime gen: anytype) type {
     const T = generatorReturnType(gen);
     return struct {
         fn generate(input: *Input) T {
@@ -239,9 +242,9 @@ fn Ptr(comptime gen: var) type {
 const Scalar = struct {
     fn generate(input: *Input) imp.lang.repr.value.Scalar {
         if (Bool.generate(input)) {
-            return .{.Text = Utf8(0).generate(input)};
+            return .{ .Text = Utf8(0).generate(input) };
         } else {
-            return .{.Number = Float(f64).generate(input)};
+            return .{ .Number = Float(f64).generate(input) };
         }
         // never generate Box - it's not a valid syntax literal
     }
@@ -250,108 +253,77 @@ const Scalar = struct {
 const Name = Ascii(1);
 
 const Syntax = struct {
+    const Pair = Struct(imp.lang.repr.syntax.Pair, .{
+        .left = PtrExpr,
+        .right = PtrExpr,
+    });
 
-    const Pair = Struct(
-        imp.lang.repr.syntax.Pair,
-        .{
-            .left = PtrExpr,
-            .right = PtrExpr,
-        }
-    );
+    const Fix = Struct(imp.lang.repr.syntax.Fix, .{
+        .init = PtrExpr,
+        .next = PtrExpr,
+    });
 
-    const Fix = Struct(
-        imp.lang.repr.syntax.Fix,
-        .{
-            .init = PtrExpr,
-            .next = PtrExpr,
-        }
-    );
+    const Reduce = Struct(imp.lang.repr.syntax.Reduce, .{
+        .input = PtrExpr,
+        .init = PtrExpr,
+        .next = PtrExpr,
+    });
 
-    const Reduce = Struct(
-        imp.lang.repr.syntax.Reduce,
-        .{
-            .input = PtrExpr,
-            .init = PtrExpr,
-            .next = PtrExpr,
-        }
-    );
+    const When = Struct(imp.lang.repr.syntax.When, .{
+        .condition = PtrExpr,
+        .true_branch = PtrExpr,
+    });
 
-    const When = Struct(
-        imp.lang.repr.syntax.When,
-        .{
-            .condition = PtrExpr,
-            .true_branch = PtrExpr,
-        }
-    );
+    const Arg = Struct(imp.lang.repr.syntax.Arg, .{
+        .name = Name,
+        .unbox = Bool,
+    });
 
-    const Arg = Struct(
-        imp.lang.repr.syntax.Arg,
-        .{
-            .name = Name,
-            .unbox = Bool,
-        }
-    );
+    const Annotate = Struct(imp.lang.repr.syntax.Annotate, .{
+        .annotation = Name,
+        .body = PtrExpr,
+    });
 
-    const Annotate = Struct(
-        imp.lang.repr.syntax.Annotate,
-        .{
-            .annotation = Name,
-            .body = PtrExpr,
-        }
-    );
+    const If = Struct(imp.lang.repr.syntax.If, .{
+        .condition = PtrExpr,
+        .true_branch = PtrExpr,
+        .false_branch = PtrExpr,
+    });
 
-    const If = Struct(
-        imp.lang.repr.syntax.If,
-        .{
-            .condition = PtrExpr,
-            .true_branch = PtrExpr,
-            .false_branch = PtrExpr,
-        }
-    );
+    const Let = Struct(imp.lang.repr.syntax.Let, .{
+        .name = Name,
+        .value = PtrExpr,
+        .body = PtrExpr,
+    });
 
-    const Let = Struct(
-        imp.lang.repr.syntax.Let,
-        .{
-            .name = Name,
-            .value = PtrExpr,
-            .body = PtrExpr,
-        }
-    );
+    const Lookup = Struct(imp.lang.repr.syntax.Lookup, .{
+        .value = PtrExpr,
+        .name = Name,
+    });
 
-    const Lookup = Struct(
-        imp.lang.repr.syntax.Lookup,
-        .{
-            .value = PtrExpr,
-            .name = Name,
-        }
-    );
+    const Expr = Union(imp.lang.repr.syntax.Expr, .{
+        .None = Void,
+        .Some = Void,
+        .Scalar = Scalar,
+        .Union = Pair,
+        .Intersect = Pair,
+        .Product = Pair,
+        .Equal = Pair,
+        .Name = Name,
+        .When = When,
+        .Arg = Arg,
+        .Apply = Pair,
+        .Box = PtrExpr,
+        .Fix = Fix,
+        .Reduce = Reduce,
+        .Enumerate = PtrExpr,
+        .Annotate = Annotate,
 
-    const Expr = Union(
-        imp.lang.repr.syntax.Expr,
-        .{
-            .None = Void,
-            .Some = Void,
-            .Scalar = Scalar,
-            .Union = Pair,
-            .Intersect = Pair,
-            .Product = Pair,
-            .Equal = Pair,
-            .Name = Name,
-            .When = When,
-            .Arg = Arg,
-            .Apply = Pair,
-            .Box = PtrExpr,
-            .Fix = Fix,
-            .Reduce = Reduce,
-            .Enumerate = PtrExpr,
-            .Annotate = Annotate,
-
-            .Negate = PtrExpr,
-            .If = If,
-            .Let = Let,
-            .Lookup = Lookup,
-        }
-    );
+        .Negate = PtrExpr,
+        .If = If,
+        .Let = Let,
+        .Lookup = Lookup,
+    });
 
     const PtrExpr = struct {
         fn generate(input: *Input) *const imp.lang.repr.syntax.Expr {
@@ -363,86 +335,64 @@ const Syntax = struct {
 };
 
 const Core = struct {
-
-    const Pair = Struct(
-        imp.lang.repr.core.Pair,
-        .{
-            .left = PtrExpr,
-            .right = PtrExpr,
-        }
-    );
+    const Pair = Struct(imp.lang.repr.core.Pair, .{
+        .left = PtrExpr,
+        .right = PtrExpr,
+    });
 
     // will fix these up in makeValid
     const NameIx = Int(usize);
 
-    const When = Struct(
-        imp.lang.repr.core.When,
-        .{
-            .condition = PtrExpr,
-            .true_branch = PtrExpr,
-        }
-    );
+    const When = Struct(imp.lang.repr.core.When, .{
+        .condition = PtrExpr,
+        .true_branch = PtrExpr,
+    });
 
-    const Box = Struct(
-        imp.lang.repr.core.Box,
-        .{
-            .body = PtrExpr,
-            // will fix this up in makeValid
-            .scope = Slice(NameIx, 0),
-        }
-    );
+    const Box = Struct(imp.lang.repr.core.Box, .{
+        .body = PtrExpr,
+        // will fix this up in makeValid
+        .scope = Slice(NameIx, 0),
+    });
 
-    const Fix = Struct(
-        imp.lang.repr.core.Fix,
-        .{
-            .init = PtrExpr,
-            .next = PtrExpr,
-        }
-    );
+    const Fix = Struct(imp.lang.repr.core.Fix, .{
+        .init = PtrExpr,
+        .next = PtrExpr,
+    });
 
-    const Reduce = Struct(
-        imp.lang.repr.core.Reduce,
-        .{
-            .input = PtrExpr,
-            .init = PtrExpr,
-            .next = PtrExpr,
-        }
-    );
+    const Reduce = Struct(imp.lang.repr.core.Reduce, .{
+        .input = PtrExpr,
+        .init = PtrExpr,
+        .next = PtrExpr,
+    });
 
-    const Annotate = Struct(
-        imp.lang.repr.core.Annotate,
-        .{
-            .annotation = Name,
-            .body = PtrExpr,
-        }
-    );
+    const Annotate = Struct(imp.lang.repr.core.Annotate, .{
+        .annotation = Name,
+        .body = PtrExpr,
+    });
 
     const Native = Enum(imp.lang.repr.core.Native);
 
-    const Expr = Union(
-        imp.lang.repr.core.Expr,
-        .{
-            .None = Void,
-            .Some = Void,
-            .Scalar = Scalar,
-            .Union = Pair,
-            .Intersect = Pair,
-            .Product = Pair,
-            .Equal = Pair,
-            .Name = NameIx,
-            .UnboxName = NameIx,
-            .Negate = PtrExpr,
-            .When = When,
-            .Abstract = PtrExpr,
-            .Apply = Pair,
-            .Box = Box,
-            .Fix = Fix,
-            .Reduce = Reduce,
-            .Enumerate = PtrExpr,
-            .Annotate = Annotate,
-            .Native = Native,
-        }
-    );
+    const Expr = Union(imp.lang.repr.core.Expr, .{
+        .None = Void,
+        .Some = Void,
+        .Scalar = Scalar,
+        .Union = Pair,
+        .Intersect = Pair,
+        .Product = Pair,
+        .Equal = Pair,
+        .Name = NameIx,
+        .UnboxName = NameIx,
+        .Negate = PtrExpr,
+        .When = When,
+        .Abstract = PtrExpr,
+        .Apply = Pair,
+        .Box = Box,
+        .Fix = Fix,
+        .Reduce = Reduce,
+        .Enumerate = PtrExpr,
+        .Annotate = Annotate,
+        .Native = Native,
+    });
 
     const PtrExpr = struct {
         fn generate(input: *Input) *const imp.lang.repr.core.Expr {
@@ -505,7 +455,7 @@ const Options = struct {
     shrink_iterations: usize = 100_000,
 };
 
-fn fuzz(allocator: *Allocator, options: Options, generator: var, tester: var) error{FuzzFailed} ! void {
+fn fuzz(allocator: *Allocator, options: Options, generator: anytype, tester: anytype) error{FuzzFailed}!void {
     var rng = std.rand.DefaultPrng.init(options.seed);
     var random = &rng.random;
     var fuzz_iteration: usize = 0;
@@ -528,7 +478,7 @@ fn fuzz(allocator: *Allocator, options: Options, generator: var, tester: var) er
             bytes.deinit();
             input.deinit();
         } else |err| {
-            warn("\nFound {} after {} fuzzes:\n", .{err, fuzz_iteration});
+            warn("\nFound {} after {} fuzzes:\n", .{ err, fuzz_iteration });
             dump(value);
 
             // try to shrink input
@@ -577,7 +527,7 @@ fn fuzz(allocator: *Allocator, options: Options, generator: var, tester: var) er
                 }
             }
 
-            warn("\nFound {} after {} shrinks:\n", .{most_shrunk_err, shrink_iteration});
+            warn("\nFound {} after {} shrinks:\n", .{ most_shrunk_err, shrink_iteration });
             dump(most_shrunk_value);
             most_shrunk_bytes.deinit();
             most_shrunk_input.deinit();
@@ -599,17 +549,11 @@ fn fuzz_parse(arena: *ArenaAllocator, source: []const u8) !void {
             // shouldn't oom unless you're running this on a potato
             error.OutOfMemory => return err,
             // should only return utf8 errors if input is invalid utf8
-            error.Utf8InvalidStartByte,
-            error.InvalidUtf8,
-            error.InvalidCharacter,
-            error.Utf8ExpectedContinuation,
-            error.Utf8OverlongEncoding,
-            error.Utf8EncodesSurrogateHalf,
-            error.Utf8CodepointTooLarge => {
+            error.Utf8InvalidStartByte, error.InvalidUtf8, error.InvalidCharacter, error.Utf8ExpectedContinuation, error.Utf8OverlongEncoding, error.Utf8EncodesSurrogateHalf, error.Utf8CodepointTooLarge => {
                 if (std.unicode.utf8ValidateSlice(source)) {
                     return err;
                 }
-            }
+            },
         }
     };
 }
@@ -647,7 +591,6 @@ fn fuzz_analyze(arena: *ArenaAllocator, store_and_expr: Core.StoreAndExpr) !void
         }
     };
 }
-
 
 test "fuzz analyze deterministic" {
     try fuzz(std.heap.c_allocator, .{}, Core.StoreAndValidExpr, fuzz_analyze_deterministic);

@@ -7,17 +7,17 @@ pub const Ordering = enum {
     GreaterThan,
 };
 
-pub fn deepEqual(a: var, b: @TypeOf(a)) bool {
+pub fn deepEqual(a: anytype, b: @TypeOf(a)) bool {
     return deepCompare(a, b) == .Equal;
 }
 
-pub fn deepCompare(a: var, b: @TypeOf(a)) Ordering {
+pub fn deepCompare(a: anytype, b: @TypeOf(a)) Ordering {
     const T = @TypeOf(a);
     const ti = @typeInfo(T);
     switch (ti) {
         .Struct, .Enum, .Union => {
             if (@hasDecl(T, "deepCompare")) {
-                return T.deepCompare(a,b);
+                return T.deepCompare(a, b);
             }
         },
         else => {},
@@ -98,6 +98,7 @@ pub fn deepCompare(a: var, b: @TypeOf(a)) Ordering {
         },
         .Union => |uti| {
             if (uti.tag_type) |tag_type| {
+                const enum_info = @typeInfo(tag_type).Enum;
                 const a_tag = @enumToInt(@as(tag_type, a));
                 const b_tag = @enumToInt(@as(tag_type, b));
                 if (a_tag < b_tag) {
@@ -106,8 +107,8 @@ pub fn deepCompare(a: var, b: @TypeOf(a)) Ordering {
                 if (a_tag > b_tag) {
                     return .GreaterThan;
                 }
-                inline for (uti.fields) |fti| {
-                    if (a_tag == fti.enum_field.?.value) {
+                inline for (enum_info.fields) |fti| {
+                    if (a_tag == fti.value) {
                         return deepCompare(
                             @field(a, fti.name),
                             @field(b, fti.name),
@@ -140,13 +141,13 @@ pub fn deepCompare(a: var, b: @TypeOf(a)) Ordering {
     }
 }
 
-pub fn deepHash(key: var) u64 {
+pub fn deepHash(key: anytype) u64 {
     var hasher = std.hash.Wyhash.init(0);
     deepHashInto(&hasher, key);
     return hasher.final();
 }
 
-pub fn deepHashInto(hasher: var, key: var) void {
+pub fn deepHashInto(hasher: anytype, key: anytype) void {
     const T = @TypeOf(key);
     const ti = @typeInfo(T);
     switch (ti) {
@@ -186,10 +187,10 @@ pub fn deepHashInto(hasher: var, key: var) void {
         },
         .Union => |info| {
             if (info.tag_type) |tag_type| {
+                const enum_info = @typeInfo(tag_type).Enum;
                 const tag = std.meta.activeTag(key);
                 deepHashInto(hasher, tag);
-                inline for (info.fields) |field| {
-                    const enum_field = field.enum_field.?;
+                inline for (enum_info.fields) |enum_field| {
                     if (enum_field.value == @enumToInt(tag)) {
                         deepHashInto(hasher, @field(key, enum_field.name));
                         return;

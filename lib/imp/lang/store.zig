@@ -29,28 +29,28 @@ pub const Store = struct {
         };
     }
 
-    pub fn putSyntax(self: *Store, expr: syntax.Expr, start: usize, end: usize) ! *const syntax.Expr {
+    pub fn putSyntax(self: *Store, expr: syntax.Expr, start: usize, end: usize) !*const syntax.Expr {
         var expr_and_meta = try self.arena.allocator.create(ExprAndMeta(syntax.Expr, SyntaxMeta));
         expr_and_meta.* = .{
             .expr = expr,
-            .meta = SyntaxMeta {
+            .meta = SyntaxMeta{
                 .start = start,
                 .end = end,
-            }
+            },
         };
         return &expr_and_meta.expr;
     }
 
-    pub fn putCore(self: *Store, expr: core.Expr, from: *const syntax.Expr) ! *const core.Expr {
+    pub fn putCore(self: *Store, expr: core.Expr, from: *const syntax.Expr) !*const core.Expr {
         var expr_and_meta = try self.arena.allocator.create(ExprAndMeta(core.Expr, CoreMeta));
         const id = self.next_expr_id;
         self.next_expr_id += 1;
         expr_and_meta.* = .{
             .expr = expr,
-            .meta = CoreMeta {
+            .meta = CoreMeta{
                 .from = from,
                 .id = id,
-            }
+            },
         };
         return &expr_and_meta.expr;
     }
@@ -63,7 +63,7 @@ pub const Store = struct {
         return &@fieldParentPtr(ExprAndMeta(core.Expr, CoreMeta), "expr", expr).meta;
     }
 
-    pub fn putSpecialization(self: *Store, lazy: type_.LazySetType, hint: []const type_.ScalarType, set_type: type_.SetType) ! void {
+    pub fn putSpecialization(self: *Store, lazy: type_.LazySetType, hint: []const type_.ScalarType, set_type: type_.SetType) !void {
         const used_hint = switch (set_type) {
             // didn't specialize so all we know is this hint isn't enough
             .Lazy => hint,
@@ -73,15 +73,15 @@ pub const Store = struct {
         // analyze shouldn't redo previous work
         assert(self.getSpecialization(lazy, used_hint) == null);
         var slot = try self.specializations.getOrPut(lazy);
-        if (!slot.found_existing) slot.kv.value = ArrayList(Specialization).init(&self.arena.allocator);
-        try slot.kv.value.append(.{
+        if (!slot.found_existing) slot.entry.value = ArrayList(Specialization).init(&self.arena.allocator);
+        try slot.entry.value.append(.{
             .hint = used_hint,
             .set_type = set_type,
         });
     }
 
     pub fn getSpecialization(self: *Store, lazy: type_.LazySetType, hint: []const type_.ScalarType) ?type_.SetType {
-        const kv = self.specializations.get(lazy) orelse return null;
+        const kv = self.specializations.getEntry(lazy) orelse return null;
         for (kv.value.items) |specialization| {
             const is_match = switch (specialization.set_type) {
                 // if couldn't specialize with a longer hint, can't specialize with this one

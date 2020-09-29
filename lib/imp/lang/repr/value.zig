@@ -9,15 +9,15 @@ pub const Set = union(enum) {
     Finite: FiniteSet,
     Lazy: LazySet,
 
-    pub fn dumpInto(self: Set, allocator: *Allocator, out_stream: var) OutStreamError(@TypeOf(out_stream))!void {
-        switch(self) {
+    pub fn dumpInto(self: Set, allocator: *Allocator, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
+        switch (self) {
             .Finite => |finite| try finite.dumpInto(allocator, out_stream),
             .Lazy => |lazy| try lazy.dumpInto(out_stream),
         }
     }
 
-    pub fn format(self: Set, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
-        switch(self) {
+    pub fn format(self: Set, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
+        switch (self) {
             .Finite => |finite| try finite.format(fmt, options, out_stream),
             .Lazy => |lazy| try lazy.dumpInto(out_stream),
         }
@@ -44,7 +44,7 @@ pub const FiniteSet = struct {
         return .Equal;
     }
 
-    pub fn dumpInto(self: FiniteSet, allocator: *Allocator, out_stream: var) OutStreamError(@TypeOf(out_stream))!void {
+    pub fn dumpInto(self: FiniteSet, allocator: *Allocator, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
         var tuples = ArrayList(Tuple).init(allocator);
         defer tuples.deinit();
         var iter = self.set.iterator();
@@ -52,11 +52,11 @@ pub const FiniteSet = struct {
             // TODO errors for printing are funky
             tuples.append(kv.key) catch imp_panic("oom", .{});
         }
-        std.sort.sort(Tuple, tuples.items, struct {
-            fn lessThan(a: Tuple, b: Tuple) bool {
-                return meta.deepCompare(a,b) == .LessThan;
+        std.sort.sort(Tuple, tuples.items, {}, struct {
+            fn lessThan(_: void, a: Tuple, b: Tuple) bool {
+                return meta.deepCompare(a, b) == .LessThan;
             }
-            }.lessThan);
+        }.lessThan);
         if (tuples.items.len == 0) {
             try out_stream.writeAll("none");
         } else if (tuples.items.len == 1 and tuples.items[0].len == 0) {
@@ -72,7 +72,7 @@ pub const FiniteSet = struct {
         }
     }
 
-    pub fn format(self: FiniteSet, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
+    pub fn format(self: FiniteSet, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
         if (self.set.count() == 0) {
             try out_stream.writeAll("none");
         } else if (self.set.count() == 1 and self.set.iterator().next().?.key.len == 0) {
@@ -96,7 +96,7 @@ pub const Scalar = union(enum) {
     Number: f64,
     Box: LazySet,
 
-    fn dumpInto(self: Scalar, out_stream: var) OutStreamError(@TypeOf(out_stream))!void {
+    fn dumpInto(self: Scalar, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
         switch (self) {
             // TODO proper escaping
             .Text => |text| try std.fmt.format(out_stream, "\"{s}\"", .{text}),
@@ -105,11 +105,11 @@ pub const Scalar = union(enum) {
                 try out_stream.writeAll("[");
                 try box.dumpInto(out_stream);
                 try out_stream.writeAll("]");
-            }
+            },
         }
     }
 
-    pub fn format(self: Scalar, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
+    pub fn format(self: Scalar, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
         try self.dumpInto(out_stream);
     }
 };
@@ -123,7 +123,7 @@ pub const LazySet = struct {
 
     // Equality on expr id and scope/time value
 
-    pub fn deepHashInto(hasher: var, self: LazySet) void {
+    pub fn deepHashInto(hasher: anytype, self: LazySet) void {
         hasher.update(std.mem.asBytes(&Store.getCoreMeta(self.expr).id));
         meta.deepHashInto(hasher, self.scope);
         meta.deepHashInto(hasher, self.time);
@@ -137,7 +137,7 @@ pub const LazySet = struct {
         return meta.deepCompare(self.time, other.time);
     }
 
-    pub fn dumpInto(self: LazySet, out_stream: var) OutStreamError(@TypeOf(out_stream)) ! void {
+    pub fn dumpInto(self: LazySet, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
         try std.fmt.format(out_stream, "(value of expr #{} with scope (", .{Store.getCoreMeta(self.expr).id});
         for (self.scope) |scalar| {
             try out_stream.writeAll(" ");

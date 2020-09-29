@@ -52,7 +52,7 @@ pub const Expr = union(enum) {
         return children;
     }
 
-    pub fn dumpInto(self: Expr, out_stream: var, indent: u32) anyerror!void {
+    pub fn dumpInto(self: Expr, out_stream: anytype, indent: u32) anyerror!void {
         if (indent != 0) {
             try out_stream.writeAll("\n");
             try out_stream.writeByteNTimes(' ', indent);
@@ -80,11 +80,10 @@ pub const Expr = union(enum) {
             .Lookup => |lookup| try std.fmt.format(out_stream, ": {}", .{lookup.name}),
         }
         for (self.getChildren().slice()) |child| {
-            try child.dumpInto(out_stream, indent+2);
+            try child.dumpInto(out_stream, indent + 2);
         }
     }
 };
-
 
 pub const Pair = struct {
     left: *const Expr,
@@ -117,7 +116,7 @@ pub const Abstract = struct {
     unbox: bool,
     body: *const Expr,
 
-    fn dumpInto(self: Abstract, out_stream: var) anyerror!void {
+    fn dumpInto(self: Abstract, out_stream: anytype) anyerror!void {
         try out_stream.writeAll("?");
         if (self.unbox) {
             try std.fmt.format(out_stream, "[{}]", .{self.name});

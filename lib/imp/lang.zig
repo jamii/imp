@@ -12,31 +12,23 @@ pub const InterpretErrorInfo = union(enum) {
     Analyze: pass.analyze.ErrorInfo,
     Interpret: pass.interpret.ErrorInfo,
 
-    pub fn dumpInto(self: ?InterpretErrorInfo, err: InterpretError, out_stream: var) anyerror ! void {
+    pub fn dumpInto(self: ?InterpretErrorInfo, err: InterpretError, out_stream: anytype) anyerror!void {
         switch (err) {
             // TODO report source position
-
             error.ParseError => try std.fmt.format(out_stream, "Parse error: {}\n", .{self.?.Parse.message}),
             error.DesugarError => try std.fmt.format(out_stream, "Desugar error: {}\n", .{self.?.Desugar.message}),
             error.AnalyzeError => try std.fmt.format(out_stream, "Analyze error: {}\n", .{self.?.Analyze.message}),
             error.InterpretError => try std.fmt.format(out_stream, "Interpret error: {}\n", .{self.?.Interpret.message}),
             error.NativeError => try std.fmt.format(out_stream, "Native error: {}\n", .{self.?.Interpret.message}),
 
-            error.Utf8InvalidStartByte,
-            error.InvalidUtf8,
-            error.InvalidCharacter,
-            error.Utf8ExpectedContinuation,
-            error.Utf8OverlongEncoding,
-            error.Utf8EncodesSurrogateHalf,
-            error.Utf8CodepointTooLarge => try std.fmt.format(out_stream, "Invalid utf8 input: {}\n", .{err}),
+            error.Utf8InvalidStartByte, error.InvalidUtf8, error.InvalidCharacter, error.Utf8ExpectedContinuation, error.Utf8OverlongEncoding, error.Utf8EncodesSurrogateHalf, error.Utf8CodepointTooLarge => try std.fmt.format(out_stream, "Invalid utf8 input: {}\n", .{err}),
 
             error.OutOfMemory => try std.fmt.format(out_stream, "Out of memory\n", .{}),
         }
     }
 };
 
-pub const InterpretError =
-    pass.parse.Error ||
+pub const InterpretError = pass.parse.Error ||
     pass.desugar.Error ||
     pass.analyze.Error ||
     pass.interpret.Error;
@@ -45,7 +37,7 @@ pub const TypeAndSet = struct {
     set_type: repr.type_.SetType,
     set: repr.value.Set,
 
-    pub fn dumpInto(self: TypeAndSet, allocator: *Allocator, out_stream: var) anyerror ! void {
+    pub fn dumpInto(self: TypeAndSet, allocator: *Allocator, out_stream: anytype) anyerror!void {
         try out_stream.writeAll("type: ");
         try self.set_type.dumpInto(out_stream);
         try out_stream.writeAll("\nvalue: ");
@@ -54,13 +46,13 @@ pub const TypeAndSet = struct {
     }
 };
 
-pub fn interpret(arena: *ArenaAllocator, source: []const u8, error_info: *?InterpretErrorInfo) InterpretError ! TypeAndSet {
+pub fn interpret(arena: *ArenaAllocator, source: []const u8, error_info: *?InterpretErrorInfo) InterpretError!TypeAndSet {
     var store = Store.init(arena);
 
     var parse_error_info: ?pass.parse.ErrorInfo = null;
     const syntax_expr = pass.parse.parse(&store, source, &parse_error_info) catch |err| {
         if (err == error.ParseError) {
-            error_info.* = .{.Parse = parse_error_info.?};
+            error_info.* = .{ .Parse = parse_error_info.? };
         }
         return err;
     };
@@ -68,7 +60,7 @@ pub fn interpret(arena: *ArenaAllocator, source: []const u8, error_info: *?Inter
     var desugar_error_info: ?pass.desugar.ErrorInfo = null;
     const core_expr = pass.desugar.desugar(&store, syntax_expr, &desugar_error_info) catch |err| {
         if (err == error.DesugarError) {
-            error_info.* = .{.Desugar = desugar_error_info.?};
+            error_info.* = .{ .Desugar = desugar_error_info.? };
         }
         return err;
     };
@@ -76,7 +68,7 @@ pub fn interpret(arena: *ArenaAllocator, source: []const u8, error_info: *?Inter
     var analyze_error_info: ?pass.analyze.ErrorInfo = null;
     const set_type = pass.analyze.analyze(&store, core_expr, &analyze_error_info) catch |err| {
         if (err == error.AnalyzeError) {
-            error_info.* = .{.Analyze = analyze_error_info.?};
+            error_info.* = .{ .Analyze = analyze_error_info.? };
         }
         return err;
     };
@@ -84,7 +76,7 @@ pub fn interpret(arena: *ArenaAllocator, source: []const u8, error_info: *?Inter
     var interpret_error_info: ?pass.interpret.ErrorInfo = null;
     const set = pass.interpret.interpret(&store, arena, core_expr, &interpret_error_info) catch |err| {
         if (err == error.InterpretError or err == error.NativeError) {
-            error_info.* = .{.Interpret = interpret_error_info.?};
+            error_info.* = .{ .Interpret = interpret_error_info.? };
         }
         return err;
     };

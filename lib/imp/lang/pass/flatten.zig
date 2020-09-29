@@ -5,7 +5,7 @@ const value = imp.lang.repr.value;
 const core = imp.lang.repr.core;
 const logical = imp.lang.repr.logical;
 
-pub fn flatten(store: *Store, core_expr: *const core.Expr, error_info: *?ErrorInfo) Error ! *const logical.Exprs {
+pub fn flatten(store: *Store, core_expr: *const core.Expr, error_info: *?ErrorInfo) Error!*const logical.Exprs {
     var flattener = Flattener{
         .store = store,
         .current_expr = null,
@@ -14,11 +14,11 @@ pub fn flatten(store: *Store, core_expr: *const core.Expr, error_info: *?ErrorIn
     };
     const args = TODO();
     const root = try flattener.flatten(core_expr, args);
-    try flattener.putExpr(.{.Set = .{args = args, .body = root}});
-    return .{.exprs = flattener.exprs.items};
+    try flattener.putExpr(.{ .Collect = .{ .args = args, .body = root } });
+    return .{ .exprs = flattener.exprs.items };
 }
 
-pub const Error = error {
+pub const Error = error{
     // sets error_info
     FlattenError,
 
@@ -39,7 +39,7 @@ const Flattener = struct {
     exprs: ArrayList(logical.Expr),
     error_info: *?ErrorInfo,
 
-    fn setError(self: *Flattener, comptime fmt: []const u8, args: var) Error {
+    fn setError(self: *Flattener, comptime fmt: []const u8, args: anytype) Error {
         const message = try format(&self.store.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
             .expr = self.current_expr,
@@ -48,7 +48,7 @@ const Flattener = struct {
         return error.FlattenError;
     }
 
-    fn flatten(self: *Flattener, core_expr: *const core.Expr, args: []const NameIx) Error ! logical.BoolExpr {
+    fn flatten(self: *Flattener, core_expr: *const core.Expr, args: []const NameIx) Error!logical.BoolExpr {
         const prev_expr = self.current_expr;
         self.current_expr = core_expr;
         defer self.current_expr = prev_expr;
@@ -56,4 +56,4 @@ const Flattener = struct {
             else => TODO(),
         }
     }
-}
+};

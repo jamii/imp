@@ -21,6 +21,10 @@ pub fn imp_panic(comptime fmt: []const u8, args: anytype) noreturn {
     @panic(message);
 }
 
+pub fn TODO() noreturn {
+    imp_panic("TODO", .{});
+}
+
 pub fn DeepHashMap(comptime K: type, comptime V: type) type {
     return std.HashMap(K, V, struct {
         fn hash(key: K) u64 {
@@ -40,7 +44,7 @@ pub fn DeepHashSet(comptime K: type) type {
 pub fn dump(thing: anytype) void {
     const held = std.debug.getStderrMutex().acquire();
     defer held.release();
-    const my_stderr = std.debug.getStderrStream();
+    const my_stderr = std.io.getStdErr();
     dumpInto(my_stderr.*, 0, thing) catch return;
     my_stderr.writeAll("\n") catch return;
 }

@@ -13,8 +13,8 @@ let
   zig = hostPkgs.stdenv.mkDerivation {
     name = "zig";
     src = fetchTarball {
-      url = "https://ziglang.org/builds/zig-linux-x86_64-0.6.0+e60939bfa.tar.xz";
-      sha256 = "0rw8vmhrpniwwd6wvckc8vsbrasf37c7hq426z1pip5yk8b10byh";
+      url = "https://ziglang.org/builds/zig-linux-x86_64-0.6.0+477798b37.tar.xz";
+      sha256 = "07n54s0fyqvl9c808kb5dfk292rn5bw24j5qyzkzadwzw7imxrq5";
     };
     dontConfigure = true;
     dontBuild = true;

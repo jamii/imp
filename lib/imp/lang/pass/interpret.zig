@@ -21,15 +21,13 @@ pub fn interpret(store: *const Store, arena: *ArenaAllocator, expr: *const core.
 }
 
 pub const Error = error{
-    // sets error_info
-    InterpretError, 
-    NativeError,
+// sets error_info
+InterpretError, NativeError,
 
-    // does not set error_info
-    OutOfMemory 
-};
+// does not set error_info
+OutOfMemory };
 
-pub const ErrorInfo = struct 
+pub const ErrorInfo = struct {
     expr: *const core.Expr,
     message: []const u8,
 };

@@ -172,10 +172,6 @@ pub fn FixedSizeArrayList(comptime size: usize, comptime T: type) type {
     };
 }
 
-pub fn TODO() noreturn {
-    imp_panic("TODO", .{});
-}
-
 pub fn OutStreamError(comptime OutStream: type) type {
     return @typeInfo(std.meta.declarationInfo(OutStream, "writeAll").data.Fn.return_type).ErrorUnion.error_set;
 }

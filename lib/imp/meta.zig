@@ -160,7 +160,7 @@ pub fn deepHashInto(hasher: anytype, key: anytype) void {
     }
     switch (ti) {
         .Int => @call(.{ .modifier = .always_inline }, hasher.update, .{std.mem.asBytes(&key)}),
-        .Float => |info| deepHashInto(hasher, @bitCast(std.meta.IntType(false, info.bits), key)),
+        .Float => |info| deepHashInto(hasher, @bitCast(std.meta.Int(.unsigned, info.bits), key)),
         .Bool => deepHashInto(hasher, @boolToInt(key)),
         .Enum => deepHashInto(hasher, @enumToInt(key)),
         .Pointer => |pti| {

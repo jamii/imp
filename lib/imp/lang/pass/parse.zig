@@ -202,7 +202,7 @@ const Token = union(TokenTag) {
     Annotate,
 
     // sugar
-    Negate,
+    Negate, // TODO not currently desugared because `none` is typed as 0 arity
     If,
     Let,
     In,

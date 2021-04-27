@@ -12,6 +12,7 @@ pub const SetType = union(enum) {
     Lazy: LazySetType,
 
     pub fn isFinite(self: SetType) bool {
+        // we never assign a lazy type to a finite expression
         return self == .Concrete and self.Concrete.abstract_arity == 0;
     }
 
@@ -90,7 +91,7 @@ pub const LazySetType = struct {
 pub const TimeType = enum {
     Iteration,
 
-    // this is here because can't use slices on zero-sized types
+    // TODO this is here because can't currently use slices on zero-sized types
     Unused,
 };
 

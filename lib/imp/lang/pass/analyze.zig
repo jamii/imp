@@ -67,6 +67,7 @@ pub const Analyzer = struct {
                     const scalar_type: type_.ScalarType = switch (scalar) {
                         .Text => .Text,
                         .Number => .Number,
+                        // TODO distinguish between literals and scalars
                         .Box => imp_panic("Shouldn't be any box literals", .{}),
                     };
                     break :set_type .{
@@ -314,6 +315,9 @@ pub const Analyzer = struct {
                         },
                         .concrete = init_type.Concrete,
                     };
+                    // TODO is there any case where fix could take more than 1 iteration to converge?
+                    //      could we just test that body_type.Concrete.columns[1] == init_type?
+                    //      what about case where init_type is none? require a hint?
                     var max_iterations: usize = 100;
                     while (max_iterations > 0) : (max_iterations -= 1) {
                         // next looks like `?[prev] . stuff`
@@ -325,10 +329,10 @@ pub const Analyzer = struct {
                             return self.setError("The body for fix must have finite type, found {}", .{body_type});
                         }
                         if (body_type.Concrete.columns.len < 1) {
-                            return self.setError("The body for fix must have arity >= 1", .{});
+                            return self.setError("The `next` argument for fix must have arity >= 1", .{});
                         }
                         if (body_type.Concrete.columns[0] != .Box or !meta.deepEqual(body_type.Concrete.columns[0].Box, fix_box_type)) {
-                            return self.setError("The body for fix must be able to be applied to it's own result, found {}", .{body_type});
+                            return self.setError("The `next` argument for fix must be able to be applied to it's own result, found {}", .{body_type});
                         }
                         // drop the type for `prev`
                         const fix_columns = body_type.Concrete.columns[1..];
@@ -337,7 +341,7 @@ pub const Analyzer = struct {
                             return fix_type;
                         }
                         if (fix_type.Concrete.columns.len != fix_columns.len) {
-                            return self.setError("The body for fix must have constant arity, changed from {} to {}", .{ fix_type.Concrete.columns.len, fix_columns.len });
+                            return self.setError("The `next` argument for fix must have constant arity, changed from {} to {}", .{ fix_type.Concrete.columns.len, fix_columns.len });
                         }
                         var columns = try self.store.arena.allocator.alloc(type_.ScalarType, fix_type.Concrete.columns.len);
                         for (fix_columns) |column, i| {

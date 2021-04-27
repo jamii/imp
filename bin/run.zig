@@ -14,7 +14,7 @@ pub fn main() anyerror!void {
         else
             try std.fs.cwd().openFile(arg, .{});
 
-        // TODO can't use readFileAlloc on stdin
+        // TODO can't use readFileAlloc on stdin? try reader
         var source = ArrayList(u8).init(allocator);
         defer source.deinit();
         {

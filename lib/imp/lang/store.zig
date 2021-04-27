@@ -55,6 +55,8 @@ pub const Store = struct {
         return &expr_and_meta.expr;
     }
 
+    // TODO using @fieldParentPtr is unnecessarily dangerous
+
     pub fn getSyntaxMeta(expr: *const syntax.Expr) *const SyntaxMeta {
         return &@fieldParentPtr(ExprAndMeta(syntax.Expr, SyntaxMeta), "expr", expr).meta;
     }

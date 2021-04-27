@@ -665,7 +665,7 @@ fn fuzz_interpret_deterministic(arena: *ArenaAllocator, store_and_expr: Core.Sto
 
 // TODO need to track how often we're actually generating valid inputs
 
-// TODO seems to be hard to shrink by emitting a tree node - maybe need a shrink option that replaces a range with an inner range?
+// TODO seems to be hard to shrink by omitting a tree node - maybe need a shrink option that replaces a range with an inner range?
 
 // fn no_fo(arena: *ArenaAllocator, ) !void {
 //     const string = Ascii(1);

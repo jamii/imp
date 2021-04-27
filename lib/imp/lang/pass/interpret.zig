@@ -6,7 +6,6 @@ const core = imp.lang.repr.core;
 const value = imp.lang.repr.value;
 
 /// Guarantees:
-/// * If this returns a value.Set.Finite then it will be the correct answer
 /// * If expr typechecks then this will not return InterpretError
 /// * If expr has a finite type then this will return a value.Set.Finite
 pub fn interpret(store: *const Store, arena: *ArenaAllocator, expr: *const core.Expr, error_info: *?ErrorInfo) Error!value.Set {
@@ -22,13 +21,15 @@ pub fn interpret(store: *const Store, arena: *ArenaAllocator, expr: *const core.
 }
 
 pub const Error = error{
-// sets error_info
-InterpretError, NativeError,
+    // sets error_info
+    InterpretError, 
+    NativeError,
 
-// does not set error_info
-OutOfMemory };
+    // does not set error_info
+    OutOfMemory 
+};
 
-pub const ErrorInfo = struct {
+pub const ErrorInfo = struct 
     expr: *const core.Expr,
     message: []const u8,
 };

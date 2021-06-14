@@ -314,3 +314,15 @@ let f = ?i . (i + 1) in
 ---
 type: number . number
 value: 2 . 3
+
+let collatz = ?n . 
+  (fix n (?[n] . 
+    (if (n = 1) 
+      1
+      (if ((n % 2) 0)
+        (n / 2)
+        ((3 * n) + 1))))) in
+collatz 42
+---
+type: number
+value: 1

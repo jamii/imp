@@ -679,6 +679,31 @@ const Interpreter = struct {
                             },
                         };
                     },
+                    .GreaterThan => {
+                        if (hint.len < 2) {
+                            return value.Set{
+                                .Lazy = .{
+                                    .expr = expr,
+                                    .scope = try self.dupeScalars(self.scope.items),
+                                    .time = try self.dupeTime(self.time.items),
+                                },
+                            };
+                        }
+                        if (hint[0] != .Number or hint[1] != .Number) {
+                            return self.setNativeError(expr, "Inputs to `>` must be numbers, found `{} > {}`", .{ hint[0], hint[1] });
+                        }
+                        const a = @floatToInt(i64, hint[0].Number);
+                        const b = @floatToInt(i64, hint[1].Number);
+                        var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                        if (a > b)
+                            _ = try set.put(&[_]value.Scalar{ hint[0], hint[1] }, {});
+                        return value.Set{
+                            .Finite = .{
+                                .arity = 2,
+                                .set = set,
+                            },
+                        };
+                    },
                 }
             },
         }

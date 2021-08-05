@@ -445,6 +445,10 @@ pub const Analyzer = struct {
                                 .abstract_arity = 2,
                                 .columns = try self.dupeScalars(&[3]type_.ScalarType{ .Number, .Number, .Number }),
                             },
+                            .GreaterThan => .{
+                                .abstract_arity = 2,
+                                .columns = try self.dupeScalars(&[2]type_.ScalarType{ .Number, .Number }),
+                            },
                         },
                     };
                 },

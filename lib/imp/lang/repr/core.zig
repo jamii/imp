@@ -164,6 +164,7 @@ pub const Native = enum {
     Divide,
     Modulus,
     Range,
+    GreaterThan,
 
     pub fn toName(self: Native) []const u8 {
         return switch (self) {
@@ -173,6 +174,7 @@ pub const Native = enum {
             .Divide => "/",
             .Modulus => "%",
             .Range => "range",
+            .GreaterThan => ">",
         };
     }
 

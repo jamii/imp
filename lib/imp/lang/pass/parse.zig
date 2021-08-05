@@ -471,6 +471,7 @@ const Parser = struct {
                         return Token{ .GreaterThan = {} };
                     }
                 },
+                '~' => return Token{ .Name = "~" },
                 else => {
                     const ascii_char1 = @intCast(u8, char1 & 0b0111_1111);
                     if (char1 != @as(u21, ascii_char1)) {

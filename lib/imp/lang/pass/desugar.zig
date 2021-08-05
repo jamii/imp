@@ -94,6 +94,18 @@ const Desugarer = struct {
             .Name => |name| name: {
                 const args = self.scope.items;
                 var i: usize = 0;
+                if (meta.deepEqual(name, "~")) {
+                    break :name try self.putCore(
+                        .{ .Abstract = try self.putCore(
+                            .{ .Abstract = try self.putCore(
+                                .{ .Product = .{
+                                    .left = try self.putCore(.{ .Name = 0 }),
+                                    .right = try self.putCore(.{ .Name = 1 }),
+                                } },
+                            ) },
+                        ) },
+                    );
+                }
                 // look for name in scope
                 while (i < args.len) : (i += 1) {
                     if (args[args.len - 1 - i]) |arg| {

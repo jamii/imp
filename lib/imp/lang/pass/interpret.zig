@@ -692,10 +692,8 @@ const Interpreter = struct {
                         if (hint[0] != .Number or hint[1] != .Number) {
                             return self.setNativeError(expr, "Inputs to `>` must be numbers, found `{} > {}`", .{ hint[0], hint[1] });
                         }
-                        const a = @floatToInt(i64, hint[0].Number);
-                        const b = @floatToInt(i64, hint[1].Number);
                         var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
-                        if (a > b)
+                        if (hint[0].Number > hint[1].Number)
                             _ = try set.put(&[_]value.Scalar{ hint[0], hint[1] }, {});
                         return value.Set{
                             .Finite = .{

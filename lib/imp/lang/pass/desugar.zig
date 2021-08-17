@@ -69,22 +69,12 @@ const Desugarer = struct {
                     .right = try self.desugar(pair.right),
                 },
             }),
-            .Product => |pair| product: {
-                if (pair.left.* == .Arg) {
-                    // this is parsed late because we want `?name , expr` to bind exactly as tightly as `expr , expr`
-                    try self.scope.append(pair.left.Arg);
-                    const body = try self.desugar(pair.right);
-                    _ = self.scope.pop();
-                    break :product try self.putCore(.{ .Abstract = body });
-                } else {
-                    break :product try self.putCore(.{
-                        .Product = .{
-                            .left = try self.desugar(pair.left),
-                            .right = try self.desugar(pair.right),
-                        },
-                    });
-                }
-            },
+            .Product => |pair| try self.putCore(.{
+                .Product = .{
+                    .left = try self.desugar(pair.left),
+                    .right = try self.desugar(pair.right),
+                },
+            }),
             .Equal => |pair| try self.putCore(.{
                 .Equal = .{
                     .left = try self.desugar(pair.left),
@@ -128,9 +118,11 @@ const Desugarer = struct {
                     .true_branch = try self.desugar(when.true_branch),
                 },
             }),
-            .Arg => {
-                // TODO actually want to put parent expr in message
-                return self.setError("Arg without body: expected ?name.expr or ?[name].expr", .{});
+            .Abstract => |abstract| abstract: {
+                try self.scope.append(abstract.arg);
+                const body = try self.desugar(abstract.body);
+                _ = self.scope.pop();
+                break :abstract try self.putCore(.{ .Abstract = body });
             },
             .Apply => |pair| return self.putCore(
                 .{

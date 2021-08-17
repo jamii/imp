@@ -19,7 +19,7 @@ const syntax = imp.lang.repr.syntax;
 //   name
 //   "!" expr_inner
 //   "when" expr_inner expr_inner
-//   "?" arg "," expr
+//   "?" arg expr
 //   "[" expr "]"
 //   "fix" expr_inner expr_inner
 //   "reduce" expr_inner expr_inner expr_inner
@@ -546,13 +546,9 @@ const Parser = struct {
                 const true_branch = try self.parseExprInner();
                 return self.store.putSyntax(.{ .When = .{ .condition = condition, .true_branch = true_branch } }, start, self.position);
             },
-            // syntax is:
-            //   expr = ... | "?" arg "," expr
-            // but we parse as:
-            //   expr = ... | "?" arg
-            // and disambiguate later so that we can make `?arg , expr` bind exactly as tightly as `expr , expr`
+            // "?" arg expr
+            // TODO disallow whitespace between ? and arg
             .Arg => {
-                const arg_start = self.position;
                 const arg_token = try self.nextToken();
                 const arg = arg: {
                     switch (arg_token) {
@@ -564,10 +560,11 @@ const Parser = struct {
                             _ = try self.expect(.CloseBox);
                             break :arg syntax.Arg{ .name = name, .unbox = true };
                         },
-                        else => return self.setError(start, "Expected ?name or ?[name], found {}", .{arg_token}),
+                        else => return self.setError(start, "Expected ?name or ?[name], found ?{}", .{arg_token}),
                     }
                 };
-                return self.store.putSyntax(.{ .Arg = arg }, start, self.position);
+                const body = try self.parseExpr();
+                return self.store.putSyntax(.{ .Abstract = .{ .arg = arg, .body = body } }, start, self.position);
             },
             // "[" expr "]"
             .OpenBox => {

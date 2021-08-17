@@ -229,13 +229,10 @@ const Token = union(TokenTag) {
     EOF,
 
     fn bindsTighterThan(self: Token, other: Token) bool {
-        return switch (self) {
+        return switch (other) {
+            .Union, .Intersect => self != .Union and self != .Intersect,
+            .Product => self != .Union and self != .Intersect and self != .Product,
             .Lookup => other != .Lookup,
-            // we want:
-            //   ?a.?b.c == ?a.(?b.c)
-            // so bindsTighterThan(.Product, .Product) must return true
-            .Product => other == .Union or other == .Product,
-            .Multiply, .Divide => other == .Add or other == .Subtract,
             else => false,
         };
     }

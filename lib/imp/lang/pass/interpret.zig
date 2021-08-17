@@ -679,7 +679,7 @@ const Interpreter = struct {
                             },
                         };
                     },
-                    .GreaterThan => {
+                    .GreaterThan, .GreaterThanOrEqual => {
                         if (hint.len < 2) {
                             return value.Set{
                                 .Lazy = .{
@@ -690,10 +690,15 @@ const Interpreter = struct {
                             };
                         }
                         if (hint[0] != .Number or hint[1] != .Number) {
-                            return self.setNativeError(expr, "Inputs to `>` must be numbers, found `{} > {}`", .{ hint[0], hint[1] });
+                            return self.setNativeError(expr, "Inputs to `{}` must be numbers, found `{} > {}`", .{ native.toName(), hint[0], hint[1] });
                         }
                         var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
-                        if (hint[0].Number > hint[1].Number)
+                        const satisfied = switch (native) {
+                            .GreaterThan => hint[0].Number > hint[1].Number,
+                            .GreaterThanOrEqual => hint[0].Number >= hint[1].Number,
+                            else => unreachable,
+                        };
+                        if (satisfied)
                             _ = try set.put(&[_]value.Scalar{ hint[0], hint[1] }, {});
                         return value.Set{
                             .Finite = .{

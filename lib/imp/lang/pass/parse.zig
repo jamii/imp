@@ -662,6 +662,21 @@ const Parser = struct {
                 // expr_inner binop expr
                 .Union, .Intersect, .Product, .Equal, .Add, .Subtract, .Multiply, .Divide, .Modulus, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual => {
                     if (prev_op == null or op.bindsTighterThan(prev_op.?)) {
+                        const allow_trailing = switch (op) {
+                            .Union, .Intersect, .Product => true,
+                            else => false,
+                        };
+                        if (allow_trailing) {
+                            // peek at next token
+                            const op_end = self.position;
+                            const next_token = try self.nextToken();
+                            self.position = op_end;
+                            // if this is unambiguously the end of the expr then we can just drop this trailing op
+                            switch (next_token) {
+                                .In, .CloseGroup, .CloseBox, .EOF => return left,
+                                else => {},
+                            }
+                        }
                         const right = try self.parseExprOuter(op);
                         left = try switch (op) {
                             // core ops

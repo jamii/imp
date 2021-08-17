@@ -65,6 +65,12 @@ value: 1 , 2 | 3 , 4
 type: number , number , number
 value: 1 , 2 , 4 | 1 , 3 , 4
 
+(1, 2, 3,) |
+(4, 5, 6,) |
+---
+type: number , number , number
+value: 1 , 2 , 3 | 4 , 5 , 6
+
 1 + 2 * 3
 ---
 type: number
@@ -327,3 +333,66 @@ let foo = 1 , "a" | 2 , "b" in
 ---
 type: text , number
 value: "a" , 1 | "b" , 2
+
+let edits = range 0 8 in
+let root =
+  0 in
+let parent =
+  1 , 0 |
+  2 , 0 |
+  3 , 1 |
+  4 , 1 |
+  5 , 2 |
+  6 , 5 |
+  7 , 5 |
+  8 , 5 | in
+let character =
+  0 , "a" |
+  1 , "b" |
+  2 , "e" |
+  3 , "c" |
+  4 , "d" |
+  5 , "f" |
+  6 , "g" |
+  7 , "h" |
+  8 , "i" | in
+// TODO this is a workaround for bad arity tracking in the interpreter
+let none1 = 1 & 0 in
+// TODO need a version of reduce that doesn't return input on empty inputs
+let max =
+  ?[things]
+    if !!things
+      reduce things (enumerate things 0) ?[prev] ?[i] if (prev > i) prev else i
+    else
+      none1 in
+let min =
+  ?[things]
+    if !!things
+      reduce things (enumerate things 0) ?[prev] ?[i] if (i > prev) prev else i
+    else
+      none1 in
+let rightmost_child =
+  edits ?edit edit , (max [edit (~parent)]) in
+let rightmost_leaf =
+  fix
+    (edits ?edit edit , edit)
+    ?[rightmost_leaf]
+      rightmost_leaf ?edit ?leaf
+        edit , (max [leaf | (leaf rightmost_child)]) in
+let prev_sibling = edits ?edit edit,
+  ([edit parent (parent~) (?sibling if (edit > sibling) sibling else none1)] max) in
+let prev =
+  edits ?edit edit ,
+    if (!! (edit prev_sibling))
+      edit prev_sibling rightmost_leaf
+    else
+      edit parent in
+let position =
+  fix (root , 0) ?[position]
+    position |
+    (position (?edit ?pos (edit (~prev)) , (pos + 1))) in
+edits ?edit
+  (edit position) , edit , (edit character)
+---
+type: number , number , text
+value: 0 , 0 , "a" | 1 , 1 , "b" | 2 , 3 , "c" | 3 , 4 , "d" | 4 , 2 , "e" | 5 , 5 , "f" | 6 , 6 , "g" | 7 , 7 , "h" | 8 , 8 , "i"

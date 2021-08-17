@@ -113,6 +113,7 @@ const TokenTag = enum {
     // sugar
     Negate,
     If,
+    Else,
     Let,
     In,
     Lookup,
@@ -158,6 +159,7 @@ const TokenTag = enum {
 
             .Negate => "`!`",
             .If => "`if`",
+            .Else => "`else`",
             .Let => "`let`",
             .In => "`in`",
             .Lookup => "`:`",
@@ -204,6 +206,7 @@ const Token = union(TokenTag) {
     // sugar
     Negate, // TODO not currently desugared because `none` is typed as 0 arity
     If,
+    Else,
     Let,
     In,
     Lookup,
@@ -488,6 +491,7 @@ const Parser = struct {
                         if (meta.deepEqual(name, "reduce")) return Token{ .Reduce = {} };
                         if (meta.deepEqual(name, "enumerate")) return Token{ .Enumerate = {} };
                         if (meta.deepEqual(name, "if")) return Token{ .If = {} };
+                        if (meta.deepEqual(name, "else")) return Token{ .Else = {} };
                         if (meta.deepEqual(name, "let")) return Token{ .Let = {} };
                         if (meta.deepEqual(name, "in")) return Token{ .In = {} };
                         return Token{ .Name = name };
@@ -540,10 +544,10 @@ const Parser = struct {
             .Text => |text| return self.store.putSyntax(.{ .Scalar = .{ .Text = text } }, start, self.position),
             // name
             .Name => |name| return self.store.putSyntax(.{ .Name = name }, start, self.position),
-            // "when" expr_inner expr_inner
+            // "when" expr_inner expr
             .When => {
                 const condition = try self.parseExprInner();
-                const true_branch = try self.parseExprInner();
+                const true_branch = try self.parseExpr();
                 return self.store.putSyntax(.{ .When = .{ .condition = condition, .true_branch = true_branch } }, start, self.position);
             },
             // "?" arg expr
@@ -601,12 +605,16 @@ const Parser = struct {
                 const expr = try self.parseExprInner();
                 return self.store.putSyntax(.{ .Negate = expr }, start, self.position);
             },
-            // "if" expr_inner expr_inner expr_inner
+            // "if" expr_inner expr else expr
             .If => {
                 const condition = try self.parseExprInner();
-                const true_branch = try self.parseExprInner();
-                const false_branch = try self.parseExprInner();
+                const true_branch = try self.parseExpr();
+                _ = try self.expect(.Else);
+                const false_branch = try self.parseExpr();
                 return self.store.putSyntax(.{ .If = .{ .condition = condition, .true_branch = true_branch, .false_branch = false_branch } }, start, self.position);
+            },
+            .Else => {
+                return self.setError(start, "Found `else` without `if`", .{});
             },
             // "let" name "=" expr "in" expr
             .Let => {
@@ -694,6 +702,12 @@ const Parser = struct {
                     } else {
                         return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{ prev_op.?, op });
                     }
+                },
+
+                // we're between if and else, backtrack
+                .Else => {
+                    self.position = op_start;
+                    return left;
                 },
 
                 // not a binop, might be an apply

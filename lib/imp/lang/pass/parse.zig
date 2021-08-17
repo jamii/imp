@@ -19,7 +19,7 @@ const syntax = imp.lang.repr.syntax;
 //   name
 //   "!" expr_inner
 //   "when" expr_inner expr_inner
-//   "?" arg "." expr
+//   "?" arg "," expr
 //   "[" expr "]"
 //   "fix" expr_inner expr_inner
 //   "reduce" expr_inner expr_inner expr_inner
@@ -39,7 +39,7 @@ const syntax = imp.lang.repr.syntax;
 // binop =
 //   "|"
 //   "&"
-//   "."
+//   ","
 //   "="
 //   "+"
 //   "-"
@@ -144,7 +144,7 @@ const TokenTag = enum {
             .Text => "text",
             .Union => "`|`",
             .Intersect => "`&`",
-            .Product => "`.`",
+            .Product => "`,`",
             .Equal => "`=`",
             .Name => "name",
             .When => "`when`",
@@ -414,7 +414,6 @@ const Parser = struct {
             }
         }
         if (has_decimal_point and self.position == point_end) {
-            // otherwise `1.foo` can parse as `1 . foo` or `1.0 foo`
             return self.setError(start, "there must be at least one digit after a decimal point", .{});
         } else {
             return std.fmt.parseFloat(f64, self.source[start..self.position]);
@@ -431,7 +430,7 @@ const Parser = struct {
                 '"' => return Token{ .Text = try self.tokenizeText() },
                 '|' => return Token{ .Union = {} },
                 '&' => return Token{ .Intersect = {} },
-                '.' => return Token{ .Product = {} },
+                ',' => return Token{ .Product = {} },
                 '=' => return Token{ .Equal = {} },
                 '?' => return Token{ .Arg = {} },
                 '-' => return Token{ .Subtract = {} },
@@ -548,10 +547,10 @@ const Parser = struct {
                 return self.store.putSyntax(.{ .When = .{ .condition = condition, .true_branch = true_branch } }, start, self.position);
             },
             // syntax is:
-            //   expr = ... | "?" arg "." expr
+            //   expr = ... | "?" arg "," expr
             // but we parse as:
             //   expr = ... | "?" arg
-            // and disambiguate later so that we can make `?arg . expr` bind exactly as tightly as `expr . expr`
+            // and disambiguate later so that we can make `?arg , expr` bind exactly as tightly as `expr , expr`
             .Arg => {
                 const arg_start = self.position;
                 const arg_token = try self.nextToken();

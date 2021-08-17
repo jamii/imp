@@ -41,7 +41,7 @@ pub const ConcreteSetType = struct {
             try out_stream.writeAll("maybe");
         } else {
             for (self.columns) |scalar_type, i| {
-                try out_stream.writeAll(if (i == 0) "" else " . ");
+                try out_stream.writeAll(if (i == 0) "" else " , ");
                 if (i < self.abstract_arity) try out_stream.writeAll("?");
                 try scalar_type.dumpInto(out_stream);
             }
@@ -77,7 +77,7 @@ pub const LazySetType = struct {
     pub fn dumpInto(self: LazySetType, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
         try std.fmt.format(out_stream, "(type of expr #{} with scope (", .{Store.getCoreMeta(self.expr).id});
         for (self.scope) |scalar_type, i| {
-            try out_stream.writeAll(if (i == 0) "" else " . ");
+            try out_stream.writeAll(if (i == 0) "" else " , ");
             try scalar_type.dumpInto(out_stream);
         }
         try out_stream.writeAll("))");

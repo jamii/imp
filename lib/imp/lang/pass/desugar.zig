@@ -71,7 +71,7 @@ const Desugarer = struct {
             }),
             .Product => |pair| product: {
                 if (pair.left.* == .Arg) {
-                    // this is parsed late because we want `?name . expr` to bind exactly as tightly as `expr . expr`
+                    // this is parsed late because we want `?name , expr` to bind exactly as tightly as `expr , expr`
                     try self.scope.append(pair.left.Arg);
                     const body = try self.desugar(pair.right);
                     _ = self.scope.pop();
@@ -164,7 +164,7 @@ const Desugarer = struct {
                 },
             ),
             .If => |if_| if_: {
-                // `if c t f` => `[c] (?[g] . ((when g then t) | (when !g then f)))`
+                // `if c t f` => `[c] (?[g] , ((when g then t) | (when !g then f)))`
                 const box_c = try self.desugarBox(if_.condition);
                 try self.scope.append(null); // g
                 const t = try self.desugar(if_.true_branch);
@@ -180,7 +180,7 @@ const Desugarer = struct {
                 break :if_ try self.putCore(.{ .Apply = .{ .left = box_c, .right = abstract } });
             },
             .Let => |let| let: {
-                // `let n = v in b` => `[v] (?[n] . b)`
+                // `let n = v in b` => `[v] (?[n] , b)`
                 const box_v = try self.desugarBox(let.value);
                 try self.scope.append(syntax.Arg{ .name = let.name, .unbox = true });
                 const b = try self.desugar(let.body);
@@ -189,7 +189,7 @@ const Desugarer = struct {
                 break :let try self.putCore(.{ .Apply = .{ .left = box_v, .right = abstract } });
             },
             .Lookup => |lookup| lookup: {
-                // `a:b` => `(a "b") (?[g] . g)`
+                // `a:b` => `(a "b") (?[g] , g)`
                 const a = try self.desugar(lookup.value);
                 const b = try self.putCore(.{ .Scalar = .{ .Text = lookup.name } });
                 const apply_ab = try self.putCore(.{ .Apply = .{ .left = a, .right = b } });

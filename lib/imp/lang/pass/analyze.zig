@@ -320,7 +320,7 @@ pub const Analyzer = struct {
                     //      what about case where init_type is none? require a hint?
                     var max_iterations: usize = 100;
                     while (max_iterations > 0) : (max_iterations -= 1) {
-                        // next looks like `?[prev] . stuff`
+                        // next looks like `?[prev] , stuff`
                         fix_hint[0] = .{ .Box = fix_box_type };
                         try self.time.append(.Iteration);
                         const body_type = try self.analyze(fix.next, fix_hint);
@@ -385,7 +385,7 @@ pub const Analyzer = struct {
 
                     var max_iterations: usize = 100;
                     while (max_iterations > 0) : (max_iterations -= 1) {
-                        // next looks like `?[prev] . ?[input] . stuff`
+                        // next looks like `?[prev] , ?[input] , stuff`
                         reduce_hint[0] = .{ .Box = reduce_box_type };
                         reduce_hint[1] = .{ .Box = input_box_type };
                         // TODO should time be input row instead of iteration number?

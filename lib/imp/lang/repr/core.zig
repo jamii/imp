@@ -99,7 +99,7 @@ pub const Expr = union(enum) {
             .Scalar => |scalar| try scalar.dumpInto(out_stream),
             .Union => try out_stream.writeAll("|"),
             .Intersect => try out_stream.writeAll("&"),
-            .Product => try out_stream.writeAll("."),
+            .Product => try out_stream.writeAll(","),
             .Equal => try out_stream.writeAll("="),
             .Name => |name_ix| try std.fmt.format(out_stream, "get {}", .{name_ix}),
             .UnboxName => |name_ix| try std.fmt.format(out_stream, "get unbox {}", .{name_ix}),
@@ -111,7 +111,7 @@ pub const Expr = union(enum) {
                 if (box.scope.len > 0) {
                     try std.fmt.format(out_stream, " {}", .{box.scope[0]});
                     for (box.scope[1..]) |name_ix, i| {
-                        try std.fmt.format(out_stream, " . {}", .{name_ix});
+                        try std.fmt.format(out_stream, " , {}", .{name_ix});
                     }
                 }
             },

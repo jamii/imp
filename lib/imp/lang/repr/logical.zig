@@ -57,7 +57,7 @@ pub const SetExpr = struct {
         try out_stream.writeAll("(");
         for (self.args) |arg| {
             try std.fmt.format(out_stream, "?s{}", .{arg.inner});
-            try out_stream.writeAll(" . ");
+            try out_stream.writeAll(" , ");
         }
         try body.dumpInto(out_stream);
         try out_stream.writeAll(")");

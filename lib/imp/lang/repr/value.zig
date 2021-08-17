@@ -65,7 +65,7 @@ pub const FiniteSet = struct {
             for (tuples.items) |tuple, i| {
                 try out_stream.writeAll(if (i == 0) "" else " | ");
                 for (tuple) |scalar, j| {
-                    try out_stream.writeAll(if (j == 0) "" else " . ");
+                    try out_stream.writeAll(if (j == 0) "" else " , ");
                     try scalar.dumpInto(out_stream);
                 }
             }
@@ -83,7 +83,7 @@ pub const FiniteSet = struct {
             while (iter.next()) |kv| : (i += 1) {
                 try out_stream.writeAll(if (i == 0) "" else " | ");
                 for (kv.key) |scalar, j| {
-                    try out_stream.writeAll(if (j == 0) "" else " . ");
+                    try out_stream.writeAll(if (j == 0) "" else " , ");
                     try scalar.dumpInto(out_stream);
                 }
             }

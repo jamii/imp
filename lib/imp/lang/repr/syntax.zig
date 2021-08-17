@@ -63,7 +63,7 @@ pub const Expr = union(enum) {
             .Scalar => |scalar| try scalar.dumpInto(out_stream),
             .Union => try out_stream.writeAll("|"),
             .Intersect => try out_stream.writeAll("&"),
-            .Product => try out_stream.writeAll("."),
+            .Product => try out_stream.writeAll(","),
             .Equal => try out_stream.writeAll("="),
             .Name => |name| try out_stream.writeAll(name),
             .When => try out_stream.writeAll("when"),

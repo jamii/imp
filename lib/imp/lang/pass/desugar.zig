@@ -75,6 +75,32 @@ const Desugarer = struct {
                     .right = try self.desugar(pair.right),
                 },
             }),
+            .Extend => |pair| extend: {
+                // TODO how should this behave when `l` has artity > 1
+                // `l . r` => `l (?a a , a r)`
+                const left = try self.desugar(pair.left);
+                try self.scope.append(null);
+                const right = try self.desugar(pair.right);
+                _ = self.scope.pop();
+                break :extend try self.putCore(
+                    .{ .Apply = .{
+                        .left = left,
+                        .right = try self.putCore(
+                            .{ .Abstract = try self.putCore(
+                                .{ .Product = .{
+                                    .left = try self.putCore(.{ .Name = 0 }),
+                                    .right = try self.putCore(
+                                        .{ .Apply = .{
+                                            .left = try self.putCore(.{ .Name = 0 }),
+                                            .right = right,
+                                        } },
+                                    ),
+                                } },
+                            ) },
+                        ),
+                    } },
+                );
+            },
             .Equal => |pair| try self.putCore(.{
                 .Equal = .{
                     .left = try self.desugar(pair.left),

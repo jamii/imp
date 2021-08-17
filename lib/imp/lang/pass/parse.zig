@@ -117,6 +117,7 @@ const TokenTag = enum {
     Let,
     In,
     Lookup,
+    Extend,
 
     // natives
     Add,
@@ -163,6 +164,7 @@ const TokenTag = enum {
             .Let => "`let`",
             .In => "`in`",
             .Lookup => "`:`",
+            .Extend => "`.`",
 
             .Add => "`+`",
             .Subtract => "`-`",
@@ -210,6 +212,7 @@ const Token = union(TokenTag) {
     Let,
     In,
     Lookup,
+    Extend,
 
     // natives
     Add,
@@ -227,6 +230,10 @@ const Token = union(TokenTag) {
 
     // not matched by anything but used to check that we parsed everything
     EOF,
+
+    fn canMixPrecedenceWith(self: Token, other: Token) bool {
+        return tagEqual(self, other) or (self == .Apply and other == .Extend) or (self == .Extend or other == .Apply);
+    }
 
     fn bindsTighterThan(self: Token, other: Token) bool {
         return switch (other) {
@@ -280,7 +287,7 @@ const Parser = struct {
         return error.ParseError;
     }
 
-    // use this instead of std.unicode.Utf8Iterator because we want to return the position of any unicode error
+    // using this instead of std.unicode.Utf8Iterator because we want to return the position of any unicode error
     fn nextUtf8Char(self: *Parser) !?u21 {
         if (self.position >= self.source.len) {
             return null;
@@ -439,6 +446,7 @@ const Parser = struct {
                 '#' => return Token{ .Annotate = {} },
                 '!' => return Token{ .Negate = {} },
                 ':' => return Token{ .Lookup = {} },
+                '.' => return Token{ .Extend = {} },
                 '+' => return Token{ .Add = {} },
                 '*' => return Token{ .Multiply = {} },
                 '/' => {
@@ -630,11 +638,11 @@ const Parser = struct {
         }
     }
 
-    // when parsing initial expr there can't be an apply or binop so go ahead and error
     fn parseExprInner(self: *Parser) Error!*const syntax.Expr {
         if (try self.parseExprInnerMaybe()) |expr| {
             return expr;
         } else {
+            // when parsing initial expr there can't be an apply or binop so go ahead and error
             const start = self.position;
             const token = try self.nextToken();
             return self.setError(start, "Expected start of expression, found {}", .{token});
@@ -657,7 +665,7 @@ const Parser = struct {
             const op = try self.nextToken();
             switch (op) {
                 // expr_inner binop expr
-                .Union, .Intersect, .Product, .Equal, .Add, .Subtract, .Multiply, .Divide, .Modulus, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual => {
+                .Union, .Intersect, .Product, .Extend, .Equal, .Add, .Subtract, .Multiply, .Divide, .Modulus, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual => {
                     if (prev_op == null or op.bindsTighterThan(prev_op.?)) {
                         const allow_trailing = switch (op) {
                             .Union, .Intersect, .Product => true,
@@ -682,6 +690,9 @@ const Parser = struct {
                             .Product => self.store.putSyntax(.{ .Product = .{ .left = left, .right = right } }, op_start, self.position),
                             .Equal => self.store.putSyntax(.{ .Equal = .{ .left = left, .right = right } }, op_start, self.position),
 
+                            // sugar
+                            .Extend => self.store.putSyntax(.{ .Extend = .{ .left = left, .right = right } }, op_start, self.position),
+
                             // native functions
                             .Add => self.putApplyOp("+", left, right, op_start, self.position),
                             .Subtract => self.putApplyOp("-", left, right, op_start, self.position),
@@ -695,7 +706,7 @@ const Parser = struct {
 
                             else => unreachable,
                         };
-                    } else if (tagEqual(prev_op.?, op) or prev_op.?.bindsTighterThan(op)) {
+                    } else if (prev_op.?.canMixPrecedenceWith(op) or prev_op.?.bindsTighterThan(op)) {
                         self.position = op_start;
                         return left;
                     } else {

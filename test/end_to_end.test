@@ -104,12 +104,6 @@ Parse error: Ambiguous precedence for `*` vs `+`
 type: number
 value: 9
 
-let foo = "bar" , [1] in
-foo:bar
----
-type: number
-value: 1
-
 // parses as 1 , (2 3)
 1 , 2 3
 ---

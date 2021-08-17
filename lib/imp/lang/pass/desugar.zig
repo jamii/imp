@@ -206,15 +206,6 @@ const Desugarer = struct {
                 const abstract = try self.putCore(.{ .Abstract = b });
                 break :let try self.putCore(.{ .Apply = .{ .left = box_v, .right = abstract } });
             },
-            .Lookup => |lookup| lookup: {
-                // `a:b` => `(a "b") (?[g] , g)`
-                const a = try self.desugar(lookup.value);
-                const b = try self.putCore(.{ .Scalar = .{ .Text = lookup.name } });
-                const apply_ab = try self.putCore(.{ .Apply = .{ .left = a, .right = b } });
-                const unbox = try self.putCore(.{ .UnboxName = 0 });
-                const abstract = try self.putCore(.{ .Abstract = unbox });
-                break :lookup try self.putCore(.{ .Apply = .{ .left = apply_ab, .right = abstract } });
-            },
         };
         return core_expr;
     }

@@ -27,7 +27,6 @@ pub const Expr = union(enum) {
 
     If: If,
     Let: Let,
-    Lookup: Lookup,
 
     pub fn getChildren(self: Expr) FixedSizeArrayList(3, *const Expr) {
         var children = FixedSizeArrayList(3, *const Expr).init();
@@ -39,7 +38,7 @@ pub const Expr = union(enum) {
                     // nothing to do
                 } else if (t == *const Expr) {
                     children.append(v);
-                } else if (t == Pair or t == Fix or t == When or t == Fix or t == Reduce or t == Abstract or t == Annotate or t == If or t == Let or t == Lookup) {
+                } else if (t == Pair or t == Fix or t == When or t == Fix or t == Reduce or t == Abstract or t == Annotate or t == If or t == Let) {
                     inline for (@typeInfo(t).Struct.fields) |value_field| {
                         if (value_field.field_type == *const Expr) {
                             children.append(@field(v, value_field.name));
@@ -81,7 +80,6 @@ pub const Expr = union(enum) {
             .Negate => try out_stream.writeAll("!"),
             .If => try out_stream.writeAll("when"),
             .Let => |let| try std.fmt.format(out_stream, "let {} =", .{let.name}),
-            .Lookup => |lookup| try std.fmt.format(out_stream, ": {}", .{lookup.name}),
         }
         for (self.getChildren().slice()) |child| {
             try child.dumpInto(out_stream, indent + 2);
@@ -135,9 +133,4 @@ pub const Let = struct {
     name: Name,
     value: *const Expr,
     body: *const Expr,
-};
-
-pub const Lookup = struct {
-    value: *const Expr,
-    name: Name,
 };

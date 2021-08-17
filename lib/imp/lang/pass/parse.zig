@@ -116,7 +116,6 @@ const TokenTag = enum {
     Else,
     Let,
     In,
-    Lookup,
     Extend,
 
     // natives
@@ -163,7 +162,6 @@ const TokenTag = enum {
             .Else => "`else`",
             .Let => "`let`",
             .In => "`in`",
-            .Lookup => "`:`",
             .Extend => "`.`",
 
             .Add => "`+`",
@@ -211,7 +209,6 @@ const Token = union(TokenTag) {
     Else,
     Let,
     In,
-    Lookup,
     Extend,
 
     // natives
@@ -231,17 +228,37 @@ const Token = union(TokenTag) {
     // not matched by anything but used to check that we parsed everything
     EOF,
 
-    fn canMixPrecedenceWith(self: Token, other: Token) bool {
-        return tagEqual(self, other) or (self == .Apply and other == .Extend) or (self == .Extend or other == .Apply);
+    const PrecedenceClass = enum {
+        Apply,
+        Union,
+        Product,
+        BinOp,
+        fn bindsTighterThan(self: PrecedenceClass, other: PrecedenceClass) bool {
+            return switch (self) {
+                .Union => false,
+                .Product => other == .Union,
+                .Apply, .BinOp => other == .Union or other == .Product,
+            };
+        }
+    };
+
+    fn precedenceClass(self: Token) PrecedenceClass {
+        return switch (self) {
+            .Apply, .Extend => .Apply,
+            .Union, .Intersect => .Union,
+            .Product => .Product,
+            else => .BinOp,
+        };
     }
 
-    fn bindsTighterThan(self: Token, other: Token) bool {
-        return switch (other) {
-            .Union, .Intersect => self != .Union and self != .Intersect,
-            .Product => self != .Union and self != .Intersect and self != .Product,
-            .Lookup => other != .Lookup,
-            else => false,
-        };
+    fn comparePrecedence(left: Token, right: Token) enum { LeftBindsTighter, Same, RightBindsTighter, Ambiguous } {
+        if (tagEqual(left, right)) return .Same;
+        const left_class = left.precedenceClass();
+        const right_class = right.precedenceClass();
+        if (left_class == .Apply and right_class == .Apply) return .Same;
+        if (left_class.bindsTighterThan(right_class)) return .LeftBindsTighter;
+        if (right_class.bindsTighterThan(left_class)) return .RightBindsTighter;
+        return .Ambiguous;
     }
 
     pub fn format(self: Token, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
@@ -445,7 +462,6 @@ const Parser = struct {
                 ']' => return Token{ .CloseBox = {} },
                 '#' => return Token{ .Annotate = {} },
                 '!' => return Token{ .Negate = {} },
-                ':' => return Token{ .Lookup = {} },
                 '.' => return Token{ .Extend = {} },
                 '+' => return Token{ .Add = {} },
                 '*' => return Token{ .Multiply = {} },
@@ -652,9 +668,9 @@ const Parser = struct {
     // we're looking at:
     //   prev_expr prev_op left op right
     // possible cases are:
-    //   * prev_op==null or op.bindsTighterThan(prev_op):
+    //   * prev_op==null or prev_op.comparePrecedence(op) == .RightBindsTighter:
     //     prev_expr prev_op (left op right)
-    //   * prev_op==op or prev_op.bindsTighterThan(op):
+    //   * prev_op.comparePrecedence(op) == .Same or prev_op.comparePrecedence(op) == .LeftBindsTighter:
     //     (prev_expr prev_op left) op right
     //   * otherwise:
     //     parse_error "ambiguous precedence"
@@ -666,64 +682,56 @@ const Parser = struct {
             switch (op) {
                 // expr_inner binop expr
                 .Union, .Intersect, .Product, .Extend, .Equal, .Add, .Subtract, .Multiply, .Divide, .Modulus, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual => {
-                    if (prev_op == null or op.bindsTighterThan(prev_op.?)) {
-                        const allow_trailing = switch (op) {
-                            .Union, .Intersect, .Product => true,
-                            else => false,
-                        };
-                        if (allow_trailing) {
-                            // peek at next token
-                            const op_end = self.position;
-                            const next_token = try self.nextToken();
-                            self.position = op_end;
-                            // if this is unambiguously the end of the expr then we can just drop this trailing op
-                            switch (next_token) {
-                                .In, .CloseGroup, .CloseBox, .EOF => return left,
-                                else => {},
+                    const precedence = if (prev_op == null) .RightBindsTighter else prev_op.?.comparePrecedence(op);
+                    switch (precedence) {
+                        .RightBindsTighter => {
+                            const allow_trailing = switch (op) {
+                                .Union, .Intersect, .Product => true,
+                                else => false,
+                            };
+                            if (allow_trailing) {
+                                // peek at next token
+                                const op_end = self.position;
+                                const next_token = try self.nextToken();
+                                self.position = op_end;
+                                // if this is unambiguously the end of the expr then we can just drop this trailing op
+                                switch (next_token) {
+                                    .In, .CloseGroup, .CloseBox, .EOF => return left,
+                                    else => {},
+                                }
                             }
-                        }
-                        const right = try self.parseExprOuter(op);
-                        left = try switch (op) {
-                            // core ops
-                            .Union => self.store.putSyntax(.{ .Union = .{ .left = left, .right = right } }, op_start, self.position),
-                            .Intersect => self.store.putSyntax(.{ .Intersect = .{ .left = left, .right = right } }, op_start, self.position),
-                            .Product => self.store.putSyntax(.{ .Product = .{ .left = left, .right = right } }, op_start, self.position),
-                            .Equal => self.store.putSyntax(.{ .Equal = .{ .left = left, .right = right } }, op_start, self.position),
+                            const right = try self.parseExprOuter(op);
+                            left = try switch (op) {
+                                // core ops
+                                .Union => self.store.putSyntax(.{ .Union = .{ .left = left, .right = right } }, op_start, self.position),
+                                .Intersect => self.store.putSyntax(.{ .Intersect = .{ .left = left, .right = right } }, op_start, self.position),
+                                .Product => self.store.putSyntax(.{ .Product = .{ .left = left, .right = right } }, op_start, self.position),
+                                .Equal => self.store.putSyntax(.{ .Equal = .{ .left = left, .right = right } }, op_start, self.position),
 
-                            // sugar
-                            .Extend => self.store.putSyntax(.{ .Extend = .{ .left = left, .right = right } }, op_start, self.position),
+                                // sugar
+                                .Extend => self.store.putSyntax(.{ .Extend = .{ .left = left, .right = right } }, op_start, self.position),
 
-                            // native functions
-                            .Add => self.putApplyOp("+", left, right, op_start, self.position),
-                            .Subtract => self.putApplyOp("-", left, right, op_start, self.position),
-                            .Multiply => self.putApplyOp("*", left, right, op_start, self.position),
-                            .Divide => self.putApplyOp("/", left, right, op_start, self.position),
-                            .Modulus => self.putApplyOp("%", left, right, op_start, self.position),
-                            .LessThan => self.putApplyOp("<", left, right, op_start, self.position),
-                            .LessThanOrEqual => self.putApplyOp("<=", left, right, op_start, self.position),
-                            .GreaterThan => self.putApplyOp(">", left, right, op_start, self.position),
-                            .GreaterThanOrEqual => self.putApplyOp(">=", left, right, op_start, self.position),
+                                // native functions
+                                .Add => self.putApplyOp("+", left, right, op_start, self.position),
+                                .Subtract => self.putApplyOp("-", left, right, op_start, self.position),
+                                .Multiply => self.putApplyOp("*", left, right, op_start, self.position),
+                                .Divide => self.putApplyOp("/", left, right, op_start, self.position),
+                                .Modulus => self.putApplyOp("%", left, right, op_start, self.position),
+                                .LessThan => self.putApplyOp("<", left, right, op_start, self.position),
+                                .LessThanOrEqual => self.putApplyOp("<=", left, right, op_start, self.position),
+                                .GreaterThan => self.putApplyOp(">", left, right, op_start, self.position),
+                                .GreaterThanOrEqual => self.putApplyOp(">=", left, right, op_start, self.position),
 
-                            else => unreachable,
-                        };
-                    } else if (prev_op.?.canMixPrecedenceWith(op) or prev_op.?.bindsTighterThan(op)) {
-                        self.position = op_start;
-                        return left;
-                    } else {
-                        return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{ prev_op.?, op });
-                    }
-                },
-
-                // expr_inner ":" name
-                .Lookup => {
-                    if (prev_op == null or op.bindsTighterThan(prev_op.?)) {
-                        const name = (try self.expect(.Name)).Name;
-                        left = try self.store.putSyntax(.{ .Lookup = .{ .value = left, .name = name } }, op_start, self.position);
-                    } else if (tagEqual(prev_op.?, op) or prev_op.?.bindsTighterThan(op)) {
-                        self.position = op_start;
-                        return left;
-                    } else {
-                        return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{ prev_op.?, op });
+                                else => unreachable,
+                            };
+                        },
+                        .LeftBindsTighter, .Same => {
+                            self.position = op_start;
+                            return left;
+                        },
+                        .Ambiguous => {
+                            return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{ prev_op.?, op });
+                        },
                     }
                 },
 
@@ -739,14 +747,18 @@ const Parser = struct {
 
                     // expr_inner expr
                     if (try self.parseExprInnerMaybe()) |right| {
-                        const apply: Token = .Apply;
-                        if (prev_op == null or apply.bindsTighterThan(prev_op.?)) {
-                            left = try self.store.putSyntax(.{ .Apply = .{ .left = left, .right = right } }, op_start, self.position);
-                        } else if (tagEqual(prev_op.?, apply) or prev_op.?.bindsTighterThan(apply)) {
-                            self.position = op_start;
-                            return left;
-                        } else {
-                            return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{ prev_op.?, apply });
+                        const precedence = if (prev_op == null) .RightBindsTighter else prev_op.?.comparePrecedence(.Apply);
+                        switch (precedence) {
+                            .RightBindsTighter => {
+                                left = try self.store.putSyntax(.{ .Apply = .{ .left = left, .right = right } }, op_start, self.position);
+                            },
+                            .LeftBindsTighter, .Same => {
+                                self.position = op_start;
+                                return left;
+                            },
+                            .Ambiguous => {
+                                return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{ prev_op.?, .Apply });
+                            },
                         }
                     } else {
                         // no more binary things to apply
@@ -764,27 +776,26 @@ const Parser = struct {
 };
 
 test "binding partial order" {
-    var tokens = ArrayList(Token).init(std.testing.allocator);
-    defer tokens.deinit();
+    var classes = ArrayList(Token.PrecedenceClass).init(std.testing.allocator);
+    defer classes.deinit();
 
-    // generate examples of all posible tokens
-    inline for (@typeInfo(Token).Union.fields) |fti| {
-        // leave value undefined to test that bindsTighterThan doesn't access it
-        try tokens.append(@unionInit(Token, fti.name, undefined));
+    // generate examples of all posible classes
+    inline for (@typeInfo(Token.PrecedenceClass).Enum.fields) |fti| {
+        try classes.append(@intToEnum(Token.PrecedenceClass, fti.value));
     }
 
-    for (tokens.items) |token1| {
+    for (classes.items) |class1| {
         // non-reflexive
-        expect(!token1.bindsTighterThan(token1));
-        for (tokens.items) |token2| {
+        expect(!class1.bindsTighterThan(class1));
+        for (classes.items) |class2| {
             // non-symmetric
-            if (token1.bindsTighterThan(token2)) {
-                expect(!token2.bindsTighterThan(token1));
+            if (class1.bindsTighterThan(class2)) {
+                expect(!class2.bindsTighterThan(class1));
             }
-            for (tokens.items) |token3| {
+            for (classes.items) |class3| {
                 // transitive
-                if (token1.bindsTighterThan(token2) and token2.bindsTighterThan(token3)) {
-                    expect(token1.bindsTighterThan(token3));
+                if (class1.bindsTighterThan(class2) and class2.bindsTighterThan(class3)) {
+                    expect(class1.bindsTighterThan(class3));
                 }
             }
         }

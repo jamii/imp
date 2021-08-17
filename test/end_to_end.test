@@ -137,12 +137,12 @@ Desugar error: Name not in scope: c
 ---
 Analyze error: Mismatched arities: 2 vs 1
 
-!(1 1)
+1 1 !
 ---
 type: maybe
 value: none
 
-!(1 2)
+1 2 !
 ---
 type: maybe
 value: some
@@ -393,13 +393,13 @@ let none2 = none1, none1 in
 // TODO need a version of reduce that doesn't return output on empty input
 let max =
   ?[things]
-    if !!things
+    if (things!!)
       reduce things (enumerate things 0) ?[prev] ?[i] if (prev > i) prev else i
     else
       none1 in
 let min =
   ?[things]
-    if !!things
+    if (things!!)
       reduce things (enumerate things 0) ?[prev] ?[i] if (i > prev) prev else i
     else
       none1 in
@@ -417,7 +417,7 @@ let prev_sibling =
     [edit parent (parent~) . ?sibling edit > sibling] max in
 let prev =
   edits . ?edit
-    if (!! (edit prev_sibling))
+    if (edit prev_sibling !!)
       edit prev_sibling rightmost_leaf
     else
       edit parent in

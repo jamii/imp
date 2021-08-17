@@ -17,7 +17,7 @@ const syntax = imp.lang.repr.syntax;
 //   number
 //   text
 //   name
-//   "!" expr_inner
+//   expr_inner "!"
 //   "when" expr_inner expr_inner
 //   "?" arg expr
 //   "[" expr "]"
@@ -621,11 +621,6 @@ const Parser = struct {
                 const body = try self.parseExprInner();
                 return self.store.putSyntax(.{ .Annotate = .{ .annotation = annotation, .body = body } }, start, self.position);
             },
-            // "!" expr_inner
-            .Negate => {
-                const expr = try self.parseExprInner();
-                return self.store.putSyntax(.{ .Negate = expr }, start, self.position);
-            },
             // "if" expr_inner expr else expr
             .If => {
                 const condition = try self.parseExprInner();
@@ -733,6 +728,10 @@ const Parser = struct {
                             return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{ prev_op.?, op });
                         },
                     }
+                },
+
+                .Negate => {
+                    left = try self.store.putSyntax(.{ .Negate = left }, op_start, self.position);
                 },
 
                 // we're between if and else, backtrack

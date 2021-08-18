@@ -25,26 +25,26 @@ value: "foo"bar"
 type: [(type of expr #0 with scope ())]
 value: [(value of expr #0 with scope ())]
 
-let a = 1 in
+a: 1;
 a
 ---
 type: number
 value: 1
 
 // TODO expand boxes
-let a = [1] in
+a: [1];
 a
 ---
 type: [(type of expr #0 with scope ())]
 value: [(value of expr #0 with scope ())]
 
-let foo = ?a a in
+foo: ?a a;
 foo 1
 ---
 type: number
 value: 1
 
-let foo = ?a ?b a,b in
+foo: ?a ?b a,b;
 foo 1 2
 ---
 type: number , number
@@ -80,25 +80,25 @@ value: 1 , 2 | 3 , 4
 type: number , number , number
 value: 1 , 2 , 4 | 1 , 3 , 4
 
-let a =
+a:
  , 1
  , 2
- , 3 in
+ , 3;
 a
 ---
 type: number , number , number
 value: 1 , 2 , 3
 
-let a =
+a:
   | 1, 2, 3
-  | 4, 5, 6 in
+  | 4, 5, 6;
 a
 ---
 type: number , number , number
 value: 1 , 2 , 3 | 4 , 5 , 6
 
 // TODO this is a result of the hacky way that preceding operators are handled
-let a = |,&|,& 1 in
+a: |,&|,& 1;
 a
 ---
 type: number
@@ -165,13 +165,13 @@ value: none
 type: maybe
 value: some
 
-let foo = 1, 1, 1 in
+foo: 1, 1, 1;
 foo 1 1 1 !
 ---
 type: maybe
 value: none
 
-let foo = 1, 1, 1 in
+foo: 1, 1, 1;
 foo 2 1 1 !
 ---
 type: maybe
@@ -187,54 +187,54 @@ when none 1,2
 type: number , number
 value: none
 
-let a = 1 , "foo" in
+a: 1 , "foo";
 a , a
 ---
 type: number , text , number , text
 value: 1 , "foo" , 1 , "foo"
 
-let foo = ?a ?b a=b in
+foo: ?a ?b a=b;
 foo 1 1
 ---
 type: maybe
 value: some
 
-let foo = ?a ?b a=b in
+foo: ?a ?b a=b;
 foo 1 2
 ---
 type: maybe
 value: none
 
-let foo = ?a [?b a,b] in
+foo: ?a [?b a,b];
 foo 1 ?[bar] bar 2
 ---
 type: number , number
 value: 1 , 2
 
-let foo1 = ?a [?b a,b] in
-let foo2 = ?a [?b a,b] in
-let bar = foo1 1 | foo2 2 in
+foo1: ?a [?b a,b];
+foo2: ?a [?b a,b];
+bar: foo1 1 | foo2 2;
 bar ?[f] f 3
 ---
 Analyze error: TODO type unions are not implemented yet: [(type of expr #3 with scope (number))] | [(type of expr #10 with scope ([(type of expr #5 with scope ())] , number))]
 
-let foo = 1 , 1 | 2 , 2 in
+foo: 1 , 1 | 2 , 2;
 foo foo
 ---
 type: maybe
 value: some
 
-let foo = ?a ?b a,b in
+foo: ?a ?b a,b;
 foo foo
 ---
 Analyze error: Cannot apply two maybe-infinite sets: (type of expr #4 with scope ()) applied to (type of expr #4 with scope ())
 
-let foo = ?a ?b a,b in
+foo: ?a ?b a,b;
 foo = 1
 ---
 Analyze error: Cannot equal one or more maybe-infinite sets: (type of expr #4 with scope ()) = number
 
-let foo = ?a ?b a,b in
+foo: ?a ?b a,b;
 (foo | foo) 1 2
 ---
 type: number , number
@@ -244,21 +244,21 @@ when (?a none) 1
 ---
 Analyze error: The condition of `when` must have type `maybe`, found (type of expr #1 with scope ())
 
-let foo = ?a ?b a=b in
+foo: ?a ?b a=b;
 (foo , 1 , 2) 0 0 1 2
 ---
 type: maybe
 value: some
 
-let foo = ?a ?b a=b in
+foo: ?a ?b a=b;
 (foo , 1 , 2) 0 1 1 2
 ---
 type: maybe
 value: none
 
-let 3 = 4 in 5
+3: 4; 5
 ---
-Parse error: Expected name, found number `3`
+Parse error: Found `:` without preceding name
 
 fix 1 ?[prev] if (prev 10) 10 else prev + 1
 ---
@@ -270,35 +270,35 @@ fix 1 ?[prev] if (prev 5) prev else prev | prev ?a a+1
 type: number
 value: 1 | 2 | 3 | 4 | 5
 
-let range =
+range:
   ?lo ?hi
     fix lo ?[prev]
       if (prev hi)
         prev
       else
-        prev | prev ?a a+1 in
+        prev | prev ?a a+1;
 range 2 5
 ---
 type: number
 value: 2 | 3 | 4 | 5
 
-let edge = 1 , 2 | 2 , 3 | 3 , 4 | 3 , 1 in
+edge: 1 , 2 | 2 , 3 | 3 , 4 | 3 , 1;
 fix edge ?[reach] reach | reach ?a ?b a , edge b
 ---
 type: number , number
 value: 1 , 1 | 1 , 2 | 1 , 3 | 1 , 4 | 2 , 1 | 2 , 2 | 2 , 3 | 2 , 4 | 3 , 1 | 3 , 2 | 3 , 3 | 3 , 4
 
-let edge = 1 , 2 | 2 , 3 | 3 , 4 | 3 , 1 in
-let node = edge ?a ?b a | b in
+edge: 1 , 2 | 2 , 3 | 3 , 4 | 3 , 1;
+node: edge ?a ?b a | b;
 node ?a a , fix a ?[reach] reach | reach ?a edge a
 ---
 type: number , number
 value: 1 , 1 | 1 , 2 | 1 , 3 | 1 , 4 | 2 , 1 | 2 , 2 | 2 , 3 | 2 , 4 | 3 , 1 | 3 , 2 | 3 , 3 | 3 , 4 | 4 , 4
 
-let closure =
+closure:
   ?[edge]
     fix edge ?[reach]
-      reach | reach ?a ?b a , edge b in
+      reach | reach ?a ?b a , edge b;
 closure [1 , 2 | 2 , 3 | 3 , 4 | 3 , 1]
 ---
 type: number , number
@@ -353,13 +353,13 @@ reduce (3 | 4 | 5) 0 ?a ?b a + b
 Analyze error: Intersection of number and [(type of expr #13 with scope ())] is empty
 
 // testing specialization caching
-let f = ?i i+1 in
+f: ?i i+1;
 (f 1) , (f 2) , (f 3 4) , (f 5 6)
 ---
 type: number , number
 value: 2 , 3
 
-let collatz =
+collatz:
   ?n
     fix n ?[n]
       if (n = 1)
@@ -368,13 +368,13 @@ let collatz =
         if ((n % 2) 0)
           n / 2
         else
-          (3 * n) + 1 in
+          (3 * n) + 1;
 collatz 42
 ---
 type: number
 value: 1
 
-let foo = 1 , "a" | 2 , "b" in
+foo: 1 , "a" | 2 , "b";
 ~foo
 ---
 type: text , number
@@ -395,10 +395,9 @@ value: 2 | 3
 type: number
 value: 2
 
-let edits = range 0 8 in
-let root =
-  0 in
-let parent =
+edits: range 0 8;
+root: 0;
+parent:
   | 1 , 0
   | 2 , 0
   | 3 , 1
@@ -406,8 +405,8 @@ let parent =
   | 5 , 2
   | 6 , 5
   | 7 , 5
-  | 8 , 5 in
-let character =
+  | 8 , 5;
+character:
   | 0 , "a"
   | 1 , "b"
   | 2 , "e"
@@ -416,45 +415,45 @@ let character =
   | 5 , "f"
   | 6 , "g"
   | 7 , "h"
-  | 8 , "i" in
+  | 8 , "i";
 // TODO this is a workaround for bad arity tracking in the interpreter
-let none1 = 1 & 0 in
-let none2 = none1, none1 in
-// TODO need a version of reduce that doesn't return output on empty input
-let max =
+none1: 1 & 0;
+none2: none1, none1;
+// TODO need a version of reduce that doesn't return output on empty in put
+max:
   ?[things]
     if (things!!)
       reduce things (enumerate things 0) ?[prev] ?[i] if (prev > i) prev else i
     else
-      none1 in
-let min =
+      none1;
+min:
   ?[things]
     if (things!!)
       reduce things (enumerate things 0) ?[prev] ?[i] if (i > prev) prev else i
     else
-      none1 in
-let rightmost_child =
-  edits . ?edit [edit (~parent)] max in
-let rightmost_leaf =
+      none1;
+rightmost_child:
+  edits . ?edit [edit (~parent)] max;
+rightmost_leaf:
   fix
     none2
     ?[rightmost_leaf]
       edits . ?edit
         // TODO swapping child and leaf shouldn't matter, but causes test to spin forever
-        [edit | edit rightmost_child rightmost_leaf] max in
-let prev_sibling =
+        [edit | edit rightmost_child rightmost_leaf] max;
+prev_sibling:
   edits . ?edit
-    [edit parent (parent~) . ?sibling edit > sibling] max in
-let prev =
+    [edit parent (parent~) . ?sibling edit > sibling] max;
+prev:
   edits . ?edit
     if (edit prev_sibling !!)
       edit prev_sibling rightmost_leaf
     else
-      edit parent in
-let position =
+      edit parent;
+position:
   fix (root , 0) ?[position]
     position |
-    position ?edit ?pos edit (~prev) , pos + 1 in
+    position ?edit ?pos edit (~prev) , pos + 1;
 edits ?edit
   (edit position) , edit , (edit character)
 ---

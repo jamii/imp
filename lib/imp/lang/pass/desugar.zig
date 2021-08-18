@@ -197,14 +197,14 @@ const Desugarer = struct {
                 const abstract = try self.putCore(.{ .Abstract = body });
                 break :if_ try self.putCore(.{ .Apply = .{ .left = box_c, .right = abstract } });
             },
-            .Let => |let| let: {
-                // `let n = v in b` => `[v] (?[n] , b)`
-                const box_v = try self.desugarBox(let.value);
-                try self.scope.append(syntax.Arg{ .name = let.name, .unbox = true });
-                const b = try self.desugar(let.body);
+            .Def => |def| def: {
+                // `n: v; b` => `[v] (?[n] , b)`
+                const box_v = try self.desugarBox(def.value);
+                try self.scope.append(syntax.Arg{ .name = def.name, .unbox = true });
+                const b = try self.desugar(def.body);
                 _ = self.scope.pop();
                 const abstract = try self.putCore(.{ .Abstract = b });
-                break :let try self.putCore(.{ .Apply = .{ .left = box_v, .right = abstract } });
+                break :def try self.putCore(.{ .Apply = .{ .left = box_v, .right = abstract } });
             },
         };
         return core_expr;

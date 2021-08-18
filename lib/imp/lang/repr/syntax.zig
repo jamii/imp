@@ -26,7 +26,7 @@ pub const Expr = union(enum) {
     Annotate: Annotate,
 
     If: If,
-    Let: Let,
+    Def: Def,
 
     pub fn getChildren(self: Expr) FixedSizeArrayList(3, *const Expr) {
         var children = FixedSizeArrayList(3, *const Expr).init();
@@ -38,7 +38,7 @@ pub const Expr = union(enum) {
                     // nothing to do
                 } else if (t == *const Expr) {
                     children.append(v);
-                } else if (t == Pair or t == Fix or t == When or t == Fix or t == Reduce or t == Abstract or t == Annotate or t == If or t == Let) {
+                } else if (t == Pair or t == Fix or t == When or t == Fix or t == Reduce or t == Abstract or t == Annotate or t == If or t == Def) {
                     inline for (@typeInfo(t).Struct.fields) |value_field| {
                         if (value_field.field_type == *const Expr) {
                             children.append(@field(v, value_field.name));
@@ -79,7 +79,7 @@ pub const Expr = union(enum) {
             .Annotate => |annotate| try std.fmt.format(out_stream, "# {}", .{annotate.annotation}),
             .Negate => try out_stream.writeAll("!"),
             .If => try out_stream.writeAll("when"),
-            .Let => |let| try std.fmt.format(out_stream, "let {} =", .{let.name}),
+            .Def => |def| try std.fmt.format(out_stream, "{}:", .{def.name}),
         }
         for (self.getChildren().slice()) |child| {
             try child.dumpInto(out_stream, indent + 2);
@@ -129,7 +129,7 @@ pub const If = struct {
     false_branch: *const Expr,
 };
 
-pub const Let = struct {
+pub const Def = struct {
     name: Name,
     value: *const Expr,
     body: *const Expr,

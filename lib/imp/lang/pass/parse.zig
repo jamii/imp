@@ -26,8 +26,7 @@ const syntax = imp.lang.repr.syntax;
 //   "enumerate" expr_inner
 //   "#" name expr_inner
 //   "if" expr_inner expr_inner expr_inner
-//   "let" name "=" expr "in" expr
-//   expr_inner ":" name
+//   name ":" expr ";" expr
 
 // name =
 //   alpha (alpha | digit | "_")*
@@ -114,8 +113,8 @@ const TokenTag = enum {
     Negate,
     If,
     Else,
-    Let,
-    In,
+    Def,
+    EndDef,
     Extend,
 
     // natives
@@ -160,8 +159,8 @@ const TokenTag = enum {
             .Negate => "`!`",
             .If => "`if`",
             .Else => "`else`",
-            .Let => "`let`",
-            .In => "`in`",
+            .Def => "`:`",
+            .EndDef => "`;`",
             .Extend => "`.`",
 
             .Add => "`+`",
@@ -207,8 +206,8 @@ const Token = union(TokenTag) {
     Negate, // TODO not currently desugared because `none` is typed as 0 arity
     If,
     Else,
-    Let,
-    In,
+    Def,
+    EndDef,
     Extend,
 
     // natives
@@ -462,6 +461,8 @@ const Parser = struct {
                 ']' => return Token{ .CloseBox = {} },
                 '#' => return Token{ .Annotate = {} },
                 '!' => return Token{ .Negate = {} },
+                ':' => return Token{ .Def = {} },
+                ';' => return Token{ .EndDef = {} },
                 '.' => return Token{ .Extend = {} },
                 '+' => return Token{ .Add = {} },
                 '*' => return Token{ .Multiply = {} },
@@ -513,8 +514,6 @@ const Parser = struct {
                         if (meta.deepEqual(name, "enumerate")) return Token{ .Enumerate = {} };
                         if (meta.deepEqual(name, "if")) return Token{ .If = {} };
                         if (meta.deepEqual(name, "else")) return Token{ .Else = {} };
-                        if (meta.deepEqual(name, "let")) return Token{ .Let = {} };
-                        if (meta.deepEqual(name, "in")) return Token{ .In = {} };
                         return Token{ .Name = name };
                     } else {
                         return self.setError(start, "invalid token", .{});
@@ -564,7 +563,19 @@ const Parser = struct {
             // text
             .Text => |text| return self.store.putSyntax(.{ .Scalar = .{ .Text = text } }, start, self.position),
             // name
-            .Name => |name| return self.store.putSyntax(.{ .Name = name }, start, self.position),
+            .Name => |name| {
+                const name_end = self.position;
+                if ((try self.nextToken()) == .Def) {
+                    // name ":" expr ";" expr
+                    const value = try self.parseExpr();
+                    _ = try self.expect(.EndDef);
+                    const body = try self.parseExpr();
+                    return self.store.putSyntax(.{ .Def = .{ .name = name, .value = value, .body = body } }, start, self.position);
+                } else {
+                    self.position = name_end;
+                    return self.store.putSyntax(.{ .Name = name }, start, self.position);
+                }
+            },
             // "when" expr_inner expr
             .When => {
                 const condition = try self.parseExprInner();
@@ -632,14 +643,8 @@ const Parser = struct {
             .Else => {
                 return self.setError(start, "Found `else` without `if`", .{});
             },
-            // "let" name "=" expr "in" expr
-            .Let => {
-                const name = (try self.expect(.Name)).Name;
-                _ = try self.expect(.Equal);
-                const value = try self.parseExpr();
-                _ = try self.expect(.In);
-                const body = try self.parseExpr();
-                return self.store.putSyntax(.{ .Let = .{ .name = name, .value = value, .body = body } }, start, self.position);
+            .Def => {
+                return self.setError(start, "Found `:` without preceding name", .{});
             },
             // allow starting with |&, for easy editing of lists
             .Product, .Union, .Intersect => {

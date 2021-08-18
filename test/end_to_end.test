@@ -488,3 +488,8 @@ fix none ?[prev] none
 ---
 type: none
 value: none
+
+(?[a] ?[b] a b) [1,2] [1]
+---
+type: number
+value: 2

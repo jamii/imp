@@ -26,7 +26,7 @@ const syntax = imp.lang.repr.syntax;
 //   "enumerate" expr_inner
 //   "#" name expr_inner
 //   "if" expr_inner expr_inner expr_inner
-//   name ":" expr ";" expr
+//   "fix"? name ":" expr ";" expr
 
 // name =
 //   alpha (alpha | digit | "_")*
@@ -570,7 +570,7 @@ const Parser = struct {
                     const value = try self.parseExpr();
                     _ = try self.expect(.EndDef);
                     const body = try self.parseExpr();
-                    return self.store.putSyntax(.{ .Def = .{ .name = name, .value = value, .body = body } }, start, self.position);
+                    return self.store.putSyntax(.{ .Def = .{ .fix = false, .name = name, .value = value, .body = body } }, start, self.position);
                 } else {
                     self.position = name_end;
                     return self.store.putSyntax(.{ .Name = name }, start, self.position);
@@ -608,11 +608,23 @@ const Parser = struct {
                 _ = try self.expect(.CloseBox);
                 return self.store.putSyntax(.{ .Box = expr }, start, self.position);
             },
-            // "fix" expr_inner expr_inner
             .Fix => {
-                const init = try self.parseExprInner();
-                const next = try self.parseExprInner();
-                return self.store.putSyntax(.{ .Fix = .{ .init = init, .next = next } }, start, self.position);
+                const fix_end = self.position;
+                const maybe_name = try self.nextToken();
+                const maybe_def = try self.nextToken();
+                if (maybe_name == .Name and maybe_def == .Def) {
+                    // "fix" name ":" expr ";" expr
+                    const value = try self.parseExpr();
+                    _ = try self.expect(.EndDef);
+                    const body = try self.parseExpr();
+                    return self.store.putSyntax(.{ .Def = .{ .fix = true, .name = maybe_name.Name, .value = value, .body = body } }, start, self.position);
+                } else {
+                    // "fix" expr_inner expr
+                    self.position = fix_end;
+                    const init = try self.parseExprInner();
+                    const next = try self.parseExpr();
+                    return self.store.putSyntax(.{ .Fix = .{ .init = init, .next = next } }, start, self.position);
+                }
             },
             // "reduce" expr_inner expr_inner expr_inner
             .Reduce => {

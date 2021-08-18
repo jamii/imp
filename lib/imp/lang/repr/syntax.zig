@@ -130,6 +130,7 @@ pub const If = struct {
 };
 
 pub const Def = struct {
+    fix: bool,
     name: Name,
     value: *const Expr,
     body: *const Expr,

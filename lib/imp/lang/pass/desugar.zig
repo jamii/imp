@@ -158,7 +158,7 @@ const Desugarer = struct {
                     },
                 },
             ),
-            .Box => |expr| try self.desugarBox(expr),
+            .Box => |expr| try self.makeBox(try self.desugar(expr)),
             .Fix => |fix| try self.putCore(.{
                 .Fix = .{
                     .init = try self.desugar(fix.init),
@@ -183,7 +183,7 @@ const Desugarer = struct {
             ),
             .If => |if_| if_: {
                 // `if c t f` => `[c] (?[g] , ((when g then t) | (when !g then f)))`
-                const box_c = try self.desugarBox(if_.condition);
+                const box_c = try self.makeBox(try self.desugar(if_.condition));
                 try self.scope.append(null); // g
                 const t = try self.desugar(if_.true_branch);
                 const f = try self.desugar(if_.false_branch);
@@ -198,8 +198,21 @@ const Desugarer = struct {
                 break :if_ try self.putCore(.{ .Apply = .{ .left = box_c, .right = abstract } });
             },
             .Def => |def| def: {
-                // `n: v; b` => `[v] (?[n] , b)`
-                const box_v = try self.desugarBox(def.value);
+                // `n: v; b` => `[v] (?[n] b)`
+                // `fix n: v; b` => `[fix none (?[n] v)] (?[n] b)`
+                const v = v: {
+                    if (def.fix) {
+                        try self.scope.append(syntax.Arg{ .name = def.name, .unbox = true });
+                        const body = try self.desugar(def.value);
+                        _ = self.scope.pop();
+                        const next = try self.putCore(.{ .Abstract = body });
+                        const none = try self.putCore(.None);
+                        break :v try self.putCore(.{ .Fix = .{ .init = none, .next = next } });
+                    } else {
+                        break :v try self.desugar(def.value);
+                    }
+                };
+                const box_v = try self.makeBox(v);
                 try self.scope.append(syntax.Arg{ .name = def.name, .unbox = true });
                 const b = try self.desugar(def.body);
                 _ = self.scope.pop();
@@ -210,8 +223,7 @@ const Desugarer = struct {
         return core_expr;
     }
 
-    fn desugarBox(self: *Desugarer, syntax_expr: *const syntax.Expr) Error!*const core.Expr {
-        const body = try self.desugar(syntax_expr);
+    fn makeBox(self: *Desugarer, body: *const core.Expr) Error!*const core.Expr {
         // TODO this is correct, but needs to be done everywhere
         // var body_name_ixes = DeepHashSet(core.NameIx).init(&self.store.arena.allocator);
         // try body.getNameIxes(&body_name_ixes);

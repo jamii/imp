@@ -427,6 +427,33 @@ max [1]
 type: number
 value: 1
 
+fix none ?[prev] 1
+---
+type: number
+value: 1
+
+fix none ?[prev] none
+---
+type: none
+value: none
+
+(?[a] ?[b] a b) [1,2] [1]
+---
+type: number
+value: 2
+
+fix a: 1;
+a
+---
+type: number
+value: 1
+
+fix a: if (a!) 1 else if (a >= 10) a else a+1;
+a
+---
+type: number
+value: 10
+
 edits: range 0 8;
 root: 0;
 parent:
@@ -448,48 +475,14 @@ character:
   | 6 , "g"
   | 7 , "h"
   | 8 , "i";
-max:
-  ?[things]
-      reduce things none ?[prev] ?[i] if (prev > i) prev else i;
-rightmost_child:
-  edits . ?edit [edit (~parent)] max;
-rightmost_leaf:
-  fix
-    none
-    ?[rightmost_leaf]
-      edits . ?edit
-        // TODO swapping child and leaf shouldn't matter, but causes test to spin forever
-        [edit | edit rightmost_child rightmost_leaf] max;
-prev_sibling:
-  edits . ?edit
-    [edit parent (parent~) . ?sibling edit > sibling] max;
-prev:
-  edits . ?edit
-    if (edit prev_sibling !!)
-      edit prev_sibling rightmost_leaf
-    else
-      edit parent;
-position:
-  fix none ?[position]
-    | root, 0
-    | position ?edit ?pos edit (~prev) , pos + 1;
-edits ?edit
-  (edit position) , edit , (edit character)
+max: ?[things] reduce things none ?[prev] ?[i] if (prev > i) prev else i;
+rightmost_child: edits . ?edit [edit (~parent)] max;
+// TODO swapping child and leaf shouldn't matter, but causes test to spin forever
+fix rightmost_leaf: edits . ?edit [edit | edit rightmost_child rightmost_leaf] max;
+prev_sibling: edits . ?edit [edit parent (parent~) . ?sibling edit > sibling] max;
+prev: edits . ?edit if (edit prev_sibling !!) edit prev_sibling rightmost_leaf else edit parent;
+fix position: root, 0 | position ?edit ?pos edit (~prev) , pos + 1;
+edits ?edit (edit position) , edit , (edit character)
 ---
 type: number , number , text
 value: 0 , 0 , "a" | 1 , 1 , "b" | 2 , 3 , "c" | 3 , 4 , "d" | 4 , 2 , "e" | 5 , 5 , "f" | 6 , 6 , "g" | 7 , 7 , "h" | 8 , 8 , "i"
-
-fix none ?[prev] 1
----
-type: number
-value: 1
-
-fix none ?[prev] none
----
-type: none
-value: none
-
-(?[a] ?[b] a b) [1,2] [1]
----
-type: number
-value: 2

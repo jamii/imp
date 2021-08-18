@@ -5,6 +5,10 @@ pub const repr = @import("./lang/repr.zig");
 pub const pass = @import("./lang/pass.zig");
 pub const Store = @import("./lang/store.zig").Store;
 
+comptime {
+    @import("std").testing.refAllDecls(@This());
+}
+
 // TODO calculate source position
 pub const InterpretErrorInfo = union(enum) {
     Parse: pass.parse.ErrorInfo,

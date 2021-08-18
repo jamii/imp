@@ -451,9 +451,9 @@ prev:
     else
       edit parent;
 position:
-  fix (root , 0) ?[position]
-    position |
-    position ?edit ?pos edit (~prev) , pos + 1;
+  fix none2 ?[position]
+    | root, 0
+    | position ?edit ?pos edit (~prev) , pos + 1;
 edits ?edit
   (edit position) , edit , (edit character)
 ---

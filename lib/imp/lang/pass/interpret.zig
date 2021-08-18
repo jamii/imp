@@ -385,12 +385,14 @@ const Interpreter = struct {
                                 },
                             };
                         }
-                        if (left_arity_o) |left_arity| {
-                            if (left_arity != left_part.Finite.arity and left_part.Finite.set.count() > 0) {
-                                return self.setError(expr, "Apply resulted in unions over sets of different arities: {} vs {}", .{ left_arity, left_part.Finite.arity });
+                        if (left_part.Finite.set.count() > 0) {
+                            if (left_arity_o) |left_arity| {
+                                if (left_arity != left_part.Finite.arity) {
+                                    return self.setError(expr, "Apply resulted in unions over sets of different arities: {} vs {}", .{ left_arity, left_part.Finite.arity });
+                                }
+                            } else {
+                                left_arity_o = left_part.Finite.arity;
                             }
-                        } else {
-                            left_arity_o = left_part.Finite.arity;
                         }
                         var left_part_iter = left_part.Finite.set.iterator();
                         while (left_part_iter.next()) |lkv| {

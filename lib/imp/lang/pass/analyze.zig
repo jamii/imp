@@ -432,23 +432,30 @@ pub const Analyzer = struct {
                         if (body_type.Concrete.columns.len < 2) {
                             return self.setError("The body for reduce must have arity >= 2", .{});
                         }
-                        if (body_type.Concrete.columns[0] != .Box or !meta.deepEqual(body_type.Concrete.columns[0].Box, reduce_box_type) or body_type.Concrete.columns[1] != .Box or !meta.deepEqual(body_type.Concrete.columns[1].Box, input_box_type)) {
+                        if (body_type.Concrete.columns[0] != .Box or !meta.deepEqual(body_type.Concrete.columns[0].Box.lazy, reduce_box_type.lazy) or body_type.Concrete.columns[1] != .Box or !meta.deepEqual(body_type.Concrete.columns[1].Box.lazy, input_box_type.lazy)) {
                             return self.setError("The body for reduce must be able to be applied to it's own result and it's input, found {}", .{body_type});
                         }
                         // drop the types for `prev` and `input`
                         const reduce_columns = body_type.Concrete.columns[2..];
-                        if (meta.deepEqual(reduce_type.Concrete.columns, reduce_columns)) {
-                            // reached fixpoint
-                            break :set_type reduce_type;
+                        if (reduce_type == .None) {
+                            reduce_type = .{ .Concrete = .{
+                                .abstract_arity = 0,
+                                .columns = try std.mem.dupe(&self.store.arena.allocator, type_.ScalarType, reduce_columns),
+                            } };
+                        } else {
+                            if (meta.deepEqual(reduce_type.Concrete.columns, reduce_columns)) {
+                                // reached fixpoint
+                                break :set_type reduce_type;
+                            }
+                            if (reduce_type.Concrete.columns.len != reduce_columns.len) {
+                                return self.setError("The body for reduce must have constant arity, changed from {} to {}", .{ reduce_type.Concrete.columns.len, reduce_columns.len });
+                            }
+                            var columns = try self.store.arena.allocator.alloc(type_.ScalarType, reduce_type.Concrete.columns.len);
+                            for (reduce_columns) |column, i| {
+                                columns[i] = try self.unionScalar(reduce_type.Concrete.columns[i], column);
+                            }
+                            reduce_type.Concrete.columns = columns;
                         }
-                        if (reduce_type.Concrete.columns.len != reduce_columns.len) {
-                            return self.setError("The body for reduce must have constant arity, changed from {} to {}", .{ reduce_type.Concrete.columns.len, reduce_columns.len });
-                        }
-                        var columns = try self.store.arena.allocator.alloc(type_.ScalarType, reduce_type.Concrete.columns.len);
-                        for (reduce_columns) |column, i| {
-                            columns[i] = try self.unionScalar(reduce_type.Concrete.columns[i], column);
-                        }
-                        reduce_type.Concrete.columns = columns;
                         reduce_box_type.finite = .{ .Concrete = reduce_type.Concrete };
                     }
                     return self.setError("Type of reduce failed to converge, reached {}", .{reduce_type});

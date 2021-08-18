@@ -6,6 +6,8 @@ const value = imp.lang.repr.value;
 const core = imp.lang.repr.core;
 
 pub const SetType = union(enum) {
+    /// The empty set
+    None,
     /// A set with these column types
     Concrete: ConcreteSetType,
     /// Something that we can't type until it's specialized
@@ -13,11 +15,12 @@ pub const SetType = union(enum) {
 
     pub fn isFinite(self: SetType) bool {
         // we never assign a lazy type to a finite expression
-        return self == .Concrete and self.Concrete.abstract_arity == 0;
+        return self == .None or (self == .Concrete and self.Concrete.abstract_arity == 0);
     }
 
     pub fn dumpInto(self: SetType, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
         switch (self) {
+            .None => try out_stream.writeAll("none"),
             .Concrete => |concrete| {
                 try concrete.dumpInto(out_stream);
             },
@@ -121,7 +124,7 @@ pub const BoxType = struct {
     // always need a lazy type because box types are nominal - determined by the expr itself
     lazy: LazySetType,
     // need to store the concrete type when analyzing fixpoints to avoid infinite recursion
-    concrete: ?ConcreteSetType,
+    finite: ?union(enum) { None, Concrete: ConcreteSetType },
 
     pub fn dumpInto(self: BoxType, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
         try self.lazy.dumpInto(out_stream);

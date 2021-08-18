@@ -67,6 +67,8 @@ pub const Store = struct {
 
     pub fn putSpecialization(self: *Store, lazy: type_.LazySetType, hint: []const type_.ScalarType, set_type: type_.SetType) !void {
         const used_hint = switch (set_type) {
+            // always empty so can't say how much of the hint was used
+            .None => hint,
             // didn't specialize so all we know is this hint isn't enough
             .Lazy => hint,
             // specialized, so cannot have used >concrete.columns.len of the hint
@@ -89,7 +91,7 @@ pub const Store = struct {
                 // if couldn't specialize with a longer hint, can't specialize with this one
                 .Lazy => specialization.hint.len >= hint.len and meta.deepEqual(specialization.hint[0..hint.len], hint),
                 // if could specialize with a shorter hint, can specialize with this one
-                .Concrete => specialization.hint.len <= hint.len and meta.deepEqual(specialization.hint, hint[0..specialization.hint.len]),
+                .None, .Concrete => specialization.hint.len <= hint.len and meta.deepEqual(specialization.hint, hint[0..specialization.hint.len]),
             };
             if (is_match) return specialization.set_type;
         }

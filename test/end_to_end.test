@@ -418,7 +418,6 @@ character:
   | 8 , "i";
 // TODO this is a workaround for bad arity tracking in the interpreter
 none1: 1 & 0;
-none2: none1, none1;
 // TODO need a version of reduce that doesn't return output on empty input
 max:
   ?[things]
@@ -436,7 +435,7 @@ rightmost_child:
   edits . ?edit [edit (~parent)] max;
 rightmost_leaf:
   fix
-    none2
+    none
     ?[rightmost_leaf]
       edits . ?edit
         // TODO swapping child and leaf shouldn't matter, but causes test to spin forever
@@ -451,7 +450,7 @@ prev:
     else
       edit parent;
 position:
-  fix none2 ?[position]
+  fix none ?[position]
     | root, 0
     | position ?edit ?pos edit (~prev) , pos + 1;
 edits ?edit
@@ -459,3 +458,13 @@ edits ?edit
 ---
 type: number , number , text
 value: 0 , 0 , "a" | 1 , 1 , "b" | 2 , 3 , "c" | 3 , 4 , "d" | 4 , 2 , "e" | 5 , 5 , "f" | 6 , 6 , "g" | 7 , 7 , "h" | 8 , 8 , "i"
+
+fix none ?[prev] 1
+---
+type: number
+value: 1
+
+fix none ?[prev] none
+---
+type: none
+value: none

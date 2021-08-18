@@ -55,7 +55,10 @@ pub const Analyzer = struct {
         }
         const set_type: type_.SetType = set_type: {
             switch (expr.*) {
-                .None, .Some => {
+                .None => {
+                    break :set_type .None;
+                },
+                .Some => {
                     break :set_type .{
                         .Concrete = .{
                             .abstract_arity = 0,
@@ -80,9 +83,9 @@ pub const Analyzer = struct {
                 .Union, .Intersect => |pair| {
                     const left = try self.analyze(pair.left, hint);
                     const right = try self.analyze(pair.right, hint);
-                    if (left == .Lazy or right == .Lazy) {
-                        break :set_type .{ .Lazy = lazy };
-                    }
+                    if (left == .None) break :set_type if (expr.* == .Union) right else .None;
+                    if (right == .None) break :set_type if (expr.* == .Union) left else .None;
+                    if (left == .Lazy or right == .Lazy) break :set_type .{ .Lazy = lazy };
                     if (left.Concrete.columns.len != right.Concrete.columns.len) {
                         return self.setError("Mismatched arities: {} vs {}", .{ left.Concrete.columns.len, right.Concrete.columns.len });
                     }
@@ -105,13 +108,11 @@ pub const Analyzer = struct {
                 },
                 .Product => |pair| {
                     const left = try self.analyze(pair.left, hint);
-                    if (left == .Lazy) {
-                        break :set_type .{ .Lazy = lazy };
-                    }
+                    if (left == .None) break :set_type .None;
+                    if (left == .Lazy) break :set_type .{ .Lazy = lazy };
                     const right = try self.analyze(pair.right, hint[min(hint.len, left.Concrete.columns.len)..]);
-                    if (right == .Lazy) {
-                        break :set_type .{ .Lazy = lazy };
-                    }
+                    if (right == .Lazy) break :set_type .{ .Lazy = lazy };
+                    if (right == .None) break :set_type .None;
                     const abstract_arity = if (right.Concrete.abstract_arity > 0)
                         left.Concrete.columns.len + right.Concrete.abstract_arity
                     else
@@ -140,11 +141,13 @@ pub const Analyzer = struct {
                     if (!left.isFinite() or !right.isFinite()) {
                         return self.setError("Cannot equal one or more maybe-infinite sets: {} = {}", .{ left, right });
                     }
-                    if (left.Concrete.columns.len != right.Concrete.columns.len) {
-                        return self.setError("Mismatched arities: {} vs {}", .{ left.Concrete.columns.len, right.Concrete.columns.len });
-                    }
-                    for (left.Concrete.columns) |scalar_type, i| {
-                        _ = try self.intersectScalar(scalar_type, right.Concrete.columns[i]);
+                    if (left == .Concrete and right == .Concrete) {
+                        if (left.Concrete.columns.len != right.Concrete.columns.len) {
+                            return self.setError("Mismatched arities: {} vs {}", .{ left.Concrete.columns.len, right.Concrete.columns.len });
+                        }
+                        for (left.Concrete.columns) |scalar_type, i| {
+                            _ = try self.intersectScalar(scalar_type, right.Concrete.columns[i]);
+                        }
                     }
                     break :set_type .{
                         .Concrete = .{
@@ -166,9 +169,13 @@ pub const Analyzer = struct {
                     const scalar_type = self.scope.items[self.scope.items.len - 1 - name_ix];
                     switch (scalar_type) {
                         .Box => |box| {
-                            if (box.concrete) |concrete| {
+                            if (box.finite) |finite| {
                                 // only reachable when analyzing `fix`
-                                break :set_type .{ .Concrete = concrete };
+                                const set_type: type_.SetType = switch (finite) {
+                                    .None => .None,
+                                    .Concrete => |concrete| .{ .Concrete = concrete },
+                                };
+                                break :set_type set_type;
                             } else {
                                 // try to specialize
                                 const old_scope = self.scope;
@@ -203,7 +210,7 @@ pub const Analyzer = struct {
                 .When => |when| {
                     // the hint for expr doesn't tell us anything about condition
                     const condition_type = try self.analyze(when.condition, &[0]type_.ScalarType{});
-                    if (!(condition_type == .Concrete and condition_type.Concrete.columns.len == 0)) {
+                    if (!((condition_type == .None) or (condition_type == .Concrete and condition_type.Concrete.columns.len == 0))) {
                         return self.setError("The condition of `when` must have type `maybe`, found {}", .{condition_type});
                     }
                     break :set_type try self.analyze(when.true_branch, hint);
@@ -217,6 +224,7 @@ pub const Analyzer = struct {
                         const body_type = try self.analyze(body, hint[1..]);
                         _ = self.scope.pop();
                         switch (body_type) {
+                            .None => break :set_type .None,
                             .Concrete => |concrete| {
                                 const abstract_arity = concrete.abstract_arity + 1;
                                 var columns = try ArrayList(type_.ScalarType).initCapacity(&self.store.arena.allocator, 1 + concrete.columns.len);
@@ -242,6 +250,7 @@ pub const Analyzer = struct {
                     var pair_right = pair.right;
                     var left = try self.analyze(pair.left, &[0]type_.ScalarType{});
                     var right = try self.analyze(pair.right, &[0]type_.ScalarType{});
+                    if (left == .None or right == .None) break :set_type .None;
                     if (!left.isFinite() and !right.isFinite()) {
                         return self.setError("Cannot apply two maybe-infinite sets: {} applied to {}", .{ left, right });
                     }
@@ -289,7 +298,7 @@ pub const Analyzer = struct {
                                 .scope = try self.dupeScalars(self.scope.items),
                                 .time = try self.dupeTime(self.time.items),
                             },
-                            .concrete = null,
+                            .finite = null,
                         },
                     };
                     break :set_type .{
@@ -313,7 +322,11 @@ pub const Analyzer = struct {
                             .scope = try self.dupeScalars(self.scope.items),
                             .time = try self.dupeTime(self.time.items),
                         },
-                        .concrete = init_type.Concrete,
+                        .finite = switch (init_type) {
+                            .None => .None,
+                            .Concrete => |concrete| .{ .Concrete = concrete },
+                            .Lazy => null,
+                        },
                     };
                     // TODO is there any case where fix could take more than 1 iteration to converge?
                     //      could we just test that body_type.Concrete.columns[1] == init_type?
@@ -325,30 +338,40 @@ pub const Analyzer = struct {
                         try self.time.append(.Iteration);
                         const body_type = try self.analyze(fix.next, fix_hint);
                         _ = self.time.pop();
-                        if (body_type != .Concrete or body_type.Concrete.abstract_arity > 1) {
+                        if (body_type == .None) {
+                            break :set_type .None;
+                        }
+                        if (body_type == .Lazy or (body_type == .Concrete and body_type.Concrete.abstract_arity > 1)) {
                             return self.setError("The body for fix must have finite type, found {}", .{body_type});
                         }
                         if (body_type.Concrete.columns.len < 1) {
                             return self.setError("The `next` argument for fix must have arity >= 1", .{});
                         }
-                        if (body_type.Concrete.columns[0] != .Box or !meta.deepEqual(body_type.Concrete.columns[0].Box, fix_box_type)) {
+                        if (body_type.Concrete.columns[0] != .Box or !meta.deepEqual(body_type.Concrete.columns[0].Box.lazy, fix_box_type.lazy)) {
                             return self.setError("The `next` argument for fix must be able to be applied to it's own result, found {}", .{body_type});
                         }
                         // drop the type for `prev`
                         const fix_columns = body_type.Concrete.columns[1..];
-                        if (meta.deepEqual(fix_type.Concrete.columns, fix_columns)) {
-                            // reached fixpoint
-                            return fix_type;
+                        if (fix_type == .None) {
+                            fix_type = .{ .Concrete = .{
+                                .abstract_arity = 0,
+                                .columns = try std.mem.dupe(&self.store.arena.allocator, type_.ScalarType, fix_columns),
+                            } };
+                        } else {
+                            if (meta.deepEqual(fix_type.Concrete.columns, fix_columns)) {
+                                // reached fixpoint
+                                break :set_type fix_type;
+                            }
+                            if (fix_type.Concrete.columns.len != fix_columns.len) {
+                                return self.setError("The `next` argument for fix must have constant arity, changed from {} to {}", .{ fix_type.Concrete.columns.len, fix_columns.len });
+                            }
+                            var columns = try self.store.arena.allocator.alloc(type_.ScalarType, fix_type.Concrete.columns.len);
+                            for (fix_columns) |column, i| {
+                                columns[i] = try self.unionScalar(fix_type.Concrete.columns[i], column);
+                            }
+                            fix_type.Concrete.columns = columns;
                         }
-                        if (fix_type.Concrete.columns.len != fix_columns.len) {
-                            return self.setError("The `next` argument for fix must have constant arity, changed from {} to {}", .{ fix_type.Concrete.columns.len, fix_columns.len });
-                        }
-                        var columns = try self.store.arena.allocator.alloc(type_.ScalarType, fix_type.Concrete.columns.len);
-                        for (fix_columns) |column, i| {
-                            columns[i] = try self.unionScalar(fix_type.Concrete.columns[i], column);
-                        }
-                        fix_type.Concrete.columns = columns;
-                        fix_box_type.concrete = fix_type.Concrete;
+                        fix_box_type.finite = .{ .Concrete = fix_type.Concrete };
                     }
                     return self.setError("Type of fix failed to converge, reached {}", .{fix_type});
                 },
@@ -364,7 +387,11 @@ pub const Analyzer = struct {
                             .scope = try self.dupeScalars(self.scope.items),
                             .time = try self.dupeTime(self.time.items),
                         },
-                        .concrete = input_type.Concrete,
+                        .finite = switch (input_type) {
+                            .None => .None,
+                            .Concrete => |concrete| .{ .Concrete = concrete },
+                            .Lazy => null,
+                        },
                     };
 
                     const init_type = try self.analyze(reduce.init, &[0]type_.ScalarType{});
@@ -380,7 +407,11 @@ pub const Analyzer = struct {
                             .scope = try self.dupeScalars(self.scope.items),
                             .time = try self.dupeTime(self.time.items),
                         },
-                        .concrete = init_type.Concrete,
+                        .finite = switch (init_type) {
+                            .None => .None,
+                            .Concrete => |concrete| .{ .Concrete = concrete },
+                            .Lazy => null,
+                        },
                     };
 
                     var max_iterations: usize = 100;
@@ -392,7 +423,10 @@ pub const Analyzer = struct {
                         try self.time.append(.Iteration);
                         const body_type = try self.analyze(reduce.next, reduce_hint);
                         _ = self.time.pop();
-                        if (body_type != .Concrete or body_type.Concrete.abstract_arity > 2) {
+                        if (body_type == .None) {
+                            break :set_type .None;
+                        }
+                        if (body_type == .Lazy or body_type.Concrete.abstract_arity > 2) {
                             return self.setError("The body for reduce must have finite type, found {}", .{body_type});
                         }
                         if (body_type.Concrete.columns.len < 2) {
@@ -405,7 +439,7 @@ pub const Analyzer = struct {
                         const reduce_columns = body_type.Concrete.columns[2..];
                         if (meta.deepEqual(reduce_type.Concrete.columns, reduce_columns)) {
                             // reached fixpoint
-                            return reduce_type;
+                            break :set_type reduce_type;
                         }
                         if (reduce_type.Concrete.columns.len != reduce_columns.len) {
                             return self.setError("The body for reduce must have constant arity, changed from {} to {}", .{ reduce_type.Concrete.columns.len, reduce_columns.len });
@@ -415,12 +449,15 @@ pub const Analyzer = struct {
                             columns[i] = try self.unionScalar(reduce_type.Concrete.columns[i], column);
                         }
                         reduce_type.Concrete.columns = columns;
-                        reduce_box_type.concrete = reduce_type.Concrete;
+                        reduce_box_type.finite = .{ .Concrete = reduce_type.Concrete };
                     }
                     return self.setError("Type of reduce failed to converge, reached {}", .{reduce_type});
                 },
                 .Enumerate => |body| {
                     const body_type = try self.analyze(body, &[0]type_.ScalarType{});
+                    if (body_type == .None) {
+                        break :set_type .None;
+                    }
                     if (!body_type.isFinite()) {
                         return self.setError("The body of `enumerate` must have finite type, found {}", .{body_type});
                     }

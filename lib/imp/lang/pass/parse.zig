@@ -641,6 +641,10 @@ const Parser = struct {
                 const body = try self.parseExpr();
                 return self.store.putSyntax(.{ .Let = .{ .name = name, .value = value, .body = body } }, start, self.position);
             },
+            // allow starting with |&, for easy editing of lists
+            .Product, .Union, .Intersect => {
+                return self.parseExprInnerMaybe();
+            },
             // otherwise not an expression but might be rhs of apply or binop so don't error yet
             else => {
                 self.position = start;
@@ -680,21 +684,6 @@ const Parser = struct {
                     const precedence = if (prev_op == null) .RightBindsTighter else prev_op.?.comparePrecedence(op);
                     switch (precedence) {
                         .RightBindsTighter => {
-                            const allow_trailing = switch (op) {
-                                .Union, .Intersect, .Product => true,
-                                else => false,
-                            };
-                            if (allow_trailing) {
-                                // peek at next token
-                                const op_end = self.position;
-                                const next_token = try self.nextToken();
-                                self.position = op_end;
-                                // if this is unambiguously the end of the expr then we can just drop this trailing op
-                                switch (next_token) {
-                                    .In, .CloseGroup, .CloseBox, .EOF => return left,
-                                    else => {},
-                                }
-                            }
                             const right = try self.parseExprOuter(op);
                             left = try switch (op) {
                                 // core ops

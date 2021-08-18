@@ -419,17 +419,17 @@ character:
 // TODO this is a workaround for bad arity tracking in the interpreter
 none1: 1 & 0;
 none2: none1, none1;
-// TODO need a version of reduce that doesn't return output on empty in put
+// TODO need a version of reduce that doesn't return output on empty input
 max:
   ?[things]
     if (things!!)
-      reduce things (enumerate things 0) ?[prev] ?[i] if (prev > i) prev else i
+      reduce things none1 ?[prev] ?[i] if (prev > i) prev else i
     else
       none1;
 min:
   ?[things]
     if (things!!)
-      reduce things (enumerate things 0) ?[prev] ?[i] if (i > prev) prev else i
+      reduce things none1 ?[prev] ?[i] if (i > prev) prev else i
     else
       none1;
 rightmost_child:

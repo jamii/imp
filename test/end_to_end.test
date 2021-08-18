@@ -395,6 +395,38 @@ value: 2 | 3
 type: number
 value: 2
 
+max:
+  ?[things]
+      reduce things none ?[prev] ?[i] if (prev > i) prev else i;
+max none
+---
+type: none
+value: none
+
+max:
+  ?[things]
+      reduce things none ?[prev] ?[i] if (prev > i) prev else i;
+max [none]
+---
+type: none
+value: none
+
+max:
+  ?[things]
+      reduce things none ?[prev] ?[i] if (prev > i) prev else i;
+max [1 & 0]
+---
+type: number
+value: none
+
+max:
+  ?[things]
+      reduce things none ?[prev] ?[i] if (prev > i) prev else i;
+max [1]
+---
+type: number
+value: 1
+
 edits: range 0 8;
 root: 0;
 parent:
@@ -416,10 +448,8 @@ character:
   | 6 , "g"
   | 7 , "h"
   | 8 , "i";
-// TODO need a version of reduce that doesn't return output on empty input
 max:
   ?[things]
-    when (things!!)
       reduce things none ?[prev] ?[i] if (prev > i) prev else i;
 rightmost_child:
   edits . ?edit [edit (~parent)] max;

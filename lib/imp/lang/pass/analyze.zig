@@ -265,6 +265,7 @@ pub const Analyzer = struct {
                         try left_hint.appendSlice(hint);
                         left = try self.analyze(pair_left, left_hint.items);
                     }
+                    if (left == .None) break :set_type .None;
                     if (left == .Lazy) {
                         // couldn't fully specialize, give up
                         break :set_type .{ .Lazy = lazy };

@@ -77,16 +77,16 @@ pub const Store = struct {
         // analyze shouldn't redo previous work
         assert(self.getSpecialization(lazy, used_hint) == null);
         var slot = try self.specializations.getOrPut(lazy);
-        if (!slot.found_existing) slot.entry.value = ArrayList(Specialization).init(&self.arena.allocator);
-        try slot.entry.value.append(.{
+        if (!slot.found_existing) slot.value_ptr.* = ArrayList(Specialization).init(&self.arena.allocator);
+        try slot.value_ptr.append(.{
             .hint = used_hint,
             .set_type = set_type,
         });
     }
 
     pub fn getSpecialization(self: *Store, lazy: type_.LazySetType, hint: []const type_.ScalarType) ?type_.SetType {
-        const kv = self.specializations.getEntry(lazy) orelse return null;
-        for (kv.value.items) |specialization| {
+        const entry = self.specializations.getEntry(lazy) orelse return null;
+        for (entry.value_ptr.items) |specialization| {
             const is_match = switch (specialization.set_type) {
                 // if couldn't specialize with a longer hint, can't specialize with this one
                 .Lazy => specialization.hint.len >= hint.len and meta.deepEqual(specialization.hint[0..hint.len], hint),

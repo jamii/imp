@@ -30,7 +30,9 @@ pub const SetType = union(enum) {
         }
     }
 
-    pub fn format(self: SetType, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
+    pub fn format(self: SetType, comptime fmt: []const u8, _: std.fmt.FormatOptions, out_stream: anytype) !void {
+        // TODO https://github.com/ziglang/zig/issues/9220
+        _ = fmt;
         try self.dumpInto(out_stream);
     }
 };
@@ -51,7 +53,9 @@ pub const ConcreteSetType = struct {
         }
     }
 
-    pub fn format(self: ConcreteSetType, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
+    pub fn format(self: ConcreteSetType, comptime fmt: []const u8, _: std.fmt.FormatOptions, out_stream: anytype) !void {
+        // TODO https://github.com/ziglang/zig/issues/9220
+        _ = fmt;
         try self.dumpInto(out_stream);
     }
 };
@@ -86,7 +90,9 @@ pub const LazySetType = struct {
         try out_stream.writeAll("))");
     }
 
-    pub fn format(self: LazySetType, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
+    pub fn format(self: LazySetType, comptime fmt: []const u8, _: std.fmt.FormatOptions, out_stream: anytype) !void {
+        // TODO https://github.com/ziglang/zig/issues/9220
+        _ = fmt;
         try self.dumpInto(out_stream);
     }
 };
@@ -114,7 +120,9 @@ pub const ScalarType = union(enum) {
         }
     }
 
-    pub fn format(self: ScalarType, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
+    pub fn format(self: ScalarType, comptime fmt: []const u8, _: std.fmt.FormatOptions, out_stream: anytype) !void {
+        // TODO https://github.com/ziglang/zig/issues/9220
+        _ = fmt;
         try self.dumpInto(out_stream);
     }
 };
@@ -129,7 +137,9 @@ pub const BoxType = struct {
         try self.lazy.dumpInto(out_stream);
     }
 
-    pub fn format(self: ScalarType, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
+    pub fn format(self: ScalarType, comptime fmt: []const u8, _: std.fmt.FormatOptions, out_stream: anytype) !void {
+        // TODO https://github.com/ziglang/zig/issues/9220
+        _ = fmt;
         try self.dumpInto(out_stream);
     }
 };

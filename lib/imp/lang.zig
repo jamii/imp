@@ -19,11 +19,11 @@ pub const InterpretErrorInfo = union(enum) {
     pub fn dumpInto(self: ?InterpretErrorInfo, err: InterpretError, out_stream: anytype) anyerror!void {
         switch (err) {
             // TODO report source position
-            error.ParseError => try std.fmt.format(out_stream, "Parse error: {}\n", .{self.?.Parse.message}),
-            error.DesugarError => try std.fmt.format(out_stream, "Desugar error: {}\n", .{self.?.Desugar.message}),
-            error.AnalyzeError => try std.fmt.format(out_stream, "Analyze error: {}\n", .{self.?.Analyze.message}),
-            error.InterpretError => try std.fmt.format(out_stream, "Interpret error: {}\n", .{self.?.Interpret.message}),
-            error.NativeError => try std.fmt.format(out_stream, "Native error: {}\n", .{self.?.Interpret.message}),
+            error.ParseError => try std.fmt.format(out_stream, "Parse error: {s}\n", .{self.?.Parse.message}),
+            error.DesugarError => try std.fmt.format(out_stream, "Desugar error: {s}\n", .{self.?.Desugar.message}),
+            error.AnalyzeError => try std.fmt.format(out_stream, "Analyze error: {s}\n", .{self.?.Analyze.message}),
+            error.InterpretError => try std.fmt.format(out_stream, "Interpret error: {s}\n", .{self.?.Interpret.message}),
+            error.NativeError => try std.fmt.format(out_stream, "Native error: {s}\n", .{self.?.Interpret.message}),
 
             error.Utf8InvalidStartByte, error.InvalidUtf8, error.InvalidCharacter, error.Utf8ExpectedContinuation, error.Utf8OverlongEncoding, error.Utf8EncodesSurrogateHalf, error.Utf8CodepointTooLarge => try std.fmt.format(out_stream, "Invalid utf8 input: {}\n", .{err}),
 

@@ -31,11 +31,11 @@ pub fn main() anyerror!void {
         var arena = ArenaAllocator.init(allocator);
         var error_info: ?imp.lang.InterpretErrorInfo = null;
         const result = imp.lang.interpret(&arena, source.items, &error_info);
-        const out_stream = std.io.getStdOut().outStream();
+        const writer = std.io.getStdOut().writer();
         if (result) |type_and_set| {
-            try type_and_set.dumpInto(allocator, out_stream);
+            try type_and_set.dumpInto(allocator, writer);
         } else |err| {
-            try imp.lang.InterpretErrorInfo.dumpInto(error_info, err, out_stream);
+            try imp.lang.InterpretErrorInfo.dumpInto(error_info, err, writer);
         }
     }
 }

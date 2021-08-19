@@ -134,7 +134,7 @@ const Desugarer = struct {
                 }
                 // otherwise look for native
                 const native = core.Native.fromName(name) orelse
-                    return self.setError("Name not in scope: {}", .{name});
+                    return self.setError("Name not in scope: {s}", .{name});
                 break :name try self.putCore(.{ .Native = native });
             },
             .Negate => |expr| try self.putCore(.{ .Negate = try self.desugar(expr) }),

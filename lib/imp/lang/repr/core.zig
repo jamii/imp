@@ -110,7 +110,7 @@ pub const Expr = union(enum) {
                 try out_stream.writeAll("@");
                 if (box.scope.len > 0) {
                     try std.fmt.format(out_stream, " {}", .{box.scope[0]});
-                    for (box.scope[1..]) |name_ix, i| {
+                    for (box.scope[1..]) |name_ix| {
                         try std.fmt.format(out_stream, " , {}", .{name_ix});
                     }
                 }
@@ -188,7 +188,7 @@ pub const Native = enum {
         return null;
     }
 
-    pub fn dumpInto(self: Native, out_stream: anytype, indent: u32) anyerror!void {
+    pub fn dumpInto(self: Native, out_stream: anytype, _: u32) anyerror!void {
         try out_stream.writeAll(self.toName());
     }
 };

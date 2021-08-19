@@ -109,11 +109,11 @@ const Interpreter = struct {
                 var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 var left_iter = left.Finite.set.iterator();
                 while (left_iter.next()) |kv| {
-                    _ = try set.put(kv.key, {});
+                    _ = try set.put(kv.key_ptr.*, {});
                 }
                 var right_iter = right.Finite.set.iterator();
                 while (right_iter.next()) |kv| {
-                    _ = try set.put(kv.key, {});
+                    _ = try set.put(kv.key_ptr.*, {});
                 }
                 return value.Set{
                     .Finite = .{
@@ -140,8 +140,8 @@ const Interpreter = struct {
                 var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 var left_iter = left.Finite.set.iterator();
                 while (left_iter.next()) |kv| {
-                    if (right.Finite.set.contains(kv.key)) {
-                        _ = try set.put(kv.key, {});
+                    if (right.Finite.set.contains(kv.key_ptr.*)) {
+                        _ = try set.put(kv.key_ptr.*, {});
                     }
                 }
                 return value.Set{
@@ -177,13 +177,13 @@ const Interpreter = struct {
                 while (left_iter.next()) |lkv| {
                     var right_iter = right.Finite.set.iterator();
                     while (right_iter.next()) |rkv| {
-                        var tuple = try self.arena.allocator.alloc(value.Scalar, lkv.key.len + rkv.key.len);
+                        var tuple = try self.arena.allocator.alloc(value.Scalar, lkv.key_ptr.len + rkv.key_ptr.len);
                         var i: usize = 0;
-                        for (lkv.key) |scalar| {
+                        for (lkv.key_ptr.*) |scalar| {
                             tuple[i] = scalar;
                             i += 1;
                         }
-                        for (rkv.key) |scalar| {
+                        for (rkv.key_ptr.*) |scalar| {
                             tuple[i] = scalar;
                             i += 1;
                         }
@@ -208,13 +208,13 @@ const Interpreter = struct {
                 const isEqual = isEqual: {
                     var leftIter = left.Finite.set.iterator();
                     while (leftIter.next()) |kv| {
-                        if (!right.Finite.set.contains(kv.key)) {
+                        if (!right.Finite.set.contains(kv.key_ptr.*)) {
                             break :isEqual false;
                         }
                     }
                     var rightIter = right.Finite.set.iterator();
                     while (rightIter.next()) |kv| {
-                        if (!left.Finite.set.contains(kv.key)) {
+                        if (!left.Finite.set.contains(kv.key_ptr.*)) {
                             break :isEqual false;
                         }
                     }
@@ -327,9 +327,9 @@ const Interpreter = struct {
                             var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                             var finite_iter = finite.set.iterator();
                             while (finite_iter.next()) |kv| {
-                                var tuple = try ArrayList(value.Scalar).initCapacity(&self.arena.allocator, kv.key.len + 1);
+                                var tuple = try ArrayList(value.Scalar).initCapacity(&self.arena.allocator, kv.key_ptr.len + 1);
                                 try tuple.append(hint[0]);
-                                try tuple.appendSlice(kv.key);
+                                try tuple.appendSlice(kv.key_ptr.*);
                                 _ = try set.put(tuple.items, {});
                             }
                             return value.Set{
@@ -339,7 +339,7 @@ const Interpreter = struct {
                                 },
                             };
                         },
-                        .Lazy => |lazy| {
+                        .Lazy => {
                             // couldn't fully specialize, give up
                             return value.Set{
                                 .Lazy = .{
@@ -372,7 +372,7 @@ const Interpreter = struct {
                     var right_iter = right.Finite.set.iterator();
                     while (right_iter.next()) |kv| {
                         var left_hint = try ArrayList(value.Scalar).initCapacity(&self.arena.allocator, right.Finite.arity + hint.len);
-                        try left_hint.appendSlice(kv.key);
+                        try left_hint.appendSlice(kv.key_ptr.*);
                         try left_hint.appendSlice(hint);
                         const left_part = try self.interpret(pair_left, left_hint.items);
                         if (left_part == .Lazy) {
@@ -396,7 +396,7 @@ const Interpreter = struct {
                         }
                         var left_part_iter = left_part.Finite.set.iterator();
                         while (left_part_iter.next()) |lkv| {
-                            _ = try left_set.put(lkv.key, {});
+                            _ = try left_set.put(lkv.key_ptr.*, {});
                         }
                     }
                     left = .{
@@ -414,8 +414,8 @@ const Interpreter = struct {
                 while (left_iter.next()) |lkv| {
                     var right_iter = right.Finite.set.iterator();
                     while (right_iter.next()) |rkv| {
-                        if (meta.deepEqual(lkv.key[0..joined_arity], rkv.key[0..joined_arity])) {
-                            _ = try set.put(if (left.Finite.arity > right.Finite.arity) lkv.key[joined_arity..] else rkv.key[joined_arity..], {});
+                        if (meta.deepEqual(lkv.key_ptr.*[0..joined_arity], rkv.key_ptr.*[0..joined_arity])) {
+                            _ = try set.put(if (left.Finite.arity > right.Finite.arity) lkv.key_ptr.*[joined_arity..] else rkv.key_ptr.*[joined_arity..], {});
                         }
                     }
                 }
@@ -485,14 +485,14 @@ const Interpreter = struct {
                     };
                     var body_iter = body_set.Finite.set.iterator();
                     while (body_iter.next()) |kv| {
-                        if (meta.deepEqual(kv.key[0], value.Scalar{ .Box = fix_key })) {
-                            _ = try new_fix_set.Finite.set.put(kv.key[1..], {});
+                        if (meta.deepEqual(kv.key_ptr.*[0], value.Scalar{ .Box = fix_key })) {
+                            _ = try new_fix_set.Finite.set.put(kv.key_ptr.*[1..], {});
                         }
                     }
                     if (meta.deepEqual(fix_set, new_fix_set)) {
                         return fix_set;
                     }
-                    const new_fix_key = value.LazySet{
+                    fix_key = value.LazySet{
                         .expr = expr,
                         .scope = try self.dupeScalars(self.scope.items),
                         .time = try self.dupeTime(self.time.items),
@@ -509,7 +509,7 @@ const Interpreter = struct {
                 var input_tuples = try ArrayList(value.Tuple).initCapacity(&self.arena.allocator, input_set.Finite.set.count());
                 var input_iter = input_set.Finite.set.iterator();
                 while (input_iter.next()) |kv| {
-                    try input_tuples.append(kv.key);
+                    try input_tuples.append(kv.key_ptr.*);
                 }
                 std.sort.sort(value.Tuple, input_tuples.items, {}, struct {
                     fn lessThan(_: void, a: value.Tuple, b: value.Tuple) bool {
@@ -566,11 +566,11 @@ const Interpreter = struct {
                     };
                     var body_iter = body_set.Finite.set.iterator();
                     while (body_iter.next()) |kv| {
-                        if (meta.deepEqual(kv.key[0], value.Scalar{ .Box = reduce_key }) and meta.deepEqual(kv.key[1], value.Scalar{ .Box = tuple_key })) {
-                            _ = try new_reduce_set.Finite.set.put(kv.key[2..], {});
+                        if (meta.deepEqual(kv.key_ptr.*[0], value.Scalar{ .Box = reduce_key }) and meta.deepEqual(kv.key_ptr.*[1], value.Scalar{ .Box = tuple_key })) {
+                            _ = try new_reduce_set.Finite.set.put(kv.key_ptr.*[2..], {});
                         }
                     }
-                    const new_reduce_key = value.LazySet{
+                    reduce_key = value.LazySet{
                         .expr = expr,
                         .scope = try self.dupeScalars(self.scope.items),
                         .time = try self.dupeTime(self.time.items),
@@ -588,7 +588,7 @@ const Interpreter = struct {
                 var tuples = try ArrayList(value.Tuple).initCapacity(&self.arena.allocator, body_set.Finite.set.count());
                 var body_iter = body_set.Finite.set.iterator();
                 while (body_iter.next()) |kv| {
-                    try tuples.append(kv.key);
+                    try tuples.append(kv.key_ptr.*);
                 }
                 std.sort.sort(value.Tuple, tuples.items, {}, struct {
                     fn lessThan(_: void, a: value.Tuple, b: value.Tuple) bool {
@@ -627,7 +627,7 @@ const Interpreter = struct {
                             };
                         }
                         if (hint[0] != .Number or hint[1] != .Number) {
-                            return self.setNativeError(expr, "Inputs to `{}` must be numbers, found `{} {} {}`", .{ native.toName(), hint[0], native.toName(), hint[1] });
+                            return self.setNativeError(expr, "Inputs to `{s}` must be numbers, found `{} {s} {}`", .{ native.toName(), hint[0], native.toName(), hint[1] });
                         }
                         if (native == .Divide and hint[1].Number == 0) {
                             return self.setNativeError(expr, "Divide by 0", .{});
@@ -692,7 +692,7 @@ const Interpreter = struct {
                             };
                         }
                         if (hint[0] != .Number or hint[1] != .Number) {
-                            return self.setNativeError(expr, "Inputs to `{}` must be numbers, found `{} > {}`", .{ native.toName(), hint[0], hint[1] });
+                            return self.setNativeError(expr, "Inputs to `{s}` must be numbers, found `{} > {}`", .{ native.toName(), hint[0], hint[1] });
                         }
                         var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                         const satisfied = switch (native) {

@@ -78,7 +78,7 @@ pub fn deepCompare(a: anytype, b: @TypeOf(a)) Ordering {
                 }
             }
         },
-        .Array => |ati| {
+        .Array => {
             for (a) |a_elem, a_ix| {
                 const ordering = deepCompare(a_elem, b[a_ix]);
                 if (ordering != .Equal) {
@@ -202,4 +202,16 @@ pub fn deepHashInto(hasher: anytype, key: anytype) void {
         .Void => {},
         else => @compileError("cannot deepHash " ++ @typeName(T)),
     }
+}
+
+pub fn DeepHashContext(comptime K: type) type {
+    return struct {
+        const Self = @This();
+        pub fn hash(_: Self, pseudo_key: K) u64 {
+            return deepHash(pseudo_key);
+        }
+        pub fn eql(_: Self, pseudo_key: K, key: K) bool {
+            return deepEqual(pseudo_key, key);
+        }
+    };
 }

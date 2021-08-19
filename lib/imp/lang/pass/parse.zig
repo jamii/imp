@@ -133,7 +133,9 @@ const TokenTag = enum {
     // not matched by anything but used to check that we parsed everything
     EOF,
 
-    pub fn format(self: TokenTag, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
+    pub fn format(self: TokenTag, comptime fmt: []const u8, _: std.fmt.FormatOptions, out_stream: anytype) !void {
+        // TODO https://github.com/ziglang/zig/issues/9220
+        _ = fmt;
         try out_stream.writeAll(switch (self) {
             .OpenGroup => "`(`",
             .CloseGroup => "`)`",
@@ -793,16 +795,16 @@ test "binding partial order" {
 
     for (classes.items) |class1| {
         // non-reflexive
-        expect(!class1.bindsTighterThan(class1));
+        try expect(!class1.bindsTighterThan(class1));
         for (classes.items) |class2| {
             // non-symmetric
             if (class1.bindsTighterThan(class2)) {
-                expect(!class2.bindsTighterThan(class1));
+                try expect(!class2.bindsTighterThan(class1));
             }
             for (classes.items) |class3| {
                 // transitive
                 if (class1.bindsTighterThan(class2) and class2.bindsTighterThan(class3)) {
-                    expect(class1.bindsTighterThan(class3));
+                    try expect(class1.bindsTighterThan(class3));
                 }
             }
         }

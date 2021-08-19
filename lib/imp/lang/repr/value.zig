@@ -17,6 +17,8 @@ pub const Set = union(enum) {
     }
 
     pub fn format(self: Set, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
+        // TODO https://github.com/ziglang/zig/issues/9220
+        _ = fmt;
         switch (self) {
             .Finite => |finite| try finite.format(fmt, options, out_stream),
             .Lazy => |lazy| try lazy.dumpInto(out_stream),
@@ -37,7 +39,7 @@ pub const FiniteSet = struct {
         }
         var self_iter = self.set.iterator();
         while (self_iter.next()) |kv| {
-            if (!other.set.contains(kv.key)) {
+            if (!other.set.contains(kv.key_ptr.*)) {
                 return .LessThan;
             }
         }
@@ -50,7 +52,7 @@ pub const FiniteSet = struct {
         var iter = self.set.iterator();
         while (iter.next()) |kv| {
             // TODO errors for printing are funky
-            tuples.append(kv.key) catch imp_panic("oom", .{});
+            tuples.append(kv.key_ptr.*) catch imp_panic("oom", .{});
         }
         std.sort.sort(Tuple, tuples.items, {}, struct {
             fn lessThan(_: void, a: Tuple, b: Tuple) bool {
@@ -72,17 +74,19 @@ pub const FiniteSet = struct {
         }
     }
 
-    pub fn format(self: FiniteSet, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
+    pub fn format(self: FiniteSet, comptime fmt: []const u8, _: std.fmt.FormatOptions, out_stream: anytype) !void {
+        // TODO https://github.com/ziglang/zig/issues/9220
+        _ = fmt;
         if (self.set.count() == 0) {
             try out_stream.writeAll("none");
-        } else if (self.set.count() == 1 and self.set.iterator().next().?.key.len == 0) {
+        } else if (self.set.count() == 1 and self.set.iterator().next().?.key_ptr.len == 0) {
             try out_stream.writeAll("some");
         } else {
             var iter = self.set.iterator();
             var i: usize = 0;
             while (iter.next()) |kv| : (i += 1) {
                 try out_stream.writeAll(if (i == 0) "" else " | ");
-                for (kv.key) |scalar, j| {
+                for (kv.key_ptr.*) |scalar, j| {
                     try out_stream.writeAll(if (j == 0) "" else " , ");
                     try scalar.dumpInto(out_stream);
                 }
@@ -108,7 +112,9 @@ pub const Scalar = union(enum) {
         }
     }
 
-    pub fn format(self: Scalar, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
+    pub fn format(self: Scalar, comptime fmt: []const u8, _: std.fmt.FormatOptions, out_stream: anytype) !void {
+        // TODO https://github.com/ziglang/zig/issues/9220
+        _ = fmt;
         try self.dumpInto(out_stream);
     }
 };

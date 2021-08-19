@@ -38,7 +38,7 @@ pub fn main() anyerror!void {
             var case_iter = std.mem.split(case, "---");
             const input = std.mem.trim(u8, case_iter.next().?, "\n ");
             const expected = std.mem.trim(u8, case_iter.next().?, "\n ");
-            expect(case_iter.next() == null);
+            try expect(case_iter.next() == null);
 
             var arena = ArenaAllocator.init(allocator);
             defer arena.deinit();
@@ -48,18 +48,18 @@ pub fn main() anyerror!void {
 
             var bytes = ArrayList(u8).init(allocator);
             defer bytes.deinit();
-            const out_stream = bytes.outStream();
+            const writer = bytes.writer();
             if (result) |type_and_set| {
-                try type_and_set.dumpInto(allocator, out_stream);
+                try type_and_set.dumpInto(allocator, writer);
             } else |err| {
-                try imp.lang.InterpretErrorInfo.dumpInto(error_info, err, out_stream);
+                try imp.lang.InterpretErrorInfo.dumpInto(error_info, err, writer);
             }
             const found = std.mem.trim(u8, bytes.items, "\n ");
 
             num_tests += 1;
             if (!std.mem.eql(u8, expected, found)) {
                 num_failed += 1;
-                warn("Filename:\n\n{}\nSource:\n{}\n\nExpected:\n{}\n\nFound:\n{}\n\n---\n\n", .{ filename, input, expected, found });
+                warn("Filename:\n\n{s}\nSource:\n{s}\n\nExpected:\n{s}\n\nFound:\n{s}\n\n---\n\n", .{ filename, input, expected, found });
             }
         }
 

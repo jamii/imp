@@ -108,9 +108,8 @@ pub const ScalarType = union(enum) {
             .Text => try out_stream.writeAll("text"),
             .Number => try out_stream.writeAll("number"),
             .Box => |box_type| {
-                try out_stream.writeAll("[");
+                try out_stream.writeAll("@");
                 try box_type.dumpInto(out_stream);
-                try out_stream.writeAll("]");
             },
         }
     }

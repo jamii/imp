@@ -102,9 +102,8 @@ pub const Scalar = union(enum) {
             .Text => |text| try std.fmt.format(out_stream, "\"{s}\"", .{text}),
             .Number => |number| try std.fmt.format(out_stream, "{d}", .{number}),
             .Box => |box| {
-                try out_stream.writeAll("[");
+                try out_stream.writeAll("@");
                 try box.dumpInto(out_stream);
-                try out_stream.writeAll("]");
             },
         }
     }

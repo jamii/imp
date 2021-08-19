@@ -17,10 +17,10 @@ const syntax = imp.lang.repr.syntax;
 //   number
 //   text
 //   name
-//   expr_inner "!"
+//   expr "!"
 //   "when" expr_inner expr_inner
 //   "?" arg expr
-//   "[" expr "]"
+//   expr "@"
 //   "fix" expr_inner expr_inner
 //   "reduce" expr_inner expr_inner expr_inner
 //   "enumerate" expr_inner
@@ -33,7 +33,7 @@ const syntax = imp.lang.repr.syntax;
 
 // arg =
 //   name
-//   "[" name "]"
+//   "@"
 
 // binop =
 //   "|"
@@ -102,8 +102,7 @@ const TokenTag = enum {
     Name,
     When,
     Arg,
-    OpenBox,
-    CloseBox,
+    Box,
     Fix,
     Reduce,
     Enumerate,
@@ -149,8 +148,7 @@ const TokenTag = enum {
             .Name => "name",
             .When => "`when`",
             .Arg => "`?`",
-            .OpenBox => "`[`",
-            .CloseBox => "`]`",
+            .Box => "`@`",
             .Fix => "`fix`",
             .Reduce => "`reduce`",
             .Enumerate => "`enumerate`",
@@ -195,8 +193,7 @@ const Token = union(TokenTag) {
     Name: []const u8, // ascii, non-empty
     When,
     Arg,
-    OpenBox,
-    CloseBox,
+    Box,
     Fix,
     Reduce,
     Enumerate,
@@ -457,8 +454,7 @@ const Parser = struct {
                 '=' => return Token{ .Equal = {} },
                 '?' => return Token{ .Arg = {} },
                 '-' => return Token{ .Subtract = {} },
-                '[' => return Token{ .OpenBox = {} },
-                ']' => return Token{ .CloseBox = {} },
+                '@' => return Token{ .Box = {} },
                 '#' => return Token{ .Annotate = {} },
                 '!' => return Token{ .Negate = {} },
                 ':' => return Token{ .Def = {} },
@@ -591,9 +587,8 @@ const Parser = struct {
                         .Name => |name| {
                             break :arg syntax.Arg{ .name = name, .unbox = false };
                         },
-                        .OpenBox => {
+                        .Box => {
                             const name = (try self.expect(.Name)).Name;
-                            _ = try self.expect(.CloseBox);
                             break :arg syntax.Arg{ .name = name, .unbox = true };
                         },
                         else => return self.setError(start, "Expected ?name or ?[name], found ?{}", .{arg_token}),
@@ -601,12 +596,6 @@ const Parser = struct {
                 };
                 const body = try self.parseExpr();
                 return self.store.putSyntax(.{ .Abstract = .{ .arg = arg, .body = body } }, start, self.position);
-            },
-            // "[" expr "]"
-            .OpenBox => {
-                const expr = try self.parseExpr();
-                _ = try self.expect(.CloseBox);
-                return self.store.putSyntax(.{ .Box = expr }, start, self.position);
             },
             .Fix => {
                 const fix_end = self.position;
@@ -737,7 +726,20 @@ const Parser = struct {
                 },
 
                 .Negate => {
-                    left = try self.store.putSyntax(.{ .Negate = left }, op_start, self.position);
+                    if (prev_op == null) {
+                        left = try self.store.putSyntax(.{ .Negate = left }, op_start, self.position);
+                    } else {
+                        self.position = op_start;
+                        return left;
+                    }
+                },
+                .Box => {
+                    if (prev_op == null) {
+                        left = try self.store.putSyntax(.{ .Box = left }, op_start, self.position);
+                    } else {
+                        self.position = op_start;
+                        return left;
+                    }
                 },
 
                 // we're between if and else, backtrack

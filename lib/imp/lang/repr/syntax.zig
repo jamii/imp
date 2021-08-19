@@ -75,7 +75,7 @@ pub const Expr = union(enum) {
                 try abstract.body.dumpInto(out_stream);
             },
             .Apply => try out_stream.writeAll("apply"),
-            .Box => try out_stream.writeAll("[]"),
+            .Box => try out_stream.writeAll("@"),
             .Annotate => |annotate| try std.fmt.format(out_stream, "# {}", .{annotate.annotation}),
             .Negate => try out_stream.writeAll("!"),
             .If => try out_stream.writeAll("when"),

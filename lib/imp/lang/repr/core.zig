@@ -104,10 +104,10 @@ pub const Expr = union(enum) {
             .Name => |name_ix| try std.fmt.format(out_stream, "get {}", .{name_ix}),
             .UnboxName => |name_ix| try std.fmt.format(out_stream, "get unbox {}", .{name_ix}),
             .When => try out_stream.writeAll("when"),
-            .Abstract => try out_stream.writeAll("\\ _ ->"),
+            .Abstract => try out_stream.writeAll("?"),
             .Apply => try out_stream.writeAll("apply"),
             .Box => |box| {
-                try out_stream.writeAll("box;");
+                try out_stream.writeAll("@");
                 if (box.scope.len > 0) {
                     try std.fmt.format(out_stream, " {}", .{box.scope[0]});
                     for (box.scope[1..]) |name_ix, i| {

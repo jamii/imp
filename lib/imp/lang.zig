@@ -42,9 +42,9 @@ pub const TypeAndSet = struct {
     set: repr.value.Set,
 
     pub fn dumpInto(self: TypeAndSet, allocator: *Allocator, out_stream: anytype) anyerror!void {
-        try out_stream.writeAll("type: ");
+        try out_stream.writeAll("type:\n");
         try self.set_type.dumpInto(out_stream);
-        try out_stream.writeAll("\nvalue: ");
+        try out_stream.writeAll("\nvalue:\n");
         try self.set.dumpInto(allocator, out_stream);
         try out_stream.writeAll("\n");
     }

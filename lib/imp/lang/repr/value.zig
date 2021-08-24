@@ -64,12 +64,13 @@ pub const FiniteSet = struct {
         } else if (tuples.items.len == 1 and tuples.items[0].len == 0) {
             try out_stream.writeAll("some");
         } else {
-            for (tuples.items) |tuple, i| {
-                try out_stream.writeAll(if (i == 0) "" else " | ");
-                for (tuple) |scalar, j| {
-                    try out_stream.writeAll(if (j == 0) "" else " , ");
+            for (tuples.items) |tuple| {
+                try out_stream.writeAll("| ");
+                for (tuple) |scalar, scalar_ix| {
+                    if (scalar_ix != 0) try out_stream.writeAll(", ");
                     try scalar.dumpInto(out_stream);
                 }
+                try out_stream.writeAll("\n");
             }
         }
     }
@@ -85,11 +86,12 @@ pub const FiniteSet = struct {
             var iter = self.set.iterator();
             var i: usize = 0;
             while (iter.next()) |kv| : (i += 1) {
-                try out_stream.writeAll(if (i == 0) "" else " | ");
-                for (kv.key_ptr.*) |scalar, j| {
-                    try out_stream.writeAll(if (j == 0) "" else " , ");
+                try out_stream.writeAll("| ");
+                for (kv.key_ptr.*) |scalar, scalar_ix| {
+                    if (scalar_ix != 0) try out_stream.writeAll(", ");
                     try scalar.dumpInto(out_stream);
                 }
+                try out_stream.writeAll("\n");
             }
         }
     }

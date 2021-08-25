@@ -90,3 +90,119 @@ pub fn interpret(arena: *ArenaAllocator, source: []const u8, error_info: *?Inter
         .set = set,
     };
 }
+
+pub const Worker = struct {
+    allocator: *Allocator,
+
+    // mutex protects these fields
+    mutex: std.Thread.Mutex,
+    // background loop waits for this
+    state_changed_event: std.Thread.AutoResetEvent,
+    // the background thread must check this before setting new_program or new_result
+    background_loop_should_stop: bool,
+    // new_program and new_result behave like queues, except that they only care about the most recent item
+    new_program: ?TextAndId,
+    new_result: ?TextAndId,
+
+    pub const TextAndId = struct {
+        text: []const u8,
+        id: usize,
+    };
+
+    pub fn init(allocator: *Allocator) !*Worker {
+        const self = try allocator.create(Worker);
+        self.* = Worker{
+            .allocator = allocator,
+            .mutex = .{},
+            .state_changed_event = .{},
+            .background_loop_should_stop = false,
+            .new_program = null,
+            .new_result = null,
+        };
+        _ = try std.Thread.spawn(.{}, backgroundLoop, .{self});
+        return self;
+    }
+
+    fn deinit(self: *Worker) void {
+        if (self.new_program) |program| self.allocator.free(program.text);
+        if (self.new_result) |result| self.allocator.free(result.text);
+        self.* = undefined;
+    }
+
+    pub fn stop(self: *Worker) void {
+        const held = self.mutex.acquire();
+        defer held.release();
+        self.background_loop_should_stop = true;
+        self.state_changed_event.set();
+    }
+
+    pub fn setProgram(self: *Worker, program: TextAndId) !void {
+        const held = self.mutex.acquire();
+        defer held.release();
+        if (self.new_program) |old_program| self.allocator.free(old_program.text);
+        self.new_program = program;
+        self.new_program.?.text = try std.mem.dupe(self.allocator, u8, self.new_program.?.text);
+        self.state_changed_event.set();
+    }
+
+    pub fn getResult(self: *Worker) ?TextAndId {
+        const held = self.mutex.acquire();
+        defer held.release();
+        if (self.new_result) |result| {
+            self.new_result = null;
+            return result;
+        } else {
+            return null;
+        }
+    }
+
+    fn backgroundLoop(self: *Worker) !void {
+        while (true) {
+            // wait for a new program
+            self.state_changed_event.wait();
+
+            // get new program
+            var new_program: TextAndId = undefined;
+            {
+                const held = self.mutex.acquire();
+                defer held.release();
+                if (self.background_loop_should_stop) {
+                    self.deinit();
+                    return;
+                }
+                new_program = self.new_program.?;
+                self.new_program = null;
+            }
+            defer self.allocator.free(new_program.text);
+
+            // eval
+            var arena = ArenaAllocator.init(self.allocator);
+            defer arena.deinit();
+            var error_info: ?imp.lang.InterpretErrorInfo = null;
+            const result = imp.lang.interpret(&arena, new_program.text, &error_info);
+
+            // print result
+            var result_buffer = ArrayList(u8).init(self.allocator);
+            defer result_buffer.deinit();
+            if (result) |type_and_set|
+                try type_and_set.dumpInto(&arena.allocator, result_buffer.writer())
+            else |err|
+                try imp.lang.InterpretErrorInfo.dumpInto(error_info, err, result_buffer.writer());
+
+            // set result
+            {
+                const held = self.mutex.acquire();
+                defer held.release();
+                if (self.background_loop_should_stop) {
+                    self.deinit();
+                    return;
+                }
+                if (self.new_result) |old_result| self.allocator.free(old_result.text);
+                self.new_result = .{
+                    .text = result_buffer.toOwnedSlice(),
+                    .id = new_program.id,
+                };
+            }
+        }
+    }
+};

@@ -124,6 +124,8 @@ pub const Worker = struct {
     }
 
     fn deinit(self: *Worker) void {
+        const held = self.mutex.acquire();
+        defer held.release();
         if (self.new_program) |program| self.allocator.free(program.text);
         if (self.new_result) |result| self.allocator.free(result.text);
         self.* = undefined;

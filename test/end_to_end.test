@@ -676,3 +676,19 @@ value:
 | 6, 6, "g"
 | 7, 7, "h"
 | 8, 8, "i"
+
+// sloppy mode allows ending with a def
+a: 1 + 1
+---
+type:
+number
+value:
+| 2
+
+// sloppy mode allows ending with a def
+a: 1 + 1;
+---
+type:
+number
+value:
+| 2

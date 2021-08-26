@@ -541,6 +541,31 @@ const Parser = struct {
         }
     }
 
+    // called after seeing name ":"
+    fn parseDefBody(self: *Parser, start: usize, fix: bool, name: []const u8) Error!?*const syntax.Expr {
+        // (name ":") expr ";" expr
+        const value = try self.parseExpr();
+        const value_end = self.position;
+        if ((try self.nextToken()) == .EOF) {
+            // in sloppy mode, allow ending with a def
+            const body = try self.store.putSyntax(.{ .Name = name }, value_end, self.position);
+            return self.store.putSyntax(.{ .Def = .{ .fix = fix, .name = name, .value = value, .body = body } }, start, self.position);
+        } else {
+            self.position = value_end;
+            _ = try self.expect(.EndDef);
+            const end_def_end = self.position;
+            if ((try self.nextToken()) == .EOF) {
+                // in sloppy mode, allow ending with a def
+                const body = try self.store.putSyntax(.{ .Name = name }, end_def_end, self.position);
+                return self.store.putSyntax(.{ .Def = .{ .fix = fix, .name = name, .value = value, .body = body } }, start, self.position);
+            } else {
+                self.position = end_def_end;
+                const body = try self.parseExpr();
+                return self.store.putSyntax(.{ .Def = .{ .fix = fix, .name = name, .value = value, .body = body } }, start, self.position);
+            }
+        }
+    }
+
     // returns null if this isn't the start of an expression
     fn parseExprInnerMaybe(self: *Parser) Error!?*const syntax.Expr {
         const start = self.position;
@@ -564,11 +589,7 @@ const Parser = struct {
             .Name => |name| {
                 const name_end = self.position;
                 if ((try self.nextToken()) == .Def) {
-                    // name ":" expr ";" expr
-                    const value = try self.parseExpr();
-                    _ = try self.expect(.EndDef);
-                    const body = try self.parseExpr();
-                    return self.store.putSyntax(.{ .Def = .{ .fix = false, .name = name, .value = value, .body = body } }, start, self.position);
+                    return self.parseDefBody(start, false, name);
                 } else {
                     self.position = name_end;
                     return self.store.putSyntax(.{ .Name = name }, start, self.position);
@@ -605,10 +626,7 @@ const Parser = struct {
                 const maybe_def = try self.nextToken();
                 if (maybe_name == .Name and maybe_def == .Def) {
                     // "fix" name ":" expr ";" expr
-                    const value = try self.parseExpr();
-                    _ = try self.expect(.EndDef);
-                    const body = try self.parseExpr();
-                    return self.store.putSyntax(.{ .Def = .{ .fix = true, .name = maybe_name.Name, .value = value, .body = body } }, start, self.position);
+                    return self.parseDefBody(start, true, maybe_name.Name);
                 } else {
                     // "fix" expr_inner expr
                     self.position = fix_end;

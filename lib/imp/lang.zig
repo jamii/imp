@@ -186,8 +186,18 @@ pub const Worker = struct {
                     self.deinit();
                     return;
                 }
-                new_program = self.new_program.?;
-                self.new_program = null;
+                if (self.new_program) |program| {
+                    new_program = program;
+                    self.new_program = null;
+                } else {
+                    // spurious wakeup, wait again
+                    // (can happen like this:
+                    //  outside: sets program a, wakes worker
+                    //  outside: sets program b, wakes worker
+                    //  worker: wakes up, reads program b, sets program null
+                    //  worker: wakes up, reads program null)
+                    continue;
+                }
             }
             defer self.allocator.free(new_program.text);
 

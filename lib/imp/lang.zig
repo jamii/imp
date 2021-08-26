@@ -128,10 +128,10 @@ pub const Worker = struct {
         defer held.release();
         if (self.new_program) |program| self.allocator.free(program.text);
         if (self.new_result) |result| self.allocator.free(result.text);
-        self.* = undefined;
+        self.allocator.destroy(self);
     }
 
-    pub fn stop(self: *Worker) void {
+    pub fn stopSoon(self: *Worker) void {
         const held = self.mutex.acquire();
         defer held.release();
         self.background_loop_should_stop = true;

@@ -137,7 +137,7 @@ pub const Worker = struct {
         const held = self.mutex.acquire();
         defer held.release();
         self.should_deinit = true;
-        self.desired_id = std.math.maxInt(usize);
+        @atomicStore(usize, &self.desired_id, std.math.maxInt(usize), .SeqCst);
         self.state_changed_event.set();
     }
 
@@ -147,7 +147,7 @@ pub const Worker = struct {
         if (self.new_program) |old_program| self.allocator.free(old_program.text);
         self.new_program = program;
         self.new_program.?.text = try std.mem.dupe(self.allocator, u8, self.new_program.?.text);
-        self.desired_id = program.id;
+        @atomicStore(usize, &self.desired_id, program.id, .SeqCst);
         self.state_changed_event.set();
     }
 
@@ -239,8 +239,8 @@ pub const Interrupter = struct {
 
     // called by interpreter while running
     pub fn check(self: Interrupter) error{WasInterrupted}!void {
-        // TODO figure out what ordering is needed
-        if (@atomicLoad(usize, self.desired_id, .Monotonic) != self.current_id)
+        // TODO probably don't need .SeqCst, but need to think hard about it
+        if (@atomicLoad(usize, self.desired_id, .SeqCst) != self.current_id)
             return error.WasInterrupted;
     }
 };

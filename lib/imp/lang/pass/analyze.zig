@@ -5,22 +5,25 @@ const Store = imp.lang.Store;
 const core = imp.lang.repr.core;
 const type_ = imp.lang.repr.type_;
 
-pub fn analyze(store: *Store, expr: *const core.Expr, error_info: *?ErrorInfo) Error!type_.SetType {
+pub fn analyze(store: *Store, expr: *const core.Expr, interrupter: imp.lang.Interrupter, error_info: *?ErrorInfo) Error!type_.SetType {
     var analyzer = Analyzer{
         .store = store,
         .scope = ArrayList(type_.ScalarType).init(&store.arena.allocator),
         .time = ArrayList(type_.TimeType).init(&store.arena.allocator),
+        .interrupter = interrupter,
         .error_info = error_info,
     };
     return analyzer.analyze(expr, &[0]type_.ScalarType{});
 }
 
 pub const Error = error{
-// sets error_info
-AnalyzeError,
+    // sets error_info
+    AnalyzeError,
 
-// does not set error_info
-OutOfMemory };
+    // does not set error_info
+    OutOfMemory,
+    WasInterrupted,
+};
 
 pub const ErrorInfo = struct {
     // TODO want something like a stack of specializations
@@ -33,6 +36,7 @@ pub const Analyzer = struct {
     store: *Store,
     scope: ArrayList(type_.ScalarType),
     time: ArrayList(type_.TimeType),
+    interrupter: imp.lang.Interrupter,
     error_info: *?ErrorInfo,
 
     fn setError(self: *Analyzer, comptime fmt: []const u8, args: anytype) Error {
@@ -44,6 +48,7 @@ pub const Analyzer = struct {
     }
 
     fn analyze(self: *Analyzer, expr: *const core.Expr, hint: []const type_.ScalarType) Error!type_.SetType {
+        try self.interrupter.check();
         const lazy = type_.LazySetType{
             .expr = expr,
             .scope = try self.dupeScalars(self.scope.items),

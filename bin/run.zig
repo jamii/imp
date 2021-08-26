@@ -29,8 +29,13 @@ pub fn main() anyerror!void {
         }
 
         var arena = ArenaAllocator.init(allocator);
+        var desired_id: usize = 0;
+        const interrupter = .{
+            .current_id = 0,
+            .desired_id = &desired_id,
+        };
         var error_info: ?imp.lang.InterpretErrorInfo = null;
-        const result = imp.lang.interpret(&arena, source.items, &error_info);
+        const result = imp.lang.interpret(&arena, source.items, interrupter, &error_info);
         const writer = std.io.getStdOut().writer();
         if (result) |type_and_set| {
             try type_and_set.dumpInto(allocator, writer);

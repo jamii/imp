@@ -8,24 +8,28 @@ const value = imp.lang.repr.value;
 /// Guarantees:
 /// * If expr typechecks then this will not return InterpretError
 /// * If expr has a finite type then this will return a value.Set.Finite
-pub fn interpret(store: *const Store, arena: *ArenaAllocator, expr: *const core.Expr, error_info: *?ErrorInfo) Error!value.Set {
+pub fn interpret(store: *const Store, arena: *ArenaAllocator, expr: *const core.Expr, interrupter: imp.lang.Interrupter, error_info: *?ErrorInfo) Error!value.Set {
     var interpreter = Interpreter{
         .store = store,
         .arena = arena,
         .scope = ArrayList(value.Scalar).init(&store.arena.allocator),
         .time = ArrayList(value.Time).init(&store.arena.allocator),
         .boxes = DeepHashMap(value.LazySet, value.Set).init(&store.arena.allocator),
+        .interrupter = interrupter,
         .error_info = error_info,
     };
     return interpreter.interpret(expr, &[0]value.Scalar{});
 }
 
 pub const Error = error{
-// sets error_info
-InterpretError, NativeError,
+    // sets error_info
+    InterpretError,
+    NativeError,
 
-// does not set error_info
-OutOfMemory };
+    // does not set error_info
+    OutOfMemory,
+    WasInterrupted,
+};
 
 pub const ErrorInfo = struct {
     expr: *const core.Expr,
@@ -40,6 +44,7 @@ const Interpreter = struct {
     scope: ArrayList(value.Scalar),
     time: ArrayList(value.Time),
     boxes: DeepHashMap(value.LazySet, value.Set),
+    interrupter: imp.lang.Interrupter,
     error_info: *?ErrorInfo,
 
     fn setError(self: *Interpreter, expr: *const core.Expr, comptime fmt: []const u8, args: anytype) Error {
@@ -61,6 +66,7 @@ const Interpreter = struct {
     }
 
     fn interpret(self: *Interpreter, expr: *const core.Expr, hint: value.Tuple) Error!value.Set {
+        try self.interrupter.check();
         switch (expr.*) {
             .None => {
                 const set = DeepHashSet(value.Tuple).init(&self.arena.allocator);

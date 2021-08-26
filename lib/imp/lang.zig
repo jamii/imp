@@ -28,6 +28,7 @@ pub const InterpretErrorInfo = union(enum) {
             error.Utf8InvalidStartByte, error.InvalidUtf8, error.InvalidCharacter, error.Utf8ExpectedContinuation, error.Utf8OverlongEncoding, error.Utf8EncodesSurrogateHalf, error.Utf8CodepointTooLarge => try std.fmt.format(out_stream, "Invalid utf8 input: {}\n", .{err}),
 
             error.OutOfMemory => try std.fmt.format(out_stream, "Out of memory\n", .{}),
+            error.WasInterrupted => try std.fmt.format(out_stream, "Was interrupted\n", .{}),
         }
     }
 };
@@ -50,7 +51,7 @@ pub const TypeAndSet = struct {
     }
 };
 
-pub fn interpret(arena: *ArenaAllocator, source: []const u8, error_info: *?InterpretErrorInfo) InterpretError!TypeAndSet {
+pub fn interpret(arena: *ArenaAllocator, source: []const u8, interrupter: Interrupter, error_info: *?InterpretErrorInfo) InterpretError!TypeAndSet {
     var store = Store.init(arena);
 
     var parse_error_info: ?pass.parse.ErrorInfo = null;
@@ -70,7 +71,7 @@ pub fn interpret(arena: *ArenaAllocator, source: []const u8, error_info: *?Inter
     };
 
     var analyze_error_info: ?pass.analyze.ErrorInfo = null;
-    const set_type = pass.analyze.analyze(&store, core_expr, &analyze_error_info) catch |err| {
+    const set_type = pass.analyze.analyze(&store, core_expr, interrupter, &analyze_error_info) catch |err| {
         if (err == error.AnalyzeError) {
             error_info.* = .{ .Analyze = analyze_error_info.? };
         }
@@ -78,7 +79,7 @@ pub fn interpret(arena: *ArenaAllocator, source: []const u8, error_info: *?Inter
     };
 
     var interpret_error_info: ?pass.interpret.ErrorInfo = null;
-    const set = pass.interpret.interpret(&store, arena, core_expr, &interpret_error_info) catch |err| {
+    const set = pass.interpret.interpret(&store, arena, core_expr, interrupter, &interpret_error_info) catch |err| {
         if (err == error.InterpretError or err == error.NativeError) {
             error_info.* = .{ .Interpret = interpret_error_info.? };
         }
@@ -98,16 +99,23 @@ pub const Worker = struct {
     mutex: std.Thread.Mutex,
     // background loop waits for this
     state_changed_event: std.Thread.AutoResetEvent,
-    // the background thread must check this before setting new_program or new_result
-    background_loop_should_stop: bool,
+    // when set to true, the background thread will deinit its state and then exit
+    should_deinit: bool,
     // new_program and new_result behave like queues, except that they only care about the most recent item
     new_program: ?TextAndId,
     new_result: ?TextAndId,
+    // desired_id is the most recent id set in new_program
+    // if the interpreter is running and notices that desired_id has changed, it gives up and returns error.WasInterrupted so we can start again with then new program
+    // desired_id is only changed inside mutex but is read atomically by the Interrupter outside the mutex
+    // TODO I think this is safe because it only ever increases and we don't care exactly how long it takes for the interpreter to notice
+    desired_id: usize,
 
     pub const TextAndId = struct {
         text: []const u8,
         id: usize,
     };
+
+    // --- called by outside thread ---
 
     pub fn init(allocator: *Allocator) !*Worker {
         const self = try allocator.create(Worker);
@@ -115,26 +123,21 @@ pub const Worker = struct {
             .allocator = allocator,
             .mutex = .{},
             .state_changed_event = .{},
-            .background_loop_should_stop = false,
+            .should_deinit = false,
             .new_program = null,
             .new_result = null,
+            .desired_id = 0,
         };
+        // spawn worker thread
         _ = try std.Thread.spawn(.{}, backgroundLoop, .{self});
         return self;
     }
 
-    fn deinit(self: *Worker) void {
+    pub fn deinitSoon(self: *Worker) void {
         const held = self.mutex.acquire();
         defer held.release();
-        if (self.new_program) |program| self.allocator.free(program.text);
-        if (self.new_result) |result| self.allocator.free(result.text);
-        self.allocator.destroy(self);
-    }
-
-    pub fn stopSoon(self: *Worker) void {
-        const held = self.mutex.acquire();
-        defer held.release();
-        self.background_loop_should_stop = true;
+        self.should_deinit = true;
+        self.desired_id = std.math.maxInt(usize);
         self.state_changed_event.set();
     }
 
@@ -144,6 +147,7 @@ pub const Worker = struct {
         if (self.new_program) |old_program| self.allocator.free(old_program.text);
         self.new_program = program;
         self.new_program.?.text = try std.mem.dupe(self.allocator, u8, self.new_program.?.text);
+        self.desired_id = program.id;
         self.state_changed_event.set();
     }
 
@@ -158,6 +162,16 @@ pub const Worker = struct {
         }
     }
 
+    // --- called by worker thread ---
+
+    fn deinit(self: *Worker) void {
+        const held = self.mutex.acquire();
+        defer held.release();
+        if (self.new_program) |program| self.allocator.free(program.text);
+        if (self.new_result) |result| self.allocator.free(result.text);
+        self.allocator.destroy(self);
+    }
+
     fn backgroundLoop(self: *Worker) !void {
         while (true) {
             // wait for a new program
@@ -168,7 +182,7 @@ pub const Worker = struct {
             {
                 const held = self.mutex.acquire();
                 defer held.release();
-                if (self.background_loop_should_stop) {
+                if (self.should_deinit) {
                     self.deinit();
                     return;
                 }
@@ -181,7 +195,11 @@ pub const Worker = struct {
             var arena = ArenaAllocator.init(self.allocator);
             defer arena.deinit();
             var error_info: ?imp.lang.InterpretErrorInfo = null;
-            const result = imp.lang.interpret(&arena, new_program.text, &error_info);
+            const interrupter = Interrupter{
+                .current_id = new_program.id,
+                .desired_id = &self.desired_id,
+            };
+            const result = imp.lang.interpret(&arena, new_program.text, interrupter, &error_info);
 
             // print result
             var result_buffer = ArrayList(u8).init(self.allocator);
@@ -195,10 +213,6 @@ pub const Worker = struct {
             {
                 const held = self.mutex.acquire();
                 defer held.release();
-                if (self.background_loop_should_stop) {
-                    self.deinit();
-                    return;
-                }
                 if (self.new_result) |old_result| self.allocator.free(old_result.text);
                 self.new_result = .{
                     .text = result_buffer.toOwnedSlice(),
@@ -206,5 +220,17 @@ pub const Worker = struct {
                 };
             }
         }
+    }
+};
+
+pub const Interrupter = struct {
+    current_id: usize,
+    desired_id: *usize,
+
+    // called by interpreter while running
+    pub fn check(self: Interrupter) error{WasInterrupted}!void {
+        // TODO figure out what ordering is needed
+        if (@atomicLoad(usize, self.desired_id, .Monotonic) != self.current_id)
+            return error.WasInterrupted;
     }
 };

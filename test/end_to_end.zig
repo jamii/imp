@@ -43,8 +43,13 @@ pub fn main() anyerror!void {
             var arena = ArenaAllocator.init(allocator);
             defer arena.deinit();
 
+            var desired_id: usize = 0;
+            const interrupter = .{
+                .current_id = 0,
+                .desired_id = &desired_id,
+            };
             var error_info: ?imp.lang.InterpretErrorInfo = null;
-            const result = imp.lang.interpret(&arena, input, &error_info);
+            const result = imp.lang.interpret(&arena, input, interrupter, &error_info);
 
             var bytes = ArrayList(u8).init(allocator);
             defer bytes.deinit();

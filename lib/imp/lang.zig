@@ -94,6 +94,7 @@ pub fn interpret(arena: *ArenaAllocator, source: []const u8, interrupter: Interr
 
 pub const Worker = struct {
     allocator: *Allocator,
+    config: Config,
 
     // mutex protects these fields
     mutex: std.Thread.Mutex,
@@ -110,6 +111,10 @@ pub const Worker = struct {
     // TODO I think this is safe because it only ever increases and we don't care exactly how long it takes for the interpreter to notice
     desired_id: usize,
 
+    pub const Config = struct {
+        memory_limit_bytes: ?usize = null,
+    };
+
     pub const TextAndId = struct {
         text: []const u8,
         id: usize,
@@ -117,10 +122,11 @@ pub const Worker = struct {
 
     // --- called by outside thread ---
 
-    pub fn init(allocator: *Allocator) !*Worker {
+    pub fn init(allocator: *Allocator, config: Config) !*Worker {
         const self = try allocator.create(Worker);
         self.* = Worker{
             .allocator = allocator,
+            .config = config,
             .mutex = .{},
             .state_changed_event = .{},
             .should_deinit = false,
@@ -202,7 +208,14 @@ pub const Worker = struct {
             defer self.allocator.free(new_program.text);
 
             // eval
-            var arena = ArenaAllocator.init(self.allocator);
+            var gpa = std.heap.GeneralPurposeAllocator(.{
+                // TODO it's possible but awkward to set this to false when config.memory_limit_bytes is null
+                .enable_memory_limit = true,
+            }){
+                .backing_allocator = self.allocator,
+                .requested_memory_limit = self.config.memory_limit_bytes orelse std.math.maxInt(usize),
+            };
+            var arena = ArenaAllocator.init(&gpa.allocator);
             defer arena.deinit();
             var error_info: ?imp.lang.InterpretErrorInfo = null;
             const interrupter = Interrupter{

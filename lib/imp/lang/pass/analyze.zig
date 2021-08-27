@@ -97,6 +97,7 @@ pub const Analyzer = struct {
                     const abstract_arity = max(left.Concrete.abstract_arity, right.Concrete.abstract_arity);
                     var columns = try self.store.arena.allocator.alloc(type_.ScalarType, left.Concrete.columns.len);
                     for (left.Concrete.columns) |left_type, i| {
+                        try self.interrupter.check();
                         const right_type = right.Concrete.columns[i];
                         columns[i] = switch (expr.*) {
                             .Union => try self.unionScalar(left_type, right_type),
@@ -125,10 +126,12 @@ pub const Analyzer = struct {
                     var columns = try self.store.arena.allocator.alloc(type_.ScalarType, left.Concrete.columns.len + right.Concrete.columns.len);
                     var i: usize = 0;
                     for (left.Concrete.columns) |left_type| {
+                        try self.interrupter.check();
                         columns[i] = left_type;
                         i += 1;
                     }
                     for (right.Concrete.columns) |right_type| {
+                        try self.interrupter.check();
                         columns[i] = right_type;
                         i += 1;
                     }
@@ -151,6 +154,7 @@ pub const Analyzer = struct {
                             return self.setError("Mismatched arities: {} vs {}", .{ left.Concrete.columns.len, right.Concrete.columns.len });
                         }
                         for (left.Concrete.columns) |scalar_type, i| {
+                            try self.interrupter.check();
                             _ = try self.intersectScalar(scalar_type, right.Concrete.columns[i]);
                         }
                     }
@@ -277,6 +281,7 @@ pub const Analyzer = struct {
                     }
                     const joined_arity = min(left.Concrete.columns.len, right.Concrete.columns.len);
                     for (left.Concrete.columns[0..joined_arity]) |column, i| {
+                        try self.interrupter.check();
                         _ = try self.intersectScalar(column, right.Concrete.columns[i]);
                     }
                     const abstract_arity = if (left.Concrete.abstract_arity > joined_arity)
@@ -339,6 +344,7 @@ pub const Analyzer = struct {
                     //      what about case where init_type is none? require a hint?
                     var max_iterations: usize = 100;
                     while (max_iterations > 0) : (max_iterations -= 1) {
+                        try self.interrupter.check();
                         // next looks like `?[prev] , stuff`
                         fix_hint[0] = .{ .Box = fix_box_type };
                         try self.time.append(.Iteration);
@@ -373,6 +379,7 @@ pub const Analyzer = struct {
                             }
                             var columns = try self.store.arena.allocator.alloc(type_.ScalarType, fix_type.Concrete.columns.len);
                             for (fix_columns) |column, i| {
+                                try self.interrupter.check();
                                 columns[i] = try self.unionScalar(fix_type.Concrete.columns[i], column);
                             }
                             fix_type.Concrete.columns = columns;
@@ -422,6 +429,7 @@ pub const Analyzer = struct {
 
                     var max_iterations: usize = 100;
                     while (max_iterations > 0) : (max_iterations -= 1) {
+                        try self.interrupter.check();
                         // next looks like `?[prev] , ?[input] , stuff`
                         reduce_hint[0] = .{ .Box = reduce_box_type };
                         reduce_hint[1] = .{ .Box = input_box_type };
@@ -458,6 +466,7 @@ pub const Analyzer = struct {
                             }
                             var columns = try self.store.arena.allocator.alloc(type_.ScalarType, reduce_type.Concrete.columns.len);
                             for (reduce_columns) |column, i| {
+                                try self.interrupter.check();
                                 columns[i] = try self.unionScalar(reduce_type.Concrete.columns[i], column);
                             }
                             reduce_type.Concrete.columns = columns;

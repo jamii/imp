@@ -115,10 +115,12 @@ const Interpreter = struct {
                 var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 var left_iter = left.Finite.set.iterator();
                 while (left_iter.next()) |kv| {
+                    try self.interrupter.check();
                     _ = try set.put(kv.key_ptr.*, {});
                 }
                 var right_iter = right.Finite.set.iterator();
                 while (right_iter.next()) |kv| {
+                    try self.interrupter.check();
                     _ = try set.put(kv.key_ptr.*, {});
                 }
                 return value.Set{
@@ -146,6 +148,7 @@ const Interpreter = struct {
                 var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 var left_iter = left.Finite.set.iterator();
                 while (left_iter.next()) |kv| {
+                    try self.interrupter.check();
                     if (right.Finite.set.contains(kv.key_ptr.*)) {
                         _ = try set.put(kv.key_ptr.*, {});
                     }
@@ -181,8 +184,10 @@ const Interpreter = struct {
                 var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 var left_iter = left.Finite.set.iterator();
                 while (left_iter.next()) |lkv| {
+                    try self.interrupter.check();
                     var right_iter = right.Finite.set.iterator();
                     while (right_iter.next()) |rkv| {
+                        try self.interrupter.check();
                         var tuple = try self.arena.allocator.alloc(value.Scalar, lkv.key_ptr.len + rkv.key_ptr.len);
                         var i: usize = 0;
                         for (lkv.key_ptr.*) |scalar| {
@@ -214,12 +219,14 @@ const Interpreter = struct {
                 const isEqual = isEqual: {
                     var leftIter = left.Finite.set.iterator();
                     while (leftIter.next()) |kv| {
+                        try self.interrupter.check();
                         if (!right.Finite.set.contains(kv.key_ptr.*)) {
                             break :isEqual false;
                         }
                     }
                     var rightIter = right.Finite.set.iterator();
                     while (rightIter.next()) |kv| {
+                        try self.interrupter.check();
                         if (!left.Finite.set.contains(kv.key_ptr.*)) {
                             break :isEqual false;
                         }
@@ -333,6 +340,7 @@ const Interpreter = struct {
                             var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                             var finite_iter = finite.set.iterator();
                             while (finite_iter.next()) |kv| {
+                                try self.interrupter.check();
                                 var tuple = try ArrayList(value.Scalar).initCapacity(&self.arena.allocator, kv.key_ptr.len + 1);
                                 try tuple.append(hint[0]);
                                 try tuple.appendSlice(kv.key_ptr.*);
@@ -377,6 +385,7 @@ const Interpreter = struct {
                     var left_set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                     var right_iter = right.Finite.set.iterator();
                     while (right_iter.next()) |kv| {
+                        try self.interrupter.check();
                         var left_hint = try ArrayList(value.Scalar).initCapacity(&self.arena.allocator, right.Finite.arity + hint.len);
                         try left_hint.appendSlice(kv.key_ptr.*);
                         try left_hint.appendSlice(hint);
@@ -402,6 +411,7 @@ const Interpreter = struct {
                         }
                         var left_part_iter = left_part.Finite.set.iterator();
                         while (left_part_iter.next()) |lkv| {
+                            try self.interrupter.check();
                             _ = try left_set.put(lkv.key_ptr.*, {});
                         }
                     }
@@ -418,8 +428,10 @@ const Interpreter = struct {
                 var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 var left_iter = left.Finite.set.iterator();
                 while (left_iter.next()) |lkv| {
+                    try self.interrupter.check();
                     var right_iter = right.Finite.set.iterator();
                     while (right_iter.next()) |rkv| {
+                        try self.interrupter.check();
                         if (meta.deepEqual(lkv.key_ptr.*[0..joined_arity], rkv.key_ptr.*[0..joined_arity])) {
                             _ = try set.put(if (left.Finite.arity > right.Finite.arity) lkv.key_ptr.*[joined_arity..] else rkv.key_ptr.*[joined_arity..], {});
                         }
@@ -473,6 +485,7 @@ const Interpreter = struct {
                 var fix_set = init_set;
                 var iteration: value.Time = 1;
                 while (true) : (iteration += 1) {
+                    try self.interrupter.check();
                     try self.time.append(iteration);
                     _ = try self.boxes.put(fix_key, fix_set);
                     fix_hint[0] = .{ .Box = fix_key };
@@ -491,6 +504,7 @@ const Interpreter = struct {
                     };
                     var body_iter = body_set.Finite.set.iterator();
                     while (body_iter.next()) |kv| {
+                        try self.interrupter.check();
                         if (meta.deepEqual(kv.key_ptr.*[0], value.Scalar{ .Box = fix_key })) {
                             _ = try new_fix_set.Finite.set.put(kv.key_ptr.*[1..], {});
                         }
@@ -515,8 +529,10 @@ const Interpreter = struct {
                 var input_tuples = try ArrayList(value.Tuple).initCapacity(&self.arena.allocator, input_set.Finite.set.count());
                 var input_iter = input_set.Finite.set.iterator();
                 while (input_iter.next()) |kv| {
+                    try self.interrupter.check();
                     try input_tuples.append(kv.key_ptr.*);
                 }
+                // TODO would like to be able to interrupt sorting
                 std.sort.sort(value.Tuple, input_tuples.items, {}, struct {
                     fn lessThan(_: void, a: value.Tuple, b: value.Tuple) bool {
                         return meta.deepCompare(a, b) == .LessThan;
@@ -540,6 +556,7 @@ const Interpreter = struct {
                 var reduce_key = init_key;
                 var reduce_set = init_set;
                 for (input_tuples.items) |input_tuple, iteration| {
+                    try self.interrupter.check();
                     try self.time.append(iteration);
                     _ = try self.boxes.put(reduce_key, reduce_set);
                     var tuple_set = value.Set{
@@ -572,6 +589,7 @@ const Interpreter = struct {
                     };
                     var body_iter = body_set.Finite.set.iterator();
                     while (body_iter.next()) |kv| {
+                        try self.interrupter.check();
                         if (meta.deepEqual(kv.key_ptr.*[0], value.Scalar{ .Box = reduce_key }) and meta.deepEqual(kv.key_ptr.*[1], value.Scalar{ .Box = tuple_key })) {
                             _ = try new_reduce_set.Finite.set.put(kv.key_ptr.*[2..], {});
                         }
@@ -594,8 +612,10 @@ const Interpreter = struct {
                 var tuples = try ArrayList(value.Tuple).initCapacity(&self.arena.allocator, body_set.Finite.set.count());
                 var body_iter = body_set.Finite.set.iterator();
                 while (body_iter.next()) |kv| {
+                    try self.interrupter.check();
                     try tuples.append(kv.key_ptr.*);
                 }
+                // TODO would like to be able to interrupt sorting
                 std.sort.sort(value.Tuple, tuples.items, {}, struct {
                     fn lessThan(_: void, a: value.Tuple, b: value.Tuple) bool {
                         return meta.deepCompare(a, b) == .LessThan;
@@ -604,6 +624,7 @@ const Interpreter = struct {
                 // TODO HashMap.initCapacity is private?
                 var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 for (tuples.items) |tuple, i| {
+                    try self.interrupter.check();
                     var enumerated_tuple = try ArrayList(value.Scalar).initCapacity(&self.arena.allocator, 1 + tuple.len);
                     // TODO can we allocate enough tuples to overflow this conversion?
                     try enumerated_tuple.append(.{ .Number = @intToFloat(f64, i + 1) });
@@ -677,6 +698,7 @@ const Interpreter = struct {
                         var i = lo;
                         var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                         while (i <= hi) : (i += 1) {
+                            try self.interrupter.check();
                             const tuple = try self.dupeScalars(&[3]value.Scalar{ hint[0], hint[1], .{ .Number = @intToFloat(f64, i) } });
                             _ = try set.put(tuple, {});
                         }

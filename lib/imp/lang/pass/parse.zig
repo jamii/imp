@@ -87,7 +87,7 @@ pub const ErrorInfo = struct {
 
 // --------------------------------------------------------------------------------
 
-const TokenTag = enum {
+pub const TokenTag = enum {
     // core
     OpenGroup,
     CloseGroup,
@@ -180,7 +180,7 @@ const TokenTag = enum {
     }
 };
 
-const Token = union(TokenTag) {
+pub const Token = union(TokenTag) {
     // core
     OpenGroup,
     CloseGroup,
@@ -279,7 +279,7 @@ fn appendChar(bytes: *ArrayList(u8), char: u21) !void {
     try bytes.appendSlice(char_bytes[0..len]);
 }
 
-const Parser = struct {
+pub const Parser = struct {
     store: *Store,
     source: []const u8,
     position: usize,
@@ -348,7 +348,7 @@ const Parser = struct {
                             return self.setError(char_start, "unfinished text escape", .{});
                         }
                     },
-                    '"' => {
+                    '"', '\n' => {
                         break;
                     },
                     else => {
@@ -443,7 +443,7 @@ const Parser = struct {
     }
 
     // returns null for comments/whitespace so we can easily skip them
-    fn nextTokenMaybe(self: *Parser) !?Token {
+    pub fn nextTokenMaybe(self: *Parser) !?Token {
         const start = self.position;
         if (try self.nextAsciiChar()) |char1| {
             switch (char1) {
@@ -523,7 +523,7 @@ const Parser = struct {
         }
     }
 
-    fn nextToken(self: *Parser) !Token {
+    pub fn nextToken(self: *Parser) !Token {
         while (true) {
             if (try self.nextTokenMaybe()) |token| {
                 return token;

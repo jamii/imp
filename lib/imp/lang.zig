@@ -17,10 +17,23 @@ pub const InterpretErrorInfo = union(enum) {
     Interpret: pass.interpret.ErrorInfo,
 
     pub fn error_range(self: ?InterpretErrorInfo, err: InterpretError) ?[2]usize {
-        return switch (err) {
-            error.ParseError => .{ self.?.Parse.start, self.?.Parse.end },
-            else => null,
-        };
+        switch (err) {
+            error.ParseError => {
+                return [2]usize{ self.?.Parse.start, self.?.Parse.end };
+            },
+            error.DesugarError => {
+                const syntax_meta = Store.getSyntaxMeta(self.?.Desugar.expr);
+                return [2]usize{ syntax_meta.start, syntax_meta.end };
+            },
+            // TODO
+            // error.AnalyzeError =>
+            error.InterpretError, error.NativeError => {
+                const core_meta = Store.getCoreMeta(self.?.Interpret.expr);
+                const syntax_meta = Store.getSyntaxMeta(core_meta.from);
+                return [2]usize{ syntax_meta.start, syntax_meta.end };
+            },
+            else => return null,
+        }
     }
 
     pub fn dumpInto(self: ?InterpretErrorInfo, err: InterpretError, out_stream: anytype) anyerror!void {

@@ -24,7 +24,7 @@ pub const Error = error{
 };
 
 pub const ErrorInfo = struct {
-    expr: ?*const syntax.Expr,
+    expr: *const syntax.Expr,
     message: []const u8,
 };
 
@@ -39,7 +39,7 @@ const Desugarer = struct {
     fn setError(self: *Desugarer, comptime fmt: []const u8, args: anytype) Error {
         const message = try format(&self.store.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
-            .expr = self.current_expr,
+            .expr = self.current_expr.?,
             .message = message,
         };
         return error.DesugarError;

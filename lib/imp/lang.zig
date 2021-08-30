@@ -16,6 +16,13 @@ pub const InterpretErrorInfo = union(enum) {
     Analyze: pass.analyze.ErrorInfo,
     Interpret: pass.interpret.ErrorInfo,
 
+    pub fn error_range(self: ?InterpretErrorInfo, err: InterpretError) ?[2]usize {
+        return switch (err) {
+            error.ParseError => .{ self.?.Parse.start, self.?.Parse.end },
+            else => null,
+        };
+    }
+
     pub fn dumpInto(self: ?InterpretErrorInfo, err: InterpretError, out_stream: anytype) anyerror!void {
         switch (err) {
             // TODO report source position
@@ -221,6 +228,7 @@ pub const Worker = struct {
                 .backing_allocator = self.allocator,
                 .requested_memory_limit = self.config.memory_limit_bytes orelse std.math.maxInt(usize),
             };
+            defer _ = gpa.deinit();
             var arena = ArenaAllocator.init(&gpa.allocator);
             defer arena.deinit();
             var error_info: ?imp.lang.InterpretErrorInfo = null;
@@ -234,14 +242,11 @@ pub const Worker = struct {
             var response_buffer = ArrayList(u8).init(self.allocator);
             defer response_buffer.deinit();
             var error_range: ?[2]usize = null;
-            if (result) |type_and_set|
-                try type_and_set.dumpInto(&arena.allocator, response_buffer.writer())
-            else |err| {
-                try InterpretErrorInfo.dumpInto(error_info.?, err, response_buffer.writer());
-                error_range = switch (err) {
-                    error.ParseError => .{ error_info.?.Parse.start, error_info.?.Parse.end },
-                    else => null,
-                };
+            if (result) |type_and_set| {
+                try type_and_set.dumpInto(&arena.allocator, response_buffer.writer());
+            } else |err| {
+                try InterpretErrorInfo.dumpInto(error_info, err, response_buffer.writer());
+                error_range = InterpretErrorInfo.error_range(error_info, err);
             }
 
             // set response

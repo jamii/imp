@@ -146,7 +146,12 @@ pub const Worker = struct {
     pub const Response = struct {
         id: usize,
         text: []const u8,
-        error_range: ?[2]usize,
+        kind: ResponseKind,
+    };
+
+    pub const ResponseKind = union(enum) {
+        Ok,
+        Err: ?[2]usize,
     };
 
     // --- called by outside thread ---
@@ -257,12 +262,13 @@ pub const Worker = struct {
             // print result
             var response_buffer = ArrayList(u8).init(self.allocator);
             defer response_buffer.deinit();
-            var error_range: ?[2]usize = null;
+            var response_kind: ResponseKind = undefined;
             if (result) |type_and_set| {
                 try type_and_set.dumpInto(&arena.allocator, response_buffer.writer());
+                response_kind = .Ok;
             } else |err| {
                 try InterpretErrorInfo.dumpInto(error_info, err, response_buffer.writer());
-                error_range = InterpretErrorInfo.error_range(error_info, err);
+                response_kind = .{ .Err = InterpretErrorInfo.error_range(error_info, err) };
             }
 
             // set response
@@ -273,7 +279,7 @@ pub const Worker = struct {
                 self.new_response = .{
                     .text = response_buffer.toOwnedSlice(),
                     .id = new_request.id,
-                    .error_range = error_range,
+                    .kind = response_kind,
                 };
             }
         }

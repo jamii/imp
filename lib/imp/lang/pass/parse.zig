@@ -531,6 +531,16 @@ pub const Parser = struct {
         }
     }
 
+    pub fn consumeWhitespace(self: *Parser) !void {
+        while (true) {
+            const start = self.position;
+            if ((try self.nextTokenMaybe()) != null) {
+                self.position = start;
+                break;
+            }
+        }
+    }
+
     fn expect(self: *Parser, expected: TokenTag) !Token {
         const start = self.position;
         const found = try self.nextToken();
@@ -568,6 +578,7 @@ pub const Parser = struct {
 
     // returns null if this isn't the start of an expression
     fn parseExprInnerMaybe(self: *Parser) Error!?*const syntax.Expr {
+        try self.consumeWhitespace();
         const start = self.position;
         const token = try self.nextToken();
         switch (token) {
@@ -700,6 +711,8 @@ pub const Parser = struct {
     //   * otherwise:
     //     parse_error "ambiguous precedence"
     fn parseExprOuter(self: *Parser, prev_op: ?Token) Error!*const syntax.Expr {
+        try self.consumeWhitespace();
+        const start = self.position;
         var left = try self.parseExprInner();
         while (true) {
             const op_start = self.position;
@@ -713,24 +726,24 @@ pub const Parser = struct {
                             const right = try self.parseExprOuter(op);
                             left = try switch (op) {
                                 // core ops
-                                .Union => self.store.putSyntax(.{ .Union = .{ .left = left, .right = right } }, op_start, self.position),
-                                .Intersect => self.store.putSyntax(.{ .Intersect = .{ .left = left, .right = right } }, op_start, self.position),
-                                .Product => self.store.putSyntax(.{ .Product = .{ .left = left, .right = right } }, op_start, self.position),
-                                .Equal => self.store.putSyntax(.{ .Equal = .{ .left = left, .right = right } }, op_start, self.position),
+                                .Union => self.store.putSyntax(.{ .Union = .{ .left = left, .right = right } }, start, self.position),
+                                .Intersect => self.store.putSyntax(.{ .Intersect = .{ .left = left, .right = right } }, start, self.position),
+                                .Product => self.store.putSyntax(.{ .Product = .{ .left = left, .right = right } }, start, self.position),
+                                .Equal => self.store.putSyntax(.{ .Equal = .{ .left = left, .right = right } }, start, self.position),
 
                                 // sugar
-                                .Extend => self.store.putSyntax(.{ .Extend = .{ .left = left, .right = right } }, op_start, self.position),
+                                .Extend => self.store.putSyntax(.{ .Extend = .{ .left = left, .right = right } }, start, self.position),
 
                                 // native functions
-                                .Add => self.putApplyOp("+", left, right, op_start, self.position),
-                                .Subtract => self.putApplyOp("-", left, right, op_start, self.position),
-                                .Multiply => self.putApplyOp("*", left, right, op_start, self.position),
-                                .Divide => self.putApplyOp("/", left, right, op_start, self.position),
-                                .Modulus => self.putApplyOp("%", left, right, op_start, self.position),
-                                .LessThan => self.putApplyOp("<", left, right, op_start, self.position),
-                                .LessThanOrEqual => self.putApplyOp("<=", left, right, op_start, self.position),
-                                .GreaterThan => self.putApplyOp(">", left, right, op_start, self.position),
-                                .GreaterThanOrEqual => self.putApplyOp(">=", left, right, op_start, self.position),
+                                .Add => self.putApplyOp("+", left, right, start, self.position),
+                                .Subtract => self.putApplyOp("-", left, right, start, self.position),
+                                .Multiply => self.putApplyOp("*", left, right, start, self.position),
+                                .Divide => self.putApplyOp("/", left, right, start, self.position),
+                                .Modulus => self.putApplyOp("%", left, right, start, self.position),
+                                .LessThan => self.putApplyOp("<", left, right, start, self.position),
+                                .LessThanOrEqual => self.putApplyOp("<=", left, right, start, self.position),
+                                .GreaterThan => self.putApplyOp(">", left, right, start, self.position),
+                                .GreaterThanOrEqual => self.putApplyOp(">=", left, right, start, self.position),
 
                                 else => unreachable,
                             };
@@ -747,7 +760,7 @@ pub const Parser = struct {
 
                 .Negate => {
                     if (prev_op == null) {
-                        left = try self.store.putSyntax(.{ .Negate = left }, op_start, self.position);
+                        left = try self.store.putSyntax(.{ .Negate = left }, start, self.position);
                     } else {
                         self.position = op_start;
                         return left;
@@ -755,7 +768,7 @@ pub const Parser = struct {
                 },
                 .Box => {
                     if (prev_op == null) {
-                        left = try self.store.putSyntax(.{ .Box = left }, op_start, self.position);
+                        left = try self.store.putSyntax(.{ .Box = left }, start, self.position);
                     } else {
                         self.position = op_start;
                         return left;
@@ -777,7 +790,7 @@ pub const Parser = struct {
                         const precedence = if (prev_op == null) .RightBindsTighter else prev_op.?.comparePrecedence(.Apply);
                         switch (precedence) {
                             .RightBindsTighter => {
-                                left = try self.store.putSyntax(.{ .Apply = .{ .left = left, .right = right } }, op_start, self.position);
+                                left = try self.store.putSyntax(.{ .Apply = .{ .left = left, .right = right } }, start, self.position);
                             },
                             .LeftBindsTighter, .Same => {
                                 self.position = op_start;

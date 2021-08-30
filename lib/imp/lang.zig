@@ -102,10 +102,10 @@ pub const Worker = struct {
     state_changed_event: std.Thread.AutoResetEvent,
     // when set to true, the background thread will deinit its state and then exit
     should_deinit: bool,
-    // new_program and new_result behave like queues, except that they only care about the most recent item
-    new_program: ?TextAndId,
-    new_result: ?TextAndId,
-    // desired_id is the most recent id set in new_program
+    // new_request and new_response behave like queues, except that they only care about the most recent item
+    new_request: ?Request,
+    new_response: ?Response,
+    // desired_id is the most recent id set in new_request
     // if the interpreter is running and notices that desired_id has changed, it gives up and returns error.WasInterrupted so we can start again with then new program
     // desired_id is only changed inside mutex but is read atomically by the Interrupter outside the mutex
     // TODO I think this is safe because it only ever increases and we don't care exactly how long it takes for the interpreter to notice
@@ -115,9 +115,15 @@ pub const Worker = struct {
         memory_limit_bytes: ?usize = null,
     };
 
-    pub const TextAndId = struct {
-        text: []const u8,
+    pub const Request = struct {
         id: usize,
+        text: []const u8,
+    };
+
+    pub const Response = struct {
+        id: usize,
+        text: []const u8,
+        error_range: ?[2]usize,
     };
 
     // --- called by outside thread ---
@@ -130,8 +136,8 @@ pub const Worker = struct {
             .mutex = .{},
             .state_changed_event = .{},
             .should_deinit = false,
-            .new_program = null,
-            .new_result = null,
+            .new_request = null,
+            .new_response = null,
             .desired_id = 0,
         };
         // spawn worker thread
@@ -147,22 +153,22 @@ pub const Worker = struct {
         self.state_changed_event.set();
     }
 
-    pub fn setProgram(self: *Worker, program: TextAndId) !void {
+    pub fn setRequest(self: *Worker, request: Request) !void {
         const held = self.mutex.acquire();
         defer held.release();
-        if (self.new_program) |old_program| self.allocator.free(old_program.text);
-        self.new_program = program;
-        self.new_program.?.text = try std.mem.dupe(self.allocator, u8, self.new_program.?.text);
-        @atomicStore(usize, &self.desired_id, program.id, .SeqCst);
+        if (self.new_request) |old_request| self.allocator.free(old_request.text);
+        self.new_request = request;
+        self.new_request.?.text = try std.mem.dupe(self.allocator, u8, self.new_request.?.text);
+        @atomicStore(usize, &self.desired_id, request.id, .SeqCst);
         self.state_changed_event.set();
     }
 
-    pub fn getResult(self: *Worker) ?TextAndId {
+    pub fn getResponse(self: *Worker) ?Response {
         const held = self.mutex.acquire();
         defer held.release();
-        if (self.new_result) |result| {
-            self.new_result = null;
-            return result;
+        if (self.new_response) |response| {
+            self.new_response = null;
+            return response;
         } else {
             return null;
         }
@@ -173,18 +179,18 @@ pub const Worker = struct {
     fn deinit(self: *Worker) void {
         const held = self.mutex.acquire();
         defer held.release();
-        if (self.new_program) |program| self.allocator.free(program.text);
-        if (self.new_result) |result| self.allocator.free(result.text);
+        if (self.new_request) |request| self.allocator.free(request.text);
+        if (self.new_response) |response| self.allocator.free(response.text);
         self.allocator.destroy(self);
     }
 
     fn backgroundLoop(self: *Worker) !void {
         while (true) {
-            // wait for a new program
+            // wait for a new request
             self.state_changed_event.wait();
 
-            // get new program
-            var new_program: TextAndId = undefined;
+            // get new request
+            var new_request: Request = undefined;
             {
                 const held = self.mutex.acquire();
                 defer held.release();
@@ -192,20 +198,20 @@ pub const Worker = struct {
                     self.deinit();
                     return;
                 }
-                if (self.new_program) |program| {
-                    new_program = program;
-                    self.new_program = null;
+                if (self.new_request) |request| {
+                    new_request = request;
+                    self.new_request = null;
                 } else {
                     // spurious wakeup, wait again
                     // (can happen like this:
-                    //  outside: sets program a, wakes worker
-                    //  outside: sets program b, wakes worker
-                    //  worker: wakes up, reads program b, sets program null
-                    //  worker: wakes up, reads program null)
+                    //  outside: sets request a, wakes worker
+                    //  outside: sets request b, wakes worker
+                    //  worker: wakes up, reads request b, sets request null
+                    //  worker: wakes up, reads request null)
                     continue;
                 }
             }
-            defer self.allocator.free(new_program.text);
+            defer self.allocator.free(new_request.text);
 
             // eval
             var gpa = std.heap.GeneralPurposeAllocator(.{
@@ -219,27 +225,34 @@ pub const Worker = struct {
             defer arena.deinit();
             var error_info: ?imp.lang.InterpretErrorInfo = null;
             const interrupter = Interrupter{
-                .current_id = new_program.id,
+                .current_id = new_request.id,
                 .desired_id = &self.desired_id,
             };
-            const result = imp.lang.interpret(&arena, new_program.text, interrupter, &error_info);
+            const result = imp.lang.interpret(&arena, new_request.text, interrupter, &error_info);
 
             // print result
-            var result_buffer = ArrayList(u8).init(self.allocator);
-            defer result_buffer.deinit();
+            var response_buffer = ArrayList(u8).init(self.allocator);
+            defer response_buffer.deinit();
+            var error_range: ?[2]usize = null;
             if (result) |type_and_set|
-                try type_and_set.dumpInto(&arena.allocator, result_buffer.writer())
-            else |err|
-                try imp.lang.InterpretErrorInfo.dumpInto(error_info, err, result_buffer.writer());
+                try type_and_set.dumpInto(&arena.allocator, response_buffer.writer())
+            else |err| {
+                try InterpretErrorInfo.dumpInto(error_info.?, err, response_buffer.writer());
+                error_range = switch (err) {
+                    error.ParseError => .{ error_info.?.Parse.start, error_info.?.Parse.end },
+                    else => null,
+                };
+            }
 
-            // set result
+            // set response
             {
                 const held = self.mutex.acquire();
                 defer held.release();
-                if (self.new_result) |old_result| self.allocator.free(old_result.text);
-                self.new_result = .{
-                    .text = result_buffer.toOwnedSlice(),
-                    .id = new_program.id,
+                if (self.new_response) |old_response| self.allocator.free(old_response.text);
+                self.new_response = .{
+                    .text = response_buffer.toOwnedSlice(),
+                    .id = new_request.id,
+                    .error_range = error_range,
                 };
             }
         }

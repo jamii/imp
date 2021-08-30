@@ -25,8 +25,11 @@ pub const InterpretErrorInfo = union(enum) {
                 const syntax_meta = Store.getSyntaxMeta(self.?.Desugar.expr);
                 return [2]usize{ syntax_meta.start, syntax_meta.end };
             },
-            // TODO
-            // error.AnalyzeError =>
+            error.AnalyzeError => {
+                const core_meta = Store.getCoreMeta(self.?.Analyze.expr);
+                const syntax_meta = Store.getSyntaxMeta(core_meta.from);
+                return [2]usize{ syntax_meta.start, syntax_meta.end };
+            },
             error.InterpretError, error.NativeError => {
                 const core_meta = Store.getCoreMeta(self.?.Interpret.expr);
                 const syntax_meta = Store.getSyntaxMeta(core_meta.from);

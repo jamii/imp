@@ -26,6 +26,7 @@ pub const Error = error{
 };
 
 pub const ErrorInfo = struct {
+    expr: *const core.Expr,
     // TODO want something like a stack of specializations
     message: []const u8,
 };
@@ -39,9 +40,10 @@ pub const Analyzer = struct {
     interrupter: imp.lang.Interrupter,
     error_info: *?ErrorInfo,
 
-    fn setError(self: *Analyzer, comptime fmt: []const u8, args: anytype) Error {
+    fn setError(self: *Analyzer, expr: *const core.Expr, comptime fmt: []const u8, args: anytype) Error {
         const message = try format(&self.store.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
+            .expr = expr,
             .message = message,
         };
         return error.AnalyzeError;
@@ -92,7 +94,7 @@ pub const Analyzer = struct {
                     if (right == .None) break :set_type if (expr.* == .Union) left else .None;
                     if (left == .Lazy or right == .Lazy) break :set_type .{ .Lazy = lazy };
                     if (left.Concrete.columns.len != right.Concrete.columns.len) {
-                        return self.setError("Mismatched arities: {} vs {}", .{ left.Concrete.columns.len, right.Concrete.columns.len });
+                        return self.setError(expr, "Mismatched arities: {} vs {}", .{ left.Concrete.columns.len, right.Concrete.columns.len });
                     }
                     const abstract_arity = max(left.Concrete.abstract_arity, right.Concrete.abstract_arity);
                     var columns = try self.store.arena.allocator.alloc(type_.ScalarType, left.Concrete.columns.len);
@@ -100,8 +102,8 @@ pub const Analyzer = struct {
                         try self.interrupter.check();
                         const right_type = right.Concrete.columns[i];
                         columns[i] = switch (expr.*) {
-                            .Union => try self.unionScalar(left_type, right_type),
-                            .Intersect => try self.intersectScalar(left_type, right_type),
+                            .Union => try self.unionScalar(expr, left_type, right_type),
+                            .Intersect => try self.intersectScalar(expr, left_type, right_type),
                             else => unreachable,
                         };
                     }
@@ -147,15 +149,15 @@ pub const Analyzer = struct {
                     const left = try self.analyze(pair.left, &[0]type_.ScalarType{});
                     const right = try self.analyze(pair.right, &[0]type_.ScalarType{});
                     if (!left.isFinite() or !right.isFinite()) {
-                        return self.setError("Cannot equal one or more maybe-infinite sets: {} = {}", .{ left, right });
+                        return self.setError(expr, "Cannot equal one or more maybe-infinite sets: {} = {}", .{ left, right });
                     }
                     if (left == .Concrete and right == .Concrete) {
                         if (left.Concrete.columns.len != right.Concrete.columns.len) {
-                            return self.setError("Mismatched arities: {} vs {}", .{ left.Concrete.columns.len, right.Concrete.columns.len });
+                            return self.setError(expr, "Mismatched arities: {} vs {}", .{ left.Concrete.columns.len, right.Concrete.columns.len });
                         }
                         for (left.Concrete.columns) |scalar_type, i| {
                             try self.interrupter.check();
-                            _ = try self.intersectScalar(scalar_type, right.Concrete.columns[i]);
+                            _ = try self.intersectScalar(expr, scalar_type, right.Concrete.columns[i]);
                         }
                     }
                     break :set_type .{
@@ -199,7 +201,7 @@ pub const Analyzer = struct {
                             }
                         },
                         else => {
-                            return self.setError("Don't know what type will result from unboxing type {}", .{scalar_type});
+                            return self.setError(expr, "Don't know what type will result from unboxing type {}", .{scalar_type});
                         },
                     }
                 },
@@ -207,7 +209,7 @@ pub const Analyzer = struct {
                     // the hint for expr doesn't tell us anything about body
                     const body_type = try self.analyze(body, &[0]type_.ScalarType{});
                     if (!body_type.isFinite()) {
-                        return self.setError("The body of `!` must have finite type, found {}", .{body_type});
+                        return self.setError(expr, "The body of `!` must have finite type, found {}", .{body_type});
                     }
                     break :set_type .{
                         .Concrete = .{
@@ -220,7 +222,7 @@ pub const Analyzer = struct {
                     // the hint for expr doesn't tell us anything about condition
                     const condition_type = try self.analyze(when.condition, &[0]type_.ScalarType{});
                     if (!((condition_type == .None) or (condition_type == .Concrete and condition_type.Concrete.columns.len == 0))) {
-                        return self.setError("The condition of `when` must have type `maybe`, found {}", .{condition_type});
+                        return self.setError(expr, "The condition of `when` must have type `maybe`, found {}", .{condition_type});
                     }
                     break :set_type try self.analyze(when.true_branch, hint);
                 },
@@ -261,7 +263,7 @@ pub const Analyzer = struct {
                     var right = try self.analyze(pair.right, &[0]type_.ScalarType{});
                     if (left == .None or right == .None) break :set_type .None;
                     if (!left.isFinite() and !right.isFinite()) {
-                        return self.setError("Cannot apply two maybe-infinite sets: {} applied to {}", .{ left, right });
+                        return self.setError(expr, "Cannot apply two maybe-infinite sets: {} applied to {}", .{ left, right });
                     }
                     if (!right.isFinite()) {
                         std.mem.swap(*const core.Expr, &pair_left, &pair_right);
@@ -282,7 +284,7 @@ pub const Analyzer = struct {
                     const joined_arity = min(left.Concrete.columns.len, right.Concrete.columns.len);
                     for (left.Concrete.columns[0..joined_arity]) |column, i| {
                         try self.interrupter.check();
-                        _ = try self.intersectScalar(column, right.Concrete.columns[i]);
+                        _ = try self.intersectScalar(expr, column, right.Concrete.columns[i]);
                     }
                     const abstract_arity = if (left.Concrete.abstract_arity > joined_arity)
                         left.Concrete.abstract_arity - joined_arity
@@ -322,7 +324,7 @@ pub const Analyzer = struct {
                 .Fix => |fix| {
                     const init_type = try self.analyze(fix.init, &[0]type_.ScalarType{});
                     if (!init_type.isFinite()) {
-                        return self.setError("The initial value for fix must have finite type, found {}", .{init_type});
+                        return self.setError(expr, "The initial value for fix must have finite type, found {}", .{init_type});
                     }
 
                     var fix_hint = try self.store.arena.allocator.alloc(type_.ScalarType, 1);
@@ -354,13 +356,13 @@ pub const Analyzer = struct {
                             break :set_type .None;
                         }
                         if (body_type == .Lazy or (body_type == .Concrete and body_type.Concrete.abstract_arity > 1)) {
-                            return self.setError("The body for fix must have finite type, found {}", .{body_type});
+                            return self.setError(expr, "The body for fix must have finite type, found {}", .{body_type});
                         }
                         if (body_type.Concrete.columns.len < 1) {
-                            return self.setError("The `next` argument for fix must have arity >= 1", .{});
+                            return self.setError(expr, "The `next` argument for fix must have arity >= 1", .{});
                         }
                         if (body_type.Concrete.columns[0] != .Box or !meta.deepEqual(body_type.Concrete.columns[0].Box.lazy, fix_box_type.lazy)) {
-                            return self.setError("The `next` argument for fix must be able to be applied to it's own result, found {}", .{body_type});
+                            return self.setError(expr, "The `next` argument for fix must be able to be applied to it's own result, found {}", .{body_type});
                         }
                         // drop the type for `prev`
                         const fix_columns = body_type.Concrete.columns[1..];
@@ -375,23 +377,23 @@ pub const Analyzer = struct {
                                 break :set_type fix_type;
                             }
                             if (fix_type.Concrete.columns.len != fix_columns.len) {
-                                return self.setError("The `next` argument for fix must have constant arity, changed from {} to {}", .{ fix_type.Concrete.columns.len, fix_columns.len });
+                                return self.setError(expr, "The `next` argument for fix must have constant arity, changed from {} to {}", .{ fix_type.Concrete.columns.len, fix_columns.len });
                             }
                             var columns = try self.store.arena.allocator.alloc(type_.ScalarType, fix_type.Concrete.columns.len);
                             for (fix_columns) |column, i| {
                                 try self.interrupter.check();
-                                columns[i] = try self.unionScalar(fix_type.Concrete.columns[i], column);
+                                columns[i] = try self.unionScalar(expr, fix_type.Concrete.columns[i], column);
                             }
                             fix_type.Concrete.columns = columns;
                         }
                         fix_box_type.finite = .{ .Concrete = fix_type.Concrete };
                     }
-                    return self.setError("Type of fix failed to converge, reached {}", .{fix_type});
+                    return self.setError(expr, "Type of fix failed to converge, reached {}", .{fix_type});
                 },
                 .Reduce => |reduce| {
                     const input_type = try self.analyze(reduce.input, &[0]type_.ScalarType{});
                     if (!input_type.isFinite()) {
-                        return self.setError("The input for reduce must have finite type, found {}", .{input_type});
+                        return self.setError(expr, "The input for reduce must have finite type, found {}", .{input_type});
                     }
 
                     const input_box_type = type_.BoxType{
@@ -409,7 +411,7 @@ pub const Analyzer = struct {
 
                     const init_type = try self.analyze(reduce.init, &[0]type_.ScalarType{});
                     if (!init_type.isFinite()) {
-                        return self.setError("The initial value for reduce must have finite type, found {}", .{init_type});
+                        return self.setError(expr, "The initial value for reduce must have finite type, found {}", .{init_type});
                     }
 
                     var reduce_hint = try self.store.arena.allocator.alloc(type_.ScalarType, 2);
@@ -441,13 +443,13 @@ pub const Analyzer = struct {
                             break :set_type .None;
                         }
                         if (body_type == .Lazy or body_type.Concrete.abstract_arity > 2) {
-                            return self.setError("The body for reduce must have finite type, found {}", .{body_type});
+                            return self.setError(expr, "The body for reduce must have finite type, found {}", .{body_type});
                         }
                         if (body_type.Concrete.columns.len < 2) {
-                            return self.setError("The body for reduce must have arity >= 2", .{});
+                            return self.setError(expr, "The body for reduce must have arity >= 2", .{});
                         }
                         if (body_type.Concrete.columns[0] != .Box or !meta.deepEqual(body_type.Concrete.columns[0].Box.lazy, reduce_box_type.lazy) or body_type.Concrete.columns[1] != .Box or !meta.deepEqual(body_type.Concrete.columns[1].Box.lazy, input_box_type.lazy)) {
-                            return self.setError("The body for reduce must be able to be applied to it's own result and it's input, found {}", .{body_type});
+                            return self.setError(expr, "The body for reduce must be able to be applied to it's own result and it's input, found {}", .{body_type});
                         }
                         // drop the types for `prev` and `input`
                         const reduce_columns = body_type.Concrete.columns[2..];
@@ -462,18 +464,18 @@ pub const Analyzer = struct {
                                 break :set_type reduce_type;
                             }
                             if (reduce_type.Concrete.columns.len != reduce_columns.len) {
-                                return self.setError("The body for reduce must have constant arity, changed from {} to {}", .{ reduce_type.Concrete.columns.len, reduce_columns.len });
+                                return self.setError(expr, "The body for reduce must have constant arity, changed from {} to {}", .{ reduce_type.Concrete.columns.len, reduce_columns.len });
                             }
                             var columns = try self.store.arena.allocator.alloc(type_.ScalarType, reduce_type.Concrete.columns.len);
                             for (reduce_columns) |column, i| {
                                 try self.interrupter.check();
-                                columns[i] = try self.unionScalar(reduce_type.Concrete.columns[i], column);
+                                columns[i] = try self.unionScalar(expr, reduce_type.Concrete.columns[i], column);
                             }
                             reduce_type.Concrete.columns = columns;
                         }
                         reduce_box_type.finite = .{ .Concrete = reduce_type.Concrete };
                     }
-                    return self.setError("Type of reduce failed to converge, reached {}", .{reduce_type});
+                    return self.setError(expr, "Type of reduce failed to converge, reached {}", .{reduce_type});
                 },
                 .Enumerate => |body| {
                     const body_type = try self.analyze(body, &[0]type_.ScalarType{});
@@ -481,7 +483,7 @@ pub const Analyzer = struct {
                         break :set_type .None;
                     }
                     if (!body_type.isFinite()) {
-                        return self.setError("The body of `enumerate` must have finite type, found {}", .{body_type});
+                        return self.setError(expr, "The body of `enumerate` must have finite type, found {}", .{body_type});
                     }
                     var columns = try ArrayList(type_.ScalarType).initCapacity(&self.store.arena.allocator, 1 + body_type.Concrete.columns.len);
                     try columns.append(.Number);
@@ -525,19 +527,19 @@ pub const Analyzer = struct {
         return std.mem.dupe(&self.store.arena.allocator, type_.TimeType, time);
     }
 
-    fn unionScalar(self: *Analyzer, a: type_.ScalarType, b: type_.ScalarType) Error!type_.ScalarType {
+    fn unionScalar(self: *Analyzer, parent_expr: *const core.Expr, a: type_.ScalarType, b: type_.ScalarType) Error!type_.ScalarType {
         if (meta.deepEqual(a, b)) {
             return a;
         } else {
-            return self.setError("TODO type unions are not implemented yet: {} | {}", .{ a, b });
+            return self.setError(parent_expr, "TODO type unions are not implemented yet: {} | {}", .{ a, b });
         }
     }
 
-    fn intersectScalar(self: *Analyzer, a: type_.ScalarType, b: type_.ScalarType) Error!type_.ScalarType {
+    fn intersectScalar(self: *Analyzer, parent_expr: *const core.Expr, a: type_.ScalarType, b: type_.ScalarType) Error!type_.ScalarType {
         if (meta.deepEqual(a, b)) {
             return a;
         } else {
-            return self.setError("Intersection of {} and {} is empty", .{ a, b });
+            return self.setError(parent_expr, "Intersection of {} and {} is empty", .{ a, b });
         }
     }
 };

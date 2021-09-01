@@ -524,13 +524,32 @@ value:
 | 1
 
 foo: 1, "a" | 2, "b";
-~foo
+foo ~
 ---
 type:
 text, number
 value:
 | "a", 1
 | "b", 2
+
+foo: "a" | "b" | "z";
+bar: "a", "z", 0 | "b", "q", 0;
+foo bar ~
+---
+type:
+number, text
+value:
+| 0, "q"
+| 0, "z"
+
+foo: "a" | "b" | "z";
+bar: "a", "z" | "b", "q";
+foo bar~
+---
+type:
+text
+value:
+| "a"
 
 (1 | 2 | 3) . ?a a+1
 ---
@@ -617,6 +636,13 @@ number
 value:
 | 2
 
+(?@a ?@b a b) (1,2)@ 1@
+---
+type:
+number
+value:
+| 2
+
 fix a: 1;
 a
 ---
@@ -655,12 +681,12 @@ character:
   | 7, "h"
   | 8, "i";
 max: ?@things reduce things none ?@prev ?@i prev > i then prev else i;
-rightmost_child: edits.?edit edit (~parent) @ max;
+rightmost_child: edits.?edit edit parent~ @ max;
 // TODO swapping child and leaf shouldn't matter, but causes test to spin forever
 fix rightmost_leaf: edits.?edit edit | edit rightmost_child rightmost_leaf @ max;
-prev_sibling: edits.?edit edit parent (parent~) .(?sibling edit > sibling) @ max;
+prev_sibling: edits.?edit edit parent parent~ .(?sibling edit > sibling) @ max;
 prev: edits.?edit edit prev_sibling !! then edit prev_sibling rightmost_leaf else edit parent;
-fix position: root, 0 | position ?edit ?pos edit (~prev), pos + 1;
+fix position: root, 0 | position ?edit ?pos edit prev~, pos + 1;
 edits ?edit (edit position), edit, (edit character)
 ---
 type:

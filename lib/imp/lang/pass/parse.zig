@@ -124,6 +124,7 @@ pub const TokenTag = enum {
     LessThanOrEqual,
     GreaterThan,
     GreaterThanOrEqual,
+    Swap,
 
     // not an actual token but used for precedence
     Apply,
@@ -169,6 +170,7 @@ pub const TokenTag = enum {
             .LessThanOrEqual => "`<=`",
             .GreaterThan => "`>`",
             .GreaterThanOrEqual => "`>=`",
+            .Swap => "~",
 
             .Apply => "` `",
 
@@ -215,6 +217,7 @@ pub const Token = union(TokenTag) {
     LessThanOrEqual,
     GreaterThan,
     GreaterThanOrEqual,
+    Swap,
 
     // not an actual token but used for precedence
     Apply,
@@ -489,7 +492,7 @@ pub const Parser = struct {
                         return Token{ .GreaterThan = {} };
                     }
                 },
-                '~' => return Token{ .Name = "~" },
+                '~' => return Token{ .Swap = {} },
                 else => {
                     const ascii_char1 = @intCast(u8, char1 & 0b0111_1111);
                     if (char1 != @as(u21, ascii_char1)) {
@@ -547,7 +550,7 @@ pub const Parser = struct {
     }
 
     // called after seeing name ":"
-    fn parseDefBody(self: *Parser, start: usize, fix: bool, name: []const u8) Error!?*const syntax.Expr {
+    fn parseDefBody(self: *Parser, start: usize, fix: bool, name: []const u8) Error!*const syntax.Expr {
         // (name ":") expr ";" expr
         const value = try self.parseExpr();
         const value_end = self.position;
@@ -572,7 +575,7 @@ pub const Parser = struct {
     }
 
     // returns null if this isn't the start of an expression
-    fn parseExprInnerMaybe(self: *Parser) Error!?*const syntax.Expr {
+    fn parseExprInner(self: *Parser) Error!*const syntax.Expr {
         try self.consumeWhitespace();
         const start = self.position;
         const token = try self.nextToken();
@@ -670,24 +673,11 @@ pub const Parser = struct {
             },
             // allow starting with |&, for easy editing of lists
             .Product, .Union, .Intersect => {
-                return self.parseExprInnerMaybe();
+                return self.parseExprInner();
             },
-            // otherwise not an expression but might be rhs of apply or binop so don't error yet
             else => {
-                self.position = start;
-                return null;
+                return self.setError(start, "Expected start of expression, found {}", .{token});
             },
-        }
-    }
-
-    fn parseExprInner(self: *Parser) Error!*const syntax.Expr {
-        if (try self.parseExprInnerMaybe()) |expr| {
-            return expr;
-        } else {
-            // when parsing initial expr there can't be an apply or binop so go ahead and error
-            const start = self.position;
-            const token = try self.nextToken();
-            return self.setError(start, "Expected start of expression, found {}", .{token});
         }
     }
 
@@ -706,7 +696,15 @@ pub const Parser = struct {
         var left = try self.parseExprInner();
         while (true) {
             const op_start = self.position;
-            const op = try self.nextToken();
+            var whitespace_before_op: bool = undefined;
+            var op: Token = undefined;
+            if (try self.nextTokenMaybe()) |token| {
+                whitespace_before_op = false;
+                op = token;
+            } else {
+                whitespace_before_op = true;
+                op = try self.nextToken();
+            }
             switch (op) {
                 // expr_inner binop expr
                 .Union, .Intersect, .Product, .Extend, .Equal, .Add, .Subtract, .Multiply, .Divide, .Modulus, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual => {
@@ -749,16 +747,27 @@ pub const Parser = struct {
                 },
 
                 .Negate => {
-                    if (prev_op == null) {
+                    if (prev_op == null or !whitespace_before_op) {
                         left = try self.store.putSyntax(.{ .Negate = left }, start, self.position);
                     } else {
                         self.position = op_start;
                         return left;
                     }
                 },
+
                 .Box => {
-                    if (prev_op == null) {
+                    if (prev_op == null or !whitespace_before_op) {
                         left = try self.store.putSyntax(.{ .Box = left }, start, self.position);
+                    } else {
+                        self.position = op_start;
+                        return left;
+                    }
+                },
+
+                .Swap => {
+                    if (prev_op == null or !whitespace_before_op) {
+                        const swap = try self.store.putSyntax(.{ .Name = "~" }, op_start, self.position);
+                        left = try self.store.putSyntax(.{ .Apply = .{ .left = left, .right = swap } }, start, self.position);
                     } else {
                         self.position = op_start;
                         return left;
@@ -789,29 +798,30 @@ pub const Parser = struct {
                     return left;
                 },
 
+                .CloseGroup, .EndDef, .EOF => {
+                    // no more binary things to apply
+                    self.position = op_start;
+                    return left;
+                },
+
                 // not a binop, might be an apply
                 else => {
                     self.position = op_start;
 
-                    // expr_inner expr
-                    if (try self.parseExprInnerMaybe()) |right| {
-                        const precedence = if (prev_op == null) .RightBindsTighter else prev_op.?.comparePrecedence(.Apply);
-                        switch (precedence) {
-                            .RightBindsTighter => {
-                                left = try self.store.putSyntax(.{ .Apply = .{ .left = left, .right = right } }, start, self.position);
-                            },
-                            .LeftBindsTighter, .Same => {
-                                self.position = op_start;
-                                return left;
-                            },
-                            .Ambiguous => {
-                                return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{ prev_op.?, .Apply });
-                            },
-                        }
-                    } else {
-                        // no more binary things to apply
-                        self.position = op_start;
-                        return left;
+                    // expr expr
+                    const right = try self.parseExprOuter(.Apply);
+                    const precedence = if (prev_op == null) .RightBindsTighter else prev_op.?.comparePrecedence(.Apply);
+                    switch (precedence) {
+                        .RightBindsTighter => {
+                            left = try self.store.putSyntax(.{ .Apply = .{ .left = left, .right = right } }, start, self.position);
+                        },
+                        .LeftBindsTighter, .Same => {
+                            self.position = op_start;
+                            return left;
+                        },
+                        .Ambiguous => {
+                            return self.setError(op_start, "Ambiguous precedence for {} vs {}", .{ prev_op.?, .Apply });
+                        },
                     }
                 },
             }

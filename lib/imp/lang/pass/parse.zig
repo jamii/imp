@@ -609,6 +609,19 @@ pub const Parser = struct {
             // "when" expr_inner expr
             .When => {
                 const condition = try self.parseExprInner();
+
+                // in sloppy mode, covert when (cond) to when (cond) some
+                const condition_end = self.position;
+                if ((try self.nextToken()) == .EOF) {
+                    const some = try self.store.putSyntax(.Some, condition_end, self.position);
+                    return self.store.putSyntax(.{ .When = .{
+                        .condition = condition,
+                        .true_branch = some,
+                    } }, start, self.position);
+                } else {
+                    self.position = condition_end;
+                }
+
                 const true_branch = try self.parseExpr();
                 return self.store.putSyntax(.{ .When = .{ .condition = condition, .true_branch = true_branch } }, start, self.position);
             },
@@ -667,7 +680,28 @@ pub const Parser = struct {
             // "if" expr_inner expr else expr
             .If => {
                 const condition = try self.parseExprInner();
+
+                // in sloppy mode, covert if (cond) to if (cond) some else none
+                const condition_end = self.position;
+                if ((try self.nextToken()) == .EOF) {
+                    const some = try self.store.putSyntax(.Some, condition_end, self.position);
+                    const none = try self.store.putSyntax(.None, condition_end, self.position);
+                    return self.store.putSyntax(.{ .If = .{ .condition = condition, .true_branch = some, .false_branch = none } }, start, self.position);
+                } else {
+                    self.position = condition_end;
+                }
+
                 const true_branch = try self.parseExpr();
+
+                // in sloppy mode, covert if (cond) true_branch to if (cond) true_branch else none
+                const true_branch_end = self.position;
+                if ((try self.nextToken()) == .EOF) {
+                    const none = try self.store.putSyntax(.None, condition_end, self.position);
+                    return self.store.putSyntax(.{ .If = .{ .condition = condition, .true_branch = true_branch, .false_branch = none } }, start, self.position);
+                } else {
+                    self.position = true_branch_end;
+                }
+
                 _ = try self.expect(.Else);
                 const false_branch = try self.parseExpr();
                 return self.store.putSyntax(.{ .If = .{ .condition = condition, .true_branch = true_branch, .false_branch = false_branch } }, start, self.position);

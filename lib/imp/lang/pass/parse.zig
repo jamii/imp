@@ -585,6 +585,15 @@ pub const Parser = struct {
             // "(" expr ")"
             .OpenGroup => {
                 const expr = try self.parseExpr();
+
+                // in sloppy mode, close parens
+                const expr_end = self.position;
+                if ((try self.nextToken()) == .EOF) {
+                    return expr;
+                } else {
+                    self.position = expr_end;
+                }
+
                 _ = try self.expect(.CloseGroup);
                 return expr;
             },

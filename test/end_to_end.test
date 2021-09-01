@@ -659,6 +659,30 @@ number
 value:
 | 10
 
+// sloppy mode allows ending with a def
+a: 1 + 1
+---
+type:
+number
+value:
+| 2
+
+// sloppy mode allows ending with a def
+a: 1 + 1;
+---
+type:
+number
+value:
+| 2
+
+// sloppy mode allows ending without closing parens
+a: (1 + 1
+---
+type:
+number
+value:
+| 2
+
 edits: range 0 8;
 root: 0;
 parent:
@@ -761,19 +785,3 @@ value:
 | 6, 6, "g"
 | 7, 7, "h"
 | 8, 8, "i"
-
-// sloppy mode allows ending with a def
-a: 1 + 1
----
-type:
-number
-value:
-| 2
-
-// sloppy mode allows ending with a def
-a: 1 + 1;
----
-type:
-number
-value:
-| 2

@@ -269,7 +269,7 @@ const Syntax = struct {
         .next = PtrExpr,
     });
 
-    const When = Struct(imp.lang.repr.syntax.When, .{
+    const Then = Struct(imp.lang.repr.syntax.Then, .{
         .condition = PtrExpr,
         .true_branch = PtrExpr,
     });
@@ -284,7 +284,7 @@ const Syntax = struct {
         .body = PtrExpr,
     });
 
-    const If = Struct(imp.lang.repr.syntax.If, .{
+    const ThenElse = Struct(imp.lang.repr.syntax.ThenElse, .{
         .condition = PtrExpr,
         .true_branch = PtrExpr,
         .false_branch = PtrExpr,
@@ -310,7 +310,7 @@ const Syntax = struct {
         .Product = Pair,
         .Equal = Pair,
         .Name = Name,
-        .When = When,
+        .Then = Then,
         .Arg = Arg,
         .Apply = Pair,
         .Box = PtrExpr,
@@ -320,7 +320,7 @@ const Syntax = struct {
         .Annotate = Annotate,
 
         .Negate = PtrExpr,
-        .If = If,
+        .ThenElse = ThenElse,
         .Let = Let,
         .Lookup = Lookup,
     });
@@ -343,7 +343,7 @@ const Core = struct {
     // will fix these up in makeValid
     const NameIx = Int(usize);
 
-    const When = Struct(imp.lang.repr.core.When, .{
+    const Then = Struct(imp.lang.repr.core.Then, .{
         .condition = PtrExpr,
         .true_branch = PtrExpr,
     });
@@ -383,7 +383,7 @@ const Core = struct {
         .Name = NameIx,
         .UnboxName = NameIx,
         .Negate = PtrExpr,
-        .When = When,
+        .Then = Then,
         .Abstract = PtrExpr,
         .Apply = Pair,
         .Box = Box,

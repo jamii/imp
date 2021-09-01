@@ -16,7 +16,7 @@ pub const Expr = union(enum) {
     Equal: Pair,
     Name: Name,
     Negate: *const Expr,
-    When: When,
+    Then: Then,
     Abstract: Abstract,
     Apply: Pair,
     Box: *const Expr,
@@ -25,7 +25,7 @@ pub const Expr = union(enum) {
     Enumerate: *const Expr,
     Annotate: Annotate,
 
-    If: If,
+    ThenElse: ThenElse,
     Def: Def,
 
     pub fn getChildren(self: Expr) FixedSizeArrayList(3, *const Expr) {
@@ -38,7 +38,7 @@ pub const Expr = union(enum) {
                     // nothing to do
                 } else if (t == *const Expr) {
                     children.append(v);
-                } else if (t == Pair or t == Fix or t == When or t == Fix or t == Reduce or t == Abstract or t == Annotate or t == If or t == Def) {
+                } else if (t == Pair or t == Fix or t == Then or t == Fix or t == Reduce or t == Abstract or t == Annotate or t == ThenElse or t == Def) {
                     inline for (@typeInfo(t).Struct.fields) |value_field| {
                         if (value_field.field_type == *const Expr) {
                             children.append(@field(v, value_field.name));
@@ -67,7 +67,7 @@ pub const Expr = union(enum) {
             .Extend => try out_stream.writeAll("."),
             .Equal => try out_stream.writeAll("="),
             .Name => |name| try out_stream.writeAll(name),
-            .When => try out_stream.writeAll("when"),
+            .Then => try out_stream.writeAll("then"),
             .Abstract => |abstract| {
                 try out_stream.writeAll("?");
                 try abstract.arg.dumpInto(out_stream);
@@ -78,7 +78,7 @@ pub const Expr = union(enum) {
             .Box => try out_stream.writeAll("@"),
             .Annotate => |annotate| try std.fmt.format(out_stream, "# {}", .{annotate.annotation}),
             .Negate => try out_stream.writeAll("!"),
-            .If => try out_stream.writeAll("when"),
+            .ThenElse => try out_stream.writeAll("then_else"),
             .Def => |def| try std.fmt.format(out_stream, "{}:", .{def.name}),
         }
         for (self.getChildren().slice()) |child| {
@@ -92,7 +92,7 @@ pub const Pair = struct {
     right: *const Expr,
 };
 
-pub const When = struct {
+pub const Then = struct {
     condition: *const Expr,
     true_branch: *const Expr,
 };
@@ -123,7 +123,7 @@ pub const Annotate = struct {
     body: *const Expr,
 };
 
-pub const If = struct {
+pub const ThenElse = struct {
     condition: *const Expr,
     true_branch: *const Expr,
     false_branch: *const Expr,

@@ -302,11 +302,11 @@ const Interpreter = struct {
                     },
                 };
             },
-            .When => |when| {
+            .Then => |then| {
                 // the hint for expr doesn't tell us anything about condition
-                const condition = try self.interpret(when.condition, &[0]value.Scalar{});
+                const condition = try self.interpret(then.condition, &[0]value.Scalar{});
                 if (condition == .Lazy) {
-                    return self.setError(expr, "The condition for `when` cannot be a lazy set", .{});
+                    return self.setError(expr, "The condition for `then` cannot be a lazy set", .{});
                 }
                 if (condition.Finite.set.count() == 0) {
                     const set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
@@ -317,7 +317,7 @@ const Interpreter = struct {
                         },
                     };
                 } else {
-                    return self.interpret(when.true_branch, hint);
+                    return self.interpret(then.true_branch, hint);
                 }
             },
             .Abstract => |body| {

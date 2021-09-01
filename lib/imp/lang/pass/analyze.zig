@@ -218,13 +218,13 @@ pub const Analyzer = struct {
                         },
                     };
                 },
-                .When => |when| {
+                .Then => |then| {
                     // the hint for expr doesn't tell us anything about condition
-                    const condition_type = try self.analyze(when.condition, &[0]type_.ScalarType{});
+                    const condition_type = try self.analyze(then.condition, &[0]type_.ScalarType{});
                     if (!((condition_type == .None) or (condition_type == .Concrete and condition_type.Concrete.columns.len == 0))) {
-                        return self.setError(expr, "The condition of `when` must have type `maybe`, found {}", .{condition_type});
+                        return self.setError(expr, "The condition of `then` must have type `maybe`, found {}", .{condition_type});
                     }
-                    break :set_type try self.analyze(when.true_branch, hint);
+                    break :set_type try self.analyze(then.true_branch, hint);
                 },
                 .Abstract => |body| {
                     if (hint.len == 0) {

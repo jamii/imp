@@ -138,10 +138,10 @@ const Desugarer = struct {
                 break :name try self.putCore(.{ .Native = native });
             },
             .Negate => |expr| try self.putCore(.{ .Negate = try self.desugar(expr) }),
-            .When => |when| try self.putCore(.{
-                .When = .{
-                    .condition = try self.desugar(when.condition),
-                    .true_branch = try self.desugar(when.true_branch),
+            .Then => |then| try self.putCore(.{
+                .Then = .{
+                    .condition = try self.desugar(then.condition),
+                    .true_branch = try self.desugar(then.true_branch),
                 },
             }),
             .Abstract => |abstract| abstract: {
@@ -181,21 +181,21 @@ const Desugarer = struct {
                     },
                 },
             ),
-            .If => |if_| if_: {
-                // `if c t f` => `[c] (?[g] , ((when g then t) | (when !g then f)))`
-                const box_c = try self.makeBox(try self.desugar(if_.condition));
+            .ThenElse => |then_else| then_else: {
+                // `c then t else f` => `[c] (?[g] , ((g then t) | (g! then f)))`
+                const box_c = try self.makeBox(try self.desugar(then_else.condition));
                 try self.scope.append(null); // g
-                const t = try self.desugar(if_.true_branch);
-                const f = try self.desugar(if_.false_branch);
+                const t = try self.desugar(then_else.true_branch);
+                const f = try self.desugar(then_else.false_branch);
                 _ = self.scope.pop();
                 const left_g = try self.putCore(.{ .UnboxName = 0 });
-                const left = try self.putCore(.{ .When = .{ .condition = left_g, .true_branch = t } });
+                const left = try self.putCore(.{ .Then = .{ .condition = left_g, .true_branch = t } });
                 const right_g = try self.putCore(.{ .UnboxName = 0 });
                 const not_right_g = try self.putCore(.{ .Negate = right_g });
-                const right = try self.putCore(.{ .When = .{ .condition = not_right_g, .true_branch = f } });
+                const right = try self.putCore(.{ .Then = .{ .condition = not_right_g, .true_branch = f } });
                 const body = try self.putCore(.{ .Union = .{ .left = left, .right = right } });
                 const abstract = try self.putCore(.{ .Abstract = body });
-                break :if_ try self.putCore(.{ .Apply = .{ .left = box_c, .right = abstract } });
+                break :then_else try self.putCore(.{ .Apply = .{ .left = box_c, .right = abstract } });
             },
             .Def => |def| def: {
                 // `n: v; b` => `[v] (?[n] b)`

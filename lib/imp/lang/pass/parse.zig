@@ -18,14 +18,13 @@ const syntax = imp.lang.repr.syntax;
 //   text
 //   name
 //   expr "!"
-//   "when" expr_inner expr_inner
 //   "?" arg expr
 //   expr "@"
 //   "fix" expr_inner expr_inner
 //   "reduce" expr_inner expr_inner expr_inner
 //   "enumerate" expr_inner
 //   "#" name expr_inner
-//   "if" expr_inner expr_inner expr_inner
+//   expr "then" expr ("else" expr)?
 //   "fix"? name ":" expr ";" expr
 
 // name =
@@ -100,7 +99,7 @@ pub const TokenTag = enum {
     Product,
     Equal,
     Name,
-    When,
+    Then,
     Arg,
     Box,
     Fix,
@@ -110,7 +109,6 @@ pub const TokenTag = enum {
 
     // sugar
     Negate,
-    If,
     Else,
     Def,
     EndDef,
@@ -148,7 +146,7 @@ pub const TokenTag = enum {
             .Product => "`,`",
             .Equal => "`=`",
             .Name => "name",
-            .When => "`when`",
+            .Then => "`then`",
             .Arg => "`?`",
             .Box => "`@`",
             .Fix => "`fix`",
@@ -157,7 +155,6 @@ pub const TokenTag = enum {
             .Annotate => "`#`",
 
             .Negate => "`!`",
-            .If => "`if`",
             .Else => "`else`",
             .Def => "`:`",
             .EndDef => "`;`",
@@ -193,7 +190,7 @@ pub const Token = union(TokenTag) {
     Product,
     Equal,
     Name: []const u8, // ascii, non-empty
-    When,
+    Then,
     Arg,
     Box,
     Fix,
@@ -203,7 +200,6 @@ pub const Token = union(TokenTag) {
 
     // sugar
     Negate, // TODO not currently desugared because `none` is typed as 0 arity
-    If,
     Else,
     Def,
     EndDef,
@@ -506,11 +502,10 @@ pub const Parser = struct {
                         const name = try self.tokenizeName();
                         if (meta.deepEqual(name, "none")) return Token{ .None = {} };
                         if (meta.deepEqual(name, "some")) return Token{ .Some = {} };
-                        if (meta.deepEqual(name, "when")) return Token{ .When = {} };
+                        if (meta.deepEqual(name, "then")) return Token{ .Then = {} };
                         if (meta.deepEqual(name, "fix")) return Token{ .Fix = {} };
                         if (meta.deepEqual(name, "reduce")) return Token{ .Reduce = {} };
                         if (meta.deepEqual(name, "enumerate")) return Token{ .Enumerate = {} };
-                        if (meta.deepEqual(name, "if")) return Token{ .If = {} };
                         if (meta.deepEqual(name, "else")) return Token{ .Else = {} };
                         return Token{ .Name = name };
                     } else {
@@ -615,25 +610,6 @@ pub const Parser = struct {
                     return self.store.putSyntax(.{ .Name = name }, start, self.position);
                 }
             },
-            // "when" expr_inner expr
-            .When => {
-                const condition = try self.parseExprInner();
-
-                // in sloppy mode, covert when (cond) to when (cond) some
-                const condition_end = self.position;
-                if ((try self.nextToken()) == .EOF) {
-                    const some = try self.store.putSyntax(.Some, condition_end, self.position);
-                    return self.store.putSyntax(.{ .When = .{
-                        .condition = condition,
-                        .true_branch = some,
-                    } }, start, self.position);
-                } else {
-                    self.position = condition_end;
-                }
-
-                const true_branch = try self.parseExpr();
-                return self.store.putSyntax(.{ .When = .{ .condition = condition, .true_branch = true_branch } }, start, self.position);
-            },
             // "?" arg expr
             // TODO disallow whitespace between ? and arg
             .Arg => {
@@ -686,37 +662,8 @@ pub const Parser = struct {
                 const body = try self.parseExprInner();
                 return self.store.putSyntax(.{ .Annotate = .{ .annotation = annotation, .body = body } }, start, self.position);
             },
-            // "if" expr_inner expr else expr
-            .If => {
-                const condition = try self.parseExprInner();
-
-                // in sloppy mode, covert if (cond) to if (cond) some else none
-                const condition_end = self.position;
-                if ((try self.nextToken()) == .EOF) {
-                    const some = try self.store.putSyntax(.Some, condition_end, self.position);
-                    const none = try self.store.putSyntax(.None, condition_end, self.position);
-                    return self.store.putSyntax(.{ .If = .{ .condition = condition, .true_branch = some, .false_branch = none } }, start, self.position);
-                } else {
-                    self.position = condition_end;
-                }
-
-                const true_branch = try self.parseExpr();
-
-                // in sloppy mode, covert if (cond) true_branch to if (cond) true_branch else none
-                const true_branch_end = self.position;
-                if ((try self.nextToken()) == .EOF) {
-                    const none = try self.store.putSyntax(.None, condition_end, self.position);
-                    return self.store.putSyntax(.{ .If = .{ .condition = condition, .true_branch = true_branch, .false_branch = none } }, start, self.position);
-                } else {
-                    self.position = true_branch_end;
-                }
-
-                _ = try self.expect(.Else);
-                const false_branch = try self.parseExpr();
-                return self.store.putSyntax(.{ .If = .{ .condition = condition, .true_branch = true_branch, .false_branch = false_branch } }, start, self.position);
-            },
             .Else => {
-                return self.setError(start, "Found `else` without `if`", .{});
+                return self.setError(start, "Found `else` without `then`", .{});
             },
             .Def => {
                 return self.setError(start, "Found `:` without preceding name", .{});
@@ -818,7 +765,25 @@ pub const Parser = struct {
                     }
                 },
 
-                // we're between if and else, backtrack
+                // expr "then" expr ("else" expr)?
+                .Then => {
+                    if (prev_op == null) {
+                        const true_branch = try self.parseExpr();
+                        const true_branch_end = self.position;
+                        if ((try self.nextToken()) == .Else) {
+                            const false_branch = try self.parseExpr();
+                            left = try self.store.putSyntax(.{ .ThenElse = .{ .condition = left, .true_branch = true_branch, .false_branch = false_branch } }, start, self.position);
+                        } else {
+                            self.position = true_branch_end;
+                            left = try self.store.putSyntax(.{ .Then = .{ .condition = left, .true_branch = true_branch } }, start, self.position);
+                        }
+                    } else {
+                        self.position = op_start;
+                        return left;
+                    }
+                },
+
+                // we're between `then` and `else`, backtrack
                 .Else => {
                     self.position = op_start;
                     return left;

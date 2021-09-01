@@ -17,7 +17,7 @@ pub const Expr = union(enum) {
     Name: NameIx,
     UnboxName: NameIx,
     Negate: *const Expr,
-    When: When,
+    Then: Then,
     Abstract: *const Expr,
     Apply: Pair,
     Box: Box,
@@ -37,7 +37,7 @@ pub const Expr = union(enum) {
                     // nothing to do
                 } else if (t == *const Expr) {
                     children.append(v);
-                } else if (t == Pair or t == When or t == Box or t == Fix or t == Reduce or t == Annotate) {
+                } else if (t == Pair or t == Then or t == Box or t == Fix or t == Reduce or t == Annotate) {
                     inline for (@typeInfo(t).Struct.fields) |value_field| {
                         if (value_field.field_type == *const Expr) {
                             children.append(@field(v, value_field.name));
@@ -61,7 +61,7 @@ pub const Expr = union(enum) {
                     // nothing to do
                 } else if (t == *const Expr) {
                     children.append(v);
-                } else if (t == Pair or t == When or t == Box or t == Fix or t == Reduce or t == Annotate) {
+                } else if (t == Pair or t == Then or t == Box or t == Fix or t == Reduce or t == Annotate) {
                     inline for (@typeInfo(t).Struct.fields) |value_field| {
                         if (value_field.field_type == *const Expr) {
                             children.append(&@field(v, value_field.name));
@@ -103,7 +103,7 @@ pub const Expr = union(enum) {
             .Equal => try out_stream.writeAll("="),
             .Name => |name_ix| try std.fmt.format(out_stream, "get {}", .{name_ix}),
             .UnboxName => |name_ix| try std.fmt.format(out_stream, "get unbox {}", .{name_ix}),
-            .When => try out_stream.writeAll("when"),
+            .Then => try out_stream.writeAll("then"),
             .Abstract => try out_stream.writeAll("?"),
             .Apply => try out_stream.writeAll("apply"),
             .Box => |box| {
@@ -131,7 +131,7 @@ pub const Pair = struct {
 
 pub const NameIx = usize;
 
-pub const When = struct {
+pub const Then = struct {
     condition: *const Expr,
     true_branch: *const Expr,
 };

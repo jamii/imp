@@ -60,9 +60,9 @@ pub const FiniteSet = struct {
             }
         }.lessThan);
         if (tuples.items.len == 0) {
-            try out_stream.writeAll("none");
+            try out_stream.writeAll("none\n");
         } else if (tuples.items.len == 1 and tuples.items[0].len == 0) {
-            try out_stream.writeAll("some");
+            try out_stream.writeAll("some\n");
         } else {
             for (tuples.items) |tuple| {
                 try out_stream.writeAll("| ");

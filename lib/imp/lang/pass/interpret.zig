@@ -8,10 +8,12 @@ const value = imp.lang.repr.value;
 /// Guarantees:
 /// * If expr typechecks then this will not return InterpretError
 /// * If expr has a finite type then this will return a value.Set.Finite
-pub fn interpret(store: *const Store, arena: *ArenaAllocator, expr: *const core.Expr, interrupter: imp.lang.Interrupter, error_info: *?ErrorInfo) Error!value.Set {
+pub fn interpret(store: *const Store, arena: *ArenaAllocator, expr: *const core.Expr, watch_expr_o: ?*const core.Expr, watch_results: *ArrayList(value.Set), interrupter: imp.lang.Interrupter, error_info: *?ErrorInfo) Error!value.Set {
     var interpreter = Interpreter{
         .store = store,
         .arena = arena,
+        .watch_expr_o = watch_expr_o,
+        .watch_results = watch_results,
         .scope = ArrayList(value.Scalar).init(&store.arena.allocator),
         .time = ArrayList(value.Time).init(&store.arena.allocator),
         .boxes = DeepHashMap(value.LazySet, value.Set).init(&store.arena.allocator),
@@ -41,6 +43,8 @@ pub const ErrorInfo = struct {
 const Interpreter = struct {
     store: *const Store,
     arena: *ArenaAllocator,
+    watch_expr_o: ?*const core.Expr,
+    watch_results: *ArrayList(value.Set),
     scope: ArrayList(value.Scalar),
     time: ArrayList(value.Time),
     boxes: DeepHashMap(value.LazySet, value.Set),
@@ -66,6 +70,16 @@ const Interpreter = struct {
     }
 
     fn interpret(self: *Interpreter, expr: *const core.Expr, hint: value.Tuple) Error!value.Set {
+        const result = self.interpretInner(expr, hint);
+        if (self.watch_expr_o) |watch_expr|
+            if (expr == watch_expr)
+                if (result) |set|
+                    try self.watch_results.append(set)
+                else |_| {};
+        return result;
+    }
+
+    fn interpretInner(self: *Interpreter, expr: *const core.Expr, hint: value.Tuple) Error!value.Set {
         try self.interrupter.check();
         switch (expr.*) {
             .None => {

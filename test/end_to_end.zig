@@ -49,7 +49,7 @@ pub fn main() anyerror!void {
                 .desired_id = &desired_id,
             };
             var error_info: ?imp.lang.InterpretErrorInfo = null;
-            const result = imp.lang.interpret(&arena, input, interrupter, &error_info);
+            const result = imp.lang.interpret(&arena, input, 0, interrupter, &error_info);
 
             var bytes = ArrayList(u8).init(allocator);
             defer bytes.deinit();

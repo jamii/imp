@@ -19,13 +19,15 @@ pub const CoreMeta = struct {
 pub const Store = struct {
     arena: *ArenaAllocator,
     next_expr_id: usize,
+    core_exprs: ArrayList(*const core.Expr),
     specializations: DeepHashMap(type_.LazySetType, ArrayList(Specialization)),
 
     pub fn init(arena: *ArenaAllocator) Store {
         return Store{
             .arena = arena,
-            .specializations = DeepHashMap(type_.LazySetType, ArrayList(Specialization)).init(&arena.allocator),
             .next_expr_id = 0,
+            .core_exprs = ArrayList(*const core.Expr).init(&arena.allocator),
+            .specializations = DeepHashMap(type_.LazySetType, ArrayList(Specialization)).init(&arena.allocator),
         };
     }
 
@@ -52,6 +54,7 @@ pub const Store = struct {
                 .id = id,
             },
         };
+        try self.core_exprs.append(&expr_and_meta.expr);
         return &expr_and_meta.expr;
     }
 
@@ -63,6 +66,32 @@ pub const Store = struct {
 
     pub fn getCoreMeta(expr: *const core.Expr) *const CoreMeta {
         return &@fieldParentPtr(ExprAndMeta(core.Expr, CoreMeta), "expr", expr).meta;
+    }
+
+    fn betterMatchForPosition(position: usize, a: *const core.Expr, b: *const core.Expr) bool {
+        const a_core_meta = Store.getCoreMeta(a);
+        const a_syntax_meta = Store.getSyntaxMeta(a_core_meta.from);
+        const b_core_meta = Store.getCoreMeta(b);
+        const b_syntax_meta = Store.getSyntaxMeta(b_core_meta.from);
+        // anything past position is not a match
+        if (a_syntax_meta.end > position) return false;
+        if (b_syntax_meta.end > position) return true;
+        // the expr that ends closest to position is the best match
+        if (a_syntax_meta.end > b_syntax_meta.end) return true;
+        if (a_syntax_meta.end < b_syntax_meta.end) return false;
+        // if both end at the same point, the expr that is longest is the best match
+        if (a_syntax_meta.start < b_syntax_meta.start) return true;
+        if (a_syntax_meta.start > b_syntax_meta.start) return false;
+        // if both have same length, return the outermost expr in the tree
+        return a_core_meta.id > b_core_meta.id;
+    }
+
+    pub fn findCoreExprAt(self: Store, position: usize) ?*const core.Expr {
+        if (std.sort.min(*const core.Expr, self.core_exprs.items, position, betterMatchForPosition)) |best_match| {
+            const match_meta = Store.getSyntaxMeta(Store.getCoreMeta(best_match).from);
+            if (match_meta.end <= position) return best_match;
+        }
+        return null;
     }
 
     pub fn putSpecialization(self: *Store, lazy: type_.LazySetType, hint: []const type_.ScalarType, set_type: type_.SetType) !void {

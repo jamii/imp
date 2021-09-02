@@ -61,20 +61,34 @@ pub const InterpretError = pass.parse.Error ||
     pass.analyze.Error ||
     pass.interpret.Error;
 
-pub const TypeAndSet = struct {
+pub const InterpretResult = struct {
     set_type: repr.type_.SetType,
     set: repr.value.Set,
+    watch_results: []const repr.value.Set,
+    watch_range: ?[2]usize,
 
-    pub fn dumpInto(self: TypeAndSet, allocator: *Allocator, out_stream: anytype) anyerror!void {
+    pub fn dumpInto(self: InterpretResult, allocator: *Allocator, out_stream: anytype) anyerror!void {
         try out_stream.writeAll("type:\n");
         try self.set_type.dumpInto(out_stream);
         try out_stream.writeAll("\nvalue:\n");
         try self.set.dumpInto(allocator, out_stream);
-        try out_stream.writeAll("\n");
+        if (self.watch_range) |_| {
+            try out_stream.writeAll("\nwatch values:\n");
+            for (self.watch_results) |set| {
+                try set.dumpInto(allocator, out_stream);
+                try out_stream.writeAll("\n");
+            }
+        }
     }
 };
 
-pub fn interpret(arena: *ArenaAllocator, source: []const u8, interrupter: Interrupter, error_info: *?InterpretErrorInfo) InterpretError!TypeAndSet {
+pub fn interpret(
+    arena: *ArenaAllocator,
+    source: []const u8,
+    watch_position: usize,
+    interrupter: Interrupter,
+    error_info: *?InterpretErrorInfo,
+) InterpretError!InterpretResult {
     var store = Store.init(arena);
 
     var parse_error_info: ?pass.parse.ErrorInfo = null;
@@ -101,17 +115,26 @@ pub fn interpret(arena: *ArenaAllocator, source: []const u8, interrupter: Interr
         return err;
     };
 
+    const watch_expr_o = store.findCoreExprAt(watch_position);
+    var watch_range: ?[2]usize = null;
+    if (watch_expr_o) |watch_expr| {
+        const watch_meta = Store.getSyntaxMeta(Store.getCoreMeta(watch_expr).from);
+        watch_range = .{ watch_meta.start, watch_meta.end };
+    }
+    var watch_results = ArrayList(repr.value.Set).init(&arena.allocator);
     var interpret_error_info: ?pass.interpret.ErrorInfo = null;
-    const set = pass.interpret.interpret(&store, arena, core_expr, interrupter, &interpret_error_info) catch |err| {
+    const set = pass.interpret.interpret(&store, arena, core_expr, watch_expr_o, &watch_results, interrupter, &interpret_error_info) catch |err| {
         if (err == error.InterpretError or err == error.NativeError) {
             error_info.* = .{ .Interpret = interpret_error_info.? };
         }
         return err;
     };
 
-    return TypeAndSet{
+    return InterpretResult{
         .set_type = set_type,
         .set = set,
+        .watch_results = watch_results.toOwnedSlice(),
+        .watch_range = watch_range,
     };
 }
 
@@ -141,6 +164,7 @@ pub const Worker = struct {
     pub const Request = struct {
         id: usize,
         text: []const u8,
+        position: usize,
     };
 
     pub const Response = struct {
@@ -150,7 +174,7 @@ pub const Worker = struct {
     };
 
     pub const ResponseKind = union(enum) {
-        Ok,
+        Ok: ?[2]usize,
         Err: ?[2]usize,
     };
 
@@ -252,20 +276,20 @@ pub const Worker = struct {
             defer _ = gpa.deinit();
             var arena = ArenaAllocator.init(&gpa.allocator);
             defer arena.deinit();
-            var error_info: ?imp.lang.InterpretErrorInfo = null;
             const interrupter = Interrupter{
                 .current_id = new_request.id,
                 .desired_id = &self.desired_id,
             };
-            const result = imp.lang.interpret(&arena, new_request.text, interrupter, &error_info);
+            var error_info: ?imp.lang.InterpretErrorInfo = null;
+            const result = imp.lang.interpret(&arena, new_request.text, new_request.position, interrupter, &error_info);
 
             // print result
             var response_buffer = ArrayList(u8).init(self.allocator);
             defer response_buffer.deinit();
             var response_kind: ResponseKind = undefined;
-            if (result) |type_and_set| {
-                try type_and_set.dumpInto(&arena.allocator, response_buffer.writer());
-                response_kind = .Ok;
+            if (result) |ok| {
+                try ok.dumpInto(&arena.allocator, response_buffer.writer());
+                response_kind = .{ .Ok = ok.watch_range };
             } else |err| {
                 try InterpretErrorInfo.dumpInto(error_info, err, response_buffer.writer());
                 response_kind = .{ .Err = InterpretErrorInfo.error_range(error_info, err) };

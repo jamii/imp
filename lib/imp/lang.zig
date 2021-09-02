@@ -85,7 +85,7 @@ pub const InterpretResult = struct {
 pub fn interpret(
     arena: *ArenaAllocator,
     source: []const u8,
-    watch_position: usize,
+    watch_selection: Store.SourceSelection,
     interrupter: Interrupter,
     error_info: *?InterpretErrorInfo,
 ) InterpretError!InterpretResult {
@@ -115,7 +115,7 @@ pub fn interpret(
         return err;
     };
 
-    const watch_expr_o = store.findCoreExprAt(watch_position);
+    const watch_expr_o = store.findCoreExprAt(watch_selection);
     var watch_range: ?[2]usize = null;
     if (watch_expr_o) |watch_expr| {
         const watch_meta = Store.getSyntaxMeta(Store.getCoreMeta(watch_expr).from);
@@ -164,7 +164,7 @@ pub const Worker = struct {
     pub const Request = struct {
         id: usize,
         text: []const u8,
-        position: usize,
+        selection: Store.SourceSelection,
     };
 
     pub const Response = struct {
@@ -281,7 +281,7 @@ pub const Worker = struct {
                 .desired_id = &self.desired_id,
             };
             var error_info: ?imp.lang.InterpretErrorInfo = null;
-            const result = imp.lang.interpret(&arena, new_request.text, new_request.position, interrupter, &error_info);
+            const result = imp.lang.interpret(&arena, new_request.text, new_request.selection, interrupter, &error_info);
 
             // print result
             var response_buffer = ArrayList(u8).init(self.allocator);

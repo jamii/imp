@@ -8,7 +8,15 @@ const value = imp.lang.repr.value;
 /// Guarantees:
 /// * If expr typechecks then this will not return InterpretError
 /// * If expr has a finite type then this will return a value.Set.Finite
-pub fn interpret(store: *const Store, arena: *ArenaAllocator, expr: *const core.Expr, watch_expr_o: ?*const core.Expr, watch_results: *ArrayList(value.Set), interrupter: imp.lang.Interrupter, error_info: *?ErrorInfo) Error!value.Set {
+pub fn interpret(
+    store: *const Store,
+    arena: *ArenaAllocator,
+    expr: *const core.Expr,
+    watch_expr_o: ?*const core.Expr,
+    watch_results: *ArrayList(value.Set),
+    interrupter: imp.lang.Interrupter,
+    error_info: *?ErrorInfo,
+) Error!value.Set {
     var interpreter = Interpreter{
         .store = store,
         .arena = arena,

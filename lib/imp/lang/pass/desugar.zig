@@ -46,7 +46,7 @@ const Desugarer = struct {
     }
 
     fn putCore(self: *Desugarer, core_expr: core.Expr) Error!*const core.Expr {
-        return self.store.putCore(core_expr, self.current_expr.?);
+        return self.store.putCore(core_expr, self.current_expr.?, try std.mem.dupe(&self.store.arena.allocator, ?syntax.Arg, self.scope.items));
     }
 
     fn desugar(self: *Desugarer, syntax_expr: *const syntax.Expr) Error!*const core.Expr {

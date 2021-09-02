@@ -12,6 +12,7 @@ pub const SyntaxMeta = struct {
 
 pub const CoreMeta = struct {
     from: *const syntax.Expr,
+    scope: []const ?syntax.Arg,
     // this is just useful as a stable id for tests
     id: usize,
 };
@@ -43,7 +44,7 @@ pub const Store = struct {
         return &expr_and_meta.expr;
     }
 
-    pub fn putCore(self: *Store, expr: core.Expr, from: *const syntax.Expr) !*const core.Expr {
+    pub fn putCore(self: *Store, expr: core.Expr, from: *const syntax.Expr, scope: []const ?syntax.Arg) !*const core.Expr {
         var expr_and_meta = try self.arena.allocator.create(ExprAndMeta(core.Expr, CoreMeta));
         const id = self.next_expr_id;
         self.next_expr_id += 1;
@@ -51,6 +52,7 @@ pub const Store = struct {
             .expr = expr,
             .meta = CoreMeta{
                 .from = from,
+                .scope = scope,
                 .id = id,
             },
         };

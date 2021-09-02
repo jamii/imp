@@ -3,6 +3,7 @@ usingnamespace imp.common;
 const meta = imp.meta;
 const Store = imp.lang.Store;
 const core = imp.lang.repr.core;
+const syntax = imp.lang.repr.syntax;
 const value = imp.lang.repr.value;
 
 /// Guarantees:
@@ -13,7 +14,7 @@ pub fn interpret(
     arena: *ArenaAllocator,
     expr: *const core.Expr,
     watch_expr_o: ?*const core.Expr,
-    watch_results: *ArrayList(value.Set),
+    watch_results: *ArrayList(ScopeAndSet),
     interrupter: imp.lang.Interrupter,
     error_info: *?ErrorInfo,
 ) Error!value.Set {
@@ -46,13 +47,23 @@ pub const ErrorInfo = struct {
     message: []const u8,
 };
 
+pub const ScopeAndSet = struct {
+    scope: []const ArgAndScalar,
+    set: value.Set,
+};
+
+pub const ArgAndScalar = struct {
+    arg: syntax.Arg,
+    scalar: value.Scalar,
+};
+
 // --------------------------------------------------------------------------------
 
 const Interpreter = struct {
     store: *const Store,
     arena: *ArenaAllocator,
     watch_expr_o: ?*const core.Expr,
-    watch_results: *ArrayList(value.Set),
+    watch_results: *ArrayList(ScopeAndSet),
     scope: ArrayList(value.Scalar),
     time: ArrayList(value.Time),
     boxes: DeepHashMap(value.LazySet, value.Set),
@@ -81,9 +92,17 @@ const Interpreter = struct {
         const result = self.interpretInner(expr, hint);
         if (self.watch_expr_o) |watch_expr|
             if (expr == watch_expr)
-                if (result) |set|
-                    try self.watch_results.append(set)
-                else |_| {};
+                if (result) |set| {
+                    var scope = ArrayList(ArgAndScalar).init(&self.arena.allocator);
+                    const watch_meta = Store.getCoreMeta(expr);
+                    for (watch_meta.scope) |arg_o, i|
+                        if (arg_o) |arg|
+                            try scope.append(.{ .arg = arg, .scalar = self.scope.items[i] });
+                    try self.watch_results.append(.{
+                        .scope = scope.toOwnedSlice(),
+                        .set = set,
+                    });
+                } else |_| {};
         return result;
     }
 

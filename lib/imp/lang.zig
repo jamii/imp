@@ -64,7 +64,7 @@ pub const InterpretError = pass.parse.Error ||
 pub const InterpretResult = struct {
     set_type: repr.type_.SetType,
     set: repr.value.Set,
-    watch_results: []const repr.value.Set,
+    watch_results: []const pass.interpret.ScopeAndSet,
     watch_range: ?[2]usize,
 
     pub fn dumpInto(self: InterpretResult, allocator: *Allocator, out_stream: anytype) anyerror!void {
@@ -73,9 +73,21 @@ pub const InterpretResult = struct {
         try out_stream.writeAll("\nvalue:\n");
         try self.set.dumpInto(allocator, out_stream);
         if (self.watch_range) |_| {
-            try out_stream.writeAll("\nwatch values:\n");
-            for (self.watch_results) |set| {
-                try set.dumpInto(allocator, out_stream);
+            try out_stream.writeAll("\nwatch:\n\n");
+            for (self.watch_results) |scope_and_set| {
+                for (scope_and_set.scope) |arg_and_scalar| {
+                    // TODO might want to print boxes when we have good scope detection and better box printing
+                    if (arg_and_scalar.scalar != .Box) {
+                        const maybe_box: []const u8 = if (arg_and_scalar.arg.unbox) "@" else "";
+                        try std.fmt.format(out_stream, "{s}: {}{s}; ", .{
+                            arg_and_scalar.arg.name,
+                            arg_and_scalar.scalar,
+                            maybe_box,
+                        });
+                    }
+                }
+                try out_stream.writeAll("\n");
+                try scope_and_set.set.dumpInto(allocator, out_stream);
                 try out_stream.writeAll("\n");
             }
         }
@@ -121,7 +133,7 @@ pub fn interpret(
         const watch_meta = Store.getSyntaxMeta(Store.getCoreMeta(watch_expr).from);
         watch_range = .{ watch_meta.start, watch_meta.end };
     }
-    var watch_results = ArrayList(repr.value.Set).init(&arena.allocator);
+    var watch_results = ArrayList(pass.interpret.ScopeAndSet).init(&arena.allocator);
     var interpret_error_info: ?pass.interpret.ErrorInfo = null;
     const set = pass.interpret.interpret(&store, arena, core_expr, watch_expr_o, &watch_results, interrupter, &interpret_error_info) catch |err| {
         if (err == error.InterpretError or err == error.NativeError) {

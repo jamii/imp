@@ -683,6 +683,41 @@ number
 value:
 | 2
 
+// with tmp as
+//    select timestamp - lag(timestamp) as diff
+//    partition by category
+//    order by timestamp
+//    from metrics
+// select mean(diff)
+// from tmp
+// group by category
+mean: ?@things (reduce things 0 ?@prev ?@thing prev + (thing (?a ?b b))) / (reduce things 0 ?@prev ?@thing prev + 1);
+group: (0 | 1), "foo" | (2 | 3), "bar";
+timestamp: 0, 4 | 1, 12 | 2, 15 | 3, 3;
+group ?id ?g g,
+  sorted_timestamps: enumerate (g group~ ?id id timestamp, id);
+  timestamp_diffs: sorted_timestamps ?i ?t ?id i, t - (sorted_timestamps (i - 1) (?t ?id t));
+  mean timestamp_diffs@
+// TODO with inferred domains
+// ?g
+//   category _ g,
+//   sorted_timestamps: enumerate (?id ?t timestamp id t, category id g);
+//   timestamp_diffs: ?i sorted_timestamps(i) - sorted_timestamps (i - 1);
+//   mean timestamp_diffs
+//
+// RAI version
+//def group = {(0, "foo"); (1, "foo"); (2, "bar"); (3, "bar")}
+//def timestamp = {(0, 4); (1, 12); (2, 15); (3, 3)}
+//def sorted_groups = g: sort[{t, id: timestamp(id, t), group(id, g)}]
+//def diffs = g, i: {t1 - t2 from t1, t2 where sorted_groups(g,i,t1,_) and sorted_groups(g,i-1,t2,_)}
+//def result = g: mean[diffs[g]]
+---
+type:
+text, number
+value:
+| "bar", 12
+| "foo", 8
+
 edits: range 0 8;
 root: 0;
 parent:
@@ -712,6 +747,29 @@ prev_sibling: edits.?edit edit parent parent~ .(?sibling edit > sibling) @ max;
 prev: edits.?edit edit prev_sibling !! then edit prev_sibling rightmost_leaf else edit parent;
 fix position: root, 0 | position ?edit ?pos edit prev~, pos + 1;
 edits ?edit (edit position), edit, (edit character)
+//
+// RAI version
+//def rightmost_child[p] =
+//  Max[{c from c where parent(c, p)}]
+//
+//def rightmost_leaf[p in edit] =
+//  Max[p; rightmost_leaf[rightmost_child[p]]]
+//
+//def prev_sibling[a] =
+//  Max[{b from b,p where parent(a,p) and parent(b,p) and a > b}]
+//
+//def prev[a] =
+//  if exists prev_sibling[a]
+//  then rightmost_leaf[prev_sibling[a]]
+//  else parent[a]
+//  end
+//
+//def position[a in edit] =
+//  if not exists parent[a] then 0 else
+//  position[prev[a]] + 1
+//  end
+//
+//def output[p, a] = position(a, p), character[a]
 ---
 type:
 number, number, text

@@ -64,7 +64,7 @@ pub const InterpretError = pass.parse.Error ||
 pub const InterpretResult = struct {
     set_type: repr.type_.SetType,
     set: repr.value.Set,
-    watch_results: []const pass.interpret.ScopeAndSet,
+    watch_results: []const pass.interpret.WatchResult,
     watch_range: ?[2]usize,
 
     pub fn dumpInto(self: InterpretResult, allocator: *Allocator, out_stream: anytype) anyerror!void {
@@ -74,8 +74,12 @@ pub const InterpretResult = struct {
         try self.set.dumpInto(allocator, out_stream);
         if (self.watch_range) |_| {
             try out_stream.writeAll("\nwatch:\n\n");
-            for (self.watch_results) |scope_and_set| {
-                for (scope_and_set.scope) |arg_and_scalar| {
+            for (self.watch_results) |watch_result| {
+                for (watch_result.time) |time, i| {
+                    try std.fmt.format(out_stream, "fix{}: {}; ", .{ i, time });
+                }
+                if (watch_result.time.len > 0) try out_stream.writeAll("\n");
+                for (watch_result.scope) |arg_and_scalar| {
                     // TODO might want to print boxes when we have good scope detection and better box printing
                     if (arg_and_scalar.scalar != .Box) {
                         const maybe_box: []const u8 = if (arg_and_scalar.arg.unbox) "@" else "";
@@ -86,8 +90,8 @@ pub const InterpretResult = struct {
                         });
                     }
                 }
-                try out_stream.writeAll("\n");
-                try scope_and_set.set.dumpInto(allocator, out_stream);
+                if (watch_result.scope.len > 0) try out_stream.writeAll("\n");
+                try watch_result.set.dumpInto(allocator, out_stream);
                 try out_stream.writeAll("\n");
             }
         }
@@ -133,7 +137,7 @@ pub fn interpret(
         const watch_meta = Store.getSyntaxMeta(Store.getCoreMeta(watch_expr).from);
         watch_range = .{ watch_meta.start, watch_meta.end };
     }
-    var watch_results = ArrayList(pass.interpret.ScopeAndSet).init(&arena.allocator);
+    var watch_results = ArrayList(pass.interpret.WatchResult).init(&arena.allocator);
     var interpret_error_info: ?pass.interpret.ErrorInfo = null;
     const set = pass.interpret.interpret(&store, arena, core_expr, watch_expr_o, &watch_results, interrupter, &interpret_error_info) catch |err| {
         if (err == error.InterpretError or err == error.NativeError) {

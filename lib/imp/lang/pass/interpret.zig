@@ -14,7 +14,7 @@ pub fn interpret(
     arena: *ArenaAllocator,
     expr: *const core.Expr,
     watch_expr_o: ?*const core.Expr,
-    watch_results: *ArrayList(ScopeAndSet),
+    watch_results: *ArrayList(WatchResult),
     interrupter: imp.lang.Interrupter,
     error_info: *?ErrorInfo,
 ) Error!value.Set {
@@ -47,7 +47,8 @@ pub const ErrorInfo = struct {
     message: []const u8,
 };
 
-pub const ScopeAndSet = struct {
+pub const WatchResult = struct {
+    time: []const value.Time,
     scope: []const ArgAndScalar,
     set: value.Set,
 };
@@ -63,7 +64,7 @@ const Interpreter = struct {
     store: *const Store,
     arena: *ArenaAllocator,
     watch_expr_o: ?*const core.Expr,
-    watch_results: *ArrayList(ScopeAndSet),
+    watch_results: *ArrayList(WatchResult),
     scope: ArrayList(value.Scalar),
     time: ArrayList(value.Time),
     boxes: DeepHashMap(value.LazySet, value.Set),
@@ -99,6 +100,7 @@ const Interpreter = struct {
                         if (arg_o) |arg|
                             try scope.append(.{ .arg = arg, .scalar = self.scope.items[i] });
                     try self.watch_results.append(.{
+                        .time = try std.mem.dupe(&self.arena.allocator, value.Time, self.time.items),
                         .scope = scope.toOwnedSlice(),
                         .set = set,
                     });
@@ -528,6 +530,7 @@ const Interpreter = struct {
                 while (true) : (iteration += 1) {
                     try self.interrupter.check();
                     try self.time.append(iteration);
+                    defer _ = self.time.pop();
                     _ = try self.boxes.put(fix_key, fix_set);
                     fix_hint[0] = .{ .Box = fix_key };
                     const body_set = try self.interpret(fix.next, fix_hint);
@@ -559,7 +562,6 @@ const Interpreter = struct {
                         .time = try self.dupeTime(self.time.items),
                     };
                     fix_set = new_fix_set;
-                    _ = self.time.pop();
                 }
             },
             .Reduce => |reduce| {
@@ -599,6 +601,7 @@ const Interpreter = struct {
                 for (input_tuples.items) |input_tuple, iteration| {
                     try self.interrupter.check();
                     try self.time.append(iteration);
+                    defer _ = self.time.pop();
                     _ = try self.boxes.put(reduce_key, reduce_set);
                     var tuple_set = value.Set{
                         .Finite = .{
@@ -641,7 +644,6 @@ const Interpreter = struct {
                         .time = try self.dupeTime(self.time.items),
                     };
                     reduce_set = new_reduce_set;
-                    _ = self.time.pop();
                 }
                 return reduce_set;
             },

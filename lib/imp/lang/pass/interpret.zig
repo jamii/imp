@@ -14,7 +14,7 @@ pub fn interpret(
     arena: *ArenaAllocator,
     expr: *const core.Expr,
     watch_expr_o: ?*const core.Expr,
-    watch_results: *ArrayList(WatchResult),
+    watch_results: *DeepHashSet(WatchResult),
     interrupter: imp.lang.Interrupter,
     error_info: *?ErrorInfo,
 ) Error!value.Set {
@@ -64,7 +64,7 @@ const Interpreter = struct {
     store: *const Store,
     arena: *ArenaAllocator,
     watch_expr_o: ?*const core.Expr,
-    watch_results: *ArrayList(WatchResult),
+    watch_results: *DeepHashSet(WatchResult),
     scope: ArrayList(value.Scalar),
     time: ArrayList(value.Time),
     boxes: DeepHashMap(value.LazySet, value.Set),
@@ -99,11 +99,11 @@ const Interpreter = struct {
                     for (watch_meta.scope) |arg_o, i|
                         if (arg_o) |arg|
                             try scope.append(.{ .arg = arg, .scalar = self.scope.items[i] });
-                    try self.watch_results.append(.{
+                    try self.watch_results.put(.{
                         .time = try std.mem.dupe(&self.arena.allocator, value.Time, self.time.items),
                         .scope = scope.toOwnedSlice(),
                         .set = set,
-                    });
+                    }, .{});
                 } else |_| {};
         return result;
     }

@@ -46,6 +46,15 @@ pub const FiniteSet = struct {
         return .Equal;
     }
 
+    pub fn deepHashInto(hasher: anytype, self: FiniteSet) void {
+        meta.deepHashInto(hasher, self.arity);
+        // TODO this will break if hashmap starts using a random seed
+        var iter = self.set.iterator();
+        while (iter.next()) |entry| {
+            meta.deepHashInto(hasher, entry.key_ptr.*);
+        }
+    }
+
     pub fn dumpInto(self: FiniteSet, allocator: *Allocator, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
         var tuples = ArrayList(Tuple).init(allocator);
         defer tuples.deinit();

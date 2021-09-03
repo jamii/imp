@@ -64,7 +64,7 @@ pub const InterpretError = pass.parse.Error ||
 pub const InterpretResult = struct {
     set_type: repr.type_.SetType,
     set: repr.value.Set,
-    watch_results: []const pass.interpret.WatchResult,
+    watch_results: DeepHashSet(pass.interpret.WatchResult),
     watch_range: ?[2]usize,
 
     pub fn dumpInto(self: InterpretResult, allocator: *Allocator, out_stream: anytype) anyerror!void {
@@ -74,11 +74,21 @@ pub const InterpretResult = struct {
         try self.set.dumpInto(allocator, out_stream);
         if (self.watch_range) |_| {
             try out_stream.writeAll("\nwatch:\n\n");
-            for (self.watch_results) |watch_result| {
+            var watch_results = ArrayList(pass.interpret.WatchResult).init(allocator);
+            defer watch_results.deinit();
+            var iter = self.watch_results.iterator();
+            while (iter.next()) |entry| try watch_results.append(entry.key_ptr.*);
+            std.sort.sort(pass.interpret.WatchResult, watch_results.items, {}, struct {
+                fn lessThan(_: void, a: pass.interpret.WatchResult, b: pass.interpret.WatchResult) bool {
+                    return imp.meta.deepCompare(a, b) == .LessThan;
+                }
+            }.lessThan);
+            for (watch_results.items) |watch_result| {
                 for (watch_result.time) |time, i| {
                     try std.fmt.format(out_stream, "fix{}: {}; ", .{ i, time });
                 }
                 if (watch_result.time.len > 0) try out_stream.writeAll("\n");
+                var printed_scope = false;
                 for (watch_result.scope) |arg_and_scalar| {
                     // TODO might want to print boxes when we have good scope detection and better box printing
                     if (arg_and_scalar.scalar != .Box) {
@@ -88,9 +98,10 @@ pub const InterpretResult = struct {
                             arg_and_scalar.scalar,
                             maybe_box,
                         });
+                        printed_scope = true;
                     }
                 }
-                if (watch_result.scope.len > 0) try out_stream.writeAll("\n");
+                if (printed_scope) try out_stream.writeAll("\n");
                 try watch_result.set.dumpInto(allocator, out_stream);
                 try out_stream.writeAll("\n");
             }
@@ -137,7 +148,7 @@ pub fn interpret(
         const watch_meta = Store.getSyntaxMeta(Store.getCoreMeta(watch_expr).from);
         watch_range = .{ watch_meta.start, watch_meta.end };
     }
-    var watch_results = ArrayList(pass.interpret.WatchResult).init(&arena.allocator);
+    var watch_results = DeepHashSet(pass.interpret.WatchResult).init(&arena.allocator);
     var interpret_error_info: ?pass.interpret.ErrorInfo = null;
     const set = pass.interpret.interpret(&store, arena, core_expr, watch_expr_o, &watch_results, interrupter, &interpret_error_info) catch |err| {
         if (err == error.InterpretError or err == error.NativeError) {
@@ -149,7 +160,7 @@ pub fn interpret(
     return InterpretResult{
         .set_type = set_type,
         .set = set,
-        .watch_results = watch_results.toOwnedSlice(),
+        .watch_results = watch_results,
         .watch_range = watch_range,
     };
 }

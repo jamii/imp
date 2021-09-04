@@ -286,7 +286,7 @@ foo2: ?a ((?b a,b)@);
 bar: foo1 1 | foo2 2;
 bar ?@f f 3
 ---
-Analyze error: TODO type unions are not implemented yet: @(type of expr #3 with scope (number)) | @(type of expr #10 with scope (@(type of expr #5 with scope ()), number))
+Analyze error: TODO type unions are not implemented yet: @(type of expr #3 with scope (number, )) | @(type of expr #10 with scope (number, ))
 
 foo: 1, 1 | 2, 2;
 foo foo

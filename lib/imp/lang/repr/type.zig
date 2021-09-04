@@ -88,9 +88,12 @@ pub const LazySetType = struct {
 
     pub fn dumpInto(self: LazySetType, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
         try std.fmt.format(out_stream, "(type of expr #{} with scope (", .{Store.getCoreMeta(self.expr).id});
-        for (self.scope) |scalar_type, scalar_type_ix| {
-            if (scalar_type_ix != 0) try out_stream.writeAll(", ");
-            try scalar_type.dumpInto(out_stream);
+        for (self.scope) |scalar_type| {
+            // TODO want to print box types once we have reasonable scoping
+            if (scalar_type != .Box) {
+                try scalar_type.dumpInto(out_stream);
+                try out_stream.writeAll(", ");
+            }
         }
         try out_stream.writeAll("))");
     }

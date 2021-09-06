@@ -700,10 +700,10 @@ group ?id ?g g,
   mean timestamp_diffs@
 // TODO with inferred domains
 // ?g
-//   category _ g,
-//   sorted_timestamps: enumerate (?id ?t timestamp id t, category id g);
-//   timestamp_diffs: ?i sorted_timestamps(i) - sorted_timestamps (i - 1);
-//   mean timestamp_diffs
+//   group _ g then
+//   sorted_timestamps: enumerate (?t ?id timestamp id t, group id g);
+//   timestamp_diffs: ?i (?t sorted_timestamps i t _) - (?t sorted_timestamps (i - 1) t _);
+//   timestamp_diffs @ mean
 //
 // RAI version
 //def group = {(0, "foo"); (1, "foo"); (2, "bar"); (3, "bar")}

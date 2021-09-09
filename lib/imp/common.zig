@@ -170,6 +170,6 @@ pub fn FixedSizeArrayList(comptime size: usize, comptime T: type) type {
     };
 }
 
-pub fn OutStreamError(comptime OutStream: type) type {
-    return @typeInfo(std.meta.declarationInfo(OutStream, "writeAll").data.Fn.return_type).ErrorUnion.error_set;
+pub fn WriterError(comptime Writer: type) type {
+    return @typeInfo(std.meta.declarationInfo(Writer, "writeAll").data.Fn.return_type).ErrorUnion.error_set;
 }

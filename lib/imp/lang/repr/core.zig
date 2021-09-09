@@ -88,38 +88,38 @@ pub const Expr = union(enum) {
         }
     }
 
-    pub fn dumpInto(self: Expr, out_stream: anytype, indent: u32) anyerror!void {
+    pub fn dumpInto(self: Expr, writer: anytype, indent: u32) anyerror!void {
         if (indent != 0) {
-            try out_stream.writeAll("\n");
-            try out_stream.writeByteNTimes(' ', indent);
+            try writer.writeAll("\n");
+            try writer.writeByteNTimes(' ', indent);
         }
         switch (self) {
-            .None => try out_stream.writeAll("none"),
-            .Some => try out_stream.writeAll("some"),
-            .Scalar => |scalar| try scalar.dumpInto(out_stream),
-            .Union => try out_stream.writeAll("|"),
-            .Intersect => try out_stream.writeAll("&"),
-            .Product => try out_stream.writeAll(","),
-            .Equal => try out_stream.writeAll("="),
-            .Name => |name_ix| try std.fmt.format(out_stream, "get {}", .{name_ix}),
-            .UnboxName => |name_ix| try std.fmt.format(out_stream, "get unbox {}", .{name_ix}),
-            .Then => try out_stream.writeAll("then"),
-            .Abstract => try out_stream.writeAll("?"),
-            .Apply => try out_stream.writeAll("apply"),
+            .None => try writer.writeAll("none"),
+            .Some => try writer.writeAll("some"),
+            .Scalar => |scalar| try scalar.dumpInto(writer),
+            .Union => try writer.writeAll("|"),
+            .Intersect => try writer.writeAll("&"),
+            .Product => try writer.writeAll(","),
+            .Equal => try writer.writeAll("="),
+            .Name => |name_ix| try std.fmt.format(writer, "get {}", .{name_ix}),
+            .UnboxName => |name_ix| try std.fmt.format(writer, "get unbox {}", .{name_ix}),
+            .Then => try writer.writeAll("then"),
+            .Abstract => try writer.writeAll("?"),
+            .Apply => try writer.writeAll("apply"),
             .Box => |box| {
-                try out_stream.writeAll("@");
+                try writer.writeAll("@");
                 if (box.scope.len > 0) {
-                    try std.fmt.format(out_stream, " {}", .{box.scope[0]});
+                    try std.fmt.format(writer, " {}", .{box.scope[0]});
                     for (box.scope[1..]) |name_ix| {
-                        try std.fmt.format(out_stream, " , {}", .{name_ix});
+                        try std.fmt.format(writer, " , {}", .{name_ix});
                     }
                 }
             },
-            .Annotate => |annotate| try std.fmt.format(out_stream, "# {}", .{annotate.annotation}),
-            .Native => |native| try native.dumpInto(out_stream),
+            .Annotate => |annotate| try std.fmt.format(writer, "# {}", .{annotate.annotation}),
+            .Native => |native| try native.dumpInto(writer),
         }
         for (self.getChildren().slice()) |child| {
-            try child.dumpInto(out_stream, indent + 2);
+            try child.dumpInto(writer, indent + 2);
         }
     }
 };
@@ -188,7 +188,7 @@ pub const Native = enum {
         return null;
     }
 
-    pub fn dumpInto(self: Native, out_stream: anytype, _: u32) anyerror!void {
-        try out_stream.writeAll(self.toName());
+    pub fn dumpInto(self: Native, writer: anytype, _: u32) anyerror!void {
+        try writer.writeAll(self.toName());
     }
 };

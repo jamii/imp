@@ -9,19 +9,19 @@ pub const Set = union(enum) {
     Finite: FiniteSet,
     Lazy: LazySet,
 
-    pub fn dumpInto(self: Set, allocator: *Allocator, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
+    pub fn dumpInto(self: Set, allocator: *Allocator, writer: anytype) WriterError(@TypeOf(writer))!void {
         switch (self) {
-            .Finite => |finite| try finite.dumpInto(allocator, out_stream),
-            .Lazy => |lazy| try lazy.dumpInto(out_stream),
+            .Finite => |finite| try finite.dumpInto(allocator, writer),
+            .Lazy => |lazy| try lazy.dumpInto(writer),
         }
     }
 
-    pub fn format(self: Set, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
+    pub fn format(self: Set, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         // TODO https://github.com/ziglang/zig/issues/9220
         _ = fmt;
         switch (self) {
-            .Finite => |finite| try finite.format(fmt, options, out_stream),
-            .Lazy => |lazy| try lazy.dumpInto(out_stream),
+            .Finite => |finite| try finite.format(fmt, options, writer),
+            .Lazy => |lazy| try lazy.dumpInto(writer),
         }
     }
 };
@@ -55,7 +55,7 @@ pub const FiniteSet = struct {
         }
     }
 
-    pub fn dumpInto(self: FiniteSet, allocator: *Allocator, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
+    pub fn dumpInto(self: FiniteSet, allocator: *Allocator, writer: anytype) WriterError(@TypeOf(writer))!void {
         var tuples = ArrayList(Tuple).init(allocator);
         defer tuples.deinit();
         var iter = self.set.iterator();
@@ -69,38 +69,38 @@ pub const FiniteSet = struct {
             }
         }.lessThan);
         if (tuples.items.len == 0) {
-            try out_stream.writeAll("none\n");
+            try writer.writeAll("none\n");
         } else if (tuples.items.len == 1 and tuples.items[0].len == 0) {
-            try out_stream.writeAll("some\n");
+            try writer.writeAll("some\n");
         } else {
             for (tuples.items) |tuple| {
-                try out_stream.writeAll("| ");
+                try writer.writeAll("| ");
                 for (tuple) |scalar, scalar_ix| {
-                    if (scalar_ix != 0) try out_stream.writeAll(", ");
-                    try scalar.dumpInto(out_stream);
+                    if (scalar_ix != 0) try writer.writeAll(", ");
+                    try scalar.dumpInto(writer);
                 }
-                try out_stream.writeAll("\n");
+                try writer.writeAll("\n");
             }
         }
     }
 
-    pub fn format(self: FiniteSet, comptime fmt: []const u8, _: std.fmt.FormatOptions, out_stream: anytype) !void {
+    pub fn format(self: FiniteSet, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         // TODO https://github.com/ziglang/zig/issues/9220
         _ = fmt;
         if (self.set.count() == 0) {
-            try out_stream.writeAll("none");
+            try writer.writeAll("none");
         } else if (self.set.count() == 1 and self.set.iterator().next().?.key_ptr.len == 0) {
-            try out_stream.writeAll("some");
+            try writer.writeAll("some");
         } else {
             var iter = self.set.iterator();
             var i: usize = 0;
             while (iter.next()) |kv| : (i += 1) {
-                try out_stream.writeAll("| ");
+                try writer.writeAll("| ");
                 for (kv.key_ptr.*) |scalar, scalar_ix| {
-                    if (scalar_ix != 0) try out_stream.writeAll(", ");
-                    try scalar.dumpInto(out_stream);
+                    if (scalar_ix != 0) try writer.writeAll(", ");
+                    try scalar.dumpInto(writer);
                 }
-                try out_stream.writeAll("\n");
+                try writer.writeAll("\n");
             }
         }
     }
@@ -111,22 +111,22 @@ pub const Scalar = union(enum) {
     Number: f64,
     Box: LazySet,
 
-    fn dumpInto(self: Scalar, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
+    fn dumpInto(self: Scalar, writer: anytype) WriterError(@TypeOf(writer))!void {
         switch (self) {
             // TODO proper escaping
-            .Text => |text| try std.fmt.format(out_stream, "\"{s}\"", .{text}),
-            .Number => |number| try std.fmt.format(out_stream, "{d}", .{number}),
+            .Text => |text| try std.fmt.format(writer, "\"{s}\"", .{text}),
+            .Number => |number| try std.fmt.format(writer, "{d}", .{number}),
             .Box => |box| {
-                try out_stream.writeAll("@");
-                try box.dumpInto(out_stream);
+                try writer.writeAll("@");
+                try box.dumpInto(writer);
             },
         }
     }
 
-    pub fn format(self: Scalar, comptime fmt: []const u8, _: std.fmt.FormatOptions, out_stream: anytype) !void {
+    pub fn format(self: Scalar, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         // TODO https://github.com/ziglang/zig/issues/9220
         _ = fmt;
-        try self.dumpInto(out_stream);
+        try self.dumpInto(writer);
     }
 };
 
@@ -153,15 +153,15 @@ pub const LazySet = struct {
         return meta.deepCompare(self.time, other.time);
     }
 
-    pub fn dumpInto(self: LazySet, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
-        try std.fmt.format(out_stream, "(value of expr #{} with scope (", .{Store.getCoreMeta(self.expr).id});
+    pub fn dumpInto(self: LazySet, writer: anytype) WriterError(@TypeOf(writer))!void {
+        try std.fmt.format(writer, "(value of expr #{} with scope (", .{Store.getCoreMeta(self.expr).id});
         for (self.scope) |scalar| {
             // TODO want to print boxes once we have reasonable scoping
             if (scalar != .Box) {
-                try scalar.dumpInto(out_stream);
-                try out_stream.writeAll(", ");
+                try scalar.dumpInto(writer);
+                try writer.writeAll(", ");
             }
         }
-        try out_stream.writeAll("))");
+        try writer.writeAll("))");
     }
 };

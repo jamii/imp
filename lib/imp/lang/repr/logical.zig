@@ -7,11 +7,11 @@ const core = imp.lang.repr.core;
 pub const Exprs = struct {
     exprs: []const Expr,
 
-    pub fn dumpInto(self: Expr, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
+    pub fn dumpInto(self: Expr, writer: anytype) WriterError(@TypeOf(writer))!void {
         for (self.exprs) |expr, i| {
-            try std.fmt.format("S{} = ", i);
-            try expr.dumpInto(out_stream);
-            try out_stream.writeAll("\n");
+            try std.fmt.format("S{} = ", .{i});
+            try expr.dumpInto(writer);
+            try writer.writeAll("\n");
         }
     }
 };
@@ -21,29 +21,36 @@ pub const Expr = enum {
     Enumerate: *const SetExpr,
     Fix: [2]*const SetExpr,
     Reduce: [3]*const SetExpr,
+    Equal: [2]*const SetExpr,
 
-    pub fn dumpInto(self: Expr, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
+    pub fn dumpInto(self: Expr, writer: anytype) WriterError(@TypeOf(writer))!void {
         switch (self) {
             .Collect => |body| {
-                try body.dumpInto(out_stream);
+                try body.dumpInto(writer);
             },
             .Enumerate => |body| {
-                try out_stream.writeAll("enumerate ");
-                try body.dumpInto(out_stream);
+                try writer.writeAll("enumerate ");
+                try body.dumpInto(writer);
             },
             .Fix => |fix| {
-                try out_stream.writeAll("fix ");
-                try fix[0].dumpInto(out_stream);
-                try out_stream.writeAll(" ");
-                try fix[1].dumpInto(out_stream);
+                try writer.writeAll("fix ");
+                try fix[0].dumpInto(writer);
+                try writer.writeAll(" ");
+                try fix[1].dumpInto(writer);
             },
             .Reduce => |reduce| {
-                try out_stream.writeAll("reduce ");
-                try fix[0].dumpInto(out_stream);
-                try out_stream.writeAll(" ");
-                try fix[1].dumpInto(out_stream);
-                try out_stream.writeAll(" ");
-                try fix[2].dumpInto(out_stream);
+                try writer.writeAll("reduce ");
+                try reduce[0].dumpInto(writer);
+                try writer.writeAll(" ");
+                try reduce[1].dumpInto(writer);
+                try writer.writeAll(" ");
+                try reduce[2].dumpInto(writer);
+            },
+            .Equal => |equal| {
+                try writer.writeAll("= ");
+                try equal[0].dumpInto(writer);
+                try writer.writeAll(" ");
+                try equal[1].dumpInto(writer);
             },
         }
     }
@@ -53,14 +60,14 @@ pub const SetExpr = struct {
     args: []const NameIx,
     body: BoolExpr,
 
-    pub fn dumpInto(self: SetExpr, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
-        try out_stream.writeAll("(");
+    pub fn dumpInto(self: SetExpr, writer: anytype) WriterError(@TypeOf(writer))!void {
+        try writer.writeAll("(");
         for (self.args) |arg| {
-            try std.fmt.format(out_stream, "?s{}", .{arg.inner});
-            try out_stream.writeAll(" , ");
+            try std.fmt.format(writer, "?s{}", .{arg.inner});
+            try writer.writeAll(" , ");
         }
-        try body.dumpInto(out_stream);
-        try out_stream.writeAll(")");
+        try body.dumpInto(writer);
+        try writer.writeAll(")");
     }
 };
 
@@ -70,40 +77,40 @@ pub const BoolExpr = enum {
     Union: [2]*const BoolExpr,
     Intersect: [2]*const BoolExpr,
     Negate: *const BoolExpr,
-    ScalarEqual: [2]ScalarRef,
+    Equal: [2]ScalarRef,
     Apply: Apply,
 
-    pub fn dumpInto(self: BoolExpr, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
+    pub fn dumpInto(self: BoolExpr, writer: anytype) WriterError(@TypeOf(writer))!void {
         switch (self) {
-            .None => try out_stream.writeAll("none"),
-            .Some => try out_stream.writeAll("some"),
+            .None => try writer.writeAll("none"),
+            .Some => try writer.writeAll("some"),
             .Union => |pair| {
-                try out_stream.writeAll("(");
-                try pair[0].dumpInto(out_stream);
-                try out_stream.writeAll(" | ");
-                try pair[1].dumpInto(out_stream);
-                try out_stream.writeAll(")");
+                try writer.writeAll("(");
+                try pair[0].dumpInto(writer);
+                try writer.writeAll(" | ");
+                try pair[1].dumpInto(writer);
+                try writer.writeAll(")");
             },
             .Intersect => |pair| {
-                try out_stream.writeAll("(");
-                try pair[0].dumpInto(out_stream);
-                try out_stream.writeAll(" & ");
-                try pair[1].dumpInto(out_stream);
-                try out_stream.writeAll(")");
+                try writer.writeAll("(");
+                try pair[0].dumpInto(writer);
+                try writer.writeAll(" & ");
+                try pair[1].dumpInto(writer);
+                try writer.writeAll(")");
             },
             .Negate => |body| {
-                try out_stream.writeAll("!");
-                try body.dumpInto(out_stream);
+                try writer.writeAll("!");
+                try body.dumpInto(writer);
             },
-            .ScalarEqual => |pair| {
-                try out_stream.writeAll("(");
-                try pair[0].dumpInto(out_stream);
-                try out_stream.writeAll(" ");
-                try pair[1].dumpInto(out_stream);
-                try out_stream.writeAll(")");
+            .Equal => |pair| {
+                try writer.writeAll("(");
+                try pair[0].dumpInto(writer);
+                try writer.writeAll(" ");
+                try pair[1].dumpInto(writer);
+                try writer.writeAll(")");
             },
             .Apply => |apply| {
-                try apply.dumpInto(out_stream);
+                try apply.dumpInto(writer);
             },
         }
     }
@@ -113,14 +120,14 @@ pub const Apply = struct {
     set: SetRef,
     args: []const ScalarRef,
 
-    pub fn dumpInto(self: Apply, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
-        try out_stream.writeAll("(");
-        try self.set.dumpInto(out_stream);
+    pub fn dumpInto(self: Apply, writer: anytype) WriterError(@TypeOf(writer))!void {
+        try writer.writeAll("(");
+        try self.set.dumpInto(writer);
         for (self.args) |arg| {
-            try arg.dumpInto(out_stream);
-            try out_stream.writeAll(" ");
+            try arg.dumpInto(writer);
+            try writer.writeAll(" ");
         }
-        try out_stream.writeAll(")");
+        try writer.writeAll(")");
     }
 };
 
@@ -128,13 +135,13 @@ pub const SetRef = enum {
     Name: NameIx,
     Native: core.Native,
 
-    pub fn dumpInto(self: SetRef, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
+    pub fn dumpInto(self: SetRef, writer: anytype) WriterError(@TypeOf(writer))!void {
         switch (self) {
             .Name => |name_ix| {
-                try std.fmt.format(out_stream, "s{}", name_ix.inner);
+                try std.fmt.format(writer, "s{}", .{name_ix});
             },
             .Native => |native| {
-                try native.dumpInto(out_stream);
+                try native.dumpInto(writer);
             },
         }
     }
@@ -144,18 +151,16 @@ pub const ScalarRef = enum {
     Name: NameIx,
     Scalar: value.Scalar,
 
-    pub fn dumpInto(self: ScalarRef, out_stream: anytype) OutStreamError(@TypeOf(out_stream))!void {
+    pub fn dumpInto(self: ScalarRef, writer: anytype) WriterError(@TypeOf(writer))!void {
         switch (self) {
             .Name => |name_ix| {
-                try std.fmt.format(out_stream, "S{}", name_ix.inner);
+                try std.fmt.format(writer, "S{}", .{name_ix});
             },
             .Scalar => |scalar| {
-                try scalar.dumpInto(out_stream);
+                try scalar.dumpInto(writer);
             },
         }
     }
 };
 
-pub const NameIx = struct {
-    inner: usize,
-};
+pub const NameIx = usize;

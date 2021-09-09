@@ -39,19 +39,19 @@ pub const InterpretErrorInfo = union(enum) {
         }
     }
 
-    pub fn dumpInto(self: ?InterpretErrorInfo, err: InterpretError, out_stream: anytype) anyerror!void {
+    pub fn dumpInto(self: ?InterpretErrorInfo, err: InterpretError, writer: anytype) anyerror!void {
         switch (err) {
             // TODO report source position
-            error.ParseError => try std.fmt.format(out_stream, "Parse error: {s}\n", .{self.?.Parse.message}),
-            error.DesugarError => try std.fmt.format(out_stream, "Desugar error: {s}\n", .{self.?.Desugar.message}),
-            error.AnalyzeError => try std.fmt.format(out_stream, "Analyze error: {s}\n", .{self.?.Analyze.message}),
-            error.InterpretError => try std.fmt.format(out_stream, "Interpret error: {s}\n", .{self.?.Interpret.message}),
-            error.NativeError => try std.fmt.format(out_stream, "Native error: {s}\n", .{self.?.Interpret.message}),
+            error.ParseError => try std.fmt.format(writer, "Parse error: {s}\n", .{self.?.Parse.message}),
+            error.DesugarError => try std.fmt.format(writer, "Desugar error: {s}\n", .{self.?.Desugar.message}),
+            error.AnalyzeError => try std.fmt.format(writer, "Analyze error: {s}\n", .{self.?.Analyze.message}),
+            error.InterpretError => try std.fmt.format(writer, "Interpret error: {s}\n", .{self.?.Interpret.message}),
+            error.NativeError => try std.fmt.format(writer, "Native error: {s}\n", .{self.?.Interpret.message}),
 
-            error.Utf8InvalidStartByte, error.InvalidUtf8, error.InvalidCharacter, error.Utf8ExpectedContinuation, error.Utf8OverlongEncoding, error.Utf8EncodesSurrogateHalf, error.Utf8CodepointTooLarge => try std.fmt.format(out_stream, "Invalid utf8 input: {}\n", .{err}),
+            error.Utf8InvalidStartByte, error.InvalidUtf8, error.InvalidCharacter, error.Utf8ExpectedContinuation, error.Utf8OverlongEncoding, error.Utf8EncodesSurrogateHalf, error.Utf8CodepointTooLarge => try std.fmt.format(writer, "Invalid utf8 input: {}\n", .{err}),
 
-            error.OutOfMemory => try std.fmt.format(out_stream, "Out of memory\n", .{}),
-            error.WasInterrupted => try std.fmt.format(out_stream, "Was interrupted\n", .{}),
+            error.OutOfMemory => try std.fmt.format(writer, "Out of memory\n", .{}),
+            error.WasInterrupted => try std.fmt.format(writer, "Was interrupted\n", .{}),
         }
     }
 };
@@ -67,13 +67,13 @@ pub const InterpretResult = struct {
     watch_results: DeepHashSet(pass.interpret.WatchResult),
     watch_range: ?[2]usize,
 
-    pub fn dumpInto(self: InterpretResult, allocator: *Allocator, out_stream: anytype) anyerror!void {
-        try out_stream.writeAll("type:\n");
-        try self.set_type.dumpInto(out_stream);
-        try out_stream.writeAll("\nvalue:\n");
-        try self.set.dumpInto(allocator, out_stream);
+    pub fn dumpInto(self: InterpretResult, allocator: *Allocator, writer: anytype) anyerror!void {
+        try writer.writeAll("type:\n");
+        try self.set_type.dumpInto(writer);
+        try writer.writeAll("\nvalue:\n");
+        try self.set.dumpInto(allocator, writer);
         if (self.watch_range) |_| {
-            try out_stream.writeAll("\nwatch:\n\n");
+            try writer.writeAll("\nwatch:\n\n");
             var watch_results = ArrayList(pass.interpret.WatchResult).init(allocator);
             defer watch_results.deinit();
             var iter = self.watch_results.iterator();
@@ -85,15 +85,15 @@ pub const InterpretResult = struct {
             }.lessThan);
             for (watch_results.items) |watch_result| {
                 for (watch_result.time) |time, i| {
-                    try std.fmt.format(out_stream, "fix{}: {}; ", .{ i, time });
+                    try std.fmt.format(writer, "fix{}: {}; ", .{ i, time });
                 }
-                if (watch_result.time.len > 0) try out_stream.writeAll("\n");
+                if (watch_result.time.len > 0) try writer.writeAll("\n");
                 var printed_scope = false;
                 for (watch_result.scope) |arg_and_scalar| {
                     // TODO might want to print boxes when we have good scope detection and better box printing
                     if (arg_and_scalar.scalar != .Box) {
                         const maybe_box: []const u8 = if (arg_and_scalar.arg.unbox) "@" else "";
-                        try std.fmt.format(out_stream, "{s}: {}{s}; ", .{
+                        try std.fmt.format(writer, "{s}: {}{s}; ", .{
                             arg_and_scalar.arg.name,
                             arg_and_scalar.scalar,
                             maybe_box,
@@ -101,9 +101,9 @@ pub const InterpretResult = struct {
                         printed_scope = true;
                     }
                 }
-                if (printed_scope) try out_stream.writeAll("\n");
-                try watch_result.set.dumpInto(allocator, out_stream);
-                try out_stream.writeAll("\n");
+                if (printed_scope) try writer.writeAll("\n");
+                try watch_result.set.dumpInto(allocator, writer);
+                try writer.writeAll("\n");
             }
         }
     }

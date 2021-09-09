@@ -52,37 +52,37 @@ pub const Expr = union(enum) {
         return children;
     }
 
-    pub fn dumpInto(self: Expr, out_stream: anytype, indent: u32) anyerror!void {
+    pub fn dumpInto(self: Expr, writer: anytype, indent: u32) anyerror!void {
         if (indent != 0) {
-            try out_stream.writeAll("\n");
-            try out_stream.writeByteNTimes(' ', indent);
+            try writer.writeAll("\n");
+            try writer.writeByteNTimes(' ', indent);
         }
         switch (self) {
-            .None => try out_stream.writeAll("none"),
-            .Some => try out_stream.writeAll("some"),
-            .Scalar => |scalar| try scalar.dumpInto(out_stream),
-            .Union => try out_stream.writeAll("|"),
-            .Intersect => try out_stream.writeAll("&"),
-            .Product => try out_stream.writeAll(","),
-            .Extend => try out_stream.writeAll("."),
-            .Equal => try out_stream.writeAll("="),
-            .Name => |name| try out_stream.writeAll(name),
-            .Then => try out_stream.writeAll("then"),
+            .None => try writer.writeAll("none"),
+            .Some => try writer.writeAll("some"),
+            .Scalar => |scalar| try scalar.dumpInto(writer),
+            .Union => try writer.writeAll("|"),
+            .Intersect => try writer.writeAll("&"),
+            .Product => try writer.writeAll(","),
+            .Extend => try writer.writeAll("."),
+            .Equal => try writer.writeAll("="),
+            .Name => |name| try writer.writeAll(name),
+            .Then => try writer.writeAll("then"),
             .Abstract => |abstract| {
-                try out_stream.writeAll("?");
-                try abstract.arg.dumpInto(out_stream);
-                try out_stream.writeAll(" ");
-                try abstract.body.dumpInto(out_stream);
+                try writer.writeAll("?");
+                try abstract.arg.dumpInto(writer);
+                try writer.writeAll(" ");
+                try abstract.body.dumpInto(writer);
             },
-            .Apply => try out_stream.writeAll("apply"),
-            .Box => try out_stream.writeAll("@"),
-            .Annotate => |annotate| try std.fmt.format(out_stream, "# {}", .{annotate.annotation}),
-            .Negate => try out_stream.writeAll("!"),
-            .ThenElse => try out_stream.writeAll("then_else"),
-            .Def => |def| try std.fmt.format(out_stream, "{}:", .{def.name}),
+            .Apply => try writer.writeAll("apply"),
+            .Box => try writer.writeAll("@"),
+            .Annotate => |annotate| try std.fmt.format(writer, "# {}", .{annotate.annotation}),
+            .Negate => try writer.writeAll("!"),
+            .ThenElse => try writer.writeAll("then_else"),
+            .Def => |def| try std.fmt.format(writer, "{}:", .{def.name}),
         }
         for (self.getChildren().slice()) |child| {
-            try child.dumpInto(out_stream, indent + 2);
+            try child.dumpInto(writer, indent + 2);
         }
     }
 };

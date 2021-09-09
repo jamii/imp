@@ -132,10 +132,10 @@ pub const TokenTag = enum {
     // not matched by anything but used to check that we parsed everything
     EOF,
 
-    pub fn format(self: TokenTag, comptime fmt: []const u8, _: std.fmt.FormatOptions, out_stream: anytype) !void {
+    pub fn format(self: TokenTag, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         // TODO https://github.com/ziglang/zig/issues/9220
         _ = fmt;
-        try out_stream.writeAll(switch (self) {
+        try writer.writeAll(switch (self) {
             .OpenGroup => "`(`",
             .CloseGroup => "`)`",
             .None => "`none`",
@@ -258,13 +258,13 @@ pub const Token = union(TokenTag) {
         return .Ambiguous;
     }
 
-    pub fn format(self: Token, comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: anytype) !void {
-        try (std.meta.activeTag(self)).format(fmt, options, out_stream);
+    pub fn format(self: Token, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        try (std.meta.activeTag(self)).format(fmt, options, writer);
         switch (self) {
-            .Number => |number| try std.fmt.format(out_stream, " `{d}`", .{number}),
+            .Number => |number| try std.fmt.format(writer, " `{d}`", .{number}),
             // TODO proper escaping
-            .Text => |text| try std.fmt.format(out_stream, " `\"{s}\"`", .{text}),
-            .Name => |name| try std.fmt.format(out_stream, " `{s}`", .{name}),
+            .Text => |text| try std.fmt.format(writer, " `\"{s}\"`", .{text}),
+            .Name => |name| try std.fmt.format(writer, " `{s}`", .{name}),
             else => {},
         }
     }

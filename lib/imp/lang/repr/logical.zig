@@ -5,7 +5,7 @@ const value = imp.lang.repr.value;
 const core = imp.lang.repr.core;
 
 pub const Exprs = struct {
-    exprs: []const Expr,
+    exprs: []const *const Expr,
 
     pub fn dumpInto(self: Expr, writer: anytype) WriterError(@TypeOf(writer))!void {
         for (self.exprs) |expr, i| {
@@ -58,7 +58,7 @@ pub const Expr = enum {
 
 pub const SetExpr = struct {
     args: []const NameIx,
-    body: BoolExpr,
+    body: *const BoolExpr,
 
     pub fn dumpInto(self: SetExpr, writer: anytype) WriterError(@TypeOf(writer))!void {
         try writer.writeAll("(");
@@ -105,7 +105,7 @@ pub const BoolExpr = enum {
             .Equal => |pair| {
                 try writer.writeAll("(");
                 try pair[0].dumpInto(writer);
-                try writer.writeAll(" ");
+                try writer.writeAll(" = ");
                 try pair[1].dumpInto(writer);
                 try writer.writeAll(")");
             },
@@ -138,7 +138,7 @@ pub const SetRef = enum {
     pub fn dumpInto(self: SetRef, writer: anytype) WriterError(@TypeOf(writer))!void {
         switch (self) {
             .Name => |name_ix| {
-                try std.fmt.format(writer, "s{}", .{name_ix});
+                try std.fmt.format(writer, "S{}", .{name_ix});
             },
             .Native => |native| {
                 try native.dumpInto(writer);
@@ -154,7 +154,7 @@ pub const ScalarRef = enum {
     pub fn dumpInto(self: ScalarRef, writer: anytype) WriterError(@TypeOf(writer))!void {
         switch (self) {
             .Name => |name_ix| {
-                try std.fmt.format(writer, "S{}", .{name_ix});
+                try std.fmt.format(writer, "s{}", .{name_ix});
             },
             .Scalar => |scalar| {
                 try scalar.dumpInto(writer);

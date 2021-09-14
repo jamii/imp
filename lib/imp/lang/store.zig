@@ -17,6 +17,10 @@ pub const CoreMeta = struct {
     id: usize,
 };
 
+pub const LogicalMeta = struct {
+    from: *const core.Expr,
+};
+
 pub const Store = struct {
     arena: *ArenaAllocator,
     next_expr_id: usize,
@@ -60,6 +64,21 @@ pub const Store = struct {
         return &expr_and_meta.expr;
     }
 
+    pub fn putLogical(self: *Store, expr: anytype, from: *const core.Expr) !*const @TypeOf(expr) {
+        switch (@TypeOf(expr)) {
+            logical.Expr, logical.SetExpr, logical.BoolExpr => {},
+            else => @compileError("Not a logical expr: " ++ @typeName(@TypeOf(expr))),
+        }
+        var expr_and_meta = try self.arena.allocator.create(ExprAndMeta(@TypeOf(expr), CoreMeta));
+        expr_and_meta.* = .{
+            .expr = expr,
+            .meta = LogicalMeta{
+                .from = from,
+            },
+        };
+        return &expr_and_meta.expr;
+    }
+
     // TODO using @fieldParentPtr is unnecessarily dangerous
 
     pub fn getSyntaxMeta(expr: *const syntax.Expr) *const SyntaxMeta {
@@ -68,6 +87,14 @@ pub const Store = struct {
 
     pub fn getCoreMeta(expr: *const core.Expr) *const CoreMeta {
         return &@fieldParentPtr(ExprAndMeta(core.Expr, CoreMeta), "expr", expr).meta;
+    }
+
+    pub fn getLogical(expr: anytype) *const LogicalMeta {
+        switch (@TypeOf(expr)) {
+            *const logical.Expr, *const logical.SetExpr, *const logical.BoolExpr => {},
+            else => @compileError("Not a logical expr: " ++ @typeName(@TypeOf(expr))),
+        }
+        return &@fieldParentPtr(ExprAndMeta(@TypeOf(expr.*), CoreMeta), "expr", expr).meta;
     }
 
     pub const SourceSelection = union(enum) {
@@ -105,7 +132,6 @@ pub const Store = struct {
             },
         }
     }
-
     pub fn findCoreExprAt(self: Store, selection: SourceSelection) ?*const core.Expr {
         if (std.sort.min(*const core.Expr, self.core_exprs.items, selection, betterMatchForPosition)) |best_match| {
             const match_meta = Store.getSyntaxMeta(Store.getCoreMeta(best_match).from);

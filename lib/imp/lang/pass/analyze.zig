@@ -119,8 +119,8 @@ pub const Analyzer = struct {
                     if (left == .None) break :set_type .None;
                     if (left == .Lazy) break :set_type .{ .Lazy = lazy };
                     const right = try self.analyze(pair.right, hint[min(hint.len, left.Concrete.columns.len)..]);
-                    if (right == .Lazy) break :set_type .{ .Lazy = lazy };
                     if (right == .None) break :set_type .None;
+                    if (right == .Lazy) break :set_type .{ .Lazy = lazy };
                     const abstract_arity = if (right.Concrete.abstract_arity > 0)
                         left.Concrete.columns.len + right.Concrete.abstract_arity
                     else

@@ -3,9 +3,6 @@ usingnamespace imp.common;
 const meta = imp.meta;
 const value = imp.lang.repr.value;
 
-// ascii, non-empty
-pub const Name = []const u8;
-
 pub const Expr = union(enum) {
     None,
     Some,
@@ -153,7 +150,7 @@ pub const Reduce = struct {
 };
 
 pub const Annotate = struct {
-    annotation: Name,
+    annotation: []const u8,
     body: *const Expr,
 };
 

@@ -43,7 +43,17 @@ pub fn dump(thing: anytype) void {
 }
 
 pub fn dumpInto(writer: anytype, indent: u32, thing: anytype) anyerror!void {
-    switch (@typeInfo(@TypeOf(thing))) {
+    const T = @TypeOf(thing);
+    const ti = @typeInfo(T);
+    switch (ti) {
+        .Struct, .Enum, .Union => {
+            if (@hasDecl(T, "dumpInto")) {
+                return thing.dumpInto(writer, indent);
+            }
+        },
+        else => {},
+    }
+    switch (ti) {
         .Pointer => |pti| {
             switch (pti.size) {
                 .One => {

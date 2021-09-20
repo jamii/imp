@@ -3,6 +3,7 @@ usingnamespace imp.common;
 const meta = imp.meta;
 const syntax = imp.lang.repr.syntax;
 const core = imp.lang.repr.core;
+const core2 = imp.lang.repr.core2;
 const type_ = imp.lang.repr.type_;
 
 pub const SyntaxMeta = struct {
@@ -17,6 +18,12 @@ pub const CoreMeta = struct {
     id: usize,
 };
 
+pub const Core2Meta = struct {
+    from: *const syntax.Expr,
+    // this is just useful as a stable id for tests
+    id: usize,
+};
+
 pub const LogicalMeta = struct {
     from: *const core.Expr,
 };
@@ -25,6 +32,7 @@ pub const Store = struct {
     arena: *ArenaAllocator,
     next_expr_id: usize,
     core_exprs: ArrayList(*const core.Expr),
+    core2_exprs: ArrayList(*const core2.Expr),
     specializations: DeepHashMap(type_.LazySetType, ArrayList(Specialization)),
 
     pub fn init(arena: *ArenaAllocator) Store {
@@ -32,6 +40,7 @@ pub const Store = struct {
             .arena = arena,
             .next_expr_id = 0,
             .core_exprs = ArrayList(*const core.Expr).init(&arena.allocator),
+            .core2_exprs = ArrayList(*const core2.Expr).init(&arena.allocator),
             .specializations = DeepHashMap(type_.LazySetType, ArrayList(Specialization)).init(&arena.allocator),
         };
     }
@@ -64,6 +73,21 @@ pub const Store = struct {
         return &expr_and_meta.expr;
     }
 
+    pub fn putCore2(self: *Store, expr: core2.Expr, from: *const syntax.Expr) !*const core2.Expr {
+        var expr_and_meta = try self.arena.allocator.create(ExprAndMeta(core2.Expr, Core2Meta));
+        const id = self.next_expr_id;
+        self.next_expr_id += 1;
+        expr_and_meta.* = .{
+            .expr = expr,
+            .meta = Core2Meta{
+                .from = from,
+                .id = id,
+            },
+        };
+        try self.core2_exprs.append(&expr_and_meta.expr);
+        return &expr_and_meta.expr;
+    }
+
     pub fn putLogical(self: *Store, expr: anytype, from: *const core.Expr) !*const @TypeOf(expr) {
         switch (@TypeOf(expr)) {
             logical.Expr, logical.SetExpr, logical.BoolExpr => {},
@@ -87,6 +111,10 @@ pub const Store = struct {
 
     pub fn getCoreMeta(expr: *const core.Expr) *const CoreMeta {
         return &@fieldParentPtr(ExprAndMeta(core.Expr, CoreMeta), "expr", expr).meta;
+    }
+
+    pub fn getCore2Meta(expr: *const core2.Expr) *const Core2Meta {
+        return &@fieldParentPtr(ExprAndMeta(core2.Expr, Core2Meta), "expr", expr).meta;
     }
 
     pub fn getLogical(expr: anytype) *const LogicalMeta {

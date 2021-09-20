@@ -3,6 +3,8 @@ usingnamespace imp.common;
 const meta = imp.meta;
 const value = imp.lang.repr.value;
 
+pub const Program = []const *const Expr;
+
 pub const Expr = union(enum) {
     None,
     Some,
@@ -11,8 +13,9 @@ pub const Expr = union(enum) {
     Intersect: Pair,
     Product: Pair,
     Equal: Pair,
-    Name: NameIx,
-    UnboxName: NameIx,
+    ScalarId: ScalarId,
+    UnboxScalarId: ScalarId,
+    SetId: SetId,
     Negate: *const Expr,
     Then: Then,
     Abstract: *const Expr,
@@ -26,22 +29,21 @@ pub const Expr = union(enum) {
 
     pub fn getChildren(self: Expr) FixedSizeArrayList(3, *const Expr) {
         var children = FixedSizeArrayList(3, *const Expr).init();
-        inline for (@typeInfo(Expr).Union.fields) |expr_field| {
-            if (@enumToInt(std.meta.activeTag(self)) == expr_field.enum_field.?.value) {
-                const t = expr_field.field_type;
-                const v = @field(self, expr_field.enum_field.?.name);
-                if (t == void or t == value.Scalar or t == NameIx or t == Native) {
-                    // nothing to do
-                } else if (t == *const Expr) {
-                    children.append(v);
-                } else if (t == Pair or t == Then or t == Box or t == Fix or t == Reduce or t == Annotate) {
-                    inline for (@typeInfo(t).Struct.fields) |value_field| {
-                        if (value_field.field_type == *const Expr) {
-                            children.append(@field(v, value_field.name));
+        inline for (@typeInfo(Expr).Union.fields) |expr_field, i| {
+            if (@enumToInt(std.meta.activeTag(self)) == @typeInfo(@typeInfo(Expr).Union.tag_type.?).Enum.fields[i].value) {
+                const T = expr_field.field_type;
+                const v = @field(self, expr_field.name);
+                switch (T) {
+                    void, value.Scalar, ScalarId, Native => {},
+                    *const Expr => children.append(v),
+                    Pair, Then, Box, Fix, Reduce, Annotate => {
+                        inline for (@typeInfo(T).Struct.fields) |value_field| {
+                            if (value_field.field_type == *const Expr) {
+                                children.append(@field(v, value_field.name));
+                            }
                         }
-                    }
-                } else {
-                    @compileError("Missed case for " ++ @typeName(t));
+                    },
+                    else => @compileError("Missed case for " ++ @typeName(t)),
                 }
             }
         }
@@ -50,39 +52,25 @@ pub const Expr = union(enum) {
 
     pub fn getChildrenMut(self: *Expr) FixedSizeArrayList(3, **const Expr) {
         var children = FixedSizeArrayList(3, **const Expr).init();
-        inline for (@typeInfo(Expr).Union.fields) |expr_field| {
-            if (@enumToInt(std.meta.activeTag(self.*)) == expr_field.enum_field.?.value) {
-                const t = expr_field.field_type;
-                var v = &@field(self, expr_field.enum_field.?.name);
-                if (t == void or t == value.Scalar or t == NameIx or t == Native) {
-                    // nothing to do
-                } else if (t == *const Expr) {
-                    children.append(v);
-                } else if (t == Pair or t == Then or t == Box or t == Fix or t == Reduce or t == Annotate) {
-                    inline for (@typeInfo(t).Struct.fields) |value_field| {
-                        if (value_field.field_type == *const Expr) {
-                            children.append(&@field(v, value_field.name));
+        inline for (@typeInfo(Expr).Union.fields) |expr_field, i| {
+            if (@enumToInt(std.meta.activeTag(self.*)) == @typeInfo(@typeInfo(Expr).Union.tag_type.?).Enum.fields[i].value) {
+                const T = expr_field.field_type;
+                const v = &@field(self, expr_field.name);
+                switch (T) {
+                    void, value.Scalar, ScalarId, Native => {},
+                    *const Expr => children.append(v),
+                    Pair, Then, Box, Fix, Reduce, Annotate => {
+                        inline for (@typeInfo(T).Struct.fields) |value_field| {
+                            if (value_field.field_type == *const Expr) {
+                                children.append(&@field(v, value_field.name));
+                            }
                         }
-                    }
-                } else {
-                    @compileError("Missed case for " ++ @typeName(t));
+                    },
+                    else => @compileError("Missed case for " ++ @typeName(t)),
                 }
             }
         }
         return children;
-    }
-
-    pub fn getNameIxes(self: Expr, name_ixes: *DeepHashSet(NameIx)) error{OutOfMemory}!void {
-        switch (self) {
-            .Name, .UnboxName => |name_ix| {
-                _ = try name_ixes.put(name_ix, {});
-            },
-            else => {
-                for (self.getChildren().slice()) |child| {
-                    _ = try child.getNameIxes(name_ixes);
-                }
-            },
-        }
     }
 
     pub fn dumpInto(self: Expr, writer: anytype, indent: u32) anyerror!void {
@@ -98,21 +86,23 @@ pub const Expr = union(enum) {
             .Intersect => try writer.writeAll("&"),
             .Product => try writer.writeAll(","),
             .Equal => try writer.writeAll("="),
-            .Name => |name_ix| try std.fmt.format(writer, "get {}", .{name_ix}),
-            .UnboxName => |name_ix| try std.fmt.format(writer, "get unbox {}", .{name_ix}),
+            .ScalarId => |scalar_id| try std.fmt.format(writer, "s{}", .{scalar_id}),
+            .UnboxScalarId => |scalar_id| try std.fmt.format(writer, "unbox s{}", .{scalar_id}),
+            .SetId => |set_id| try std.fmt.format(writer, "S{}", .{set_id}),
+            .Negate => try writer.writeAll("negate"),
             .Then => try writer.writeAll("then"),
             .Abstract => try writer.writeAll("?"),
             .Apply => try writer.writeAll("apply"),
             .Box => |box| {
-                try writer.writeAll("@");
-                if (box.scope.len > 0) {
-                    try std.fmt.format(writer, " {}", .{box.scope[0]});
-                    for (box.scope[1..]) |name_ix| {
-                        try std.fmt.format(writer, " , {}", .{name_ix});
-                    }
+                try std.fmt.format(writer, "box S{}", .{box.set_id});
+                for (box.args) |scalar_id| {
+                    try std.fmt.format(writer, " s{}", .{scalar_id});
                 }
             },
-            .Annotate => |annotate| try std.fmt.format(writer, "# {}", .{annotate.annotation}),
+            .Fix => try writer.writeAll("fix"),
+            .Reduce => try writer.writeAll("reduce"),
+            .Enumerate => try writer.writeAll("enumerate"),
+            .Annotate => |annotate| try std.fmt.format(writer, "# {any}", .{annotate.annotation}),
             .Native => |native| try native.dumpInto(writer, indent),
         }
         for (self.getChildren().slice()) |child| {
@@ -120,6 +110,12 @@ pub const Expr = union(enum) {
         }
     }
 };
+
+// Index in program
+pub const SetId = usize;
+
+// De Bruijn index to some enclosing Abstract
+pub const ScalarId = usize;
 
 pub const Pair = struct {
     left: *const Expr,
@@ -134,8 +130,8 @@ pub const Then = struct {
 };
 
 pub const Box = struct {
-    body: *const Expr,
-    scope: []const NameIx,
+    set_id: SetId,
+    args: []ScalarId,
 };
 
 pub const Fix = struct {

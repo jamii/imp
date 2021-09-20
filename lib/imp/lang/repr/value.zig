@@ -111,7 +111,7 @@ pub const Scalar = union(enum) {
     Number: f64,
     Box: LazySet,
 
-    fn dumpInto(self: Scalar, writer: anytype) WriterError(@TypeOf(writer))!void {
+    pub fn dumpInto(self: Scalar, writer: anytype) WriterError(@TypeOf(writer))!void {
         switch (self) {
             // TODO proper escaping
             .Text => |text| try std.fmt.format(writer, "\"{s}\"", .{text}),

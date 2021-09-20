@@ -13,6 +13,7 @@ comptime {
 pub const InterpretErrorInfo = union(enum) {
     Parse: pass.parse.ErrorInfo,
     Desugar: pass.desugar.ErrorInfo,
+    Desugar2: pass.desugar2.ErrorInfo,
     Analyze: pass.analyze.ErrorInfo,
     Interpret: pass.interpret.ErrorInfo,
 
@@ -23,6 +24,10 @@ pub const InterpretErrorInfo = union(enum) {
             },
             error.DesugarError => {
                 const syntax_meta = Store.getSyntaxMeta(self.?.Desugar.expr);
+                return [2]usize{ syntax_meta.start, syntax_meta.end };
+            },
+            error.Desugar2Error => {
+                const syntax_meta = Store.getSyntaxMeta(self.?.Desugar2.expr);
                 return [2]usize{ syntax_meta.start, syntax_meta.end };
             },
             error.AnalyzeError => {
@@ -44,6 +49,7 @@ pub const InterpretErrorInfo = union(enum) {
             // TODO report source position
             error.ParseError => try std.fmt.format(writer, "Parse error: {s}\n", .{self.?.Parse.message}),
             error.DesugarError => try std.fmt.format(writer, "Desugar error: {s}\n", .{self.?.Desugar.message}),
+            error.Desugar2Error => try std.fmt.format(writer, "Desugar2 error: {s}\n", .{self.?.Desugar2.message}),
             error.AnalyzeError => try std.fmt.format(writer, "Analyze error: {s}\n", .{self.?.Analyze.message}),
             error.InterpretError => try std.fmt.format(writer, "Interpret error: {s}\n", .{self.?.Interpret.message}),
             error.NativeError => try std.fmt.format(writer, "Native error: {s}\n", .{self.?.Interpret.message}),
@@ -58,6 +64,7 @@ pub const InterpretErrorInfo = union(enum) {
 
 pub const InterpretError = pass.parse.Error ||
     pass.desugar.Error ||
+    pass.desugar2.Error ||
     pass.analyze.Error ||
     pass.interpret.Error;
 
@@ -133,6 +140,15 @@ pub fn interpret(
         }
         return err;
     };
+
+    var desugar2_error_info: ?pass.desugar2.ErrorInfo = null;
+    const core2_expr = pass.desugar2.desugar(&store, syntax_expr, &desugar2_error_info) catch |err| {
+        if (err == error.Desugar2Error) {
+            error_info.* = .{ .Desugar2 = desugar2_error_info.? };
+        }
+        return err;
+    };
+    dump(core2_expr);
 
     var analyze_error_info: ?pass.analyze.ErrorInfo = null;
     const set_type = pass.analyze.analyze(&store, core_expr, interrupter, &analyze_error_info) catch |err| {

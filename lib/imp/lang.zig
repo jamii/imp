@@ -15,6 +15,7 @@ pub const InterpretErrorInfo = union(enum) {
     Desugar: pass.desugar.ErrorInfo,
     Desugar2: pass.desugar2.ErrorInfo,
     Analyze: pass.analyze.ErrorInfo,
+    Analyze2: pass.analyze2.ErrorInfo,
     Interpret: pass.interpret.ErrorInfo,
 
     pub fn error_range(self: ?InterpretErrorInfo, err: InterpretError) ?[2]usize {
@@ -35,6 +36,11 @@ pub const InterpretErrorInfo = union(enum) {
                 const syntax_meta = Store.getSyntaxMeta(core_meta.from);
                 return [2]usize{ syntax_meta.start, syntax_meta.end };
             },
+            error.Analyze2Error => {
+                const core_meta = Store.getCore2Meta(self.?.Analyze2.expr);
+                const syntax_meta = Store.getSyntaxMeta(core_meta.from);
+                return [2]usize{ syntax_meta.start, syntax_meta.end };
+            },
             error.InterpretError, error.NativeError => {
                 const core_meta = Store.getCoreMeta(self.?.Interpret.expr);
                 const syntax_meta = Store.getSyntaxMeta(core_meta.from);
@@ -51,6 +57,7 @@ pub const InterpretErrorInfo = union(enum) {
             error.DesugarError => try std.fmt.format(writer, "Desugar error: {s}\n", .{self.?.Desugar.message}),
             error.Desugar2Error => try std.fmt.format(writer, "Desugar2 error: {s}\n", .{self.?.Desugar2.message}),
             error.AnalyzeError => try std.fmt.format(writer, "Analyze error: {s}\n", .{self.?.Analyze.message}),
+            error.Analyze2Error => try std.fmt.format(writer, "Analyze error: {s}\n", .{self.?.Analyze2.message}),
             error.InterpretError => try std.fmt.format(writer, "Interpret error: {s}\n", .{self.?.Interpret.message}),
             error.NativeError => try std.fmt.format(writer, "Native error: {s}\n", .{self.?.Interpret.message}),
 
@@ -66,6 +73,7 @@ pub const InterpretError = pass.parse.Error ||
     pass.desugar.Error ||
     pass.desugar2.Error ||
     pass.analyze.Error ||
+    pass.analyze2.Error ||
     pass.interpret.Error;
 
 pub const InterpretResult = struct {
@@ -157,6 +165,15 @@ pub fn interpret(
         }
         return err;
     };
+
+    var analyze2_error_info: ?pass.analyze2.ErrorInfo = null;
+    const program_type = pass.analyze2.analyze(&store, core2_expr, interrupter, &analyze2_error_info) catch |err| {
+        if (err == error.Analyze2Error) {
+            error_info.* = .{ .Analyze2 = analyze2_error_info.? };
+        }
+        return err;
+    };
+    dump(program_type);
 
     const watch_expr_o = store.findCoreExprAt(watch_selection);
     var watch_range: ?[2]usize = null;

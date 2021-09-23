@@ -291,13 +291,11 @@ const Desugarer = struct {
             var stack = ArrayList(StackItem).init(&self.store.arena.allocator);
             try stack.append(.{ .num_enclosing_abstracts = 0, .expr = expr });
             while (stack.popOrNull()) |item| {
-                switch (item.expr.*) {
-                    .ScalarId, .UnboxScalarId => |scalar_id| {
-                        if (scalar_id >= item.num_enclosing_abstracts) {
-                            try free_ids.put(scalar_id - item.num_enclosing_abstracts, {});
-                        }
-                    },
-                    else => {},
+                var tmp_expr = item.expr.*;
+                for (try self.getScalarIds(&tmp_expr)) |scalar_id| {
+                    if (scalar_id.* >= item.num_enclosing_abstracts) {
+                        try free_ids.put(scalar_id.* - item.num_enclosing_abstracts, {});
+                    }
                 }
                 for (item.expr.getChildren().slice()) |child|
                     try stack.append(.{
@@ -326,22 +324,31 @@ const Desugarer = struct {
 
     fn rename(self: *Desugarer, args: []const core.ScalarId, expr: *const core.Expr, num_enclosing_abstracts: usize) Error!*const core.Expr {
         var tmp_expr = expr.*;
-        switch (tmp_expr) {
-            .ScalarId, .UnboxScalarId => |*scalar_id| {
-                if (scalar_id.* >= num_enclosing_abstracts) {
-                    for (args) |arg, i| {
-                        if (arg == scalar_id.* - num_enclosing_abstracts) {
-                            scalar_id.* = args.len - 1 - i + num_enclosing_abstracts;
-                        }
+        for (try self.getScalarIds(&tmp_expr)) |scalar_id| {
+            if (scalar_id.* >= num_enclosing_abstracts) {
+                for (args) |arg, i| {
+                    if (arg == scalar_id.* - num_enclosing_abstracts) {
+                        scalar_id.* = args.len - 1 - i + num_enclosing_abstracts;
                     }
                 }
-            },
-            else => {},
+            }
         }
         for (tmp_expr.getChildrenMut().slice()) |child|
             child.* = try self.rename(args, child.*, num_enclosing_abstracts + (if (tmp_expr == .Abstract) @as(usize, 1) else 0));
         const expr_meta = Store.getCore2Meta(expr);
         return self.store.putCore2(tmp_expr, expr_meta.from);
+    }
+
+    fn getScalarIds(self: *Desugarer, expr: *core.Expr) ![]const *core.ScalarId {
+        var scalar_ids = ArrayList(*core.ScalarId).init(&self.store.arena.allocator);
+        switch (expr.*) {
+            .ScalarId, .UnboxScalarId => |*scalar_id| try scalar_ids.append(scalar_id),
+            .Box => |*box| for (box.args) |*scalar_id| try scalar_ids.append(scalar_id),
+            .Reduce => |*reduce| for (reduce.next.args) |*scalar_id| try scalar_ids.append(scalar_id),
+            .Fix => |*fix| for (fix.next.args) |*scalar_id| try scalar_ids.append(scalar_id),
+            else => {},
+        }
+        return scalar_ids.toOwnedSlice();
     }
 
     fn makeBox(self: *Desugarer, body: *const core.Expr) Error!*const core.Expr {

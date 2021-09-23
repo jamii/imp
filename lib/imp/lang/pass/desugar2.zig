@@ -14,7 +14,9 @@ pub fn desugar(store: *Store, syntax_expr: *const syntax.Expr, error_info: *?Err
         .error_info = error_info,
     };
     try desugarer.exprs.append(try desugarer.desugar(syntax_expr));
-    return desugarer.exprs.toOwnedSlice();
+    return core.Program{
+        .exprs = desugarer.exprs.toOwnedSlice(),
+    };
 }
 
 pub const Error = error{
@@ -207,19 +209,19 @@ const Desugarer = struct {
             .Box => |expr| try self.putCore(.{
                 .Box = try self.makeDef(try self.desugar(expr)),
             }),
-            .Fix => |fix| try self.putCore(.{
+            .Fix => |fix| try self.boxToExpr(try self.makeDef(try self.putCore(.{
                 .Fix = .{
                     .init = try self.desugar(fix.init),
-                    .next = try self.desugar(fix.next),
+                    .next = try self.makeDef(try self.desugar(fix.next)),
                 },
-            }),
-            .Reduce => |reduce| try self.putCore(.{
+            }))),
+            .Reduce => |reduce| try self.boxToExpr(try self.makeDef(try self.putCore(.{
                 .Reduce = .{
                     .input = try self.desugar(reduce.input),
                     .init = try self.desugar(reduce.init),
-                    .next = try self.desugar(reduce.next),
+                    .next = try self.makeDef(try self.desugar(reduce.next)),
                 },
-            }),
+            }))),
             .Enumerate => |body| try self.putCore(.{ .Enumerate = try self.desugar(body) }),
             .Annotate => |annotate| try self.putCore(.{
                 .Annotate = .{
@@ -260,7 +262,7 @@ const Desugarer = struct {
                         break :value try self.putCore(.{
                             .Fix = .{
                                 .init = try self.putCore(.None),
-                                .next = try self.putCore(.{ .Abstract = fix_body }),
+                                .next = try self.makeDef(try self.putCore(.{ .Abstract = fix_body })),
                             },
                         });
                     } else {

@@ -3,7 +3,19 @@ usingnamespace imp.common;
 const meta = imp.meta;
 const value = imp.lang.repr.value;
 
-pub const Program = []const *const Expr;
+pub const Program = struct {
+    exprs: []const *const Expr,
+
+    pub fn dumpInto(self: Program, writer: anytype, indent: u32) anyerror!void {
+        for (self.exprs) |expr, i| {
+            if (i != 0) try writer.writeByteNTimes(' ', indent);
+            try std.fmt.format(writer, "S{}:\n", .{i});
+            try writer.writeByteNTimes(' ', indent + 4);
+            try expr.dumpInto(writer, indent + 4);
+            try writer.writeAll(";\n");
+        }
+    }
+};
 
 pub const Expr = union(enum) {
     None,
@@ -74,10 +86,6 @@ pub const Expr = union(enum) {
     }
 
     pub fn dumpInto(self: Expr, writer: anytype, indent: u32) anyerror!void {
-        if (indent != 0) {
-            try writer.writeAll("\n");
-            try writer.writeByteNTimes(' ', indent);
-        }
         switch (self) {
             .None => try writer.writeAll("none"),
             .Some => try writer.writeAll("some"),
@@ -99,14 +107,26 @@ pub const Expr = union(enum) {
                     try std.fmt.format(writer, " s{}", .{scalar_id});
                 }
             },
-            .Fix => try writer.writeAll("fix"),
-            .Reduce => try writer.writeAll("reduce"),
+            .Fix => |fix| {
+                try std.fmt.format(writer, "fix S{}", .{fix.next.set_id});
+                for (fix.next.args) |scalar_id| {
+                    try std.fmt.format(writer, " s{}", .{scalar_id});
+                }
+            },
+            .Reduce => |reduce| {
+                try std.fmt.format(writer, "reduce S{}", .{reduce.next.set_id});
+                for (reduce.next.args) |scalar_id| {
+                    try std.fmt.format(writer, " s{}", .{scalar_id});
+                }
+            },
             .Enumerate => try writer.writeAll("enumerate"),
             .Annotate => |annotate| try std.fmt.format(writer, "# {any}", .{annotate.annotation}),
             .Native => |native| try native.dumpInto(writer, indent),
         }
         for (self.getChildren().slice()) |child| {
-            try child.dumpInto(writer, indent + 2);
+            try writer.writeAll("\n");
+            try writer.writeByteNTimes(' ', indent + 4);
+            try child.dumpInto(writer, indent + 4);
         }
     }
 };
@@ -136,13 +156,13 @@ pub const Box = struct {
 
 pub const Fix = struct {
     init: *const Expr,
-    next: *const Expr,
+    next: Box,
 };
 
 pub const Reduce = struct {
     input: *const Expr,
     init: *const Expr,
-    next: *const Expr,
+    next: Box,
 };
 
 pub const Annotate = struct {

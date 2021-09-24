@@ -13,7 +13,7 @@ pub fn analyze(store: *Store, expr: *const core.Expr, interrupter: imp.lang.Inte
         .interrupter = interrupter,
         .error_info = error_info,
     };
-    return analyzer.analyze(expr, &[0]type_.ScalarType{});
+    return analyzer.analyze(expr, &.{});
 }
 
 pub const Error = error{
@@ -69,7 +69,7 @@ pub const Analyzer = struct {
                     break :set_type .{
                         .Concrete = .{
                             .abstract_arity = 0,
-                            .columns = &[0]type_.ScalarType{},
+                            .columns = &.{},
                         },
                     };
                 },
@@ -83,7 +83,7 @@ pub const Analyzer = struct {
                     break :set_type .{
                         .Concrete = .{
                             .abstract_arity = 0,
-                            .columns = try self.dupeScalars(&[1]type_.ScalarType{scalar_type}),
+                            .columns = try self.dupeScalars(&.{scalar_type}),
                         },
                     };
                 },
@@ -146,8 +146,8 @@ pub const Analyzer = struct {
                 },
                 .Equal => |pair| {
                     // the hint for expr doesn't tell us anything about left or right
-                    const left = try self.analyze(pair.left, &[0]type_.ScalarType{});
-                    const right = try self.analyze(pair.right, &[0]type_.ScalarType{});
+                    const left = try self.analyze(pair.left, &.{});
+                    const right = try self.analyze(pair.right, &.{});
                     if (!left.isFinite() or !right.isFinite()) {
                         return self.setError(expr, "Cannot equal one or more maybe-infinite sets: {} = {}", .{ left, right });
                     }
@@ -163,7 +163,7 @@ pub const Analyzer = struct {
                     break :set_type .{
                         .Concrete = .{
                             .abstract_arity = 0,
-                            .columns = &[0]type_.ScalarType{},
+                            .columns = &.{},
                         },
                     };
                 },
@@ -172,7 +172,7 @@ pub const Analyzer = struct {
                     break :set_type .{
                         .Concrete = .{
                             .abstract_arity = 0,
-                            .columns = try self.dupeScalars(&[1]type_.ScalarType{scalar_type}),
+                            .columns = try self.dupeScalars(&.{scalar_type}),
                         },
                     };
                 },
@@ -207,20 +207,20 @@ pub const Analyzer = struct {
                 },
                 .Negate => |body| {
                     // the hint for expr doesn't tell us anything about body
-                    const body_type = try self.analyze(body, &[0]type_.ScalarType{});
+                    const body_type = try self.analyze(body, &.{});
                     if (!body_type.isFinite()) {
                         return self.setError(expr, "The body of `!` must have finite type, found {}", .{body_type});
                     }
                     break :set_type .{
                         .Concrete = .{
                             .abstract_arity = 0,
-                            .columns = &[0]type_.ScalarType{},
+                            .columns = &.{},
                         },
                     };
                 },
                 .Then => |then| {
                     // the hint for expr doesn't tell us anything about condition
-                    const condition_type = try self.analyze(then.condition, &[0]type_.ScalarType{});
+                    const condition_type = try self.analyze(then.condition, &.{});
                     if (!((condition_type == .None) or (condition_type == .Concrete and condition_type.Concrete.columns.len == 0))) {
                         return self.setError(expr, "The condition of `then` must have type `maybe`, found {}", .{condition_type});
                     }
@@ -259,8 +259,8 @@ pub const Analyzer = struct {
                     // analyze without hints first because we don't know how to split the hint between left and right
                     var pair_left = pair.left;
                     var pair_right = pair.right;
-                    var left = try self.analyze(pair.left, &[0]type_.ScalarType{});
-                    var right = try self.analyze(pair.right, &[0]type_.ScalarType{});
+                    var left = try self.analyze(pair.left, &.{});
+                    var right = try self.analyze(pair.right, &.{});
                     if (left == .None or right == .None) break :set_type .None;
                     if (!left.isFinite() and !right.isFinite()) {
                         return self.setError(expr, "Cannot apply two maybe-infinite sets: {} applied to {}", .{ left, right });
@@ -303,7 +303,7 @@ pub const Analyzer = struct {
                 },
                 .Box => |box| {
                     // ignore actual body type because box types are nominal
-                    _ = try self.analyze(box.body, &[0]type_.ScalarType{});
+                    _ = try self.analyze(box.body, &.{});
                     const box_type = type_.ScalarType{
                         .Box = .{
                             .lazy = .{
@@ -317,12 +317,12 @@ pub const Analyzer = struct {
                     break :set_type .{
                         .Concrete = .{
                             .abstract_arity = 0,
-                            .columns = try self.dupeScalars(&[1]type_.ScalarType{box_type}),
+                            .columns = try self.dupeScalars(&.{box_type}),
                         },
                     };
                 },
                 .Fix => |fix| {
-                    const init_type = try self.analyze(fix.init, &[0]type_.ScalarType{});
+                    const init_type = try self.analyze(fix.init, &.{});
                     if (!init_type.isFinite()) {
                         return self.setError(expr, "The initial value for fix must have finite type, found {}", .{init_type});
                     }
@@ -391,7 +391,7 @@ pub const Analyzer = struct {
                     return self.setError(expr, "Type of fix failed to converge, reached {}", .{fix_type});
                 },
                 .Reduce => |reduce| {
-                    const input_type = try self.analyze(reduce.input, &[0]type_.ScalarType{});
+                    const input_type = try self.analyze(reduce.input, &.{});
                     if (!input_type.isFinite()) {
                         return self.setError(expr, "The input for reduce must have finite type, found {}", .{input_type});
                     }
@@ -409,7 +409,7 @@ pub const Analyzer = struct {
                         },
                     };
 
-                    const init_type = try self.analyze(reduce.init, &[0]type_.ScalarType{});
+                    const init_type = try self.analyze(reduce.init, &.{});
                     if (!init_type.isFinite()) {
                         return self.setError(expr, "The initial value for reduce must have finite type, found {}", .{init_type});
                     }
@@ -478,7 +478,7 @@ pub const Analyzer = struct {
                     return self.setError(expr, "Type of reduce failed to converge, reached {}", .{reduce_type});
                 },
                 .Enumerate => |body| {
-                    const body_type = try self.analyze(body, &[0]type_.ScalarType{});
+                    const body_type = try self.analyze(body, &.{});
                     if (body_type == .None) {
                         break :set_type .None;
                     }
@@ -504,11 +504,11 @@ pub const Analyzer = struct {
                         .Concrete = switch (native) {
                             .Add, .Subtract, .Multiply, .Divide, .Modulus, .Range => .{
                                 .abstract_arity = 2,
-                                .columns = try self.dupeScalars(&[3]type_.ScalarType{ .Number, .Number, .Number }),
+                                .columns = try self.dupeScalars(&.{ .Number, .Number, .Number }),
                             },
                             .GreaterThan, .GreaterThanOrEqual => .{
                                 .abstract_arity = 2,
-                                .columns = try self.dupeScalars(&[2]type_.ScalarType{ .Number, .Number }),
+                                .columns = try self.dupeScalars(&.{ .Number, .Number }),
                             },
                         },
                     };

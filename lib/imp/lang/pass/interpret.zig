@@ -29,7 +29,7 @@ pub fn interpret(
         .interrupter = interrupter,
         .error_info = error_info,
     };
-    return interpreter.interpret(expr, &[0]value.Scalar{});
+    return interpreter.interpret(expr, &.{});
 }
 
 pub const Error = error{
@@ -122,7 +122,7 @@ const Interpreter = struct {
             },
             .Some => {
                 var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
-                _ = try set.put(&[0]value.Scalar{}, {});
+                _ = try set.put(&.{}, {});
                 return value.Set{
                     .Finite = .{
                         .arity = 0,
@@ -132,7 +132,7 @@ const Interpreter = struct {
             },
             .Scalar => |scalar| {
                 var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
-                _ = try set.put(try self.dupeScalars(&[1]value.Scalar{scalar}), {});
+                _ = try set.put(try self.dupeScalars(&.{scalar}), {});
                 return value.Set{
                     .Finite = .{
                         .arity = 1,
@@ -253,8 +253,8 @@ const Interpreter = struct {
             },
             .Equal => |pair| {
                 // the hint for expr doesn't tell us anything about left or right
-                const left = try self.interpret(pair.left, &[0]value.Scalar{});
-                const right = try self.interpret(pair.right, &[0]value.Scalar{});
+                const left = try self.interpret(pair.left, &.{});
+                const right = try self.interpret(pair.right, &.{});
                 if (left == .Lazy or right == .Lazy) {
                     return self.setError(expr, "Cannot equal one or more lazy sets", .{});
                 }
@@ -277,7 +277,7 @@ const Interpreter = struct {
                     break :isEqual true;
                 };
                 if (isEqual) {
-                    _ = try set.put(&[0]value.Scalar{}, {});
+                    _ = try set.put(&.{}, {});
                 }
                 return value.Set{
                     .Finite = .{
@@ -289,7 +289,7 @@ const Interpreter = struct {
             .Name => |name_ix| {
                 var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 const scalar = self.scope.items[self.scope.items.len - 1 - name_ix];
-                _ = try set.put(try self.dupeScalars(&[1]value.Scalar{scalar}), {});
+                _ = try set.put(try self.dupeScalars(&.{scalar}), {});
                 return value.Set{
                     .Finite = .{
                         .arity = 1,
@@ -330,13 +330,13 @@ const Interpreter = struct {
             },
             .Negate => |body| {
                 // the hint for expr doesn't tell us anything about body
-                const body_set = try self.interpret(body, &[0]value.Scalar{});
+                const body_set = try self.interpret(body, &.{});
                 if (body_set == .Lazy) {
                     return self.setError(expr, "The body of `!` cannot be a lazy set", .{});
                 }
                 var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 if (body_set.Finite.set.count() == 0) {
-                    _ = try set.put(&[0]value.Scalar{}, {});
+                    _ = try set.put(&.{}, {});
                 }
                 return value.Set{
                     .Finite = .{
@@ -347,7 +347,7 @@ const Interpreter = struct {
             },
             .Then => |then| {
                 // the hint for expr doesn't tell us anything about condition
-                const condition = try self.interpret(then.condition, &[0]value.Scalar{});
+                const condition = try self.interpret(then.condition, &.{});
                 if (condition == .Lazy) {
                     return self.setError(expr, "The condition for `then` cannot be a lazy set", .{});
                 }
@@ -413,8 +413,8 @@ const Interpreter = struct {
                 // analyze without hints first because we don't know how to split the hint between left and right
                 var pair_left = pair.left;
                 var pair_right = pair.right;
-                var left = try self.interpret(pair.left, &[0]value.Scalar{});
-                var right = try self.interpret(pair.right, &[0]value.Scalar{});
+                var left = try self.interpret(pair.left, &.{});
+                var right = try self.interpret(pair.right, &.{});
                 if (left == .Lazy and right == .Lazy) {
                     return self.setError(expr, "Cannot apply two lazy sets", .{});
                 }
@@ -516,7 +516,7 @@ const Interpreter = struct {
                     .scope = try self.dupeScalars(self.scope.items),
                     .time = try self.dupeTime(self.time.items),
                 };
-                const init_set = try self.interpret(fix.init, &[0]value.Scalar{});
+                const init_set = try self.interpret(fix.init, &.{});
                 _ = self.time.pop();
                 if (init_set != .Finite) {
                     return self.setError(expr, "The initial value for fix must be finite, found {}", .{init_set});
@@ -565,7 +565,7 @@ const Interpreter = struct {
                 }
             },
             .Reduce => |reduce| {
-                const input_set = try self.interpret(reduce.input, &[0]value.Scalar{});
+                const input_set = try self.interpret(reduce.input, &.{});
                 if (input_set != .Finite) {
                     return self.setError(expr, "The input for reduce must be finite, found {}", .{input_set});
                 }
@@ -588,7 +588,7 @@ const Interpreter = struct {
                     .scope = try self.dupeScalars(self.scope.items),
                     .time = try self.dupeTime(self.time.items),
                 };
-                const init_set = try self.interpret(reduce.init, &[0]value.Scalar{});
+                const init_set = try self.interpret(reduce.init, &.{});
                 _ = self.time.pop();
                 if (init_set != .Finite) {
                     return self.setError(expr, "The initial value for reduce must be finite, found {}", .{init_set});
@@ -648,7 +648,7 @@ const Interpreter = struct {
                 return reduce_set;
             },
             .Enumerate => |body| {
-                const body_set = try self.interpret(body, &[0]value.Scalar{});
+                const body_set = try self.interpret(body, &.{});
                 if (body_set != .Finite) {
                     return self.setError(expr, "The body for `enumerate` must be finite, found {}", .{body_set});
                 }
@@ -710,7 +710,7 @@ const Interpreter = struct {
                             .Modulus => @mod(hint[0].Number, hint[1].Number),
                             else => unreachable,
                         };
-                        const tuple = try self.dupeScalars(&[3]value.Scalar{ hint[0], hint[1], .{ .Number = result } });
+                        const tuple = try self.dupeScalars(&[_]value.Scalar{ hint[0], hint[1], .{ .Number = result } });
                         var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                         _ = try set.put(tuple, {});
                         return value.Set{
@@ -742,7 +742,7 @@ const Interpreter = struct {
                         var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                         while (i <= hi) : (i += 1) {
                             try self.interrupter.check();
-                            const tuple = try self.dupeScalars(&[3]value.Scalar{ hint[0], hint[1], .{ .Number = @intToFloat(f64, i) } });
+                            const tuple = try self.dupeScalars(&[_]value.Scalar{ hint[0], hint[1], .{ .Number = @intToFloat(f64, i) } });
                             _ = try set.put(tuple, {});
                         }
                         return value.Set{
@@ -772,7 +772,7 @@ const Interpreter = struct {
                             else => unreachable,
                         };
                         if (satisfied)
-                            _ = try set.put(&[_]value.Scalar{ hint[0], hint[1] }, {});
+                            _ = try set.put(&.{ hint[0], hint[1] }, {});
                         return value.Set{
                             .Finite = .{
                                 .arity = 2,

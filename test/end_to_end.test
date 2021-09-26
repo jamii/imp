@@ -696,13 +696,16 @@ group: (0 | 1), "foo" | (2 | 3), "bar";
 timestamp: 0, 4 | 1, 12 | 2, 15 | 3, 3;
 group ?id ?g g,
   sorted_timestamps: enumerate (g group~ ?id id timestamp, id);
-  timestamp_diffs: sorted_timestamps ?i ?t ?id i, t - (sorted_timestamps (i - 1) (?t ?id t));
-  mean timestamp_diffs@
+  timestamp_diffs:
+    sorted_timestamps ?i ?t1 ?id
+    sorted_timestamps (i - 1) ?t2 ?id
+    i, t1 - t2;
+  timestamp_diffs @ mean
 // TODO with inferred domains
 // ?g
 //   group _ g then
 //   sorted_timestamps: enumerate (?t ?id timestamp id t, group id g);
-//   timestamp_diffs: ?i (?t sorted_timestamps i t _) - (?t sorted_timestamps (i - 1) t _);
+//   timestamp_diffs: ?i (?t1 sorted_timestamps i t1 _) - (?t2 sorted_timestamps (i - 1) t2 _);
 //   timestamp_diffs @ mean
 //
 // RAI version

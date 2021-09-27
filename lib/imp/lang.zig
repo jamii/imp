@@ -17,6 +17,7 @@ pub const InterpretErrorInfo = union(enum) {
     Analyze: pass.analyze.ErrorInfo,
     Analyze2: pass.analyze2.ErrorInfo,
     Interpret: pass.interpret.ErrorInfo,
+    Interpret2: pass.interpret2.ErrorInfo,
 
     pub fn error_range(self: ?InterpretErrorInfo, err: InterpretError) ?[2]usize {
         switch (err) {
@@ -46,6 +47,11 @@ pub const InterpretErrorInfo = union(enum) {
                 const syntax_meta = Store.getSyntaxMeta(core_meta.from);
                 return [2]usize{ syntax_meta.start, syntax_meta.end };
             },
+            error.Interpret2Error, error.Native2Error => {
+                const core_meta = Store.getCore2Meta(self.?.Interpret.expr);
+                const syntax_meta = Store.getSyntaxMeta(core_meta.from);
+                return [2]usize{ syntax_meta.start, syntax_meta.end };
+            },
             else => return null,
         }
     }
@@ -59,7 +65,9 @@ pub const InterpretErrorInfo = union(enum) {
             error.AnalyzeError => try std.fmt.format(writer, "Analyze error: {s}\n", .{self.?.Analyze.message}),
             error.Analyze2Error => try std.fmt.format(writer, "Analyze error: {s}\n", .{self.?.Analyze2.message}),
             error.InterpretError => try std.fmt.format(writer, "Interpret error: {s}\n", .{self.?.Interpret.message}),
+            error.Interpret2Error => try std.fmt.format(writer, "Interpret error: {s}\n", .{self.?.Interpret2.message}),
             error.NativeError => try std.fmt.format(writer, "Native error: {s}\n", .{self.?.Interpret.message}),
+            error.Native2Error => try std.fmt.format(writer, "Native error: {s}\n", .{self.?.Interpret2.message}),
 
             error.Utf8InvalidStartByte, error.InvalidUtf8, error.InvalidCharacter, error.Utf8ExpectedContinuation, error.Utf8OverlongEncoding, error.Utf8EncodesSurrogateHalf, error.Utf8CodepointTooLarge => try std.fmt.format(writer, "Invalid utf8 input: {}\n", .{err}),
 
@@ -74,7 +82,8 @@ pub const InterpretError = pass.parse.Error ||
     pass.desugar2.Error ||
     pass.analyze.Error ||
     pass.analyze2.Error ||
-    pass.interpret.Error;
+    pass.interpret.Error ||
+    pass.interpret2.Error;
 
 pub const InterpretResult = struct {
     set_type: repr.type_.SetType,
@@ -150,13 +159,13 @@ pub fn interpret(
     };
 
     var desugar2_error_info: ?pass.desugar2.ErrorInfo = null;
-    const core2_expr = pass.desugar2.desugar(&store, syntax_expr, &desugar2_error_info) catch |err| {
+    const program = pass.desugar2.desugar(&store, syntax_expr, &desugar2_error_info) catch |err| {
         if (err == error.Desugar2Error) {
             error_info.* = .{ .Desugar2 = desugar2_error_info.? };
         }
         return err;
     };
-    dump(core2_expr);
+    dump(program);
 
     var analyze_error_info: ?pass.analyze.ErrorInfo = null;
     const set_type = pass.analyze.analyze(&store, core_expr, interrupter, &analyze_error_info) catch |err| {
@@ -167,7 +176,7 @@ pub fn interpret(
     };
 
     var analyze2_error_info: ?pass.analyze2.ErrorInfo = null;
-    const program_type = pass.analyze2.analyze(&store, core2_expr, interrupter, &analyze2_error_info) catch |err| {
+    const program_type = pass.analyze2.analyze(&store, program, interrupter, &analyze2_error_info) catch |err| {
         if (err == error.Analyze2Error) {
             error_info.* = .{ .Analyze2 = analyze2_error_info.? };
         }
@@ -182,6 +191,7 @@ pub fn interpret(
         watch_range = .{ watch_meta.start, watch_meta.end };
     }
     var watch_results = DeepHashSet(pass.interpret.WatchResult).init(&arena.allocator);
+
     var interpret_error_info: ?pass.interpret.ErrorInfo = null;
     const set = pass.interpret.interpret(&store, arena, core_expr, watch_expr_o, &watch_results, interrupter, &interpret_error_info) catch |err| {
         if (err == error.InterpretError or err == error.NativeError) {
@@ -189,6 +199,24 @@ pub fn interpret(
         }
         return err;
     };
+
+    const watch2_expr_o = store.findCore2ExprAt(watch_selection);
+    var watch2_range: ?[2]usize = null;
+    if (watch2_expr_o) |watch2_expr| {
+        const watch2_meta = Store.getSyntaxMeta(Store.getCore2Meta(watch2_expr).from);
+        watch2_range = .{ watch2_meta.start, watch2_meta.end };
+    }
+    var watch2_results = DeepHashSet(pass.interpret2.WatchResult).init(&arena.allocator);
+    dump(watch2_results);
+
+    var interpret2_error_info: ?pass.interpret2.ErrorInfo = null;
+    const set2 = pass.interpret2.interpret(&store, arena, program, program_type, watch2_expr_o, &watch2_results, interrupter, &interpret2_error_info) catch |err| {
+        if (err == error.Interpret2Error or err == error.Native2Error) {
+            error_info.* = .{ .Interpret2 = interpret2_error_info.? };
+        }
+        return err;
+    };
+    dump(set2);
 
     return InterpretResult{
         .set_type = set_type,

@@ -6,20 +6,20 @@ const core = imp.lang.repr.core2;
 const type_ = imp.lang.repr.type_2;
 
 pub fn analyze(store: *Store, program: core.Program, interrupter: imp.lang.Interrupter, error_info: *?ErrorInfo) Error!type_.ProgramType {
-    var expr_type_unions = try store.arena.allocator.alloc(ArrayList(type_.Specialization), program.exprs.len);
-    for (expr_type_unions) |*expr_type_union|
-        expr_type_union.* = ArrayList(type_.Specialization).init(&store.arena.allocator);
+    var def_type_unions = try store.arena.allocator.alloc(ArrayList(type_.Specialization), program.def_exprs.len);
+    for (def_type_unions) |*def_type_union|
+        def_type_union.* = ArrayList(type_.Specialization).init(&store.arena.allocator);
     var analyzer = Analyzer{
         .store = store,
         .program = program,
-        .expr_type_unions = expr_type_unions,
+        .def_type_unions = def_type_unions,
         .scope = ArrayList(type_.ScalarType).init(&store.arena.allocator),
         .interrupter = interrupter,
         .error_info = error_info,
     };
-    const program_type = try analyzer.analyzeDef(program.exprs.len - 1, &.{});
+    const program_type = try analyzer.analyzeDef(program.def_exprs.len - 1, &.{});
     return type_.ProgramType{
-        .expr_type_unions = analyzer.expr_type_unions,
+        .def_type_unions = analyzer.def_type_unions,
         .program_type = program_type,
     };
 }
@@ -37,8 +37,8 @@ pub const ErrorInfo = struct {
     expr: *const core.Expr,
     // TODO want something like a stack of specializations
     //callstack: []const struct {
-    //    set_id: SetId,
-    //    hint: []const type_.ScalarType,
+    //    def_id: DefId,
+    //    hint: type_.TupleType,
     //},
     message: []const u8,
 };
@@ -48,7 +48,7 @@ pub const ErrorInfo = struct {
 pub const Analyzer = struct {
     store: *Store,
     program: core.Program,
-    expr_type_unions: []ArrayList(type_.Specialization),
+    def_type_unions: []ArrayList(type_.Specialization),
     // TODO maybe scope should be passed as an arg like hint
     scope: ArrayList(type_.ScalarType),
     interrupter: imp.lang.Interrupter,
@@ -63,8 +63,8 @@ pub const Analyzer = struct {
         return error.Analyze2Error;
     }
 
-    fn analyzeDef(self: *Analyzer, set_id: core.SetId, hint: []const type_.ScalarType) Error!type_.SetType {
-        const type_union = &self.expr_type_unions[set_id];
+    fn analyzeDef(self: *Analyzer, def_id: core.DefId, hint: type_.TupleType) Error!type_.SetType {
+        const type_union = &self.def_type_unions[def_id];
 
         // see if we already analyzed this specialization
         for (type_union.items) |specialization| {
@@ -78,7 +78,7 @@ pub const Analyzer = struct {
         const old_scope = self.scope;
         defer self.scope = old_scope;
         self.scope = ArrayList(type_.ScalarType).init(&self.store.arena.allocator);
-        const set_type = try self.analyzeExpr(self.program.exprs[set_id], hint);
+        const set_type = try self.analyzeExpr(self.program.def_exprs[def_id], hint);
 
         // memoize result
         const used_hint = switch (set_type) {
@@ -87,7 +87,7 @@ pub const Analyzer = struct {
             // specialized, so cannot have used >concrete.columns.len of the hint
             .Concrete => |concrete| hint[0..min(hint.len, concrete.columns.len)],
         };
-        try self.expr_type_unions[set_id].append(.{
+        try self.def_type_unions[def_id].append(.{
             .hint = used_hint,
             .set_type = set_type,
         });
@@ -95,12 +95,12 @@ pub const Analyzer = struct {
         return set_type;
     }
 
-    fn analyzeBox(self: *Analyzer, box: core.Box, hint: []const type_.ScalarType) Error!type_.SetType {
+    fn analyzeBox(self: *Analyzer, box: core.Box, hint: type_.TupleType) Error!type_.SetType {
         var box_hint = ArrayList(type_.ScalarType).init(&self.store.arena.allocator);
         for (box.args) |scalar_id|
             try box_hint.append(self.scope.items[self.scope.items.len - 1 - scalar_id]);
         try box_hint.appendSlice(hint);
-        const set_type = try self.analyzeDef(box.set_id, box_hint.items);
+        const set_type = try self.analyzeDef(box.def_id, box_hint.items);
         switch (set_type) {
             .None => return type_.SetType{ .None = {} },
             .Concrete => |concrete| return type_.SetType{ .Concrete = .{
@@ -110,7 +110,7 @@ pub const Analyzer = struct {
         }
     }
 
-    fn analyzeExpr(self: *Analyzer, expr: *const core.Expr, hint: []const type_.ScalarType) Error!type_.SetType {
+    fn analyzeExpr(self: *Analyzer, expr: *const core.Expr, hint: type_.TupleType) Error!type_.SetType {
         try self.interrupter.check();
         switch (expr.*) {
             .None => {
@@ -128,7 +128,6 @@ pub const Analyzer = struct {
                 const scalar_type: type_.ScalarType = switch (scalar) {
                     .Text => .Text,
                     .Number => .Number,
-                    // TODO distinguish between literals and scalars
                     .Box => imp_panic("Shouldn't be any box literals", .{}),
                 };
                 return type_.SetType{
@@ -236,7 +235,7 @@ pub const Analyzer = struct {
                                         hint,
                                     },
                                 );
-                                const set_type = try self.analyzeDef(normal.set_id, box_hint);
+                                const set_type = try self.analyzeDef(normal.def_id, box_hint);
                                 switch (set_type) {
                                     .None => return type_.SetType{ .None = {} },
                                     .Concrete => |concrete| return type_.SetType{ .Concrete = .{
@@ -255,7 +254,7 @@ pub const Analyzer = struct {
                     },
                 }
             },
-            .SetId => |set_id| return self.analyzeDef(set_id, hint),
+            .DefId => |def_id| return self.analyzeDef(def_id, hint),
             .Negate => |body| {
                 // the hint for expr doesn't tell us anything about body
                 const body_type = try self.analyzeExpr(body, &.{});
@@ -323,7 +322,7 @@ pub const Analyzer = struct {
                 const box_type = type_.ScalarType{
                     .Box = .{
                         .Normal = .{
-                            .set_id = box.set_id,
+                            .def_id = box.def_id,
                             .args = args,
                         },
                     },
@@ -343,7 +342,7 @@ pub const Analyzer = struct {
                 var fix_hint = try self.store.arena.allocator.alloc(type_.ScalarType, 1);
                 var fix_type = init_type;
                 var fix_box_type = type_.BoxType{ .FixOrReduce = .{
-                    .set_id = fix.next.set_id,
+                    .def_id = fix.next.def_id,
                     .set_type = init_type,
                 } };
                 // TODO is there any case where fix could take more than 1 iteration to converge?
@@ -399,7 +398,7 @@ pub const Analyzer = struct {
                     return self.setError(expr, "The input for reduce must have finite type, found {}", .{input_type});
                 }
                 const input_box_type = type_.BoxType{ .FixOrReduce = .{
-                    .set_id = reduce.next.set_id,
+                    .def_id = reduce.next.def_id,
                     .set_type = input_type,
                 } };
                 const init_type = try self.analyzeExpr(reduce.init, &.{});
@@ -410,7 +409,7 @@ pub const Analyzer = struct {
                 var reduce_type = init_type;
                 var reduce_box_type = type_.BoxType{
                     .FixOrReduce = .{
-                        .set_id = reduce.next.set_id,
+                        .def_id = reduce.next.def_id,
                         .set_type = init_type,
                     },
                 };
@@ -499,7 +498,7 @@ pub const Analyzer = struct {
         }
     }
 
-    fn analyzeApply(self: *Analyzer, expr: *const core.Expr, left_type: type_.SetType, right_expr: *const core.Expr, hint: []const type_.ScalarType) Error!type_.SetType {
+    fn analyzeApply(self: *Analyzer, expr: *const core.Expr, left_type: type_.SetType, right_expr: *const core.Expr, hint: type_.TupleType) Error!type_.SetType {
         if (left_type == .None) return type_.SetType{ .None = {} };
         const right_hint = try std.mem.concat(
             &self.store.arena.allocator,
@@ -535,7 +534,7 @@ pub const Analyzer = struct {
         };
     }
 
-    fn dupeScalars(self: *Analyzer, scope: []const type_.ScalarType) Error![]type_.ScalarType {
+    fn dupeScalars(self: *Analyzer, scope: type_.TupleType) Error![]type_.ScalarType {
         return std.mem.dupe(&self.store.arena.allocator, type_.ScalarType, scope);
     }
 

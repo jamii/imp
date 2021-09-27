@@ -6,17 +6,17 @@ const value = imp.lang.repr.value;
 const core = imp.lang.repr.core2;
 
 pub const ProgramType = struct {
-    expr_type_unions: []const ArrayList(Specialization),
+    def_type_unions: []const ArrayList(Specialization),
     program_type: SetType,
 
     pub fn dumpInto(self: ProgramType, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
-        for (self.expr_type_unions) |expr_type_union, i| {
+        for (self.def_type_unions) |def_type_union, i| {
             if (i != 0) {
                 try writer.writeAll("\n");
                 try writer.writeByteNTimes(' ', indent);
             }
             try std.fmt.format(writer, "S{}", .{i});
-            for (expr_type_union.items) |specialization| {
+            for (def_type_union.items) |specialization| {
                 try writer.writeAll("\n");
                 try writer.writeByteNTimes(' ', indent + 4);
                 try specialization.dumpInto(writer, indent + 4);
@@ -71,7 +71,7 @@ pub const SetType = union(enum) {
 
 pub const ConcreteSetType = struct {
     abstract_arity: usize,
-    columns: []const ScalarType,
+    columns: TupleType,
 
     pub fn dumpInto(self: ConcreteSetType, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
         if (self.columns.len == 0) {
@@ -96,6 +96,8 @@ pub const ConcreteSetType = struct {
         try self.dumpInto(writer, 0);
     }
 };
+
+pub const TupleType = []const ScalarType;
 
 pub const ScalarType = union(enum) {
     Text,
@@ -122,20 +124,20 @@ pub const ScalarType = union(enum) {
 
 pub const BoxType = union(enum) {
     Normal: struct {
-        set_id: core.SetId,
+        def_id: core.DefId,
         args: []ScalarType,
     },
     // While analyzing fix or reduce, need to temporarily assume a type to avoid infinite recursion
     FixOrReduce: struct {
         // The id of the `next` part of the fix/reduce expr, only used to check that this box type does not escape
-        set_id: core.SetId,
+        def_id: core.DefId,
         set_type: SetType,
     },
 
     pub fn dumpInto(self: BoxType, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
         switch (self) {
             .Normal => |normal| {
-                try std.fmt.format(writer, "(S{}", .{normal.set_id});
+                try std.fmt.format(writer, "(S{}", .{normal.def_id});
                 for (normal.args) |arg| {
                     try writer.writeAll(" ");
                     try arg.dumpInto(writer, indent);
@@ -143,7 +145,7 @@ pub const BoxType = union(enum) {
                 try writer.writeAll(")");
             },
             .FixOrReduce => |fix_or_reduce| {
-                try std.fmt.format(writer, "(#S{} ", .{fix_or_reduce.set_id});
+                try std.fmt.format(writer, "(#S{} ", .{fix_or_reduce.def_id});
                 try fix_or_reduce.set_type.dumpInto(writer, indent);
                 try writer.writeAll(")");
             },

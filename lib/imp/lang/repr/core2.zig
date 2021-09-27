@@ -1,17 +1,17 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
 const meta = imp.meta;
-const value = imp.lang.repr.value;
+const value = imp.lang.repr.value2;
 
 pub const Program = struct {
-    exprs: []const *const Expr,
+    def_exprs: []const *const Expr,
 
     pub fn dumpInto(self: Program, writer: anytype, indent: u32) anyerror!void {
-        for (self.exprs) |expr, i| {
+        for (self.def_exprs) |def_expr, i| {
             if (i != 0) try writer.writeByteNTimes(' ', indent);
             try std.fmt.format(writer, "S{}:\n", .{i});
             try writer.writeByteNTimes(' ', indent + 4);
-            try expr.dumpInto(writer, indent + 4);
+            try def_expr.dumpInto(writer, indent + 4);
             try writer.writeAll(";\n");
         }
     }
@@ -27,7 +27,7 @@ pub const Expr = union(enum) {
     Equal: Pair,
     ScalarId: ScalarId,
     UnboxScalarId: ScalarId,
-    SetId: SetId,
+    DefId: DefId,
     Negate: *const Expr,
     Then: Then,
     Abstract: *const Expr,
@@ -89,32 +89,32 @@ pub const Expr = union(enum) {
         switch (self) {
             .None => try writer.writeAll("none"),
             .Some => try writer.writeAll("some"),
-            .Scalar => |scalar| try scalar.dumpInto(writer),
+            .Scalar => |scalar| try scalar.dumpInto(writer, indent),
             .Union => try writer.writeAll("|"),
             .Intersect => try writer.writeAll("&"),
             .Product => try writer.writeAll(","),
             .Equal => try writer.writeAll("="),
             .ScalarId => |scalar_id| try std.fmt.format(writer, "s{}", .{scalar_id}),
             .UnboxScalarId => |scalar_id| try std.fmt.format(writer, "unbox s{}", .{scalar_id}),
-            .SetId => |set_id| try std.fmt.format(writer, "S{}", .{set_id}),
+            .DefId => |def_id| try std.fmt.format(writer, "S{}", .{def_id}),
             .Negate => try writer.writeAll("negate"),
             .Then => try writer.writeAll("then"),
             .Abstract => try writer.writeAll("?"),
             .Apply => try writer.writeAll("apply"),
             .Box => |box| {
-                try std.fmt.format(writer, "box S{}", .{box.set_id});
+                try std.fmt.format(writer, "box S{}", .{box.def_id});
                 for (box.args) |scalar_id| {
                     try std.fmt.format(writer, " s{}", .{scalar_id});
                 }
             },
             .Fix => |fix| {
-                try std.fmt.format(writer, "fix S{}", .{fix.next.set_id});
+                try std.fmt.format(writer, "fix S{}", .{fix.next.def_id});
                 for (fix.next.args) |scalar_id| {
                     try std.fmt.format(writer, " s{}", .{scalar_id});
                 }
             },
             .Reduce => |reduce| {
-                try std.fmt.format(writer, "reduce S{}", .{reduce.next.set_id});
+                try std.fmt.format(writer, "reduce S{}", .{reduce.next.def_id});
                 for (reduce.next.args) |scalar_id| {
                     try std.fmt.format(writer, " s{}", .{scalar_id});
                 }
@@ -132,7 +132,7 @@ pub const Expr = union(enum) {
 };
 
 // Index in program
-pub const SetId = usize;
+pub const DefId = usize;
 
 // De Bruijn index to some enclosing Abstract
 pub const ScalarId = usize;
@@ -150,7 +150,7 @@ pub const Then = struct {
 };
 
 pub const Box = struct {
-    set_id: SetId,
+    def_id: DefId,
     args: []ScalarId,
 };
 

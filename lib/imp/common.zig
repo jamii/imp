@@ -62,7 +62,7 @@ pub fn dumpInto(writer: anytype, indent: u32, thing: anytype) anyerror!void {
                 },
                 .Many => {
                     // bail
-                    try std.fmt.format(writer, "{}", .{thing});
+                    try std.fmt.format(writer, "{any}", .{thing});
                 },
                 .Slice => {
                     if (pti.child == u8) {

@@ -8,14 +8,14 @@ const syntax = imp.lang.repr.syntax;
 pub fn desugar(store: *Store, syntax_expr: *const syntax.Expr, error_info: *?ErrorInfo) Error!core.Program {
     var desugarer = Desugarer{
         .store = store,
-        .exprs = ArrayList(*const core.Expr).init(&store.arena.allocator),
+        .def_exprs = ArrayList(*const core.Expr).init(&store.arena.allocator),
         .scope = ArrayList(Desugarer.ScopeItem).init(&store.arena.allocator),
         .current_expr = null,
         .error_info = error_info,
     };
-    try desugarer.exprs.append(try desugarer.desugar(syntax_expr));
+    try desugarer.def_exprs.append(try desugarer.desugar(syntax_expr));
     return core.Program{
-        .exprs = desugarer.exprs.toOwnedSlice(),
+        .def_exprs = desugarer.def_exprs.toOwnedSlice(),
     };
 }
 
@@ -36,7 +36,7 @@ pub const ErrorInfo = struct {
 
 const Desugarer = struct {
     store: *Store,
-    exprs: ArrayList(*const core.Expr),
+    def_exprs: ArrayList(*const core.Expr),
     scope: ArrayList(ScopeItem),
     current_expr: ?*const syntax.Expr,
     error_info: *?ErrorInfo,
@@ -94,7 +94,13 @@ const Desugarer = struct {
         const core_expr = switch (syntax_expr.*) {
             .None => try self.putCore(.None),
             .Some => try self.putCore(.Some),
-            .Scalar => |scalar| try self.putCore(.{ .Scalar = scalar }),
+            .Scalar => |scalar| try self.putCore(.{
+                .Scalar = switch (scalar) {
+                    .Text => |text| .{ .Text = text },
+                    .Number => |number| .{ .Number = number },
+                    .Box => imp_panic("Shouldn't be any box literals", .{}),
+                },
+            }),
             .Union => |pair| try self.putCore(.{
                 .Union = .{
                     .left = try self.desugar(pair.left),
@@ -314,10 +320,10 @@ const Desugarer = struct {
         for (args.items) |_| {
             result_expr = try self.putCore(.{ .Abstract = result_expr });
         }
-        try self.exprs.append(result_expr);
-        const set_id = self.exprs.items.len - 1;
+        try self.def_exprs.append(result_expr);
+        const def_id = self.def_exprs.items.len - 1;
         return core.Box{
-            .set_id = set_id,
+            .def_id = def_id,
             .args = args.toOwnedSlice(),
         };
     }
@@ -373,7 +379,7 @@ const Desugarer = struct {
     }
 
     fn boxToExpr(self: *Desugarer, box: core.Box) !*const core.Expr {
-        var result = try self.putCore(.{ .SetId = box.set_id });
+        var result = try self.putCore(.{ .DefId = box.def_id });
         for (box.args) |arg| {
             result = try self.putCore(.{
                 .Apply = .{

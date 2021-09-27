@@ -171,6 +171,48 @@ pub const Store = struct {
         return null;
     }
 
+    fn betterMatchForPosition2(selection: SourceSelection, a: *const core2.Expr, b: *const core2.Expr) bool {
+        const a_core_meta = Store.getCore2Meta(a);
+        const a_syntax_meta = Store.getSyntaxMeta(a_core_meta.from);
+        const b_core_meta = Store.getCore2Meta(b);
+        const b_syntax_meta = Store.getSyntaxMeta(b_core_meta.from);
+        switch (selection) {
+            .Point => |point| {
+                // anything past point is not a match
+                if (a_syntax_meta.end > point) return false;
+                if (b_syntax_meta.end > point) return true;
+                // the expr that ends closest to point is the best match
+                if (a_syntax_meta.end > b_syntax_meta.end) return true;
+                if (a_syntax_meta.end < b_syntax_meta.end) return false;
+                // if both end at the same point, the expr that is longest is the best match
+                if (a_syntax_meta.start < b_syntax_meta.start) return true;
+                if (a_syntax_meta.start > b_syntax_meta.start) return false;
+                // if both have same length, return the outermost expr in the tree
+                return a_core_meta.id > b_core_meta.id;
+            },
+            .Range => |range| {
+                // anything outside range is not a match
+                if (a_syntax_meta.start < range[0] or a_syntax_meta.end > range[1]) return false;
+                if (b_syntax_meta.start < range[0] or b_syntax_meta.end > range[1]) return true;
+                // the expr that is longest is the best match
+                if (a_syntax_meta.end - a_syntax_meta.start > b_syntax_meta.end - b_syntax_meta.start) return true;
+                if (a_syntax_meta.end - a_syntax_meta.start < b_syntax_meta.end - b_syntax_meta.start) return false;
+                // if both have the same length, return the outermost expr in the tree
+                return a_core_meta.id > b_core_meta.id;
+            },
+        }
+    }
+    pub fn findCore2ExprAt(self: Store, selection: SourceSelection) ?*const core2.Expr {
+        if (std.sort.min(*const core2.Expr, self.core2_exprs.items, selection, betterMatchForPosition2)) |best_match| {
+            const match_meta = Store.getSyntaxMeta(Store.getCore2Meta(best_match).from);
+            switch (selection) {
+                .Point => |point| if (match_meta.end <= point) return best_match,
+                .Range => |range| if (match_meta.start >= range[0] and match_meta.end <= range[1]) return best_match,
+            }
+        }
+        return null;
+    }
+
     pub fn putSpecialization(self: *Store, lazy: type_.LazySetType, hint: []const type_.ScalarType, set_type: type_.SetType) !void {
         const used_hint = switch (set_type) {
             // always empty so can't say how much of the hint was used

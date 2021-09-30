@@ -73,7 +73,7 @@ pub const InterpretResult = struct {
         try writer.writeAll("\nvalue:\n");
         try self.set.dumpInto(writer, indent);
         if (self.watch_range) |_| {
-            try writer.writeAll("\nwatch:\n\n");
+            try writer.writeAll("\n\nwatch:\n\n");
             var watch_results = ArrayList(pass.interpret.WatchResult).init(dump_allocator);
             defer watch_results.deinit();
             var iter = self.watch_results.iterator();
@@ -101,7 +101,7 @@ pub const InterpretResult = struct {
                 }
                 if (printed_scope) try writer.writeAll("\n");
                 try watch_result.set.dumpInto(writer, indent);
-                try writer.writeAll("\n");
+                try writer.writeAll("\n\n");
             }
         }
     }

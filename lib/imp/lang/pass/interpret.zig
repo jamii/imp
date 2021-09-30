@@ -109,9 +109,10 @@ const Interpreter = struct {
         const old_scope = self.scope;
         defer self.scope = old_scope;
         self.scope = ArrayList(value.Scalar).init(&self.store.arena.allocator);
-        const old_time = self.time;
-        defer self.time = old_time;
-        self.time = ArrayList(usize).init(&self.store.arena.allocator);
+        //TODO need to preserve time for watches - does correctness ever depend on resetting time?
+        //const old_time = self.time;
+        //defer self.time = old_time;
+        //self.time = ArrayList(usize).init(&self.store.arena.allocator);
         const set = try self.interpretExpr(self.program.def_exprs[def_id], hint);
 
         // memoize

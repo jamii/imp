@@ -15,8 +15,10 @@ pub const Expr = union(enum) {
     Extend: Pair,
     Equal: Pair,
     Name: Name,
+    Def: Def,
     Negate: *const Expr,
     Then: Then,
+    ThenElse: ThenElse,
     Abstract: Abstract,
     Apply: Pair,
     Box: *const Expr,
@@ -25,27 +27,24 @@ pub const Expr = union(enum) {
     Enumerate: *const Expr,
     Annotate: Annotate,
 
-    ThenElse: ThenElse,
-    Def: Def,
-
     pub fn getChildren(self: Expr) FixedSizeArrayList(3, *const Expr) {
         var children = FixedSizeArrayList(3, *const Expr).init();
-        inline for (@typeInfo(Expr).Union.fields) |expr_field| {
-            if (@enumToInt(std.meta.activeTag(self)) == expr_field.enum_field.?.value) {
-                const t = expr_field.field_type;
-                const v = @field(self, expr_field.enum_field.?.name);
-                if (t == void or t == value.Scalar or t == Name) {
+        inline for (@typeInfo(Expr).Union.fields) |expr_field, i| {
+            if (@enumToInt(std.meta.activeTag(self)) == @typeInfo(@typeInfo(Expr).Union.tag_type.?).Enum.fields[i].value) {
+                const T = expr_field.field_type;
+                const v = @field(self, expr_field.name);
+                if (T == void or T == value.Scalar or T == Name) {
                     // nothing to do
-                } else if (t == *const Expr) {
+                } else if (T == *const Expr) {
                     children.append(v);
-                } else if (t == Pair or t == Fix or t == Then or t == Fix or t == Reduce or t == Abstract or t == Annotate or t == ThenElse or t == Def) {
-                    inline for (@typeInfo(t).Struct.fields) |value_field| {
+                } else if (T == Pair or T == Fix or T == Then or T == Fix or T == Reduce or T == Abstract or T == Annotate or T == ThenElse or T == Def) {
+                    inline for (@typeInfo(T).Struct.fields) |value_field| {
                         if (value_field.field_type == *const Expr) {
                             children.append(@field(v, value_field.name));
                         }
                     }
                 } else {
-                    @compileError("Missed case for " ++ @typeName(t));
+                    @compileError("Missed case for " ++ @typeName(T));
                 }
             }
         }
@@ -53,36 +52,39 @@ pub const Expr = union(enum) {
     }
 
     pub fn dumpInto(self: Expr, writer: anytype, indent: u32) anyerror!void {
-        if (indent != 0) {
-            try writer.writeAll("\n");
-            try writer.writeByteNTimes(' ', indent);
-        }
         switch (self) {
             .None => try writer.writeAll("none"),
             .Some => try writer.writeAll("some"),
-            .Scalar => |scalar| try scalar.dumpInto(writer),
+            .Scalar => |scalar| try scalar.dumpInto(writer, indent),
             .Union => try writer.writeAll("|"),
             .Intersect => try writer.writeAll("&"),
             .Product => try writer.writeAll(","),
             .Extend => try writer.writeAll("."),
             .Equal => try writer.writeAll("="),
             .Name => |name| try writer.writeAll(name),
+            .Def => |def| try std.fmt.format(writer, "{s}:", .{def.name}),
+            .Negate => try writer.writeAll("!"),
             .Then => try writer.writeAll("then"),
-            .Abstract => |abstract| {
-                try writer.writeAll("?");
-                try abstract.arg.dumpInto(writer);
-                try writer.writeAll(" ");
-                try abstract.body.dumpInto(writer);
-            },
+            .ThenElse => try writer.writeAll("then_else"),
+            .Abstract => |abstract| try std.fmt.format(
+                writer,
+                "?{s}{s}",
+                .{
+                    if (abstract.arg.unbox) @as([]const u8, "@") else "",
+                    abstract.arg.name,
+                },
+            ),
             .Apply => try writer.writeAll("apply"),
             .Box => try writer.writeAll("@"),
-            .Annotate => |annotate| try std.fmt.format(writer, "# {}", .{annotate.annotation}),
-            .Negate => try writer.writeAll("!"),
-            .ThenElse => try writer.writeAll("then_else"),
-            .Def => |def| try std.fmt.format(writer, "{}:", .{def.name}),
+            .Fix => try writer.writeAll("fix"),
+            .Reduce => try writer.writeAll("reduce"),
+            .Enumerate => try writer.writeAll("enumerate"),
+            .Annotate => |annotate| try std.fmt.format(writer, "# {s}", .{annotate.annotation}),
         }
         for (self.getChildren().slice()) |child| {
-            try child.dumpInto(writer, indent + 2);
+            try writer.writeAll("\n");
+            try writer.writeByteNTimes(' ', indent + 4);
+            try child.dumpInto(writer, indent + 4);
         }
     }
 };

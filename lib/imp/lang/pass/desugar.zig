@@ -299,6 +299,7 @@ const Desugarer = struct {
                         scalar_id += 1;
                     }
                 }
+                return self.putCore(.{ .Watch = .{ .expr = core_expr, .scope = watch_scope.toOwnedSlice() } });
             }
         }
         return core_expr;

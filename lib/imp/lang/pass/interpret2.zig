@@ -12,7 +12,6 @@ pub fn interpret(
     arena: *ArenaAllocator,
     program: core.Program,
     program_type: type_.ProgramType,
-    watch_expr_o: ?*const core.Expr,
     watch_results: *DeepHashSet(WatchResult),
     interrupter: imp.lang.Interrupter,
     error_info: *?ErrorInfo,
@@ -24,7 +23,6 @@ pub fn interpret(
         .arena = arena,
         .program = program,
         .program_type = program_type,
-        .watch_expr_o = watch_expr_o,
         .watch_results = watch_results,
         .def_sets = def_sets,
         .scope = ArrayList(value.Scalar).init(&store.arena.allocator),
@@ -52,13 +50,13 @@ pub const ErrorInfo = struct {
 
 pub const WatchResult = struct {
     time: []const usize,
-    scope: []const ArgAndScalar,
+    scope: []const ScopeItem,
     set: value.Set,
-};
 
-pub const ArgAndScalar = struct {
-    arg: syntax.Arg,
-    scalar: value.Scalar,
+    pub const ScopeItem = struct {
+        name: syntax.Name,
+        scalar: value.Scalar,
+    };
 };
 
 // --------------------------------------------------------------------------------
@@ -68,7 +66,6 @@ const Interpreter = struct {
     arena: *ArenaAllocator,
     program: core.Program,
     program_type: type_.ProgramType,
-    watch_expr_o: ?*const core.Expr,
     watch_results: *DeepHashSet(WatchResult),
     def_sets: []ArrayList(Memo),
     scope: ArrayList(value.Scalar),
@@ -141,26 +138,6 @@ const Interpreter = struct {
     }
 
     fn interpretExpr(self: *Interpreter, expr: *const core.Expr, hint: value.Tuple) Error!value.Set {
-        const result = self.interpretExprInner(expr, hint);
-        if (self.watch_expr_o) |watch_expr|
-            if (expr == watch_expr)
-                if (result) |set| {
-                    var scope = ArrayList(ArgAndScalar).init(&self.arena.allocator);
-                    //TODO restore watch scopes
-                    //const watch_meta = Store.getCore2Meta(expr);
-                    //for (watch_meta.scope) |arg_o, i|
-                    //    if (arg_o) |arg|
-                    //        try scope.append(.{ .arg = arg, .scalar = self.scope.items[i] });
-                    try self.watch_results.put(.{
-                        .time = try std.mem.dupe(&self.arena.allocator, usize, self.time.items),
-                        .scope = scope.toOwnedSlice(),
-                        .set = set,
-                    }, .{});
-                } else |_| {};
-        return result;
-    }
-
-    fn interpretExprInner(self: *Interpreter, expr: *const core.Expr, hint: value.Tuple) Error!value.Set {
         try self.interrupter.check();
         switch (expr.*) {
             .None => {
@@ -528,6 +505,23 @@ const Interpreter = struct {
             },
             .Annotate => |annotate| {
                 return self.interpretExpr(annotate.body, hint);
+            },
+            .Watch => |watch| {
+                const result = self.interpretExpr(watch.expr, hint);
+                if (result) |set| {
+                    var scope = ArrayList(WatchResult.ScopeItem).init(&self.arena.allocator);
+                    for (watch.scope) |scope_item|
+                        try scope.append(.{
+                            .name = scope_item.name,
+                            .scalar = self.scope.items[self.scope.items.len - 1 - scope_item.scalar_id],
+                        });
+                    try self.watch_results.put(.{
+                        .time = try std.mem.dupe(&self.arena.allocator, usize, self.time.items),
+                        .scope = scope.toOwnedSlice(),
+                        .set = set,
+                    }, .{});
+                } else |_| {}
+                return result;
             },
             .Native => |native| {
                 switch (native) {

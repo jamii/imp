@@ -1,6 +1,7 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
 const meta = imp.meta;
+const syntax = imp.lang.repr.syntax;
 const value = imp.lang.repr.value2;
 
 pub const Program = struct {
@@ -37,6 +38,7 @@ pub const Expr = union(enum) {
     Reduce: Reduce,
     Enumerate: *const Expr,
     Annotate: Annotate,
+    Watch: Watch,
     Native: Native,
 
     pub fn getChildren(self: Expr) FixedSizeArrayList(3, *const Expr) {
@@ -48,14 +50,14 @@ pub const Expr = union(enum) {
                 switch (T) {
                     void, value.Scalar, ScalarId, Native => {},
                     *const Expr => children.append(v),
-                    Pair, Then, Box, Fix, Reduce, Annotate => {
+                    Pair, Then, Box, Fix, Reduce, Annotate, Watch => {
                         inline for (@typeInfo(T).Struct.fields) |value_field| {
                             if (value_field.field_type == *const Expr) {
                                 children.append(@field(v, value_field.name));
                             }
                         }
                     },
-                    else => @compileError("Missed case for " ++ @typeName(t)),
+                    else => @compileError("Missed case for " ++ @typeName(T)),
                 }
             }
         }
@@ -71,14 +73,14 @@ pub const Expr = union(enum) {
                 switch (T) {
                     void, value.Scalar, ScalarId, Native => {},
                     *const Expr => children.append(v),
-                    Pair, Then, Box, Fix, Reduce, Annotate => {
+                    Pair, Then, Box, Fix, Reduce, Annotate, Watch => {
                         inline for (@typeInfo(T).Struct.fields) |value_field| {
                             if (value_field.field_type == *const Expr) {
                                 children.append(&@field(v, value_field.name));
                             }
                         }
                     },
-                    else => @compileError("Missed case for " ++ @typeName(t)),
+                    else => @compileError("Missed case for " ++ @typeName(T)),
                 }
             }
         }
@@ -121,6 +123,7 @@ pub const Expr = union(enum) {
             },
             .Enumerate => try writer.writeAll("enumerate"),
             .Annotate => |annotate| try std.fmt.format(writer, "# {any}", .{annotate.annotation}),
+            .Watch => |watch| try watch.dumpInto(writer, indent),
             .Native => |native| try native.dumpInto(writer, indent),
         }
         for (self.getChildren().slice()) |child| {
@@ -168,6 +171,22 @@ pub const Reduce = struct {
 pub const Annotate = struct {
     annotation: []const u8,
     body: *const Expr,
+};
+
+pub const Watch = struct {
+    expr: *const Expr,
+    scope: []ScopeItem,
+
+    pub const ScopeItem = struct {
+        name: syntax.Name,
+        scalar_id: ScalarId,
+    };
+
+    pub fn dumpInto(self: Watch, writer: anytype, _: u32) anyerror!void {
+        try writer.writeAll("watch");
+        for (self.scope) |scope_item|
+            try std.fmt.format(writer, "#{s} s{}", .{ scope_item.name, scope_item.scalar_id });
+    }
 };
 
 pub const Native = enum {

@@ -30,6 +30,7 @@ pub const LogicalMeta = struct {
 
 pub const Store = struct {
     arena: *ArenaAllocator,
+    syntax_exprs: ArrayList(*const syntax.Expr),
     next_expr_id: usize,
     core_exprs: ArrayList(*const core.Expr),
     core2_exprs: ArrayList(*const core2.Expr),
@@ -38,6 +39,7 @@ pub const Store = struct {
     pub fn init(arena: *ArenaAllocator) Store {
         return Store{
             .arena = arena,
+            .syntax_exprs = ArrayList(*const syntax.Expr).init(&arena.allocator),
             .next_expr_id = 0,
             .core_exprs = ArrayList(*const core.Expr).init(&arena.allocator),
             .core2_exprs = ArrayList(*const core2.Expr).init(&arena.allocator),
@@ -54,6 +56,7 @@ pub const Store = struct {
                 .end = end,
             },
         };
+        try self.syntax_exprs.append(&expr_and_meta.expr);
         return &expr_and_meta.expr;
     }
 
@@ -129,6 +132,45 @@ pub const Store = struct {
         Point: usize,
         Range: [2]usize,
     };
+    fn betterMatchForPosition2(selection: SourceSelection, a: *const syntax.Expr, b: *const syntax.Expr) bool {
+        const a_meta = Store.getSyntaxMeta(a);
+        const b_meta = Store.getSyntaxMeta(b);
+        switch (selection) {
+            .Point => |point| {
+                // anything past point is not a match
+                if (a_meta.end > point) return false;
+                if (b_meta.end > point) return true;
+                // the expr that ends closest to point is the best match
+                if (a_meta.end > b_meta.end) return true;
+                if (a_meta.end < b_meta.end) return false;
+                // if both end at the same point, the expr that is longest is the best match
+                if (a_meta.start < b_meta.start) return true;
+                if (a_meta.start > b_meta.start) return false;
+            },
+            .Range => |range| {
+                // anything outside range is not a match
+                if (a_meta.start < range[0] or a_meta.end > range[1]) return false;
+                if (b_meta.start < range[0] or b_meta.end > range[1]) return true;
+                // the expr that is longest is the best match
+                if (a_meta.end - a_meta.start > b_meta.end - b_meta.start) return true;
+                if (a_meta.end - a_meta.start < b_meta.end - b_meta.start) return false;
+            },
+        }
+        // otherwise, pick arbitrarily
+        // TODO pick the expr that is higher in the tree - easy once we switch to ids instead of pointers
+        return @ptrToInt(a) > @ptrToInt(b);
+    }
+    pub fn findSyntaxExprAt(self: Store, selection: SourceSelection) ?*const syntax.Expr {
+        if (std.sort.min(*const syntax.Expr, self.syntax_exprs.items, selection, betterMatchForPosition2)) |best_match| {
+            const match_meta = Store.getSyntaxMeta(best_match);
+            switch (selection) {
+                .Point => |point| if (match_meta.end <= point) return best_match,
+                .Range => |range| if (match_meta.start >= range[0] and match_meta.end <= range[1]) return best_match,
+            }
+        }
+        return null;
+    }
+
     fn betterMatchForPosition(selection: SourceSelection, a: *const core.Expr, b: *const core.Expr) bool {
         const a_core_meta = Store.getCoreMeta(a);
         const a_syntax_meta = Store.getSyntaxMeta(a_core_meta.from);
@@ -163,48 +205,6 @@ pub const Store = struct {
     pub fn findCoreExprAt(self: Store, selection: SourceSelection) ?*const core.Expr {
         if (std.sort.min(*const core.Expr, self.core_exprs.items, selection, betterMatchForPosition)) |best_match| {
             const match_meta = Store.getSyntaxMeta(Store.getCoreMeta(best_match).from);
-            switch (selection) {
-                .Point => |point| if (match_meta.end <= point) return best_match,
-                .Range => |range| if (match_meta.start >= range[0] and match_meta.end <= range[1]) return best_match,
-            }
-        }
-        return null;
-    }
-
-    fn betterMatchForPosition2(selection: SourceSelection, a: *const core2.Expr, b: *const core2.Expr) bool {
-        const a_core_meta = Store.getCore2Meta(a);
-        const a_syntax_meta = Store.getSyntaxMeta(a_core_meta.from);
-        const b_core_meta = Store.getCore2Meta(b);
-        const b_syntax_meta = Store.getSyntaxMeta(b_core_meta.from);
-        switch (selection) {
-            .Point => |point| {
-                // anything past point is not a match
-                if (a_syntax_meta.end > point) return false;
-                if (b_syntax_meta.end > point) return true;
-                // the expr that ends closest to point is the best match
-                if (a_syntax_meta.end > b_syntax_meta.end) return true;
-                if (a_syntax_meta.end < b_syntax_meta.end) return false;
-                // if both end at the same point, the expr that is longest is the best match
-                if (a_syntax_meta.start < b_syntax_meta.start) return true;
-                if (a_syntax_meta.start > b_syntax_meta.start) return false;
-                // if both have same length, return the outermost expr in the tree
-                return a_core_meta.id > b_core_meta.id;
-            },
-            .Range => |range| {
-                // anything outside range is not a match
-                if (a_syntax_meta.start < range[0] or a_syntax_meta.end > range[1]) return false;
-                if (b_syntax_meta.start < range[0] or b_syntax_meta.end > range[1]) return true;
-                // the expr that is longest is the best match
-                if (a_syntax_meta.end - a_syntax_meta.start > b_syntax_meta.end - b_syntax_meta.start) return true;
-                if (a_syntax_meta.end - a_syntax_meta.start < b_syntax_meta.end - b_syntax_meta.start) return false;
-                // if both have the same length, return the outermost expr in the tree
-                return a_core_meta.id > b_core_meta.id;
-            },
-        }
-    }
-    pub fn findCore2ExprAt(self: Store, selection: SourceSelection) ?*const core2.Expr {
-        if (std.sort.min(*const core2.Expr, self.core2_exprs.items, selection, betterMatchForPosition2)) |best_match| {
-            const match_meta = Store.getSyntaxMeta(Store.getCore2Meta(best_match).from);
             switch (selection) {
                 .Point => |point| if (match_meta.end <= point) return best_match,
                 .Range => |range| if (match_meta.start >= range[0] and match_meta.end <= range[1]) return best_match,

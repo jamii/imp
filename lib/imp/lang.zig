@@ -158,8 +158,15 @@ pub fn interpret(
         return err;
     };
 
+    const watch2_expr_o = store.findSyntaxExprAt(watch_selection);
+    var watch2_range: ?[2]usize = null;
+    if (watch2_expr_o) |watch2_expr| {
+        const watch2_meta = Store.getSyntaxMeta(watch2_expr);
+        watch2_range = .{ watch2_meta.start, watch2_meta.end };
+    }
+
     var desugar2_error_info: ?pass.desugar2.ErrorInfo = null;
-    const program = pass.desugar2.desugar(&store, syntax_expr, &desugar2_error_info) catch |err| {
+    const program = pass.desugar2.desugar(&store, syntax_expr, watch2_expr_o, &desugar2_error_info) catch |err| {
         if (err == error.Desugar2Error) {
             error_info.* = .{ .Desugar2 = desugar2_error_info.? };
         }
@@ -200,17 +207,9 @@ pub fn interpret(
         return err;
     };
 
-    const watch2_expr_o = store.findCore2ExprAt(watch_selection);
-    var watch2_range: ?[2]usize = null;
-    if (watch2_expr_o) |watch2_expr| {
-        const watch2_meta = Store.getSyntaxMeta(Store.getCore2Meta(watch2_expr).from);
-        watch2_range = .{ watch2_meta.start, watch2_meta.end };
-    }
     var watch2_results = DeepHashSet(pass.interpret2.WatchResult).init(&arena.allocator);
-    dump(watch2_results);
-
     var interpret2_error_info: ?pass.interpret2.ErrorInfo = null;
-    const set2 = pass.interpret2.interpret(&store, arena, program, program_type, watch2_expr_o, &watch2_results, interrupter, &interpret2_error_info) catch |err| {
+    const set2 = pass.interpret2.interpret(&store, arena, program, program_type, &watch2_results, interrupter, &interpret2_error_info) catch |err| {
         if (err == error.Interpret2Error or err == error.Native2Error) {
             error_info.* = .{ .Interpret2 = interpret2_error_info.? };
         }

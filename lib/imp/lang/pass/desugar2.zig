@@ -5,9 +5,10 @@ const Store = imp.lang.Store;
 const core = imp.lang.repr.core2;
 const syntax = imp.lang.repr.syntax;
 
-pub fn desugar(store: *Store, syntax_expr: *const syntax.Expr, error_info: *?ErrorInfo) Error!core.Program {
+pub fn desugar(store: *Store, syntax_expr: *const syntax.Expr, watch_expr_o: ?*const syntax.Expr, error_info: *?ErrorInfo) Error!core.Program {
     var desugarer = Desugarer{
         .store = store,
+        .watch_expr_o = watch_expr_o,
         .def_exprs = ArrayList(*const core.Expr).init(&store.arena.allocator),
         .scope = ArrayList(Desugarer.ScopeItem).init(&store.arena.allocator),
         .current_expr = null,
@@ -36,6 +37,7 @@ pub const ErrorInfo = struct {
 
 const Desugarer = struct {
     store: *Store,
+    watch_expr_o: ?*const syntax.Expr,
     def_exprs: ArrayList(*const core.Expr),
     scope: ArrayList(ScopeItem),
     current_expr: ?*const syntax.Expr,
@@ -284,6 +286,21 @@ const Desugarer = struct {
                 break :def body;
             },
         };
+        if (self.watch_expr_o) |watch_expr| {
+            if (watch_expr == syntax_expr) {
+                var watch_scope = ArrayList(core.Watch.ScopeItem).init(&self.store.arena.allocator);
+                var i: usize = 0;
+                var scalar_id: usize = 0;
+                while (i < self.scope.items.len) : (i += 1) {
+                    const item = self.scope.items[self.scope.items.len - 1 - i];
+                    if (item.kind != .Set) {
+                        if (item.name) |name|
+                            try watch_scope.append(.{ .name = name, .scalar_id = scalar_id });
+                        scalar_id += 1;
+                    }
+                }
+            }
+        }
         return core_expr;
     }
 
@@ -352,20 +369,13 @@ const Desugarer = struct {
             .Box => |*box| for (box.args) |*scalar_id| try scalar_ids.append(scalar_id),
             .Reduce => |*reduce| for (reduce.next.args) |*scalar_id| try scalar_ids.append(scalar_id),
             .Fix => |*fix| for (fix.next.args) |*scalar_id| try scalar_ids.append(scalar_id),
+            .Watch => |*watch| for (watch.scope) |*scope_item| try scalar_ids.append(&scope_item.scalar_id),
             else => {},
         }
         return scalar_ids.toOwnedSlice();
     }
 
     fn makeBox(self: *Desugarer, body: *const core.Expr) Error!*const core.Expr {
-        // TODO this is correct, but needs to be done everywhere
-        // var body_name_ixes = DeepHashSet(core.NameIx).init(&self.store.arena.allocator);
-        // try body.getNameIxes(&body_name_ixes);
-        // var box_scope = ArrayList(core.NameIx).init(&self.store.arena.allocator);
-        // var body_name_ixes_iter = body_name_ixes.iterator();
-        // while (body_name_ixes_iter.next()) |kv| {
-        //     try box_scope.append(kv.key);
-        // }
         var scope = try self.store.arena.allocator.alloc(core.NameIx, self.scope.items.len);
         for (self.scope.items) |_, i| {
             scope[i] = i;

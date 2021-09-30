@@ -481,6 +481,7 @@ pub const Analyzer = struct {
                 // TODO some annotations affect types eg solve
                 return try self.analyzeExpr(annotate.body, hint);
             },
+            .Watch => |watch| return try self.analyzeExpr(watch.expr, hint),
             .Native => |native| {
                 return type_.SetType{
                     .Concrete = switch (native) {

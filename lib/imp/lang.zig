@@ -13,11 +13,8 @@ comptime {
 pub const InterpretErrorInfo = union(enum) {
     Parse: pass.parse.ErrorInfo,
     Desugar: pass.desugar.ErrorInfo,
-    Desugar2: pass.desugar2.ErrorInfo,
     Analyze: pass.analyze.ErrorInfo,
-    Analyze2: pass.analyze2.ErrorInfo,
     Interpret: pass.interpret.ErrorInfo,
-    Interpret2: pass.interpret2.ErrorInfo,
 
     pub fn error_range(self: ?InterpretErrorInfo, err: InterpretError) ?[2]usize {
         switch (err) {
@@ -28,17 +25,8 @@ pub const InterpretErrorInfo = union(enum) {
                 const syntax_meta = Store.getSyntaxMeta(self.?.Desugar.expr);
                 return [2]usize{ syntax_meta.start, syntax_meta.end };
             },
-            error.Desugar2Error => {
-                const syntax_meta = Store.getSyntaxMeta(self.?.Desugar2.expr);
-                return [2]usize{ syntax_meta.start, syntax_meta.end };
-            },
             error.AnalyzeError => {
                 const core_meta = Store.getCoreMeta(self.?.Analyze.expr);
-                const syntax_meta = Store.getSyntaxMeta(core_meta.from);
-                return [2]usize{ syntax_meta.start, syntax_meta.end };
-            },
-            error.Analyze2Error => {
-                const core_meta = Store.getCore2Meta(self.?.Analyze2.expr);
                 const syntax_meta = Store.getSyntaxMeta(core_meta.from);
                 return [2]usize{ syntax_meta.start, syntax_meta.end };
             },
@@ -47,27 +35,18 @@ pub const InterpretErrorInfo = union(enum) {
                 const syntax_meta = Store.getSyntaxMeta(core_meta.from);
                 return [2]usize{ syntax_meta.start, syntax_meta.end };
             },
-            error.Interpret2Error, error.Native2Error => {
-                const core_meta = Store.getCore2Meta(self.?.Interpret.expr);
-                const syntax_meta = Store.getSyntaxMeta(core_meta.from);
-                return [2]usize{ syntax_meta.start, syntax_meta.end };
-            },
             else => return null,
         }
     }
 
-    pub fn dumpInto(self: ?InterpretErrorInfo, err: InterpretError, writer: anytype) anyerror!void {
+    pub fn dumpInto(writer: anytype, self: ?InterpretErrorInfo, err: InterpretError) anyerror!void {
         switch (err) {
             // TODO report source position
             error.ParseError => try std.fmt.format(writer, "Parse error: {s}\n", .{self.?.Parse.message}),
             error.DesugarError => try std.fmt.format(writer, "Desugar error: {s}\n", .{self.?.Desugar.message}),
-            error.Desugar2Error => try std.fmt.format(writer, "Desugar2 error: {s}\n", .{self.?.Desugar2.message}),
             error.AnalyzeError => try std.fmt.format(writer, "Analyze error: {s}\n", .{self.?.Analyze.message}),
-            error.Analyze2Error => try std.fmt.format(writer, "Analyze error: {s}\n", .{self.?.Analyze2.message}),
             error.InterpretError => try std.fmt.format(writer, "Interpret error: {s}\n", .{self.?.Interpret.message}),
-            error.Interpret2Error => try std.fmt.format(writer, "Interpret error: {s}\n", .{self.?.Interpret2.message}),
             error.NativeError => try std.fmt.format(writer, "Native error: {s}\n", .{self.?.Interpret.message}),
-            error.Native2Error => try std.fmt.format(writer, "Native error: {s}\n", .{self.?.Interpret2.message}),
 
             error.Utf8InvalidStartByte, error.InvalidUtf8, error.InvalidCharacter, error.Utf8ExpectedContinuation, error.Utf8OverlongEncoding, error.Utf8EncodesSurrogateHalf, error.Utf8CodepointTooLarge => try std.fmt.format(writer, "Invalid utf8 input: {}\n", .{err}),
 
@@ -79,11 +58,8 @@ pub const InterpretErrorInfo = union(enum) {
 
 pub const InterpretError = pass.parse.Error ||
     pass.desugar.Error ||
-    pass.desugar2.Error ||
     pass.analyze.Error ||
-    pass.analyze2.Error ||
-    pass.interpret.Error ||
-    pass.interpret2.Error;
+    pass.interpret.Error;
 
 pub const InterpretResult = struct {
     set_type: repr.type_.SetType,
@@ -91,14 +67,14 @@ pub const InterpretResult = struct {
     watch_results: DeepHashSet(pass.interpret.WatchResult),
     watch_range: ?[2]usize,
 
-    pub fn dumpInto(self: InterpretResult, allocator: *Allocator, writer: anytype) anyerror!void {
+    pub fn dumpInto(self: InterpretResult, writer: anytype, indent: u32) anyerror!void {
         try writer.writeAll("type:\n");
-        try self.set_type.dumpInto(writer);
+        try self.set_type.dumpInto(writer, indent);
         try writer.writeAll("\nvalue:\n");
-        try self.set.dumpInto(allocator, writer);
+        try self.set.dumpInto(writer, indent);
         if (self.watch_range) |_| {
             try writer.writeAll("\nwatch:\n\n");
-            var watch_results = ArrayList(pass.interpret.WatchResult).init(allocator);
+            var watch_results = ArrayList(pass.interpret.WatchResult).init(dump_allocator);
             defer watch_results.deinit();
             var iter = self.watch_results.iterator();
             while (iter.next()) |entry| try watch_results.append(entry.key_ptr.*);
@@ -113,20 +89,18 @@ pub const InterpretResult = struct {
                 }
                 if (watch_result.time.len > 0) try writer.writeAll("\n");
                 var printed_scope = false;
-                for (watch_result.scope) |arg_and_scalar| {
+                for (watch_result.scope) |scope_item| {
                     // TODO might want to print boxes when we have good scope detection and better box printing
-                    if (arg_and_scalar.scalar != .Box) {
-                        const maybe_box: []const u8 = if (arg_and_scalar.arg.unbox) "@" else "";
-                        try std.fmt.format(writer, "{s}: {}{s}; ", .{
-                            arg_and_scalar.arg.name,
-                            arg_and_scalar.scalar,
-                            maybe_box,
+                    if (scope_item.scalar != .Box) {
+                        try std.fmt.format(writer, "{s}: {}; ", .{
+                            scope_item.name,
+                            scope_item.scalar,
                         });
                         printed_scope = true;
                     }
                 }
                 if (printed_scope) try writer.writeAll("\n");
-                try watch_result.set.dumpInto(allocator, writer);
+                try watch_result.set.dumpInto(writer, indent);
                 try writer.writeAll("\n");
             }
         }
@@ -150,75 +124,40 @@ pub fn interpret(
         return err;
     };
 
+    const watch_expr_o = store.findSyntaxExprAt(watch_selection);
+    var watch_range: ?[2]usize = null;
+    if (watch_expr_o) |watch_expr| {
+        const watch_meta = Store.getSyntaxMeta(watch_expr);
+        watch_range = .{ watch_meta.start, watch_meta.end };
+    }
+
     var desugar_error_info: ?pass.desugar.ErrorInfo = null;
-    const core_expr = pass.desugar.desugar(&store, syntax_expr, &desugar_error_info) catch |err| {
+    const program = pass.desugar.desugar(&store, syntax_expr, watch_expr_o, &desugar_error_info) catch |err| {
         if (err == error.DesugarError) {
             error_info.* = .{ .Desugar = desugar_error_info.? };
         }
         return err;
     };
 
-    const watch2_expr_o = store.findSyntaxExprAt(watch_selection);
-    var watch2_range: ?[2]usize = null;
-    if (watch2_expr_o) |watch2_expr| {
-        const watch2_meta = Store.getSyntaxMeta(watch2_expr);
-        watch2_range = .{ watch2_meta.start, watch2_meta.end };
-    }
-
-    var desugar2_error_info: ?pass.desugar2.ErrorInfo = null;
-    const program = pass.desugar2.desugar(&store, syntax_expr, watch2_expr_o, &desugar2_error_info) catch |err| {
-        if (err == error.Desugar2Error) {
-            error_info.* = .{ .Desugar2 = desugar2_error_info.? };
-        }
-        return err;
-    };
-    dump(program);
-
     var analyze_error_info: ?pass.analyze.ErrorInfo = null;
-    const set_type = pass.analyze.analyze(&store, core_expr, interrupter, &analyze_error_info) catch |err| {
+    const program_type = pass.analyze.analyze(&store, program, interrupter, &analyze_error_info) catch |err| {
         if (err == error.AnalyzeError) {
             error_info.* = .{ .Analyze = analyze_error_info.? };
         }
         return err;
     };
 
-    var analyze2_error_info: ?pass.analyze2.ErrorInfo = null;
-    const program_type = pass.analyze2.analyze(&store, program, interrupter, &analyze2_error_info) catch |err| {
-        if (err == error.Analyze2Error) {
-            error_info.* = .{ .Analyze2 = analyze2_error_info.? };
-        }
-        return err;
-    };
-    dump(program_type);
-
-    const watch_expr_o = store.findCoreExprAt(watch_selection);
-    var watch_range: ?[2]usize = null;
-    if (watch_expr_o) |watch_expr| {
-        const watch_meta = Store.getSyntaxMeta(Store.getCoreMeta(watch_expr).from);
-        watch_range = .{ watch_meta.start, watch_meta.end };
-    }
     var watch_results = DeepHashSet(pass.interpret.WatchResult).init(&arena.allocator);
-
     var interpret_error_info: ?pass.interpret.ErrorInfo = null;
-    const set = pass.interpret.interpret(&store, arena, core_expr, watch_expr_o, &watch_results, interrupter, &interpret_error_info) catch |err| {
+    const set = pass.interpret.interpret(&store, arena, program, program_type, &watch_results, interrupter, &interpret_error_info) catch |err| {
         if (err == error.InterpretError or err == error.NativeError) {
             error_info.* = .{ .Interpret = interpret_error_info.? };
         }
         return err;
     };
 
-    var watch2_results = DeepHashSet(pass.interpret2.WatchResult).init(&arena.allocator);
-    var interpret2_error_info: ?pass.interpret2.ErrorInfo = null;
-    const set2 = pass.interpret2.interpret(&store, arena, program, program_type, &watch2_results, interrupter, &interpret2_error_info) catch |err| {
-        if (err == error.Interpret2Error or err == error.Native2Error) {
-            error_info.* = .{ .Interpret2 = interpret2_error_info.? };
-        }
-        return err;
-    };
-    dump(set2);
-
     return InterpretResult{
-        .set_type = set_type,
+        .set_type = program_type.program_type,
         .set = set,
         .watch_results = watch_results,
         .watch_range = watch_range,
@@ -375,10 +314,10 @@ pub const Worker = struct {
             defer response_buffer.deinit();
             var response_kind: ResponseKind = undefined;
             if (result) |ok| {
-                try ok.dumpInto(&arena.allocator, response_buffer.writer());
+                try ok.dumpInto(response_buffer.writer(), 0);
                 response_kind = .{ .Ok = ok.watch_range };
             } else |err| {
-                try InterpretErrorInfo.dumpInto(error_info, err, response_buffer.writer());
+                try InterpretErrorInfo.dumpInto(response_buffer.writer(), error_info, err);
                 response_kind = .{ .Err = InterpretErrorInfo.error_range(error_info, err) };
             }
 

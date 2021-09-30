@@ -31,9 +31,9 @@ value:
 1 @
 ---
 type:
-@(type of expr #0 with scope ())
+@(S0)
 value:
-| @(value of expr #0 with scope ())
+| @(S0)
 
 a: 1;
 a
@@ -48,9 +48,9 @@ a: 1 @;
 a
 ---
 type:
-@(type of expr #0 with scope ())
+@(S0)
 value:
-| @(value of expr #0 with scope ())
+| @(S0)
 
 foo: ?a a;
 foo 1
@@ -286,7 +286,7 @@ foo2: ?a ((?b a,b)@);
 bar: foo1 1 | foo2 2;
 bar ?@f f 3
 ---
-Analyze error: TODO type unions are not implemented yet: @(type of expr #3 with scope (number, )) | @(type of expr #10 with scope (number, ))
+Analyze error: TODO type unions are not implemented yet: @(S0 number) | @(S2 number)
 
 foo: 1, 1 | 2, 2;
 foo foo
@@ -299,12 +299,12 @@ some
 foo: ?a ?b a,b;
 foo foo
 ---
-Analyze error: Cannot apply two maybe-infinite sets: (type of expr #4 with scope ()) applied to (type of expr #4 with scope ())
+Analyze error: Cannot apply two maybe-infinite sets
 
 foo: ?a ?b a,b;
 foo = 1
 ---
-Analyze error: Cannot equal one or more maybe-infinite sets: (type of expr #4 with scope ()) = number
+Analyze error: Could not infer the type of abstract arg
 
 foo: ?a ?b a,b;
 (foo | foo) 1 2
@@ -316,7 +316,7 @@ value:
 
 (?a none) then 1
 ---
-Analyze error: The condition of `then` must have type `maybe`, found (type of expr #1 with scope ())
+Analyze error: Could not infer the type of abstract arg
 
 foo: ?a ?b a=b;
 (foo, 1, 2) 0 0 1 2
@@ -431,7 +431,7 @@ value:
 
 fix 1 2
 ---
-Analyze error: The `next` argument for fix must be able to be applied to it's own result, found number
+Analyze error: The `next` argument for fix must take a box as it's first argument. Found number
 
 fix 1 ?@prev prev,2
 ---
@@ -496,7 +496,7 @@ value:
 
 reduce (3 | 4 | 5) 0 ?a ?b a + b
 ---
-Analyze error: Intersection of number and @(type of expr #13 with scope ()) is empty
+Analyze error: Intersection of number and @(#S0 number) is empty
 
 // testing specialization caching
 f: ?i i+1;

@@ -38,9 +38,9 @@ pub fn main() anyerror!void {
         const result = imp.lang.interpret(&arena, source.items, .{ .Point = 0 }, interrupter, &error_info);
         const writer = std.io.getStdOut().writer();
         if (result) |type_and_set| {
-            try type_and_set.dumpInto(allocator, writer);
+            try type_and_set.dumpInto(writer, 0);
         } else |err| {
-            try imp.lang.InterpretErrorInfo.dumpInto(error_info, err, writer);
+            try imp.lang.InterpretErrorInfo.dumpInto(writer, error_info, err);
         }
     }
 }

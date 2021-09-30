@@ -143,6 +143,10 @@ pub fn dumpInto(writer: anytype, indent: u32, thing: anytype) anyerror!void {
     }
 }
 
+// This is a sneaky global allocator, so that we can eg sort sets before printing them
+var dump_gpa = std.heap.GeneralPurposeAllocator(.{}){};
+pub const dump_allocator = &dump_gpa.allocator;
+
 pub fn format(allocator: *Allocator, comptime fmt: []const u8, args: anytype) ![]const u8 {
     var buf = ArrayList(u8).init(allocator);
     var writer = buf.writer();

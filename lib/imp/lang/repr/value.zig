@@ -4,36 +4,13 @@ const meta = imp.meta;
 const Store = imp.lang.Store;
 const core = imp.lang.repr.core;
 
-/// Invariant: all the tuples in a Set must be the same length
-pub const Set = union(enum) {
-    Finite: FiniteSet,
-    Lazy: LazySet,
-
-    pub fn dumpInto(self: Set, allocator: *Allocator, writer: anytype) WriterError(@TypeOf(writer))!void {
-        switch (self) {
-            .Finite => |finite| try finite.dumpInto(allocator, writer),
-            .Lazy => |lazy| try lazy.dumpInto(writer),
-        }
-    }
-
-    pub fn format(self: Set, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        // TODO https://github.com/ziglang/zig/issues/9220
-        _ = fmt;
-        switch (self) {
-            .Finite => |finite| try finite.format(fmt, options, writer),
-            .Lazy => |lazy| try lazy.dumpInto(writer),
-        }
-    }
-};
-
-pub const Tuple = []const Scalar;
-
-pub const FiniteSet = struct {
+/// Invariant: all the Tuples in a Set must be the same length
+pub const Set = struct {
     arity: usize,
     set: DeepHashSet(Tuple),
 
     // TODO this is not an ordering, only works for deepEqual
-    pub fn deepCompare(self: FiniteSet, other: FiniteSet) meta.Ordering {
+    pub fn deepCompare(self: Set, other: Set) meta.Ordering {
         if (self.set.count() != other.set.count()) {
             return .LessThan;
         }
@@ -46,7 +23,7 @@ pub const FiniteSet = struct {
         return .Equal;
     }
 
-    pub fn deepHashInto(hasher: anytype, self: FiniteSet) void {
+    pub fn deepHashInto(hasher: anytype, self: Set) void {
         meta.deepHashInto(hasher, self.arity);
         // TODO this will break if hashmap starts using a random seed
         var iter = self.set.iterator();
@@ -55,12 +32,12 @@ pub const FiniteSet = struct {
         }
     }
 
-    pub fn dumpInto(self: FiniteSet, allocator: *Allocator, writer: anytype) WriterError(@TypeOf(writer))!void {
-        var tuples = ArrayList(Tuple).init(allocator);
+    pub fn dumpInto(self: Set, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
+        var tuples = ArrayList(Tuple).init(dump_allocator);
         defer tuples.deinit();
         var iter = self.set.iterator();
         while (iter.next()) |kv| {
-            // TODO errors for printing are funky
+            // TODO format doesn't always allow OOM
             tuples.append(kv.key_ptr.*) catch imp_panic("oom", .{});
         }
         std.sort.sort(Tuple, tuples.items, {}, struct {
@@ -73,52 +50,42 @@ pub const FiniteSet = struct {
         } else if (tuples.items.len == 1 and tuples.items[0].len == 0) {
             try writer.writeAll("some\n");
         } else {
-            for (tuples.items) |tuple| {
+            for (tuples.items) |tuple, i| {
+                if (i != 0) {
+                    try writer.writeAll("\n");
+                    try writer.writeByteNTimes(' ', indent);
+                }
                 try writer.writeAll("| ");
                 for (tuple) |scalar, scalar_ix| {
                     if (scalar_ix != 0) try writer.writeAll(", ");
-                    try scalar.dumpInto(writer);
+                    try scalar.dumpInto(writer, indent);
                 }
-                try writer.writeAll("\n");
             }
         }
     }
 
-    pub fn format(self: FiniteSet, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+    pub fn format(self: Set, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         // TODO https://github.com/ziglang/zig/issues/9220
         _ = fmt;
-        if (self.set.count() == 0) {
-            try writer.writeAll("none");
-        } else if (self.set.count() == 1 and self.set.iterator().next().?.key_ptr.len == 0) {
-            try writer.writeAll("some");
-        } else {
-            var iter = self.set.iterator();
-            var i: usize = 0;
-            while (iter.next()) |kv| : (i += 1) {
-                try writer.writeAll("| ");
-                for (kv.key_ptr.*) |scalar, scalar_ix| {
-                    if (scalar_ix != 0) try writer.writeAll(", ");
-                    try scalar.dumpInto(writer);
-                }
-                try writer.writeAll("\n");
-            }
-        }
+        try self.dumpInto(writer, 0);
     }
 };
+
+pub const Tuple = []const Scalar;
 
 pub const Scalar = union(enum) {
     Text: []const u8, // valid utf8
     Number: f64,
-    Box: LazySet,
+    Box: Box,
 
-    pub fn dumpInto(self: Scalar, writer: anytype) WriterError(@TypeOf(writer))!void {
+    pub fn dumpInto(self: Scalar, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
         switch (self) {
             // TODO proper escaping
             .Text => |text| try std.fmt.format(writer, "\"{s}\"", .{text}),
             .Number => |number| try std.fmt.format(writer, "{d}", .{number}),
             .Box => |box| {
                 try writer.writeAll("@");
-                try box.dumpInto(writer);
+                try box.dumpInto(writer, indent);
             },
         }
     }
@@ -126,42 +93,68 @@ pub const Scalar = union(enum) {
     pub fn format(self: Scalar, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         // TODO https://github.com/ziglang/zig/issues/9220
         _ = fmt;
-        try self.dumpInto(writer);
+        try self.dumpInto(writer, 0);
     }
 };
 
-pub const Time = usize;
+pub const Box = union(enum) {
+    Normal: struct {
+        def_id: core.DefId,
+        args: []const Scalar,
+    },
+    // While interpreting fix or reduce, need to pass an actual value to avoid infinite recursion
+    // TODO *const c_void is actually a *const Set - workaround for https://github.com/ziglang/zig/issues/5920
+    FixOrReduce: *align(@alignOf(Set)) const c_void,
 
-pub const LazySet = struct {
-    expr: *const core.Expr,
-    scope: Tuple,
-    time: []const Time,
-
-    // Equality on expr id and scope/time value
-
-    pub fn deepHashInto(hasher: anytype, self: LazySet) void {
-        hasher.update(std.mem.asBytes(&Store.getCoreMeta(self.expr).id));
-        meta.deepHashInto(hasher, self.scope);
-        meta.deepHashInto(hasher, self.time);
-    }
-
-    pub fn deepCompare(self: LazySet, other: LazySet) meta.Ordering {
-        const id_ordering = meta.deepCompare(Store.getCoreMeta(self.expr).id, Store.getCoreMeta(other.expr).id);
-        if (id_ordering != .Equal) return id_ordering;
-        const scope_ordering = meta.deepCompare(self.scope, other.scope);
-        if (scope_ordering != .Equal) return scope_ordering;
-        return meta.deepCompare(self.time, other.time);
-    }
-
-    pub fn dumpInto(self: LazySet, writer: anytype) WriterError(@TypeOf(writer))!void {
-        try std.fmt.format(writer, "(value of expr #{} with scope (", .{Store.getCoreMeta(self.expr).id});
-        for (self.scope) |scalar| {
-            // TODO want to print boxes once we have reasonable scoping
-            if (scalar != .Box) {
-                try scalar.dumpInto(writer);
-                try writer.writeAll(", ");
-            }
+    pub fn deepCompare(self: Box, other: Box) meta.Ordering {
+        const tagOrdering = meta.deepCompare(std.meta.activeTag(self), std.meta.activeTag(other));
+        if (tagOrdering != .Equal) return tagOrdering;
+        switch (self) {
+            .Normal => return meta.deepCompare(self.Normal, other.Normal),
+            .FixOrReduce => return meta.deepCompare(self.getFixOrReduce(), other.getFixOrReduce()),
         }
-        try writer.writeAll("))");
+    }
+
+    pub fn deepHashInto(hasher: anytype, self: Box) void {
+        meta.deepHashInto(hasher, std.meta.activeTag(self));
+        switch (self) {
+            .Normal => |normal| meta.deepHashInto(hasher, normal),
+            .FixOrReduce => meta.deepHashInto(hasher, self.getFixOrReduce()),
+        }
+    }
+
+    pub fn fixOrReduce(allocator: *Allocator, set: Set) !Box {
+        const set_ptr = try allocator.create(Set);
+        set_ptr.* = set;
+        return Box{ .FixOrReduce = @ptrCast(*align(@alignOf(Set)) const c_void, set_ptr) };
+    }
+
+    pub fn getFixOrReduce(box: Box) Set {
+        const set_ptr = @ptrCast(*const Set, box.FixOrReduce);
+        return set_ptr.*;
+    }
+
+    pub fn dumpInto(self: Box, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
+        switch (self) {
+            .Normal => |normal| {
+                try std.fmt.format(writer, "(S{}", .{normal.def_id});
+                for (normal.args) |arg| {
+                    try writer.writeAll(" ");
+                    try arg.dumpInto(writer, indent);
+                }
+                try writer.writeAll(")");
+            },
+            .FixOrReduce => {
+                try writer.writeAll("(");
+                try self.getFixOrReduce().dumpInto(writer, indent);
+                try writer.writeAll(")");
+            },
+        }
+    }
+
+    pub fn format(self: ScalarType, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        // TODO https://github.com/ziglang/zig/issues/9220
+        _ = fmt;
+        try self.dumpInto(writer, 0);
     }
 };

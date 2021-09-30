@@ -5,27 +5,59 @@ const Store = imp.lang.Store;
 const value = imp.lang.repr.value;
 const core = imp.lang.repr.core;
 
+pub const ProgramType = struct {
+    def_type_unions: []const ArrayList(Specialization),
+    program_type: SetType,
+
+    pub fn dumpInto(self: ProgramType, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
+        for (self.def_type_unions) |def_type_union, i| {
+            if (i != 0) {
+                try writer.writeAll("\n");
+                try writer.writeByteNTimes(' ', indent);
+            }
+            try std.fmt.format(writer, "S{}", .{i});
+            for (def_type_union.items) |specialization| {
+                try writer.writeAll("\n");
+                try writer.writeByteNTimes(' ', indent + 4);
+                try specialization.dumpInto(writer, indent + 4);
+            }
+        }
+        try writer.writeAll("\n");
+        try writer.writeByteNTimes(' ', indent);
+        try self.program_type.dumpInto(writer, indent);
+    }
+};
+
+pub const Specialization = struct {
+    hint: []const ScalarType,
+    set_type: SetType,
+
+    pub fn dumpInto(self: Specialization, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
+        try writer.writeAll("(");
+        for (self.hint) |scalar_type| {
+            try writer.writeAll(", ");
+            try scalar_type.dumpInto(writer, indent);
+        }
+        try writer.writeAll(") ");
+        try self.set_type.dumpInto(writer, indent);
+    }
+};
+
 pub const SetType = union(enum) {
     /// The empty set
     None,
     /// A set with these column types
     Concrete: ConcreteSetType,
-    /// Something that we can't type until it's specialized
-    Lazy: LazySetType,
 
     pub fn isFinite(self: SetType) bool {
-        // we never assign a lazy type to a finite expression
         return self == .None or (self == .Concrete and self.Concrete.abstract_arity == 0);
     }
 
-    pub fn dumpInto(self: SetType, writer: anytype) WriterError(@TypeOf(writer))!void {
+    pub fn dumpInto(self: SetType, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
         switch (self) {
             .None => try writer.writeAll("none"),
             .Concrete => |concrete| {
-                try concrete.dumpInto(writer);
-            },
-            .Lazy => |lazy| {
-                try lazy.dumpInto(writer);
+                try concrete.dumpInto(writer, indent);
             },
         }
     }
@@ -33,26 +65,26 @@ pub const SetType = union(enum) {
     pub fn format(self: SetType, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         // TODO https://github.com/ziglang/zig/issues/9220
         _ = fmt;
-        try self.dumpInto(writer);
+        try self.dumpInto(writer, 0);
     }
 };
 
 pub const ConcreteSetType = struct {
     abstract_arity: usize,
-    columns: []const ScalarType,
+    columns: TupleType,
 
-    pub fn dumpInto(self: ConcreteSetType, writer: anytype) WriterError(@TypeOf(writer))!void {
+    pub fn dumpInto(self: ConcreteSetType, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
         if (self.columns.len == 0) {
             try writer.writeAll("maybe");
         } else {
             for (self.columns) |scalar_type, scalar_type_ix| {
                 if (scalar_type_ix < self.abstract_arity) {
                     try writer.writeAll("?");
-                    try scalar_type.dumpInto(writer);
+                    try scalar_type.dumpInto(writer, indent);
                     try writer.writeAll(" ");
                 } else {
                     if (scalar_type_ix != self.abstract_arity) try writer.writeAll(", ");
-                    try scalar_type.dumpInto(writer);
+                    try scalar_type.dumpInto(writer, indent);
                 }
             }
         }
@@ -61,69 +93,24 @@ pub const ConcreteSetType = struct {
     pub fn format(self: ConcreteSetType, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         // TODO https://github.com/ziglang/zig/issues/9220
         _ = fmt;
-        try self.dumpInto(writer);
+        try self.dumpInto(writer, 0);
     }
 };
 
-pub const LazySetType = struct {
-    expr: *const core.Expr,
-    scope: []const ScalarType,
-    time: []const TimeType,
-
-    // Equality on expr id and scope/time value
-
-    pub fn deepHashInto(hasher: anytype, self: LazySetType) void {
-        hasher.update(std.mem.asBytes(&Store.getCoreMeta(self.expr).id));
-        meta.deepHashInto(hasher, self.scope);
-        meta.deepHashInto(hasher, self.time);
-    }
-
-    pub fn deepCompare(self: LazySetType, other: LazySetType) meta.Ordering {
-        const id_ordering = meta.deepCompare(Store.getCoreMeta(self.expr).id, Store.getCoreMeta(other.expr).id);
-        if (id_ordering != .Equal) return id_ordering;
-        const scope_ordering = meta.deepCompare(self.scope, other.scope);
-        if (scope_ordering != .Equal) return scope_ordering;
-        return meta.deepCompare(self.time, other.time);
-    }
-
-    pub fn dumpInto(self: LazySetType, writer: anytype) WriterError(@TypeOf(writer))!void {
-        try std.fmt.format(writer, "(type of expr #{} with scope (", .{Store.getCoreMeta(self.expr).id});
-        for (self.scope) |scalar_type| {
-            // TODO want to print box types once we have reasonable scoping
-            if (scalar_type != .Box) {
-                try scalar_type.dumpInto(writer);
-                try writer.writeAll(", ");
-            }
-        }
-        try writer.writeAll("))");
-    }
-
-    pub fn format(self: LazySetType, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        // TODO https://github.com/ziglang/zig/issues/9220
-        _ = fmt;
-        try self.dumpInto(writer);
-    }
-};
-
-pub const TimeType = enum {
-    Iteration,
-
-    // TODO this is here because can't currently use slices on zero-sized types
-    Unused,
-};
+pub const TupleType = []const ScalarType;
 
 pub const ScalarType = union(enum) {
     Text,
     Number,
     Box: BoxType,
 
-    pub fn dumpInto(self: ScalarType, writer: anytype) WriterError(@TypeOf(writer))!void {
+    pub fn dumpInto(self: ScalarType, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
         switch (self) {
             .Text => try writer.writeAll("text"),
             .Number => try writer.writeAll("number"),
             .Box => |box_type| {
                 try writer.writeAll("@");
-                try box_type.dumpInto(writer);
+                try box_type.dumpInto(writer, indent);
             },
         }
     }
@@ -131,23 +118,43 @@ pub const ScalarType = union(enum) {
     pub fn format(self: ScalarType, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         // TODO https://github.com/ziglang/zig/issues/9220
         _ = fmt;
-        try self.dumpInto(writer);
+        try self.dumpInto(writer, 0);
     }
 };
 
-pub const BoxType = struct {
-    // always need a lazy type because box types are nominal - determined by the expr itself
-    lazy: LazySetType,
-    // need to store the concrete type when analyzing fixpoints to avoid infinite recursion
-    finite: ?union(enum) { None, Concrete: ConcreteSetType },
+pub const BoxType = union(enum) {
+    Normal: struct {
+        def_id: core.DefId,
+        args: []ScalarType,
+    },
+    // While analyzing fix or reduce, need to temporarily assume a type to avoid infinite recursion
+    FixOrReduce: struct {
+        // The id of the `next` part of the fix/reduce expr, only used to check that this box type does not escape
+        def_id: core.DefId,
+        set_type: SetType,
+    },
 
-    pub fn dumpInto(self: BoxType, writer: anytype) WriterError(@TypeOf(writer))!void {
-        try self.lazy.dumpInto(writer);
+    pub fn dumpInto(self: BoxType, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
+        switch (self) {
+            .Normal => |normal| {
+                try std.fmt.format(writer, "(S{}", .{normal.def_id});
+                for (normal.args) |arg| {
+                    try writer.writeAll(" ");
+                    try arg.dumpInto(writer, indent);
+                }
+                try writer.writeAll(")");
+            },
+            .FixOrReduce => |fix_or_reduce| {
+                try std.fmt.format(writer, "(#S{} ", .{fix_or_reduce.def_id});
+                try fix_or_reduce.set_type.dumpInto(writer, indent);
+                try writer.writeAll(")");
+            },
+        }
     }
 
     pub fn format(self: ScalarType, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         // TODO https://github.com/ziglang/zig/issues/9220
         _ = fmt;
-        try self.dumpInto(writer);
+        try self.dumpInto(writer, 0);
     }
 };

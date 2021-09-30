@@ -55,9 +55,9 @@ pub fn main() anyerror!void {
             defer bytes.deinit();
             const writer = bytes.writer();
             if (result) |type_and_set| {
-                try type_and_set.dumpInto(allocator, writer);
+                try type_and_set.dumpInto(writer, 0);
             } else |err| {
-                try imp.lang.InterpretErrorInfo.dumpInto(error_info, err, writer);
+                try imp.lang.InterpretErrorInfo.dumpInto(writer, error_info, err);
             }
             const found = std.mem.trim(u8, bytes.items, "\n ");
 

@@ -85,7 +85,6 @@ pub const Expr = union(enum) {
         return children;
     }
 
-    // TODO not very useful without store
     pub fn dumpInto(self: Expr, writer: anytype, indent: u32) anyerror!void {
         switch (self) {
             .None => try writer.writeAll("none"),

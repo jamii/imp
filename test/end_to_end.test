@@ -31,9 +31,9 @@ value:
 1 @
 ---
 type:
-@(S0)
+@(d0)
 value:
-| @(S0)
+| @(d0)
 
 a: 1;
 a
@@ -48,9 +48,9 @@ a: 1 @;
 a
 ---
 type:
-@(S0)
+@(d0)
 value:
-| @(S0)
+| @(d0)
 
 foo: ?a a;
 foo 1
@@ -145,7 +145,7 @@ value:
 
 1 + 2 * 3
 ---
-Parse error: Ambiguous precedence for `+` vs `*`
+ParseError: Ambiguous precedence for `+` vs `*`
 
 (1 + 2) * 3
 ---
@@ -156,7 +156,7 @@ value:
 
 3 * 2 + 1
 ---
-Parse error: Ambiguous precedence for `*` vs `+`
+ParseError: Ambiguous precedence for `*` vs `+`
 
 3 * (2 + 1)
 ---
@@ -183,11 +183,11 @@ value:
 
 a & b | c
 ---
-Parse error: Ambiguous precedence for `&` vs `|`
+ParseError: Ambiguous precedence for `&` vs `|`
 
 a * b / c
 ---
-Parse error: Ambiguous precedence for `*` vs `/`
+ParseError: Ambiguous precedence for `*` vs `/`
 
 1 + 2 | 5
 ---
@@ -199,11 +199,11 @@ value:
 
 ?a ?@b (a | b), c
 ---
-Desugar error: Name not in scope: c
+DesugarError: Name not in scope: c
 
 1, "foo" | 2
 ---
-Analyze error: Mismatched arities: 2 vs 1
+AnalyzeError: Mismatched arities: 2 vs 1
 
 1 1 !
 ---
@@ -286,7 +286,7 @@ foo2: ?a ((?b a,b)@);
 bar: foo1 1 | foo2 2;
 bar ?@f f 3
 ---
-Analyze error: TODO type unions are not implemented yet: @(S0 number) | @(S2 number)
+AnalyzeError: TODO type unions are not implemented yet: @(d0 number) | @(d2 number)
 
 foo: 1, 1 | 2, 2;
 foo foo
@@ -299,12 +299,12 @@ some
 foo: ?a ?b a,b;
 foo foo
 ---
-Analyze error: Cannot apply two maybe-infinite sets
+AnalyzeError: Cannot apply two maybe-infinite sets
 
 foo: ?a ?b a,b;
 foo = 1
 ---
-Analyze error: Could not infer the type of abstract arg
+AnalyzeError: Could not infer the type of abstract arg
 
 foo: ?a ?b a,b;
 (foo | foo) 1 2
@@ -316,7 +316,7 @@ value:
 
 (?a none) then 1
 ---
-Analyze error: Could not infer the type of abstract arg
+AnalyzeError: Could not infer the type of abstract arg
 
 foo: ?a ?b a=b;
 (foo, 1, 2) 0 0 1 2
@@ -336,7 +336,7 @@ none
 
 3: 4; 5
 ---
-Parse error: Found `:` without preceding name
+ParseError: Found `:` without preceding name
 
 fix 1 ?@prev prev 10 then 10 else prev + 1
 ---
@@ -431,11 +431,11 @@ value:
 
 fix 1 2
 ---
-Analyze error: The `next` argument for fix must take a box as it's first argument. Found number
+AnalyzeError: The `next` argument for fix must take a box as it's first argument. Found number
 
 fix 1 ?@prev prev,2
 ---
-Analyze error: The `next` argument for fix must have constant arity, changed from 1 to 2
+AnalyzeError: The `next` argument for fix must have constant arity, changed from 1 to 2
 
 range (0 - 3) 3
 ---
@@ -459,7 +459,7 @@ none
 
 range 0.5 1.5
 ---
-Native error: Inputs to `range` must be whole numbers, found `range 0.5 1.5`
+NativeError: Inputs to `range` must be whole numbers, found `range 0.5 1.5`
 
 enumerate ("c", 0 | "a", 0 | "b", 1 | "b", 0.1)
 ---
@@ -496,7 +496,7 @@ value:
 
 reduce (3 | 4 | 5) 0 ?a ?b a + b
 ---
-Analyze error: Intersection of number and @(#S0 number) is empty
+AnalyzeError: Intersection of number and @(#d0 number) is empty
 
 // testing specialization caching
 f: ?i i+1;

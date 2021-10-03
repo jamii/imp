@@ -3,166 +3,189 @@ usingnamespace imp.common;
 
 pub const repr = @import("./lang/repr.zig");
 pub const pass = @import("./lang/pass.zig");
-pub const Store = @import("./lang/store.zig").Store;
+
+const syntax = repr.syntax;
+const core = repr.core;
+const type_ = repr.type_;
+const value = repr.value;
+const parse = pass.parse;
+const desugar = pass.desugar;
+const analyze = pass.analyze;
+const interpret = pass.interpret;
 
 comptime {
     @import("std").testing.refAllDecls(@This());
 }
 
-// TODO calculate source position
-pub const InterpretErrorInfo = union(enum) {
-    Parse: pass.parse.ErrorInfo,
-    Desugar: pass.desugar.ErrorInfo,
-    Analyze: pass.analyze.ErrorInfo,
-    Interpret: pass.interpret.ErrorInfo,
+pub const ErrorInfo = union(enum) {
+    Parse: parse.ErrorInfo,
+    Desugar: desugar.ErrorInfo,
+    Analyze: analyze.ErrorInfo,
+    Interpret: interpret.ErrorInfo,
 
-    pub fn error_range(self: ?InterpretErrorInfo, err: InterpretError) ?[2]usize {
-        switch (err) {
-            error.ParseError => {
-                return [2]usize{ self.?.Parse.start, self.?.Parse.end };
-            },
-            error.DesugarError => {
-                const syntax_meta = Store.getSyntaxMeta(self.?.Desugar.expr);
-                return [2]usize{ syntax_meta.start, syntax_meta.end };
-            },
-            error.AnalyzeError => {
-                const core_meta = Store.getCoreMeta(self.?.Analyze.expr);
-                const syntax_meta = Store.getSyntaxMeta(core_meta.from);
-                return [2]usize{ syntax_meta.start, syntax_meta.end };
-            },
-            error.InterpretError, error.NativeError => {
-                const core_meta = Store.getCoreMeta(self.?.Interpret.expr);
-                const syntax_meta = Store.getSyntaxMeta(core_meta.from);
-                return [2]usize{ syntax_meta.start, syntax_meta.end };
-            },
-            else => return null,
-        }
-    }
-
-    pub fn dumpInto(writer: anytype, self: ?InterpretErrorInfo, err: InterpretError) anyerror!void {
-        switch (err) {
-            // TODO report source position
-            error.ParseError => try std.fmt.format(writer, "Parse error: {s}\n", .{self.?.Parse.message}),
-            error.DesugarError => try std.fmt.format(writer, "Desugar error: {s}\n", .{self.?.Desugar.message}),
-            error.AnalyzeError => try std.fmt.format(writer, "Analyze error: {s}\n", .{self.?.Analyze.message}),
-            error.InterpretError => try std.fmt.format(writer, "Interpret error: {s}\n", .{self.?.Interpret.message}),
-            error.NativeError => try std.fmt.format(writer, "Native error: {s}\n", .{self.?.Interpret.message}),
-
-            error.Utf8InvalidStartByte, error.InvalidUtf8, error.InvalidCharacter, error.Utf8ExpectedContinuation, error.Utf8OverlongEncoding, error.Utf8EncodesSurrogateHalf, error.Utf8CodepointTooLarge => try std.fmt.format(writer, "Invalid utf8 input: {}\n", .{err}),
-
-            error.OutOfMemory => try std.fmt.format(writer, "Out of memory\n", .{}),
-            error.WasInterrupted => try std.fmt.format(writer, "Was interrupted\n", .{}),
-        }
+    pub fn getMessage(self: ErrorInfo) []const u8 {
+        return switch (self) {
+            .Parse => |parse_info| parse_info.message,
+            .Desugar => |desugar_info| desugar_info.message,
+            .Analyze => |analyze_info| analyze_info.message,
+            .Interpret => |interpet_info| interpet_info.message,
+        };
     }
 };
 
-pub const InterpretError = pass.parse.Error ||
-    pass.desugar.Error ||
-    pass.analyze.Error ||
-    pass.interpret.Error;
+pub const Error = parse.Error ||
+    desugar.Error ||
+    analyze.Error ||
+    interpret.Error;
 
-pub const InterpretResult = struct {
-    set_type: repr.type_.SetType,
-    set: repr.value.Set,
-    watch_results: DeepHashSet(pass.interpret.WatchResult),
-    watch_range: ?[2]usize,
+pub const SourceSelection = union(enum) {
+    Point: usize,
+    Range: [2]usize,
+};
 
-    pub fn dumpInto(self: InterpretResult, writer: anytype, indent: u32) anyerror!void {
-        try writer.writeAll("type:\n");
-        try self.set_type.dumpInto(writer, indent);
-        try writer.writeAll("\nvalue:\n");
-        try self.set.dumpInto(writer, indent);
-        if (self.watch_range) |_| {
-            try writer.writeAll("\n\nwatch:\n\n");
-            var watch_results = ArrayList(pass.interpret.WatchResult).init(dump_allocator);
-            defer watch_results.deinit();
-            var iter = self.watch_results.iterator();
-            while (iter.next()) |entry| try watch_results.append(entry.key_ptr.*);
-            std.sort.sort(pass.interpret.WatchResult, watch_results.items, {}, struct {
-                fn lessThan(_: void, a: pass.interpret.WatchResult, b: pass.interpret.WatchResult) bool {
-                    return imp.meta.deepCompare(a, b) == .LessThan;
-                }
-            }.lessThan);
-            for (watch_results.items) |watch_result| {
-                for (watch_result.time) |time, i| {
-                    try std.fmt.format(writer, "fix{}: {}; ", .{ i, time });
-                }
-                if (watch_result.time.len > 0) try writer.writeAll("\n");
-                var printed_scope = false;
-                for (watch_result.scope) |scope_item| {
-                    // TODO might want to print boxes when we have good scope detection and better box printing
-                    if (scope_item.scalar != .Box) {
-                        try std.fmt.format(writer, "{s}: {}; ", .{
-                            scope_item.name,
-                            scope_item.scalar,
-                        });
-                        printed_scope = true;
+pub const Store = struct {
+    arena: *ArenaAllocator,
+    interrupter: Interrupter,
+
+    // inputs
+    source: []const u8,
+    watch_selection: ?SourceSelection = null,
+
+    // intermediate results
+    syntax_program: ?syntax.Program = null,
+    watch_expr_id: ?syntax.ExprId = null,
+    core_program: ?core.Program = null,
+    program_type: ?type_.ProgramType = null,
+
+    // outputs
+    result: ?(Error!value.Set) = null,
+    error_info: ?ErrorInfo = null,
+    watch_results: ?DeepHashSet(interpret.WatchResult) = null,
+
+    pub fn run(self: *Store) void {
+        var parse_error_info: ?parse.ErrorInfo = null;
+        self.syntax_program = parse.parse(self.arena, self.source, &parse_error_info) catch |err| {
+            if (err == error.ParseError) {
+                self.error_info = .{ .Parse = parse_error_info.? };
+            }
+            self.result = err;
+            return;
+        };
+
+        if (self.watch_selection) |watch_selection|
+            self.watch_expr_id = self.findSyntaxExprAt(watch_selection);
+
+        var desugar_error_info: ?desugar.ErrorInfo = null;
+        self.core_program = desugar.desugar(self.arena, self.syntax_program.?, self.watch_expr_id, &desugar_error_info) catch |err| {
+            if (err == error.DesugarError) {
+                self.error_info = .{ .Desugar = desugar_error_info.? };
+            }
+            self.result = err;
+            return;
+        };
+
+        var analyze_error_info: ?analyze.ErrorInfo = null;
+        self.program_type = analyze.analyze(self.arena, self.core_program.?, self.interrupter, &analyze_error_info) catch |err| {
+            if (err == error.AnalyzeError) {
+                self.error_info = .{ .Analyze = analyze_error_info.? };
+            }
+            self.result = err;
+            return;
+        };
+
+        self.watch_results = DeepHashSet(interpret.WatchResult).init(&self.arena.allocator);
+        var interpret_error_info: ?interpret.ErrorInfo = null;
+        self.result = interpret.interpret(self.arena, self.core_program.?, self.program_type.?, &self.watch_results.?, self.interrupter, &interpret_error_info) catch |err| {
+            if (err == error.InterpretError or err == error.NativeError) {
+                self.error_info = .{ .Interpret = interpret_error_info.? };
+            }
+            self.result = err;
+            return;
+        };
+    }
+
+    pub fn findSyntaxExprAt(self: Store, selection: SourceSelection) ?syntax.ExprId {
+        var expr_id: usize = self.syntax_program.?.exprs.len - 1;
+        while (expr_id > 0) : (expr_id -= 1) {
+            const source_range = self.syntax_program.?.from_source[expr_id];
+            if (switch (selection) {
+                .Point => |point| source_range[1] <= point,
+                .Range => |range| source_range[0] >= range[0] and source_range[1] <= range[1],
+            })
+                return syntax.ExprId{ .id = expr_id };
+        }
+        return null;
+    }
+
+    pub fn getWatchRange(self: Store) ?[2]usize {
+        if (self.watch_expr_id) |watch_expr_id|
+            return self.syntax_program.?.from_source[watch_expr_id.id];
+    }
+
+    pub fn getErrorRange(self: Store) ?[2]usize {
+        if (self.error_info) |error_info| {
+            switch (error_info) {
+                .Parse => |parse_info| {
+                    return .{ parse_info.start, parse_info.end };
+                },
+                .Desugar => |desugar_info| {
+                    return self.syntax_program.?.from_source[desugar_info.expr_id.id];
+                },
+                .Analyze => |analyze_info| {
+                    const syntax_expr_id = self.core_program.?.from_syntax[analyze_info.expr_id.id];
+                    return self.syntax_program.?.from_source[syntax_expr_id];
+                },
+                .Interpret => |interpret_info| {
+                    const syntax_expr_id = self.core_program.?.from_syntax[interpret_info.expr_id.id];
+                    return self.syntax_program.?.from_source[syntax_expr_id];
+                },
+            }
+        } else {
+            return null;
+        }
+    }
+
+    pub fn dumpInto(self: Store, writer: anytype, indent: u32) anyerror!void {
+        if (self.result) |result| {
+            if (result) |set| {
+                try writer.writeAll("type:\n");
+                try self.program_type.?.program_type.dumpInto(writer, indent);
+                try writer.writeAll("\nvalue:\n");
+                try set.dumpInto(writer, indent);
+
+                if (self.watch_results.?.count() > 0) {
+                    try writer.writeAll("\n\nwatch:\n\n");
+                    var sorted_watch_results = ArrayList(interpret.WatchResult).init(dump_allocator);
+                    defer sorted_watch_results.deinit();
+                    var iter = self.watch_results.?.iterator();
+                    while (iter.next()) |entry| try sorted_watch_results.append(entry.key_ptr.*);
+                    std.sort.sort(interpret.WatchResult, sorted_watch_results.items, {}, struct {
+                        fn lessThan(_: void, a: interpret.WatchResult, b: interpret.WatchResult) bool {
+                            return imp.meta.deepCompare(a, b) == .LessThan;
+                        }
+                    }.lessThan);
+                    for (sorted_watch_results.items) |watch_result| {
+                        try watch_result.dumpInto(writer, indent);
+                        try writer.writeAll("\n\n");
                     }
                 }
-                if (printed_scope) try writer.writeAll("\n");
-                try watch_result.set.dumpInto(writer, indent);
-                try writer.writeAll("\n\n");
+            } else |err| {
+                try std.fmt.format(writer, "{s}", .{@errorName(err)});
+                switch (err) {
+                    error.ParseError,
+                    error.DesugarError,
+                    error.AnalyzeError,
+                    error.InterpretError,
+                    error.NativeError,
+                    => try std.fmt.format(writer, ": {s}", .{self.error_info.?.getMessage()}),
+                    error.OutOfMemory,
+                    error.WasInterrupted,
+                    => {},
+                }
             }
         }
     }
 };
-
-pub fn interpret(
-    arena: *ArenaAllocator,
-    source: []const u8,
-    watch_selection: Store.SourceSelection,
-    interrupter: Interrupter,
-    error_info: *?InterpretErrorInfo,
-) InterpretError!InterpretResult {
-    var store = Store.init(arena);
-
-    var parse_error_info: ?pass.parse.ErrorInfo = null;
-    const syntax_expr = pass.parse.parse(&store, source, &parse_error_info) catch |err| {
-        if (err == error.ParseError) {
-            error_info.* = .{ .Parse = parse_error_info.? };
-        }
-        return err;
-    };
-
-    const watch_expr_o = store.findSyntaxExprAt(watch_selection);
-    var watch_range: ?[2]usize = null;
-    if (watch_expr_o) |watch_expr| {
-        const watch_meta = Store.getSyntaxMeta(watch_expr);
-        watch_range = .{ watch_meta.start, watch_meta.end };
-    }
-
-    var desugar_error_info: ?pass.desugar.ErrorInfo = null;
-    const program = pass.desugar.desugar(&store, syntax_expr, watch_expr_o, &desugar_error_info) catch |err| {
-        if (err == error.DesugarError) {
-            error_info.* = .{ .Desugar = desugar_error_info.? };
-        }
-        return err;
-    };
-
-    var analyze_error_info: ?pass.analyze.ErrorInfo = null;
-    const program_type = pass.analyze.analyze(&store, program, interrupter, &analyze_error_info) catch |err| {
-        if (err == error.AnalyzeError) {
-            error_info.* = .{ .Analyze = analyze_error_info.? };
-        }
-        return err;
-    };
-
-    var watch_results = DeepHashSet(pass.interpret.WatchResult).init(&arena.allocator);
-    var interpret_error_info: ?pass.interpret.ErrorInfo = null;
-    const set = pass.interpret.interpret(&store, arena, program, program_type, &watch_results, interrupter, &interpret_error_info) catch |err| {
-        if (err == error.InterpretError or err == error.NativeError) {
-            error_info.* = .{ .Interpret = interpret_error_info.? };
-        }
-        return err;
-    };
-
-    return InterpretResult{
-        .set_type = program_type.program_type,
-        .set = set,
-        .watch_results = watch_results,
-        .watch_range = watch_range,
-    };
-}
 
 pub const Worker = struct {
     allocator: *Allocator,
@@ -190,7 +213,7 @@ pub const Worker = struct {
     pub const Request = struct {
         id: usize,
         text: []const u8,
-        selection: Store.SourceSelection,
+        selection: SourceSelection,
     };
 
     pub const Response = struct {
@@ -306,20 +329,22 @@ pub const Worker = struct {
                 .current_id = new_request.id,
                 .desired_id = &self.desired_id,
             };
-            var error_info: ?imp.lang.InterpretErrorInfo = null;
-            const result = imp.lang.interpret(&arena, new_request.text, new_request.selection, interrupter, &error_info);
+            var store = Store{
+                .arena = &arena,
+                .interrupter = &interrupter,
+                .source = new_request.text,
+                .watch_selection = new_request.selection,
+            };
+            store.run();
 
             // print result
             var response_buffer = ArrayList(u8).init(self.allocator);
             defer response_buffer.deinit();
-            var response_kind: ResponseKind = undefined;
-            if (result) |ok| {
-                try ok.dumpInto(response_buffer.writer(), 0);
-                response_kind = .{ .Ok = ok.watch_range };
-            } else |err| {
-                try InterpretErrorInfo.dumpInto(response_buffer.writer(), error_info, err);
-                response_kind = .{ .Err = InterpretErrorInfo.error_range(error_info, err) };
-            }
+            store.dumpInto(response_buffer.writer(), 0);
+            const response_kind = if (store.result) |_|
+                ResponseKind{ .Ok = store.getWatchRange() }
+            else |_|
+                ResponseKind{ .Err = store.getErrorRange() };
 
             // set response
             {

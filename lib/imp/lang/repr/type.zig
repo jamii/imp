@@ -1,22 +1,21 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
 const meta = imp.meta;
-const Store = imp.lang.Store;
 const value = imp.lang.repr.value;
 const core = imp.lang.repr.core;
 
 pub const ProgramType = struct {
-    def_type_unions: []const ArrayList(Specialization),
+    defs: []const ArrayList(Specialization),
     program_type: SetType,
 
     pub fn dumpInto(self: ProgramType, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
-        for (self.def_type_unions) |def_type_union, i| {
+        for (self.defs) |def, i| {
             if (i != 0) {
                 try writer.writeAll("\n");
                 try writer.writeByteNTimes(' ', indent);
             }
-            try std.fmt.format(writer, "S{}", .{i});
-            for (def_type_union.items) |specialization| {
+            try std.fmt.format(writer, "{}", .{i});
+            for (def.items) |specialization| {
                 try writer.writeAll("\n");
                 try writer.writeByteNTimes(' ', indent + 4);
                 try specialization.dumpInto(writer, indent + 4);
@@ -137,7 +136,7 @@ pub const BoxType = union(enum) {
     pub fn dumpInto(self: BoxType, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
         switch (self) {
             .Normal => |normal| {
-                try std.fmt.format(writer, "(S{}", .{normal.def_id});
+                try std.fmt.format(writer, "({}", .{normal.def_id});
                 for (normal.args) |arg| {
                     try writer.writeAll(" ");
                     try arg.dumpInto(writer, indent);
@@ -145,7 +144,7 @@ pub const BoxType = union(enum) {
                 try writer.writeAll(")");
             },
             .FixOrReduce => |fix_or_reduce| {
-                try std.fmt.format(writer, "(#S{} ", .{fix_or_reduce.def_id});
+                try std.fmt.format(writer, "(#{} ", .{fix_or_reduce.def_id});
                 try fix_or_reduce.set_type.dumpInto(writer, indent);
                 try writer.writeAll(")");
             },

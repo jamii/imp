@@ -80,7 +80,7 @@ pub fn dumpInto(writer: anytype, indent: u32, thing: anytype) anyerror!void {
                 },
                 .C => {
                     // bail
-                    try std.fmt.format(writer, "{}", .{thing});
+                    try std.fmt.format(writer, "{any}", .{thing});
                 },
             }
         },
@@ -126,7 +126,7 @@ pub fn dumpInto(writer: anytype, indent: u32, thing: anytype) anyerror!void {
                 }
             } else {
                 // bail
-                try std.fmt.format(writer, "{}", .{thing});
+                try std.fmt.format(writer, "{any}", .{thing});
             }
         },
         .Optional => {
@@ -138,7 +138,7 @@ pub fn dumpInto(writer: anytype, indent: u32, thing: anytype) anyerror!void {
         },
         else => {
             // bail
-            try std.fmt.format(writer, "{}", .{thing});
+            try std.fmt.format(writer, "{any}", .{thing});
         },
     }
 }
@@ -160,17 +160,10 @@ pub fn tagEqual(a: anytype, b: @TypeOf(a)) bool {
 
 pub fn FixedSizeArrayList(comptime size: usize, comptime T: type) type {
     return struct {
-        elems: [size]T,
-        len: usize,
+        elems: [size]T = undefined,
+        len: usize = 0,
 
         const Self = @This();
-
-        pub fn init() Self {
-            return Self{
-                .elems = undefined,
-                .len = 0,
-            };
-        }
 
         pub fn append(self: *Self, elem: T) void {
             assert(self.len < size);

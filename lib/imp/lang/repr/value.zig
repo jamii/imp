@@ -1,7 +1,6 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
 const meta = imp.meta;
-const Store = imp.lang.Store;
 const core = imp.lang.repr.core;
 
 /// Invariant: all the Tuples in a Set must be the same length
@@ -137,7 +136,7 @@ pub const Box = union(enum) {
     pub fn dumpInto(self: Box, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
         switch (self) {
             .Normal => |normal| {
-                try std.fmt.format(writer, "(S{}", .{normal.def_id});
+                try std.fmt.format(writer, "({}", .{normal.def_id});
                 for (normal.args) |arg| {
                     try writer.writeAll(" ");
                     try arg.dumpInto(writer, indent);

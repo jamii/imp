@@ -48,17 +48,17 @@ pub fn main() anyerror!void {
                 .current_id = 0,
                 .desired_id = &desired_id,
             };
-            var error_info: ?imp.lang.InterpretErrorInfo = null;
-            const result = imp.lang.interpret(&arena, input, .{ .Point = 0 }, interrupter, &error_info);
+            var store = imp.lang.Store{
+                .arena = &arena,
+                .interrupter = interrupter,
+                .source = input,
+            };
+            store.run();
 
             var bytes = ArrayList(u8).init(allocator);
             defer bytes.deinit();
             const writer = bytes.writer();
-            if (result) |type_and_set| {
-                try type_and_set.dumpInto(writer, 0);
-            } else |err| {
-                try imp.lang.InterpretErrorInfo.dumpInto(writer, error_info, err);
-            }
+            try store.dumpInto(writer, 0);
             const found = std.mem.trim(u8, bytes.items, "\n ");
 
             num_tests += 1;

@@ -1,7 +1,6 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
 const meta = imp.meta;
-const Store = imp.lang.Store;
 const syntax = imp.lang.repr.syntax;
 
 // expr =
@@ -50,32 +49,33 @@ const syntax = imp.lang.repr.syntax;
 //   "<="
 
 // TODO https://github.com/ziglang/zig/issues/2647
-pub fn parse(store: *Store, source: []const u8, error_info: *?ErrorInfo) Error!*const syntax.Expr {
+pub fn parse(
+    arena: *ArenaAllocator,
+    source: []const u8,
+    error_info: *?ErrorInfo,
+) Error!syntax.Program {
     var parser = Parser{
-        .store = store,
+        .arena = arena,
         .source = source,
+        .exprs = ArrayList(syntax.Expr).init(&arena.allocator),
+        .from_source = ArrayList([2]usize).init(&arena.allocator),
         .position = 0,
         .error_info = error_info,
     };
-    const expr = try parser.parseExpr();
+    _ = try parser.parseExpr();
     _ = try parser.expect(.EOF);
-    return expr;
+    return syntax.Program{
+        .exprs = parser.exprs.toOwnedSlice(),
+        .from_source = parser.from_source.toOwnedSlice(),
+    };
 }
 
-// TODO clean up this errorset
 pub const Error = error{
     // sets error_info
     ParseError,
 
-    // nothing else sets error_info
+    // does not set error_info
     OutOfMemory,
-    Utf8InvalidStartByte,
-    InvalidUtf8,
-    InvalidCharacter,
-    Utf8ExpectedContinuation,
-    Utf8OverlongEncoding,
-    Utf8EncodesSurrogateHalf,
-    Utf8CodepointTooLarge,
 };
 
 pub const ErrorInfo = struct {
@@ -279,20 +279,28 @@ fn appendChar(bytes: *ArrayList(u8), char: u21) !void {
 }
 
 pub const Parser = struct {
-    store: *Store,
+    arena: *ArenaAllocator,
     source: []const u8,
+    exprs: ArrayList(syntax.Expr),
+    from_source: ArrayList([2]usize),
     position: usize,
     error_info: *?ErrorInfo,
 
-    fn putApplyOp(self: *Parser, name: syntax.Name, left: *const syntax.Expr, right: *const syntax.Expr, start: usize, end: usize) !*const syntax.Expr {
-        const expr1 = try self.store.putSyntax(.{ .Name = name }, start, end);
-        const expr2 = try self.store.putSyntax(.{ .Apply = .{ .left = expr1, .right = left } }, start, end);
-        const expr3 = try self.store.putSyntax(.{ .Apply = .{ .left = expr2, .right = right } }, start, end);
+    fn putSyntax(self: *Parser, expr: syntax.Expr, start: usize, end: usize) !syntax.ExprId {
+        try self.exprs.append(expr);
+        try self.from_source.append(.{ start, end });
+        return syntax.ExprId{ .id = self.exprs.items.len - 1 };
+    }
+
+    fn putApplyOp(self: *Parser, name: syntax.Name, left: syntax.ExprId, right: syntax.ExprId, start: usize, end: usize) !syntax.ExprId {
+        const expr1 = try self.putSyntax(.{ .Name = name }, start, end);
+        const expr2 = try self.putSyntax(.{ .Apply = .{ .left = expr1, .right = left } }, start, end);
+        const expr3 = try self.putSyntax(.{ .Apply = .{ .left = expr2, .right = right } }, start, end);
         return expr3;
     }
 
     fn setError(self: *Parser, start: usize, comptime fmt: []const u8, args: anytype) Error {
-        const message = try format(&self.store.arena.allocator, fmt, args);
+        const message = try format(&self.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
             .start = start,
             .end = self.position,
@@ -303,14 +311,21 @@ pub const Parser = struct {
 
     // using this instead of std.unicode.Utf8Iterator because we want to return the position of any unicode error
     fn nextUtf8Char(self: *Parser) !?u21 {
+        const start = self.position;
         if (self.position >= self.source.len) {
             return null;
         }
-        const len = try std.unicode.utf8ByteSequenceLength(self.source[self.position]);
+        const len = std.unicode.utf8ByteSequenceLength(self.source[self.position]) catch |err| {
+            self.position += 1;
+            return self.setError(start, "{s}", .{err});
+        };
         if (self.position + len > self.source.len) {
-            return error.InvalidUtf8;
+            return self.setError(start, "{s}", .{error.InvalidUtf8});
         }
-        const char = try std.unicode.utf8Decode(self.source[self.position .. self.position + len]);
+        const char = std.unicode.utf8Decode(self.source[self.position .. self.position + len]) catch |err| {
+            self.position += len;
+            return self.setError(start, "{s}", .{err});
+        };
         self.position += len;
         return char;
     }
@@ -320,7 +335,7 @@ pub const Parser = struct {
         if (try self.nextUtf8Char()) |char| {
             const ascii_char = @truncate(u7, char);
             if (ascii_char != char) {
-                return self.setError(start, "unicode characters may only appear in texts and comments", .{});
+                return self.setError(start, "Unicode characters may only appear in texts and comments", .{});
             }
             return ascii_char;
         } else {
@@ -330,7 +345,7 @@ pub const Parser = struct {
 
     // called after seeing '"'
     fn tokenizeText(self: *Parser) ![]const u8 {
-        var bytes = ArrayList(u8).init(&self.store.arena.allocator);
+        var bytes = ArrayList(u8).init(&self.arena.allocator);
         const text_start = self.position - 1;
         while (true) {
             const char_start = self.position;
@@ -437,7 +452,8 @@ pub const Parser = struct {
         if (has_decimal_point and self.position == point_end) {
             return self.setError(start, "there must be at least one digit after a decimal point", .{});
         } else {
-            return std.fmt.parseFloat(f64, self.source[start..self.position]);
+            return std.fmt.parseFloat(f64, self.source[start..self.position]) catch |err|
+                return self.setError(start, "{s}", .{err});
         }
     }
 
@@ -550,32 +566,32 @@ pub const Parser = struct {
     }
 
     // called after seeing name ":"
-    fn parseDefBody(self: *Parser, start: usize, fix: bool, name: []const u8) Error!*const syntax.Expr {
+    fn parseDefBody(self: *Parser, start: usize, fix: bool, name: []const u8) Error!syntax.ExprId {
         // (name ":") expr ";" expr
         const value = try self.parseExpr();
         const value_end = self.position;
         if ((try self.nextToken()) == .EOF) {
             // in sloppy mode, allow ending with a def
-            const body = try self.store.putSyntax(.{ .Name = name }, value_end, self.position);
-            return self.store.putSyntax(.{ .Def = .{ .fix = fix, .name = name, .value = value, .body = body } }, start, self.position);
+            const body = try self.putSyntax(.{ .Name = name }, value_end, self.position);
+            return self.putSyntax(.{ .Def = .{ .fix = fix, .name = name, .value = value, .body = body } }, start, self.position);
         } else {
             self.position = value_end;
             _ = try self.expect(.EndDef);
             const end_def_end = self.position;
             if ((try self.nextToken()) == .EOF) {
                 // in sloppy mode, allow ending with a def
-                const body = try self.store.putSyntax(.{ .Name = name }, end_def_end, self.position);
-                return self.store.putSyntax(.{ .Def = .{ .fix = fix, .name = name, .value = value, .body = body } }, start, self.position);
+                const body = try self.putSyntax(.{ .Name = name }, end_def_end, self.position);
+                return self.putSyntax(.{ .Def = .{ .fix = fix, .name = name, .value = value, .body = body } }, start, self.position);
             } else {
                 self.position = end_def_end;
                 const body = try self.parseExpr();
-                return self.store.putSyntax(.{ .Def = .{ .fix = fix, .name = name, .value = value, .body = body } }, start, self.position);
+                return self.putSyntax(.{ .Def = .{ .fix = fix, .name = name, .value = value, .body = body } }, start, self.position);
             }
         }
     }
 
     // returns null if this isn't the start of an expression
-    fn parseExprInner(self: *Parser) Error!*const syntax.Expr {
+    fn parseExprInner(self: *Parser) Error!syntax.ExprId {
         try self.consumeWhitespace();
         const start = self.position;
         const token = try self.nextToken();
@@ -596,13 +612,13 @@ pub const Parser = struct {
                 return expr;
             },
             // "none"
-            .None => return self.store.putSyntax(.None, start, self.position),
+            .None => return self.putSyntax(.None, start, self.position),
             // "some"
-            .Some => return self.store.putSyntax(.Some, start, self.position),
+            .Some => return self.putSyntax(.Some, start, self.position),
             // number
-            .Number => |number| return self.store.putSyntax(.{ .Scalar = .{ .Number = number } }, start, self.position),
+            .Number => |number| return self.putSyntax(.{ .Scalar = .{ .Number = number } }, start, self.position),
             // text
-            .Text => |text| return self.store.putSyntax(.{ .Scalar = .{ .Text = text } }, start, self.position),
+            .Text => |text| return self.putSyntax(.{ .Scalar = .{ .Text = text } }, start, self.position),
             // name
             .Name => |name| {
                 const name_end = self.position;
@@ -610,7 +626,7 @@ pub const Parser = struct {
                     return self.parseDefBody(start, false, name);
                 } else {
                     self.position = name_end;
-                    return self.store.putSyntax(.{ .Name = name }, start, self.position);
+                    return self.putSyntax(.{ .Name = name }, start, self.position);
                 }
             },
             // "?" arg expr
@@ -630,7 +646,7 @@ pub const Parser = struct {
                     }
                 };
                 const body = try self.parseExpr();
-                return self.store.putSyntax(.{ .Abstract = .{ .arg = arg, .body = body } }, start, self.position);
+                return self.putSyntax(.{ .Abstract = .{ .arg = arg, .body = body } }, start, self.position);
             },
             .Fix => {
                 const fix_end = self.position;
@@ -644,7 +660,7 @@ pub const Parser = struct {
                     self.position = fix_end;
                     const init = try self.parseExprInner();
                     const next = try self.parseExpr();
-                    return self.store.putSyntax(.{ .Fix = .{ .init = init, .next = next } }, start, self.position);
+                    return self.putSyntax(.{ .Fix = .{ .init = init, .next = next } }, start, self.position);
                 }
             },
             // "reduce" expr_inner expr_inner expr_inner
@@ -652,18 +668,18 @@ pub const Parser = struct {
                 const input = try self.parseExprInner();
                 const init = try self.parseExprInner();
                 const next = try self.parseExprInner();
-                return self.store.putSyntax(.{ .Reduce = .{ .input = input, .init = init, .next = next } }, start, self.position);
+                return self.putSyntax(.{ .Reduce = .{ .input = input, .init = init, .next = next } }, start, self.position);
             },
             // "enumerate" expr_inner
             .Enumerate => {
                 const body = try self.parseExprInner();
-                return self.store.putSyntax(.{ .Enumerate = body }, start, self.position);
+                return self.putSyntax(.{ .Enumerate = body }, start, self.position);
             },
             // "#" name expr_inner
             .Annotate => {
                 const annotation = (try self.expect(.Name)).Name;
                 const body = try self.parseExprInner();
-                return self.store.putSyntax(.{ .Annotate = .{ .annotation = annotation, .body = body } }, start, self.position);
+                return self.putSyntax(.{ .Annotate = .{ .annotation = annotation, .body = body } }, start, self.position);
             },
             .Else => {
                 return self.setError(start, "Found `else` without `then`", .{});
@@ -690,7 +706,7 @@ pub const Parser = struct {
     //     (prev_expr prev_op left) op right
     //   * otherwise:
     //     parse_error "ambiguous precedence"
-    fn parseExprOuter(self: *Parser, prev_op: ?Token) Error!*const syntax.Expr {
+    fn parseExprOuter(self: *Parser, prev_op: ?Token) Error!syntax.ExprId {
         try self.consumeWhitespace();
         const start = self.position;
         var left = try self.parseExprInner();
@@ -714,13 +730,13 @@ pub const Parser = struct {
                             const right = try self.parseExprOuter(op);
                             left = try switch (op) {
                                 // core ops
-                                .Union => self.store.putSyntax(.{ .Union = .{ .left = left, .right = right } }, start, self.position),
-                                .Intersect => self.store.putSyntax(.{ .Intersect = .{ .left = left, .right = right } }, start, self.position),
-                                .Product => self.store.putSyntax(.{ .Product = .{ .left = left, .right = right } }, start, self.position),
-                                .Equal => self.store.putSyntax(.{ .Equal = .{ .left = left, .right = right } }, start, self.position),
+                                .Union => self.putSyntax(.{ .Union = .{ .left = left, .right = right } }, start, self.position),
+                                .Intersect => self.putSyntax(.{ .Intersect = .{ .left = left, .right = right } }, start, self.position),
+                                .Product => self.putSyntax(.{ .Product = .{ .left = left, .right = right } }, start, self.position),
+                                .Equal => self.putSyntax(.{ .Equal = .{ .left = left, .right = right } }, start, self.position),
 
                                 // sugar
-                                .Extend => self.store.putSyntax(.{ .Extend = .{ .left = left, .right = right } }, start, self.position),
+                                .Extend => self.putSyntax(.{ .Extend = .{ .left = left, .right = right } }, start, self.position),
 
                                 // native functions
                                 .Add => self.putApplyOp("+", left, right, start, self.position),
@@ -748,7 +764,7 @@ pub const Parser = struct {
 
                 .Negate => {
                     if (prev_op == null or !whitespace_before_op) {
-                        left = try self.store.putSyntax(.{ .Negate = left }, start, self.position);
+                        left = try self.putSyntax(.{ .Negate = left }, start, self.position);
                     } else {
                         self.position = op_start;
                         return left;
@@ -757,7 +773,7 @@ pub const Parser = struct {
 
                 .Box => {
                     if (prev_op == null or !whitespace_before_op) {
-                        left = try self.store.putSyntax(.{ .Box = left }, start, self.position);
+                        left = try self.putSyntax(.{ .Box = left }, start, self.position);
                     } else {
                         self.position = op_start;
                         return left;
@@ -766,8 +782,8 @@ pub const Parser = struct {
 
                 .Swap => {
                     if (prev_op == null or !whitespace_before_op) {
-                        const swap = try self.store.putSyntax(.{ .Name = "~" }, op_start, self.position);
-                        left = try self.store.putSyntax(.{ .Apply = .{ .left = left, .right = swap } }, start, self.position);
+                        const swap = try self.putSyntax(.{ .Name = "~" }, op_start, self.position);
+                        left = try self.putSyntax(.{ .Apply = .{ .left = left, .right = swap } }, start, self.position);
                     } else {
                         self.position = op_start;
                         return left;
@@ -781,10 +797,10 @@ pub const Parser = struct {
                         const true_branch_end = self.position;
                         if ((try self.nextToken()) == .Else) {
                             const false_branch = try self.parseExpr();
-                            left = try self.store.putSyntax(.{ .ThenElse = .{ .condition = left, .true_branch = true_branch, .false_branch = false_branch } }, start, self.position);
+                            left = try self.putSyntax(.{ .ThenElse = .{ .condition = left, .true_branch = true_branch, .false_branch = false_branch } }, start, self.position);
                         } else {
                             self.position = true_branch_end;
-                            left = try self.store.putSyntax(.{ .Then = .{ .condition = left, .true_branch = true_branch } }, start, self.position);
+                            left = try self.putSyntax(.{ .Then = .{ .condition = left, .true_branch = true_branch } }, start, self.position);
                         }
                     } else {
                         self.position = op_start;
@@ -813,7 +829,7 @@ pub const Parser = struct {
                     const precedence = if (prev_op == null) .RightBindsTighter else prev_op.?.comparePrecedence(.Apply);
                     switch (precedence) {
                         .RightBindsTighter => {
-                            left = try self.store.putSyntax(.{ .Apply = .{ .left = left, .right = right } }, start, self.position);
+                            left = try self.putSyntax(.{ .Apply = .{ .left = left, .right = right } }, start, self.position);
                         },
                         .LeftBindsTighter, .Same => {
                             self.position = op_start;
@@ -828,7 +844,7 @@ pub const Parser = struct {
         }
     }
 
-    fn parseExpr(self: *Parser) Error!*const syntax.Expr {
+    fn parseExpr(self: *Parser) Error!syntax.ExprId {
         return self.parseExprOuter(null);
     }
 };

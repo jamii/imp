@@ -2,6 +2,28 @@ const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
 const value = imp.lang.repr.value;
 
+pub const Program = struct {
+    exprs: []const Expr,
+    from_source: []const [2]usize,
+
+    pub fn dumpInto(self: Program, writer: anytype, indent: u32) anyerror!void {
+        try self.dumpExprInto(.{ .id = self.exprs.len - 1 }, writer, indent);
+    }
+
+    pub fn dumpExprInto(self: Program, expr_id: ExprId, writer: anytype, indent: u32) anyerror!void {
+        const expr = self.exprs[expr_id.id];
+        try expr.dumpInto(writer, indent);
+        for (expr.getChildren().slice()) |child| {
+            try writer.writeAll("\n");
+            try writer.writeByteNTimes(' ', indent + 4);
+            try self.dumpExprInto(child, writer, indent + 4);
+        }
+    }
+};
+
+// Index into Progam.exprs/from_source
+pub const ExprId = struct { id: usize };
+
 // ascii, non-empty
 pub const Name = []const u8;
 
@@ -16,30 +38,30 @@ pub const Expr = union(enum) {
     Equal: Pair,
     Name: Name,
     Def: Def,
-    Negate: *const Expr,
+    Negate: ExprId,
     Then: Then,
     ThenElse: ThenElse,
     Abstract: Abstract,
     Apply: Pair,
-    Box: *const Expr,
+    Box: ExprId,
     Fix: Fix,
     Reduce: Reduce,
-    Enumerate: *const Expr,
+    Enumerate: ExprId,
     Annotate: Annotate,
 
-    pub fn getChildren(self: Expr) FixedSizeArrayList(3, *const Expr) {
-        var children = FixedSizeArrayList(3, *const Expr).init();
+    pub fn getChildren(self: Expr) FixedSizeArrayList(3, ExprId) {
+        var children = FixedSizeArrayList(3, ExprId){};
         inline for (@typeInfo(Expr).Union.fields) |expr_field, i| {
             if (@enumToInt(std.meta.activeTag(self)) == @typeInfo(@typeInfo(Expr).Union.tag_type.?).Enum.fields[i].value) {
                 const T = expr_field.field_type;
                 const v = @field(self, expr_field.name);
                 if (T == void or T == value.Scalar or T == Name) {
                     // nothing to do
-                } else if (T == *const Expr) {
+                } else if (T == ExprId) {
                     children.append(v);
                 } else if (T == Pair or T == Fix or T == Then or T == Fix or T == Reduce or T == Abstract or T == Annotate or T == ThenElse or T == Def) {
                     inline for (@typeInfo(T).Struct.fields) |value_field| {
-                        if (value_field.field_type == *const Expr) {
+                        if (value_field.field_type == ExprId) {
                             children.append(@field(v, value_field.name));
                         }
                     }
@@ -81,27 +103,22 @@ pub const Expr = union(enum) {
             .Enumerate => try writer.writeAll("enumerate"),
             .Annotate => |annotate| try std.fmt.format(writer, "# {s}", .{annotate.annotation}),
         }
-        for (self.getChildren().slice()) |child| {
-            try writer.writeAll("\n");
-            try writer.writeByteNTimes(' ', indent + 4);
-            try child.dumpInto(writer, indent + 4);
-        }
     }
 };
 
 pub const Pair = struct {
-    left: *const Expr,
-    right: *const Expr,
+    left: ExprId,
+    right: ExprId,
 };
 
 pub const Then = struct {
-    condition: *const Expr,
-    true_branch: *const Expr,
+    condition: ExprId,
+    true_branch: ExprId,
 };
 
 pub const Abstract = struct {
     arg: Arg,
-    body: *const Expr,
+    body: ExprId,
 };
 
 pub const Arg = struct {
@@ -110,30 +127,30 @@ pub const Arg = struct {
 };
 
 pub const Fix = struct {
-    init: *const Expr,
-    next: *const Expr,
+    init: ExprId,
+    next: ExprId,
 };
 
 pub const Reduce = struct {
-    input: *const Expr,
-    init: *const Expr,
-    next: *const Expr,
+    input: ExprId,
+    init: ExprId,
+    next: ExprId,
 };
 
 pub const Annotate = struct {
     annotation: Name,
-    body: *const Expr,
+    body: ExprId,
 };
 
 pub const ThenElse = struct {
-    condition: *const Expr,
-    true_branch: *const Expr,
-    false_branch: *const Expr,
+    condition: ExprId,
+    true_branch: ExprId,
+    false_branch: ExprId,
 };
 
 pub const Def = struct {
     fix: bool,
     name: Name,
-    value: *const Expr,
-    body: *const Expr,
+    value: ExprId,
+    body: ExprId,
 };

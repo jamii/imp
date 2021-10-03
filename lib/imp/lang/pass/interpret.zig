@@ -1,14 +1,12 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
 const meta = imp.meta;
-const Store = imp.lang.Store;
 const syntax = imp.lang.repr.syntax;
 const core = imp.lang.repr.core;
 const type_ = imp.lang.repr.type_;
 const value = imp.lang.repr.value;
 
 pub fn interpret(
-    store: *const Store,
     arena: *ArenaAllocator,
     program: core.Program,
     program_type: type_.ProgramType,
@@ -16,21 +14,20 @@ pub fn interpret(
     interrupter: imp.lang.Interrupter,
     error_info: *?ErrorInfo,
 ) Error!value.Set {
-    var def_sets = try arena.allocator.alloc(ArrayList(Interpreter.Memo), program.def_exprs.len);
+    var def_sets = try arena.allocator.alloc(ArrayList(Interpreter.Memo), program.defs.len);
     for (def_sets) |*def_set| def_set.* = ArrayList(Interpreter.Memo).init(&arena.allocator);
     var interpreter = Interpreter{
-        .store = store,
         .arena = arena,
         .program = program,
         .program_type = program_type,
         .watch_results = watch_results,
         .def_sets = def_sets,
-        .scope = ArrayList(value.Scalar).init(&store.arena.allocator),
-        .time = ArrayList(usize).init(&store.arena.allocator),
+        .scope = ArrayList(value.Scalar).init(&arena.allocator),
+        .time = ArrayList(usize).init(&arena.allocator),
         .interrupter = interrupter,
         .error_info = error_info,
     };
-    return interpreter.interpretDef(program.def_exprs.len - 1, &.{});
+    return interpreter.interpretDef(.{ .id = program.defs.len - 1 }, &.{});
 }
 
 pub const Error = error{
@@ -44,7 +41,7 @@ pub const Error = error{
 };
 
 pub const ErrorInfo = struct {
-    expr: *const core.Expr,
+    expr_id: core.ExprId,
     message: []const u8,
 };
 
@@ -57,12 +54,24 @@ pub const WatchResult = struct {
         name: syntax.Name,
         scalar: value.Scalar,
     };
+
+    pub fn dumpInto(self: WatchResult, writer: anytype, indent: u32) anyerror!void {
+        for (self.time) |time, i|
+            try std.fmt.format(writer, "fix{}: {}; ", .{ i, time });
+        if (self.time.len > 0) try writer.writeAll("\n");
+        for (self.scope) |scope_item|
+            try std.fmt.format(writer, "{s}: {}; ", .{
+                scope_item.name,
+                scope_item.scalar,
+            });
+        if (self.scope.len > 0) try writer.writeAll("\n");
+        try self.set.dumpInto(writer, indent);
+    }
 };
 
 // --------------------------------------------------------------------------------
 
 const Interpreter = struct {
-    store: *const Store,
     arena: *ArenaAllocator,
     program: core.Program,
     program_type: type_.ProgramType,
@@ -78,26 +87,26 @@ const Interpreter = struct {
         set: value.Set,
     };
 
-    fn setError(self: *Interpreter, expr: *const core.Expr, comptime fmt: []const u8, args: anytype) Error {
+    fn setError(self: *Interpreter, expr_id: core.ExprId, comptime fmt: []const u8, args: anytype) Error {
         const message = try format(&self.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
-            .expr = expr,
+            .expr_id = expr_id,
             .message = message,
         };
         return error.InterpretError;
     }
 
-    fn setNativeError(self: *Interpreter, expr: *const core.Expr, comptime fmt: []const u8, args: anytype) Error {
+    fn setNativeError(self: *Interpreter, expr_id: core.ExprId, comptime fmt: []const u8, args: anytype) Error {
         const message = try format(&self.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
-            .expr = expr,
+            .expr_id = expr_id,
             .message = message,
         };
         return error.NativeError;
     }
 
     fn interpretDef(self: *Interpreter, def_id: core.DefId, hint: value.Tuple) Error!value.Set {
-        const def_set = &self.def_sets[def_id];
+        const def_set = &self.def_sets[def_id.id];
 
         // check if already evaluated
         // TODO it's surprisingly hard to write a better lookup than this
@@ -108,12 +117,12 @@ const Interpreter = struct {
         // otherwise, evaluate
         const old_scope = self.scope;
         defer self.scope = old_scope;
-        self.scope = ArrayList(value.Scalar).init(&self.store.arena.allocator);
-        //TODO need to preserve time for watches - does correctness ever depend on resetting time?
+        self.scope = ArrayList(value.Scalar).init(&self.arena.allocator);
+        //TODO need to preserve time for watches, but does correctness ever depend on resetting time?
         //const old_time = self.time;
         //defer self.time = old_time;
-        //self.time = ArrayList(usize).init(&self.store.arena.allocator);
-        const set = try self.interpretExpr(self.program.def_exprs[def_id], hint);
+        //self.time = ArrayList(usize).init(&self.arena.allocator);
+        const set = try self.interpretExpr(self.program.defs[def_id.id], hint);
 
         // memoize
         try def_set.append(.{ .hint = hint, .set = set });
@@ -124,7 +133,7 @@ const Interpreter = struct {
     fn interpretBox(self: *Interpreter, box: core.Box, hint: value.Tuple) Error!value.Set {
         const box_args = try self.arena.allocator.alloc(value.Scalar, box.args.len);
         for (box_args) |*box_arg, i|
-            box_arg.* = self.scope.items[self.scope.items.len - 1 - box.args[i]];
+            box_arg.* = self.scope.items[self.scope.items.len - 1 - box.args[i].id];
         const box_hint = try std.mem.concat(&self.arena.allocator, value.Scalar, &.{ box_args, hint });
         const set = try self.interpretDef(box.def_id, box_hint);
         var result_set = value.Set{
@@ -138,9 +147,10 @@ const Interpreter = struct {
         return result_set;
     }
 
-    fn interpretExpr(self: *Interpreter, expr: *const core.Expr, hint: value.Tuple) Error!value.Set {
+    fn interpretExpr(self: *Interpreter, expr_id: core.ExprId, hint: value.Tuple) Error!value.Set {
         try self.interrupter.check();
-        switch (expr.*) {
+        const expr = self.program.exprs[expr_id.id];
+        switch (expr) {
             .None => {
                 const set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 return value.Set{
@@ -168,7 +178,7 @@ const Interpreter = struct {
                 const left = try self.interpretExpr(pair.left, hint);
                 const right = try self.interpretExpr(pair.right, hint);
                 if (left.arity != right.arity and left.set.count() > 0 and right.set.count() > 0) {
-                    return self.setError(expr, "Tried to union sets with different arities: {} vs {}", .{ left.arity, right.arity });
+                    return self.setError(expr_id, "Tried to union sets with different arities: {} vs {}", .{ left.arity, right.arity });
                 }
                 var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 var left_iter = left.set.iterator();
@@ -190,7 +200,7 @@ const Interpreter = struct {
                 const left = try self.interpretExpr(pair.left, hint);
                 const right = try self.interpretExpr(pair.right, hint);
                 if (left.arity != right.arity and left.set.count() > 0 and right.set.count() > 0) {
-                    return self.setError(expr, "Tried to intersect sets with different arities: {} vs {}", .{ left.arity, right.arity });
+                    return self.setError(expr_id, "Tried to intersect sets with different arities: {} vs {}", .{ left.arity, right.arity });
                 }
                 var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 var left_iter = left.set.iterator();
@@ -265,7 +275,7 @@ const Interpreter = struct {
             },
             .ScalarId => |scalar_id| {
                 var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
-                const scalar = self.scope.items[self.scope.items.len - 1 - scalar_id];
+                const scalar = self.scope.items[self.scope.items.len - 1 - scalar_id.id];
                 _ = try set.put(try self.dupeScalars(&.{scalar}), {});
                 return value.Set{
                     .arity = 1,
@@ -273,13 +283,13 @@ const Interpreter = struct {
                 };
             },
             .UnboxScalarId => |scalar_id| {
-                const scalar = self.scope.items[self.scope.items.len - 1 - scalar_id];
+                const scalar = self.scope.items[self.scope.items.len - 1 - scalar_id.id];
                 switch (scalar) {
                     .Box => |box| {
                         switch (box) {
                             .Normal => |normal| {
                                 const box_hint = try std.mem.concat(
-                                    &self.store.arena.allocator,
+                                    &self.arena.allocator,
                                     value.Scalar,
                                     &.{
                                         normal.args,
@@ -301,7 +311,7 @@ const Interpreter = struct {
                         }
                     },
                     else => {
-                        return self.setError(expr, "Tried to unbox {} which is not a box", .{scalar});
+                        return self.setError(expr_id, "Tried to unbox {} which is not a box", .{scalar});
                     },
                 }
             },
@@ -333,7 +343,7 @@ const Interpreter = struct {
             },
             .Abstract => |body| {
                 if (hint.len == 0) {
-                    return self.setError(expr, "No hint for arg", .{});
+                    return self.setError(expr_id, "No hint for arg", .{});
                 } else {
                     try self.scope.append(hint[0]);
                     const body_set = try self.interpretExpr(body, hint[1..]);
@@ -357,12 +367,12 @@ const Interpreter = struct {
             .Apply => |pair| {
                 // can't make use of hint until we know which side is finite
                 if (self.interpretExpr(pair.left, &.{})) |left_type| {
-                    return self.interpretApply(expr, left_type, pair.right, hint);
+                    return self.interpretApply(expr_id, left_type, pair.right, hint);
                 } else |_| {
                     // error might have been from lack of hints, so try other way around
                     // TODO could this cause exponential retries in large program?
                     if (self.interpretExpr(pair.right, &.{})) |right_type| {
-                        return self.interpretApply(expr, right_type, pair.left, hint);
+                        return self.interpretApply(expr_id, right_type, pair.left, hint);
                     } else |err| {
                         return err;
                     }
@@ -370,8 +380,8 @@ const Interpreter = struct {
             },
             .Box => |box| {
                 var args = try self.arena.allocator.alloc(value.Scalar, box.args.len);
-                for (box.args) |name_ix, i| {
-                    args[i] = self.scope.items[self.scope.items.len - 1 - name_ix];
+                for (box.args) |scalar_id, i| {
+                    args[i] = self.scope.items[self.scope.items.len - 1 - scalar_id.id];
                 }
                 const scalar = value.Box{
                     .Normal = .{
@@ -508,13 +518,13 @@ const Interpreter = struct {
                 return self.interpretExpr(annotate.body, hint);
             },
             .Watch => |watch| {
-                const result = self.interpretExpr(watch.expr, hint);
+                const result = self.interpretExpr(watch.body, hint);
                 if (result) |set| {
                     var scope = ArrayList(WatchResult.ScopeItem).init(&self.arena.allocator);
                     for (watch.scope) |scope_item|
                         try scope.append(.{
                             .name = scope_item.name,
-                            .scalar = self.scope.items[self.scope.items.len - 1 - scope_item.scalar_id],
+                            .scalar = self.scope.items[self.scope.items.len - 1 - scope_item.scalar_id.id],
                         });
                     try self.watch_results.put(.{
                         .time = try std.mem.dupe(&self.arena.allocator, usize, self.time.items),
@@ -528,10 +538,10 @@ const Interpreter = struct {
                 switch (native) {
                     .Add, .Subtract, .Multiply, .Divide, .Modulus => {
                         if (hint.len < 2) {
-                            return self.setError(expr, "No hint for native arg", .{});
+                            return self.setError(expr_id, "No hint for native arg", .{});
                         }
                         if (native == .Divide and hint[1].Number == 0) {
-                            return self.setNativeError(expr, "Divide by 0", .{});
+                            return self.setNativeError(expr_id, "Divide by 0", .{});
                         }
                         const result = switch (native) {
                             .Add => hint[0].Number + hint[1].Number,
@@ -551,12 +561,12 @@ const Interpreter = struct {
                     },
                     .Range => {
                         if (hint.len < 2) {
-                            return self.setError(expr, "No hint for native arg", .{});
+                            return self.setError(expr_id, "No hint for native arg", .{});
                         }
                         const lo = @floatToInt(i64, hint[0].Number);
                         const hi = @floatToInt(i64, hint[1].Number);
                         if (@intToFloat(f64, lo) != hint[0].Number or @intToFloat(f64, hi) != hint[1].Number) {
-                            return self.setNativeError(expr, "Inputs to `range` must be whole numbers, found `range {} {}`", .{ hint[0], hint[1] });
+                            return self.setNativeError(expr_id, "Inputs to `range` must be whole numbers, found `range {} {}`", .{ hint[0], hint[1] });
                         }
                         var i = lo;
                         var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
@@ -572,7 +582,7 @@ const Interpreter = struct {
                     },
                     .GreaterThan, .GreaterThanOrEqual => {
                         if (hint.len < 2) {
-                            return self.setError(expr, "No hint for native arg", .{});
+                            return self.setError(expr_id, "No hint for native arg", .{});
                         }
                         var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
                         const satisfied = switch (native) {
@@ -592,7 +602,7 @@ const Interpreter = struct {
         }
     }
 
-    fn interpretApply(self: *Interpreter, expr: *const core.Expr, left_set: value.Set, right_expr: *const core.Expr, hint: value.Tuple) Error!value.Set {
+    fn interpretApply(self: *Interpreter, expr_id: core.ExprId, left_set: value.Set, right_expr_id: core.ExprId, hint: value.Tuple) Error!value.Set {
         var right_arity_o: ?usize = null;
         var right_set_set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
         {
@@ -604,11 +614,11 @@ const Interpreter = struct {
                     value.Scalar,
                     &.{ left_entry.key_ptr.*, hint },
                 );
-                const right_part = try self.interpretExpr(right_expr, right_hint);
+                const right_part = try self.interpretExpr(right_expr_id, right_hint);
                 if (right_part.set.count() > 0) {
                     if (right_arity_o) |right_arity| {
                         if (right_arity != right_part.arity) {
-                            return self.setError(expr, "Apply resulted in unions over sets of different arities: {} vs {}", .{ right_arity, right_part.arity });
+                            return self.setError(expr_id, "Apply resulted in unions over sets of different arities: {} vs {}", .{ right_arity, right_part.arity });
                         }
                     } else {
                         right_arity_o = right_part.arity;

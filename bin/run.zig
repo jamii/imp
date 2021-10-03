@@ -34,13 +34,13 @@ pub fn main() anyerror!void {
             .current_id = 0,
             .desired_id = &desired_id,
         };
-        var error_info: ?imp.lang.InterpretErrorInfo = null;
-        const result = imp.lang.interpret(&arena, source.items, .{ .Point = 0 }, interrupter, &error_info);
+        var store = imp.lang.Store{
+            .arena = &arena,
+            .interrupter = interrupter,
+            .source = source.items,
+        };
+        store.run();
         const writer = std.io.getStdOut().writer();
-        if (result) |type_and_set| {
-            try type_and_set.dumpInto(writer, 0);
-        } else |err| {
-            try imp.lang.InterpretErrorInfo.dumpInto(writer, error_info, err);
-        }
+        try store.dumpInto(writer, 0);
     }
 }

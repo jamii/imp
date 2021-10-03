@@ -1,22 +1,31 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
 const meta = imp.meta;
-const Store = imp.lang.Store;
 const core = imp.lang.repr.core;
 const syntax = imp.lang.repr.syntax;
 
-pub fn desugar(store: *Store, syntax_expr: *const syntax.Expr, watch_expr_o: ?*const syntax.Expr, error_info: *?ErrorInfo) Error!core.Program {
+pub fn desugar(
+    arena: *ArenaAllocator,
+    syntax_program: syntax.Program,
+    watch_expr_id: ?syntax.ExprId,
+    error_info: *?ErrorInfo,
+) Error!core.Program {
     var desugarer = Desugarer{
-        .store = store,
-        .watch_expr_o = watch_expr_o,
-        .def_exprs = ArrayList(*const core.Expr).init(&store.arena.allocator),
-        .scope = ArrayList(Desugarer.ScopeItem).init(&store.arena.allocator),
-        .current_expr = null,
+        .arena = arena,
+        .syntax_program = syntax_program,
+        .watch_expr_id = watch_expr_id,
+        .defs = ArrayList(core.ExprId).init(&arena.allocator),
+        .exprs = ArrayList(core.Expr).init(&arena.allocator),
+        .from_syntax = ArrayList(syntax.ExprId).init(&arena.allocator),
+        .scope = ArrayList(Desugarer.ScopeItem).init(&arena.allocator),
+        .current_expr_id = null,
         .error_info = error_info,
     };
-    try desugarer.def_exprs.append(try desugarer.desugar(syntax_expr));
+    try desugarer.defs.append(try desugarer.desugar(.{ .id = syntax_program.exprs.len - 1 }));
     return core.Program{
-        .def_exprs = desugarer.def_exprs.toOwnedSlice(),
+        .defs = desugarer.defs.toOwnedSlice(),
+        .exprs = desugarer.exprs.toOwnedSlice(),
+        .from_syntax = desugarer.from_syntax.toOwnedSlice(),
     };
 }
 
@@ -29,18 +38,21 @@ pub const Error = error{
 };
 
 pub const ErrorInfo = struct {
-    expr: *const syntax.Expr,
+    expr_id: syntax.ExprId,
     message: []const u8,
 };
 
 // --------------------------------------------------------------------------------
 
 const Desugarer = struct {
-    store: *Store,
-    watch_expr_o: ?*const syntax.Expr,
-    def_exprs: ArrayList(*const core.Expr),
+    arena: *ArenaAllocator,
+    syntax_program: syntax.Program,
+    watch_expr_id: ?syntax.ExprId,
+    defs: ArrayList(core.ExprId),
+    exprs: ArrayList(core.Expr),
+    from_syntax: ArrayList(syntax.ExprId),
     scope: ArrayList(ScopeItem),
-    current_expr: ?*const syntax.Expr,
+    current_expr_id: ?syntax.ExprId,
     error_info: *?ErrorInfo,
 
     const ScopeItem = struct {
@@ -53,16 +65,18 @@ const Desugarer = struct {
     };
 
     fn setError(self: *Desugarer, comptime fmt: []const u8, args: anytype) Error {
-        const message = try format(&self.store.arena.allocator, fmt, args);
+        const message = try format(&self.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
-            .expr = self.current_expr.?,
+            .expr_id = self.current_expr_id.?,
             .message = message,
         };
         return error.DesugarError;
     }
 
-    fn putCore(self: *Desugarer, core_expr: core.Expr) !*const core.Expr {
-        return self.store.putCore(core_expr, self.current_expr.?);
+    fn putCore(self: *Desugarer, core_expr: core.Expr) !core.ExprId {
+        try self.exprs.append(core_expr);
+        try self.from_syntax.append(self.current_expr_id.?);
+        return core.ExprId{ .id = self.exprs.items.len - 1 };
     }
 
     fn scopeAppend(self: *Desugarer, item: ScopeItem) !void {
@@ -70,7 +84,7 @@ const Desugarer = struct {
             for (self.scope.items) |other_item| {
                 if (other_item.kind == .Set) {
                     for (other_item.kind.Set.args) |*arg|
-                        arg.* += 1;
+                        arg.id += 1;
                 }
             }
         }
@@ -83,17 +97,18 @@ const Desugarer = struct {
             for (self.scope.items) |other_item| {
                 if (other_item.kind == .Set) {
                     for (other_item.kind.Set.args) |*arg|
-                        arg.* -= 1;
+                        arg.id -= 1;
                 }
             }
         }
     }
 
-    fn desugar(self: *Desugarer, syntax_expr: *const syntax.Expr) Error!*const core.Expr {
-        const prev_expr = self.current_expr;
-        self.current_expr = syntax_expr;
-        defer self.current_expr = prev_expr;
-        const core_expr = switch (syntax_expr.*) {
+    fn desugar(self: *Desugarer, syntax_expr_id: syntax.ExprId) Error!core.ExprId {
+        const prev_expr_id = self.current_expr_id;
+        self.current_expr_id = syntax_expr_id;
+        defer self.current_expr_id = prev_expr_id;
+        const syntax_expr = self.syntax_program.exprs[syntax_expr_id.id];
+        const core_expr_id = switch (syntax_expr) {
             .None => try self.putCore(.None),
             .Some => try self.putCore(.Some),
             .Scalar => |scalar| try self.putCore(.{
@@ -137,10 +152,10 @@ const Desugarer = struct {
                         .right = try self.putCore(
                             .{ .Abstract = try self.putCore(
                                 .{ .Product = .{
-                                    .left = try self.putCore(.{ .ScalarId = 0 }),
+                                    .left = try self.putCore(.{ .ScalarId = .{ .id = 0 } }),
                                     .right = try self.putCore(
                                         .{ .Apply = .{
-                                            .left = try self.putCore(.{ .ScalarId = 0 }),
+                                            .left = try self.putCore(.{ .ScalarId = .{ .id = 0 } }),
                                             .right = right,
                                         } },
                                     ),
@@ -163,8 +178,8 @@ const Desugarer = struct {
                         .{ .Abstract = try self.putCore(
                             .{ .Abstract = try self.putCore(
                                 .{ .Product = .{
-                                    .left = try self.putCore(.{ .ScalarId = 0 }),
-                                    .right = try self.putCore(.{ .ScalarId = 1 }),
+                                    .left = try self.putCore(.{ .ScalarId = .{ .id = 0 } }),
+                                    .right = try self.putCore(.{ .ScalarId = .{ .id = 1 } }),
                                 } },
                             ) },
                         ) },
@@ -179,8 +194,8 @@ const Desugarer = struct {
                     const item = (scope[scope.len - 1 - i]);
                     if (item.name != null and meta.deepEqual(name, item.name.?)) {
                         break :name switch (item.kind) {
-                            .Scalar => try self.putCore(.{ .ScalarId = scalar_id }),
-                            .UnboxScalar => try self.putCore(.{ .UnboxScalarId = scalar_id }),
+                            .Scalar => try self.putCore(.{ .ScalarId = .{ .id = scalar_id } }),
+                            .UnboxScalar => try self.putCore(.{ .UnboxScalarId = .{ .id = scalar_id } }),
                             .Set => |box| try self.boxToExpr(box),
                         };
                     }
@@ -215,19 +230,19 @@ const Desugarer = struct {
                 },
             }),
             .Box => |expr| try self.putCore(.{
-                .Box = try self.makeDef(try self.desugar(expr)),
+                .Box = try self.putDef(try self.desugar(expr)),
             }),
-            .Fix => |fix| try self.boxToExpr(try self.makeDef(try self.putCore(.{
+            .Fix => |fix| try self.boxToExpr(try self.putDef(try self.putCore(.{
                 .Fix = .{
                     .init = try self.desugar(fix.init),
-                    .next = try self.makeDef(try self.desugar(fix.next)),
+                    .next = try self.putDef(try self.desugar(fix.next)),
                 },
             }))),
-            .Reduce => |reduce| try self.boxToExpr(try self.makeDef(try self.putCore(.{
+            .Reduce => |reduce| try self.boxToExpr(try self.putDef(try self.putCore(.{
                 .Reduce = .{
                     .input = try self.desugar(reduce.input),
                     .init = try self.desugar(reduce.init),
-                    .next = try self.makeDef(try self.desugar(reduce.next)),
+                    .next = try self.putDef(try self.desugar(reduce.next)),
                 },
             }))),
             .Enumerate => |body| try self.putCore(.{ .Enumerate = try self.desugar(body) }),
@@ -239,7 +254,7 @@ const Desugarer = struct {
             }),
             .ThenElse => |then_else| then_else: {
                 // `c then t else f` => `tmp: c; ((tmp then t) | (tmp! then f))`
-                const tmp = try self.boxToExpr(try self.makeDef(try self.desugar(then_else.condition)));
+                const tmp = try self.boxToExpr(try self.putDef(try self.desugar(then_else.condition)));
                 break :then_else try self.putCore(.{
                     .Union = .{
                         .left = try self.putCore(.{
@@ -270,7 +285,7 @@ const Desugarer = struct {
                         break :value try self.putCore(.{
                             .Fix = .{
                                 .init = try self.putCore(.None),
-                                .next = try self.makeDef(try self.putCore(.{ .Abstract = fix_body })),
+                                .next = try self.putDef(try self.putCore(.{ .Abstract = fix_body })),
                             },
                         });
                     } else {
@@ -279,93 +294,96 @@ const Desugarer = struct {
                 };
                 try self.scopeAppend(.{
                     .name = def.name,
-                    .kind = .{ .Set = try self.makeDef(value) },
+                    .kind = .{ .Set = try self.putDef(value) },
                 });
                 const body = try self.desugar(def.body);
                 try self.scopePop();
                 break :def body;
             },
         };
-        if (self.watch_expr_o) |watch_expr| {
-            if (watch_expr == syntax_expr) {
-                var watch_scope = ArrayList(core.Watch.ScopeItem).init(&self.store.arena.allocator);
+        if (self.watch_expr_id) |watch_expr_id| {
+            if (watch_expr_id.id == syntax_expr_id.id) {
+                var watch_scope = ArrayList(core.Watch.ScopeItem).init(&self.arena.allocator);
                 var i: usize = 0;
                 var scalar_id: usize = 0;
                 while (i < self.scope.items.len) : (i += 1) {
                     const item = self.scope.items[self.scope.items.len - 1 - i];
                     if (item.kind != .Set) {
                         if (item.name) |name|
-                            try watch_scope.append(.{ .name = name, .scalar_id = scalar_id });
+                            try watch_scope.append(.{ .name = name, .scalar_id = .{ .id = scalar_id } });
                         scalar_id += 1;
                     }
                 }
-                return self.putCore(.{ .Watch = .{ .expr = core_expr, .scope = watch_scope.toOwnedSlice() } });
+                return self.putCore(.{ .Watch = .{ .scope = watch_scope.toOwnedSlice(), .body = core_expr_id } });
             }
         }
-        return core_expr;
+        return core_expr_id;
     }
 
-    fn makeDef(self: *Desugarer, expr: *const core.Expr) Error!core.Box {
-        var free_ids = DeepHashSet(core.ScalarId).init(&self.store.arena.allocator);
-        const StackItem = struct {
-            num_enclosing_abstracts: usize,
-            expr: *const core.Expr,
-        };
-        {
-            var stack = ArrayList(StackItem).init(&self.store.arena.allocator);
-            try stack.append(.{ .num_enclosing_abstracts = 0, .expr = expr });
-            while (stack.popOrNull()) |item| {
-                var tmp_expr = item.expr.*;
-                for (try self.getScalarIds(&tmp_expr)) |scalar_id| {
-                    if (scalar_id.* >= item.num_enclosing_abstracts) {
-                        try free_ids.put(scalar_id.* - item.num_enclosing_abstracts, {});
-                    }
-                }
-                for (item.expr.getChildren().slice()) |child|
-                    try stack.append(.{
-                        .num_enclosing_abstracts = item.num_enclosing_abstracts + (if (item.expr.* == .Abstract) @as(usize, 1) else 0),
-                        .expr = child,
-                    });
-            }
-        }
+    fn putDef(self: *Desugarer, expr_id: core.ExprId) Error!core.Box {
+        // get list of free scalar_ids in expr
+        var free_ids = DeepHashSet(core.ScalarId).init(&self.arena.allocator);
+        for (try self.getDescendants(expr_id)) |descendant|
+            for (try self.getScalarIds(descendant.expr_id)) |scalar_id|
+                if (scalar_id.id >= descendant.num_enclosing_abstracts)
+                    try free_ids.put(.{ .id = scalar_id.id - descendant.num_enclosing_abstracts }, {});
 
-        var args = ArrayList(core.ScalarId).init(&self.store.arena.allocator);
+        // wrap expr with one abstract for each free scalar_id
+        var args = ArrayList(core.ScalarId).init(&self.arena.allocator);
         {
             var iter = free_ids.iterator();
             while (iter.next()) |entry| try args.append(entry.key_ptr.*);
         }
-        var result_expr = try self.rename(args.items, expr, 0);
+        var result_expr_id = expr_id;
         for (args.items) |_| {
-            result_expr = try self.putCore(.{ .Abstract = result_expr });
+            result_expr_id = try self.putCore(.{ .Abstract = result_expr_id });
         }
-        try self.def_exprs.append(result_expr);
-        const def_id = self.def_exprs.items.len - 1;
+
+        // rename free scalar_ids in expr to match position in args
+        for (try self.getDescendants(expr_id)) |descendant| {
+            for (try self.getScalarIds(descendant.expr_id)) |scalar_id| {
+                if (scalar_id.id >= descendant.num_enclosing_abstracts) {
+                    for (args.items) |arg, i| {
+                        if (scalar_id.id - descendant.num_enclosing_abstracts == arg.id) {
+                            scalar_id.id = args.items.len - 1 - i + descendant.num_enclosing_abstracts;
+                        }
+                    }
+                }
+            }
+        }
+
+        // make def
+        try self.defs.append(result_expr_id);
+        const def_id = core.DefId{ .id = self.defs.items.len - 1 };
         return core.Box{
             .def_id = def_id,
             .args = args.toOwnedSlice(),
         };
     }
 
-    fn rename(self: *Desugarer, args: []const core.ScalarId, expr: *const core.Expr, num_enclosing_abstracts: usize) Error!*const core.Expr {
-        var tmp_expr = expr.*;
-        for (try self.getScalarIds(&tmp_expr)) |scalar_id| {
-            if (scalar_id.* >= num_enclosing_abstracts) {
-                for (args) |arg, i| {
-                    if (arg == scalar_id.* - num_enclosing_abstracts) {
-                        scalar_id.* = args.len - 1 - i + num_enclosing_abstracts;
-                    }
-                }
-            }
+    const Descendant = struct {
+        num_enclosing_abstracts: usize,
+        expr_id: core.ExprId,
+    };
+    fn getDescendants(self: *Desugarer, expr_id: core.ExprId) ![]const Descendant {
+        var stack = ArrayList(Descendant).init(&self.arena.allocator);
+        var result = ArrayList(Descendant).init(&self.arena.allocator);
+        try stack.append(.{ .num_enclosing_abstracts = 0, .expr_id = expr_id });
+        while (stack.popOrNull()) |descendant| {
+            try result.append(descendant);
+            const expr = self.exprs.items[descendant.expr_id.id];
+            for (expr.getChildren().slice()) |child|
+                try stack.append(.{
+                    .num_enclosing_abstracts = descendant.num_enclosing_abstracts + (if (expr == .Abstract) @as(usize, 1) else 0),
+                    .expr_id = child,
+                });
         }
-        for (tmp_expr.getChildrenMut().slice()) |child|
-            child.* = try self.rename(args, child.*, num_enclosing_abstracts + (if (tmp_expr == .Abstract) @as(usize, 1) else 0));
-        const expr_meta = Store.getCoreMeta(expr);
-        return self.store.putCore(tmp_expr, expr_meta.from);
+        return result.toOwnedSlice();
     }
 
-    fn getScalarIds(self: *Desugarer, expr: *core.Expr) ![]const *core.ScalarId {
-        var scalar_ids = ArrayList(*core.ScalarId).init(&self.store.arena.allocator);
-        switch (expr.*) {
+    fn getScalarIds(self: *Desugarer, expr_id: core.ExprId) ![]const *core.ScalarId {
+        var scalar_ids = ArrayList(*core.ScalarId).init(&self.arena.allocator);
+        switch (self.exprs.items[expr_id.id]) {
             .ScalarId, .UnboxScalarId => |*scalar_id| try scalar_ids.append(scalar_id),
             .Box => |*box| for (box.args) |*scalar_id| try scalar_ids.append(scalar_id),
             .Reduce => |*reduce| for (reduce.next.args) |*scalar_id| try scalar_ids.append(scalar_id),
@@ -376,8 +394,8 @@ const Desugarer = struct {
         return scalar_ids.toOwnedSlice();
     }
 
-    fn makeBox(self: *Desugarer, body: *const core.Expr) Error!*const core.Expr {
-        var scope = try self.store.arena.allocator.alloc(core.NameIx, self.scope.items.len);
+    fn makeBox(self: *Desugarer, body: core.ExprId) Error!core.ExprId {
+        var scope = try self.arena.allocator.alloc(core.NameIx, self.scope.items.len);
         for (self.scope.items) |_, i| {
             scope[i] = i;
         }
@@ -389,7 +407,7 @@ const Desugarer = struct {
         });
     }
 
-    fn boxToExpr(self: *Desugarer, box: core.Box) !*const core.Expr {
+    fn boxToExpr(self: *Desugarer, box: core.Box) !core.ExprId {
         var result = try self.putCore(.{ .DefId = box.def_id });
         for (box.args) |arg| {
             result = try self.putCore(.{

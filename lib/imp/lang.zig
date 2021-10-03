@@ -118,26 +118,28 @@ pub const Store = struct {
     }
 
     pub fn getWatchRange(self: Store) ?[2]usize {
-        if (self.watch_expr_id) |watch_expr_id|
-            return self.syntax_program.?.from_source[watch_expr_id.id];
+        return if (self.watch_expr_id) |watch_expr_id|
+            self.syntax_program.?.from_source[watch_expr_id.id]
+        else
+            null;
     }
 
     pub fn getErrorRange(self: Store) ?[2]usize {
         if (self.error_info) |error_info| {
             switch (error_info) {
                 .Parse => |parse_info| {
-                    return .{ parse_info.start, parse_info.end };
+                    return [2]usize{ parse_info.start, parse_info.end };
                 },
                 .Desugar => |desugar_info| {
                     return self.syntax_program.?.from_source[desugar_info.expr_id.id];
                 },
                 .Analyze => |analyze_info| {
                     const syntax_expr_id = self.core_program.?.from_syntax[analyze_info.expr_id.id];
-                    return self.syntax_program.?.from_source[syntax_expr_id];
+                    return self.syntax_program.?.from_source[syntax_expr_id.id];
                 },
                 .Interpret => |interpret_info| {
                     const syntax_expr_id = self.core_program.?.from_syntax[interpret_info.expr_id.id];
-                    return self.syntax_program.?.from_source[syntax_expr_id];
+                    return self.syntax_program.?.from_source[syntax_expr_id.id];
                 },
             }
         } else {
@@ -331,7 +333,7 @@ pub const Worker = struct {
             };
             var store = Store{
                 .arena = &arena,
-                .interrupter = &interrupter,
+                .interrupter = interrupter,
                 .source = new_request.text,
                 .watch_selection = new_request.selection,
             };
@@ -340,8 +342,8 @@ pub const Worker = struct {
             // print result
             var response_buffer = ArrayList(u8).init(self.allocator);
             defer response_buffer.deinit();
-            store.dumpInto(response_buffer.writer(), 0);
-            const response_kind = if (store.result) |_|
+            try store.dumpInto(response_buffer.writer(), 0);
+            const response_kind = if (store.result.?) |_|
                 ResponseKind{ .Ok = store.getWatchRange() }
             else |_|
                 ResponseKind{ .Err = store.getErrorRange() };

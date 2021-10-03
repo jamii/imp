@@ -22,7 +22,7 @@ pub const Program = struct {
 };
 
 // Index into Progam.exprs/from_source
-pub const ExprId = struct { id: usize };
+pub const ExprId = Id("e");
 
 // ascii, non-empty
 pub const Name = []const u8;

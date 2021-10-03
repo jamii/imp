@@ -180,3 +180,18 @@ pub fn FixedSizeArrayList(comptime size: usize, comptime T: type) type {
 pub fn WriterError(comptime Writer: type) type {
     return @typeInfo(std.meta.declarationInfo(Writer, "writeAll").data.Fn.return_type).ErrorUnion.error_set;
 }
+
+pub fn Id(comptime dump_tag: []const u8) type {
+    return struct {
+        id: usize,
+        const Self = @This();
+        pub fn dumpInto(self: Self, writer: anytype, _: u32) WriterError(@TypeOf(writer))!void {
+            try std.fmt.format(writer, "{s}{}", .{ dump_tag, self.id });
+        }
+        pub fn format(self: Self, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+            // TODO https://github.com/ziglang/zig/issues/9220
+            _ = fmt;
+            try self.dumpInto(writer, 0);
+        }
+    };
+}

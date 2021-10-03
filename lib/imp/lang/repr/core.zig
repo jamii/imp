@@ -31,43 +31,13 @@ pub const Program = struct {
 };
 
 // Index into Program.exprs/from_syntax
-pub const ExprId = struct {
-    id: usize,
-    pub fn dumpInto(self: ExprId, writer: anytype, _: u32) WriterError(@TypeOf(writer))!void {
-        try std.fmt.format(writer, "e{}", .{self.id});
-    }
-    pub fn format(self: ExprId, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        // TODO https://github.com/ziglang/zig/issues/9220
-        _ = fmt;
-        try self.dumpInto(writer, 0);
-    }
-};
+pub const ExprId = Id("e");
 
 // Index into Program.defs
-pub const DefId = struct {
-    id: usize,
-    pub fn dumpInto(self: DefId, writer: anytype, _: u32) WriterError(@TypeOf(writer))!void {
-        try std.fmt.format(writer, "d{}", .{self.id});
-    }
-    pub fn format(self: DefId, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        // TODO https://github.com/ziglang/zig/issues/9220
-        _ = fmt;
-        try self.dumpInto(writer, 0);
-    }
-};
+pub const DefId = Id("d");
 
 // De Bruijn index to some enclosing Abstract
-pub const ScalarId = struct {
-    id: usize,
-    pub fn dumpInto(self: ScalarId, writer: anytype, _: u32) WriterError(@TypeOf(writer))!void {
-        try std.fmt.format(writer, "s{}", .{self.id});
-    }
-    pub fn format(self: ScalarId, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        // TODO https://github.com/ziglang/zig/issues/9220
-        _ = fmt;
-        try self.dumpInto(writer, 0);
-    }
-};
+pub const ScalarId = Id("s");
 
 pub const Expr = union(enum) {
     None,

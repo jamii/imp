@@ -1,6 +1,5 @@
 const imp = @import("../lib/imp.zig");
 usingnamespace imp.common;
-const meta = imp.meta;
 
 fn fuzz_panic() noreturn {
     imp_panic("Internal error in fuzzer", .{});
@@ -602,8 +601,8 @@ fn fuzz_analyze_deterministic(arena: *ArenaAllocator, store_and_expr: Core.Store
     const result1 = imp.lang.pass.analyze.analyze(&store, expr, &error_info);
     const result2 = imp.lang.pass.analyze.analyze(&store, expr, &error_info);
     // sanity check
-    expect(meta.deepEqual(result1, result1));
-    if (!meta.deepEqual(result1, result2)) {
+    expect(deepEqual(result1, result1));
+    if (!deepEqual(result1, result2)) {
         // dump(.{result1, result2});
         return error.Nondeterministic;
     }
@@ -654,8 +653,8 @@ fn fuzz_interpret_deterministic(arena: *ArenaAllocator, store_and_expr: Core.Sto
     const result1 = imp.lang.pass.interpret.interpret(&store_and_expr.store, arena, expr, &error_info);
     const result2 = imp.lang.pass.interpret.interpret(&store_and_expr.store, arena, expr, &error_info);
     // sanity check
-    expect(meta.deepEqual(result1, result1));
-    if (!meta.deepEqual(result1, result2)) {
+    expect(deepEqual(result1, result1));
+    if (!deepEqual(result1, result2)) {
         // dump(.{result1, result2});
         return error.Nondeterministic;
     }

@@ -1,6 +1,5 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
-const meta = imp.meta;
 const core = imp.lang.repr.core;
 
 /// Invariant: all the Tuples in a Set must be the same length
@@ -9,7 +8,7 @@ pub const Set = struct {
     set: DeepHashSet(Tuple),
 
     // TODO this is not an ordering, only works for deepEqual
-    pub fn deepCompare(self: Set, other: Set) meta.Ordering {
+    pub fn overrideDeepCompare(self: Set, other: Set) Ordering {
         if (self.set.count() != other.set.count()) {
             return .LessThan;
         }
@@ -22,12 +21,12 @@ pub const Set = struct {
         return .Equal;
     }
 
-    pub fn deepHashInto(hasher: anytype, self: Set) void {
-        meta.deepHashInto(hasher, self.arity);
+    pub fn overrideDeepHashInto(hasher: anytype, self: Set) void {
+        deepHashInto(hasher, self.arity);
         // TODO this will break if hashmap starts using a random seed
         var iter = self.set.iterator();
         while (iter.next()) |entry| {
-            meta.deepHashInto(hasher, entry.key_ptr.*);
+            deepHashInto(hasher, entry.key_ptr.*);
         }
     }
 
@@ -41,7 +40,7 @@ pub const Set = struct {
         }
         std.sort.sort(Tuple, tuples.items, {}, struct {
             fn lessThan(_: void, a: Tuple, b: Tuple) bool {
-                return meta.deepCompare(a, b) == .LessThan;
+                return deepCompare(a, b) == .LessThan;
             }
         }.lessThan);
         if (tuples.items.len == 0) {
@@ -97,20 +96,20 @@ pub const Box = union(enum) {
     // TODO *const c_void is actually a *const Set - workaround for https://github.com/ziglang/zig/issues/5920
     FixOrReduce: *align(@alignOf(Set)) const c_void,
 
-    pub fn deepCompare(self: Box, other: Box) meta.Ordering {
-        const tagOrdering = meta.deepCompare(std.meta.activeTag(self), std.meta.activeTag(other));
+    pub fn overrideDeepCompare(self: Box, other: Box) Ordering {
+        const tagOrdering = deepCompare(std.meta.activeTag(self), std.meta.activeTag(other));
         if (tagOrdering != .Equal) return tagOrdering;
         switch (self) {
-            .Normal => return meta.deepCompare(self.Normal, other.Normal),
-            .FixOrReduce => return meta.deepCompare(self.getFixOrReduce(), other.getFixOrReduce()),
+            .Normal => return deepCompare(self.Normal, other.Normal),
+            .FixOrReduce => return deepCompare(self.getFixOrReduce(), other.getFixOrReduce()),
         }
     }
 
-    pub fn deepHashInto(hasher: anytype, self: Box) void {
-        meta.deepHashInto(hasher, std.meta.activeTag(self));
+    pub fn overrideDeepHashInto(hasher: anytype, self: Box) void {
+        deepHashInto(hasher, std.meta.activeTag(self));
         switch (self) {
-            .Normal => |normal| meta.deepHashInto(hasher, normal),
-            .FixOrReduce => meta.deepHashInto(hasher, self.getFixOrReduce()),
+            .Normal => |normal| deepHashInto(hasher, normal),
+            .FixOrReduce => deepHashInto(hasher, self.getFixOrReduce()),
         }
     }
 

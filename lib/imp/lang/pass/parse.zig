@@ -1,6 +1,5 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
-const meta = imp.meta;
 const syntax = imp.lang.repr.syntax;
 
 // expr =
@@ -519,13 +518,13 @@ pub const Parser = struct {
                         return Token{ .Number = try self.tokenizeNumber() };
                     } else if (std.ascii.isAlpha(ascii_char1)) {
                         const name = try self.tokenizeName();
-                        if (meta.deepEqual(name, "none")) return Token{ .None = {} };
-                        if (meta.deepEqual(name, "some")) return Token{ .Some = {} };
-                        if (meta.deepEqual(name, "then")) return Token{ .Then = {} };
-                        if (meta.deepEqual(name, "fix")) return Token{ .Fix = {} };
-                        if (meta.deepEqual(name, "reduce")) return Token{ .Reduce = {} };
-                        if (meta.deepEqual(name, "enumerate")) return Token{ .Enumerate = {} };
-                        if (meta.deepEqual(name, "else")) return Token{ .Else = {} };
+                        if (deepEqual(name, "none")) return Token{ .None = {} };
+                        if (deepEqual(name, "some")) return Token{ .Some = {} };
+                        if (deepEqual(name, "then")) return Token{ .Then = {} };
+                        if (deepEqual(name, "fix")) return Token{ .Fix = {} };
+                        if (deepEqual(name, "reduce")) return Token{ .Reduce = {} };
+                        if (deepEqual(name, "enumerate")) return Token{ .Enumerate = {} };
+                        if (deepEqual(name, "else")) return Token{ .Else = {} };
                         return Token{ .Name = name };
                     } else {
                         return self.setError(start, "invalid token", .{});

@@ -1,6 +1,5 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
-const meta = imp.meta;
 const syntax = imp.lang.repr.syntax;
 const core = imp.lang.repr.core;
 const type_ = imp.lang.repr.type_;
@@ -111,7 +110,7 @@ const Interpreter = struct {
         // check if already evaluated
         // TODO it's surprisingly hard to write a better lookup than this
         for (def_set.items) |memo|
-            if (meta.deepEqual(memo.hint, hint))
+            if (deepEqual(memo.hint, hint))
                 return memo.set;
 
         // otherwise, evaluate
@@ -142,7 +141,7 @@ const Interpreter = struct {
         };
         var set_iter = set.set.iterator();
         while (set_iter.next()) |entry|
-            if (meta.deepEqual(entry.key_ptr.*[0..box.args.len], box_args))
+            if (deepEqual(entry.key_ptr.*[0..box.args.len], box_args))
                 try result_set.set.put(entry.key_ptr.*[box.args.len..], {});
         return result_set;
     }
@@ -303,7 +302,7 @@ const Interpreter = struct {
                                 };
                                 var set_iter = set.set.iterator();
                                 while (set_iter.next()) |entry|
-                                    if (meta.deepEqual(entry.key_ptr.*[0..normal.args.len], normal.args))
+                                    if (deepEqual(entry.key_ptr.*[0..normal.args.len], normal.args))
                                         try result_set.set.put(entry.key_ptr.*[normal.args.len..], {});
                                 return result_set;
                             },
@@ -421,11 +420,11 @@ const Interpreter = struct {
                     var body_iter = body_set.set.iterator();
                     while (body_iter.next()) |kv| {
                         try self.interrupter.check();
-                        if (meta.deepEqual(kv.key_ptr.*[0], value.Scalar{ .Box = fix_box })) {
+                        if (deepEqual(kv.key_ptr.*[0], value.Scalar{ .Box = fix_box })) {
                             _ = try new_fix_set.set.put(kv.key_ptr.*[1..], {});
                         }
                     }
-                    if (meta.deepEqual(fix_set, new_fix_set)) {
+                    if (deepEqual(fix_set, new_fix_set)) {
                         return fix_set;
                     }
                     fix_set = new_fix_set;
@@ -443,7 +442,7 @@ const Interpreter = struct {
                 // TODO would like to be able to interrupt sorting
                 std.sort.sort(value.Tuple, input_tuples.items, {}, struct {
                     fn lessThan(_: void, a: value.Tuple, b: value.Tuple) bool {
-                        return meta.deepCompare(a, b) == .LessThan;
+                        return deepCompare(a, b) == .LessThan;
                     }
                 }.lessThan);
 
@@ -476,7 +475,7 @@ const Interpreter = struct {
                     var body_iter = body_set.set.iterator();
                     while (body_iter.next()) |kv| {
                         try self.interrupter.check();
-                        if (meta.deepEqual(kv.key_ptr.*[0], value.Scalar{ .Box = reduce_box }) and meta.deepEqual(kv.key_ptr.*[1], value.Scalar{ .Box = tuple_box })) {
+                        if (deepEqual(kv.key_ptr.*[0], value.Scalar{ .Box = reduce_box }) and deepEqual(kv.key_ptr.*[1], value.Scalar{ .Box = tuple_box })) {
                             _ = try new_reduce_set.set.put(kv.key_ptr.*[2..], {});
                         }
                     }
@@ -496,7 +495,7 @@ const Interpreter = struct {
                 // TODO would like to be able to interrupt sorting
                 std.sort.sort(value.Tuple, tuples.items, {}, struct {
                     fn lessThan(_: void, a: value.Tuple, b: value.Tuple) bool {
-                        return meta.deepCompare(a, b) == .LessThan;
+                        return deepCompare(a, b) == .LessThan;
                     }
                 }.lessThan);
                 // TODO HashMap.initCapacity is private?
@@ -646,7 +645,7 @@ const Interpreter = struct {
                 var right_iter = right_set.set.iterator();
                 while (right_iter.next()) |right_entry| {
                     try self.interrupter.check();
-                    if (meta.deepEqual(left_entry.key_ptr.*[0..joined_arity], right_entry.key_ptr.*[0..joined_arity])) {
+                    if (deepEqual(left_entry.key_ptr.*[0..joined_arity], right_entry.key_ptr.*[0..joined_arity])) {
                         _ = try set.put(if (left_set.arity > right_set.arity) left_entry.key_ptr.*[joined_arity..] else right_entry.key_ptr.*[joined_arity..], {});
                     }
                 }

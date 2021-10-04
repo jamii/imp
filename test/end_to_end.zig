@@ -1,6 +1,5 @@
 const imp = @import("../lib/imp.zig");
 usingnamespace imp.common;
-const meta = imp.meta;
 
 pub fn main() anyerror!void {
     var allocator = std.heap.c_allocator;

@@ -1,6 +1,5 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
-const meta = imp.meta;
 const core = imp.lang.repr.core;
 const syntax = imp.lang.repr.syntax;
 
@@ -173,7 +172,7 @@ const Desugarer = struct {
             }),
             .Name => |name| name: {
                 // check for sugar
-                if (meta.deepEqual(name, "~")) {
+                if (deepEqual(name, "~")) {
                     break :name try self.putCore(
                         .{ .Abstract = try self.putCore(
                             .{ .Abstract = try self.putCore(
@@ -192,7 +191,7 @@ const Desugarer = struct {
                 var scalar_id: usize = 0;
                 while (i < scope.len) : (i += 1) {
                     const item = (scope[scope.len - 1 - i]);
-                    if (item.name != null and meta.deepEqual(name, item.name.?)) {
+                    if (item.name != null and deepEqual(name, item.name.?)) {
                         break :name switch (item.kind) {
                             .Scalar => try self.putCore(.{ .ScalarId = .{ .id = scalar_id } }),
                             .UnboxScalar => try self.putCore(.{ .UnboxScalarId = .{ .id = scalar_id } }),

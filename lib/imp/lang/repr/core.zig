@@ -1,6 +1,5 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
-const meta = imp.meta;
 const syntax = imp.lang.repr.syntax;
 const value = imp.lang.repr.value;
 
@@ -202,7 +201,7 @@ pub const Native = enum {
     pub fn fromName(name: []const u8) ?Native {
         inline for (@typeInfo(Native).Enum.fields) |field| {
             const native = @intToEnum(Native, field.value);
-            if (meta.deepEqual(name, comptime native.toName())) return native;
+            if (deepEqual(name, comptime native.toName())) return native;
         }
         return null;
     }

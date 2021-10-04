@@ -163,7 +163,7 @@ pub const Store = struct {
                     while (iter.next()) |entry| try sorted_watch_results.append(entry.key_ptr.*);
                     std.sort.sort(interpret.WatchResult, sorted_watch_results.items, {}, struct {
                         fn lessThan(_: void, a: interpret.WatchResult, b: interpret.WatchResult) bool {
-                            return imp.meta.deepCompare(a, b) == .LessThan;
+                            return deepCompare(a, b) == .LessThan;
                         }
                     }.lessThan);
                     for (sorted_watch_results.items) |watch_result| {

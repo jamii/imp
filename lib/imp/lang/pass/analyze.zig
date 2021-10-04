@@ -1,6 +1,5 @@
 const imp = @import("../../../imp.zig");
 usingnamespace imp.common;
-const meta = imp.meta;
 const core = imp.lang.repr.core;
 const type_ = imp.lang.repr.type_;
 
@@ -81,7 +80,7 @@ pub const Analyzer = struct {
         for (type_union.items) |specialization| {
             // if could specialize with a shorter hint, can specialize with this one
             if (specialization.hint.len <= hint.len and
-                meta.deepEqual(specialization.hint, hint[0..specialization.hint.len]))
+                deepEqual(specialization.hint, hint[0..specialization.hint.len]))
                 return specialization.set_type;
         }
 
@@ -389,7 +388,7 @@ pub const Analyzer = struct {
                             .columns = try std.mem.dupe(&self.arena.allocator, type_.ScalarType, fix_columns),
                         } };
                     } else {
-                        if (meta.deepEqual(fix_type.Concrete.columns, fix_columns)) {
+                        if (deepEqual(fix_type.Concrete.columns, fix_columns)) {
                             // reached fixpoint
                             // TODO check that fix_box_type doesn't escape
                             return fix_type;
@@ -455,7 +454,7 @@ pub const Analyzer = struct {
                             .columns = try std.mem.dupe(&self.arena.allocator, type_.ScalarType, reduce_columns),
                         } };
                     } else {
-                        if (meta.deepEqual(reduce_type.Concrete.columns, reduce_columns)) {
+                        if (deepEqual(reduce_type.Concrete.columns, reduce_columns)) {
                             // reached fixpoint
                             // TODO check that input_box_type and reduce_box_type do not escape
                             return reduce_type;
@@ -554,7 +553,7 @@ pub const Analyzer = struct {
     }
 
     fn unionScalar(self: *Analyzer, parent_expr_id: core.ExprId, a: type_.ScalarType, b: type_.ScalarType) Error!type_.ScalarType {
-        if (meta.deepEqual(a, b)) {
+        if (deepEqual(a, b)) {
             return a;
         } else {
             return self.setError(parent_expr_id, "TODO type unions are not implemented yet: {} | {}", .{ a, b }, .Other);
@@ -562,7 +561,7 @@ pub const Analyzer = struct {
     }
 
     fn intersectScalar(self: *Analyzer, parent_expr_id: core.ExprId, a: type_.ScalarType, b: type_.ScalarType) Error!type_.ScalarType {
-        if (meta.deepEqual(a, b)) {
+        if (deepEqual(a, b)) {
             return a;
         } else {
             return self.setError(parent_expr_id, "Intersection of {} and {} is empty", .{ a, b }, .Other);

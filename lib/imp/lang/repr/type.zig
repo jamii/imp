@@ -61,11 +61,7 @@ pub const SetType = union(enum) {
         }
     }
 
-    pub fn format(self: SetType, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        // TODO https://github.com/ziglang/zig/issues/9220
-        _ = fmt;
-        try self.dumpInto(writer, 0);
-    }
+    pub const format = formatViaDump;
 };
 
 pub const ConcreteSetType = struct {
@@ -89,11 +85,7 @@ pub const ConcreteSetType = struct {
         }
     }
 
-    pub fn format(self: ConcreteSetType, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        // TODO https://github.com/ziglang/zig/issues/9220
-        _ = fmt;
-        try self.dumpInto(writer, 0);
-    }
+    pub const format = formatViaDump;
 };
 
 pub const TupleType = []const ScalarType;
@@ -114,11 +106,7 @@ pub const ScalarType = union(enum) {
         }
     }
 
-    pub fn format(self: ScalarType, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        // TODO https://github.com/ziglang/zig/issues/9220
-        _ = fmt;
-        try self.dumpInto(writer, 0);
-    }
+    pub const format = formatViaDump;
 };
 
 pub const BoxType = union(enum) {
@@ -151,9 +139,5 @@ pub const BoxType = union(enum) {
         }
     }
 
-    pub fn format(self: ScalarType, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        // TODO https://github.com/ziglang/zig/issues/9220
-        _ = fmt;
-        try self.dumpInto(writer, 0);
-    }
+    pub const format = formatViaDump;
 };

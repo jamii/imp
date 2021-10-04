@@ -88,7 +88,7 @@ const Interpreter = struct {
     };
 
     fn setError(self: *Interpreter, expr_id: core.ExprId, comptime fmt: []const u8, args: anytype) Error {
-        const message = try format(&self.arena.allocator, fmt, args);
+        const message = try formatToString(&self.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
             .expr_id = expr_id,
             .message = message,
@@ -97,7 +97,7 @@ const Interpreter = struct {
     }
 
     fn setNativeError(self: *Interpreter, expr_id: core.ExprId, comptime fmt: []const u8, args: anytype) Error {
-        const message = try format(&self.arena.allocator, fmt, args);
+        const message = try formatToString(&self.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
             .expr_id = expr_id,
             .message = message,

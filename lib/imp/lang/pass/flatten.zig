@@ -38,7 +38,7 @@ const Flattener = struct {
     error_info: *?ErrorInfo,
 
     fn setError(self: *Flattener, expr: *const core.Expr, comptime fmt: []const u8, args: anytype) Error {
-        const message = try format(&self.store.arena.allocator, fmt, args);
+        const message = try formatToString(&self.store.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
             .expr = self.current_expr,
             .message = message,

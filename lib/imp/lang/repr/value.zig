@@ -63,11 +63,7 @@ pub const Set = struct {
         }
     }
 
-    pub fn format(self: Set, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        // TODO https://github.com/ziglang/zig/issues/9220
-        _ = fmt;
-        try self.dumpInto(writer, 0);
-    }
+    pub const format = formatViaDump;
 };
 
 pub const Tuple = []const Scalar;
@@ -89,11 +85,7 @@ pub const Scalar = union(enum) {
         }
     }
 
-    pub fn format(self: Scalar, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        // TODO https://github.com/ziglang/zig/issues/9220
-        _ = fmt;
-        try self.dumpInto(writer, 0);
-    }
+    pub const format = formatViaDump;
 };
 
 pub const Box = union(enum) {
@@ -151,9 +143,5 @@ pub const Box = union(enum) {
         }
     }
 
-    pub fn format(self: ScalarType, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        // TODO https://github.com/ziglang/zig/issues/9220
-        _ = fmt;
-        try self.dumpInto(writer, 0);
-    }
+    pub const format = formatViaDump;
 };

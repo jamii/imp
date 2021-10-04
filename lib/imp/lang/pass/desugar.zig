@@ -65,7 +65,7 @@ const Desugarer = struct {
     };
 
     fn setError(self: *Desugarer, comptime fmt: []const u8, args: anytype) Error {
-        const message = try format(&self.arena.allocator, fmt, args);
+        const message = try formatToString(&self.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
             .expr_id = self.current_expr_id.?,
             .message = message,

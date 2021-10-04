@@ -249,7 +249,7 @@ pub const Token = union(TokenTag) {
     }
 
     fn comparePrecedence(left: Token, right: Token) enum { LeftBindsTighter, Same, RightBindsTighter, Ambiguous } {
-        if (tagEqual(left, right)) return .Same;
+        if (std.meta.activeTag(left) == std.meta.activeTag(right)) return .Same;
         const left_class = left.precedenceClass();
         const right_class = right.precedenceClass();
         if (left_class == .Apply and right_class == .Apply) return .Same;
@@ -300,7 +300,7 @@ pub const Parser = struct {
     }
 
     fn setError(self: *Parser, start: usize, comptime fmt: []const u8, args: anytype) Error {
-        const message = try format(&self.arena.allocator, fmt, args);
+        const message = try formatToString(&self.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
             .start = start,
             .end = self.position,

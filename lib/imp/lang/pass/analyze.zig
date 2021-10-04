@@ -65,7 +65,7 @@ pub const Analyzer = struct {
     error_info: *?ErrorInfo,
 
     fn setError(self: *Analyzer, expr_id: core.ExprId, comptime fmt: []const u8, args: anytype, kind: ErrorKind) Error {
-        const message = try format(&self.arena.allocator, fmt, args);
+        const message = try formatToString(&self.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
             .expr_id = expr_id,
             .message = message,

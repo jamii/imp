@@ -8,25 +8,11 @@ pub fn main() anyerror!void {
     _ = try args.next(allocator).?;
     while (args.next(allocator)) |arg_e| {
         const arg = try arg_e;
-
         var file = if (std.mem.eql(u8, arg, "-"))
             std.io.getStdIn()
         else
             try std.fs.cwd().openFile(arg, .{});
-
-        // TODO can't use readFileAlloc on stdin? try reader
-        var source = ArrayList(u8).init(allocator);
-        defer source.deinit();
-        {
-            const chunk_size = 1024;
-            var buf = try allocator.alloc(u8, chunk_size);
-            defer allocator.free(buf);
-            while (true) {
-                const len = try file.readAll(buf);
-                try source.appendSlice(buf[0..len]);
-                if (len < chunk_size) break;
-            }
-        }
+        const source = try file.reader().readAllAlloc(allocator, std.math.maxInt(usize));
 
         var arena = ArenaAllocator.init(allocator);
         var desired_id: usize = 0;
@@ -37,7 +23,7 @@ pub fn main() anyerror!void {
         var store = imp.lang.Store{
             .arena = &arena,
             .interrupter = interrupter,
-            .source = source.items,
+            .source = source,
         };
         store.run();
         const writer = std.io.getStdOut().writer();

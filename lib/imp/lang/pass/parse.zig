@@ -224,39 +224,6 @@ pub const Token = union(TokenTag) {
     // not matched by anything but used to check that we parsed everything
     EOF,
 
-    const PrecedenceClass = enum {
-        Apply,
-        Union,
-        Product,
-        BinOp,
-        fn bindsTighterThan(self: PrecedenceClass, other: PrecedenceClass) bool {
-            return switch (self) {
-                .Union => false,
-                .Product => other == .Union,
-                .Apply, .BinOp => other == .Union or other == .Product,
-            };
-        }
-    };
-
-    fn precedenceClass(self: Token) PrecedenceClass {
-        return switch (self) {
-            .Apply, .Extend => .Apply,
-            .Union, .Intersect => .Union,
-            .Product => .Product,
-            else => .BinOp,
-        };
-    }
-
-    fn comparePrecedence(left: Token, right: Token) enum { LeftBindsTighter, Same, RightBindsTighter, Ambiguous } {
-        if (std.meta.activeTag(left) == std.meta.activeTag(right)) return .Same;
-        const left_class = left.precedenceClass();
-        const right_class = right.precedenceClass();
-        if (left_class == .Apply and right_class == .Apply) return .Same;
-        if (left_class.bindsTighterThan(right_class)) return .LeftBindsTighter;
-        if (right_class.bindsTighterThan(left_class)) return .RightBindsTighter;
-        return .Ambiguous;
-    }
-
     pub fn format(self: Token, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         try (std.meta.activeTag(self)).format(fmt, options, writer);
         switch (self) {
@@ -269,7 +236,41 @@ pub const Token = union(TokenTag) {
     }
 };
 
-fn appendChar(bytes: *ArrayList(u8), char: u21) !void {
+const PrecedenceClass = enum {
+    Apply,
+    Union,
+    Product,
+    BinOp,
+    fn bindsTighterThan(self: PrecedenceClass, other: PrecedenceClass) bool {
+        return switch (self) {
+            .Union => false,
+            .Product => other == .Union,
+            .Apply, .BinOp => other == .Union or other == .Product,
+        };
+    }
+};
+
+fn precedenceClass(token_tag: TokenTag) PrecedenceClass {
+    return switch (token_tag) {
+        .Apply, .Extend => .Apply,
+        .Union, .Intersect => .Union,
+        .Product => .Product,
+        else => .BinOp,
+    };
+}
+
+fn comparePrecedence(left: TokenTag, right: TokenTag) enum { LeftBindsTighter, RightBindsTighter, Ambiguous } {
+    const left_class = precedenceClass(left);
+    const right_class = precedenceClass(right);
+    if (left == right or
+        (left_class == .Apply and right_class == .Apply))
+        return .LeftBindsTighter;
+    if (left_class.bindsTighterThan(right_class)) return .LeftBindsTighter;
+    if (right_class.bindsTighterThan(left_class)) return .RightBindsTighter;
+    return .Ambiguous;
+}
+
+fn appendUtf8Char(bytes: *ArrayList(u8), char: u21) !void {
     var char_bytes = [4]u8{ 0, 0, 0, 0 };
     const len = std.unicode.utf8Encode(char, &char_bytes)
     // we got this char from utf8Decode so it must be legit
@@ -365,7 +366,7 @@ pub const Parser = struct {
                         break;
                     },
                     else => {
-                        try appendChar(&bytes, char);
+                        try appendUtf8Char(&bytes, char);
                     },
                 }
             } else {
@@ -699,11 +700,11 @@ pub const Parser = struct {
     // we're looking at:
     //   prev_expr prev_op left op right
     // possible cases are:
-    //   * prev_op==null or prev_op.comparePrecedence(op) == .RightBindsTighter:
+    //   * prev_op==null or comparePrecedence(prev_op, op) == .RightBindsTighter:
     //     prev_expr prev_op (left op right)
-    //   * prev_op.comparePrecedence(op) == .Same or prev_op.comparePrecedence(op) == .LeftBindsTighter:
+    //   * comparePrecedence(prev_op, op) == .LeftBindsTighter:
     //     (prev_expr prev_op left) op right
-    //   * otherwise:
+    //   * comparePrecedence(prev_op, op) == .Ambiguous:
     //     parse_error "ambiguous precedence"
     fn parseExprOuter(self: *Parser, prev_op: ?Token) Error!syntax.ExprId {
         try self.consumeWhitespace();
@@ -723,7 +724,7 @@ pub const Parser = struct {
             switch (op) {
                 // expr_inner binop expr
                 .Union, .Intersect, .Product, .Extend, .Equal, .Add, .Subtract, .Multiply, .Divide, .Modulus, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual => {
-                    const precedence = if (prev_op == null) .RightBindsTighter else prev_op.?.comparePrecedence(op);
+                    const precedence = if (prev_op == null) .RightBindsTighter else comparePrecedence(std.meta.activeTag(prev_op.?), std.meta.activeTag(op));
                     switch (precedence) {
                         .RightBindsTighter => {
                             const right = try self.parseExprOuter(op);
@@ -751,7 +752,7 @@ pub const Parser = struct {
                                 else => unreachable,
                             };
                         },
-                        .LeftBindsTighter, .Same => {
+                        .LeftBindsTighter => {
                             self.position = op_start;
                             return left;
                         },
@@ -825,12 +826,12 @@ pub const Parser = struct {
 
                     // expr expr
                     const right = try self.parseExprOuter(.Apply);
-                    const precedence = if (prev_op == null) .RightBindsTighter else prev_op.?.comparePrecedence(.Apply);
+                    const precedence = if (prev_op == null) .RightBindsTighter else comparePrecedence(std.meta.activeTag(prev_op.?), .Apply);
                     switch (precedence) {
                         .RightBindsTighter => {
                             left = try self.putSyntax(.{ .Apply = .{ .left = left, .right = right } }, start, self.position);
                         },
-                        .LeftBindsTighter, .Same => {
+                        .LeftBindsTighter => {
                             self.position = op_start;
                             return left;
                         },
@@ -848,13 +849,12 @@ pub const Parser = struct {
     }
 };
 
-test "binding partial order" {
-    var classes = ArrayList(Token.PrecedenceClass).init(std.testing.allocator);
-    defer classes.deinit();
-
+test "PrecedenceClass binding order" {
     // generate examples of all posible classes
-    inline for (@typeInfo(Token.PrecedenceClass).Enum.fields) |fti| {
-        try classes.append(@intToEnum(Token.PrecedenceClass, fti.value));
+    var classes = ArrayList(PrecedenceClass).init(std.testing.allocator);
+    defer classes.deinit();
+    inline for (@typeInfo(PrecedenceClass).Enum.fields) |fti| {
+        try classes.append(@intToEnum(PrecedenceClass, fti.value));
     }
 
     for (classes.items) |class1| {

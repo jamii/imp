@@ -1,10 +1,10 @@
 const imp = @import("../../../imp.zig");
-usingnamespace imp.common;
+const u = imp.util;
 const core = imp.lang.repr.core;
 const syntax = imp.lang.repr.syntax;
 
 pub fn desugar(
-    arena: *ArenaAllocator,
+    arena: *u.ArenaAllocator,
     syntax_program: syntax.Program,
     watch_expr_id: ?syntax.ExprId,
     error_info: *?ErrorInfo,
@@ -13,10 +13,10 @@ pub fn desugar(
         .arena = arena,
         .syntax_program = syntax_program,
         .watch_expr_id = watch_expr_id,
-        .defs = ArrayList(core.ExprId).init(&arena.allocator),
-        .exprs = ArrayList(core.Expr).init(&arena.allocator),
-        .from_syntax = ArrayList(syntax.ExprId).init(&arena.allocator),
-        .scope = ArrayList(Desugarer.ScopeItem).init(&arena.allocator),
+        .defs = u.ArrayList(core.ExprId).init(&arena.allocator),
+        .exprs = u.ArrayList(core.Expr).init(&arena.allocator),
+        .from_syntax = u.ArrayList(syntax.ExprId).init(&arena.allocator),
+        .scope = u.ArrayList(Desugarer.ScopeItem).init(&arena.allocator),
         .current_expr_id = null,
         .error_info = error_info,
     };
@@ -44,13 +44,13 @@ pub const ErrorInfo = struct {
 // --------------------------------------------------------------------------------
 
 const Desugarer = struct {
-    arena: *ArenaAllocator,
+    arena: *u.ArenaAllocator,
     syntax_program: syntax.Program,
     watch_expr_id: ?syntax.ExprId,
-    defs: ArrayList(core.ExprId),
-    exprs: ArrayList(core.Expr),
-    from_syntax: ArrayList(syntax.ExprId),
-    scope: ArrayList(ScopeItem),
+    defs: u.ArrayList(core.ExprId),
+    exprs: u.ArrayList(core.Expr),
+    from_syntax: u.ArrayList(syntax.ExprId),
+    scope: u.ArrayList(ScopeItem),
     current_expr_id: ?syntax.ExprId,
     error_info: *?ErrorInfo,
 
@@ -64,7 +64,7 @@ const Desugarer = struct {
     };
 
     fn setError(self: *Desugarer, comptime fmt: []const u8, args: anytype) Error {
-        const message = try formatToString(&self.arena.allocator, fmt, args);
+        const message = try u.formatToString(&self.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
             .expr_id = self.current_expr_id.?,
             .message = message,
@@ -114,7 +114,7 @@ const Desugarer = struct {
                 .Scalar = switch (scalar) {
                     .Text => |text| .{ .Text = text },
                     .Number => |number| .{ .Number = number },
-                    .Box => imp_panic("Shouldn't be any box literals", .{}),
+                    .Box => u.imp_panic("Shouldn't be any box literals", .{}),
                 },
             }),
             .Union => |pair| try self.putCore(.{
@@ -172,7 +172,7 @@ const Desugarer = struct {
             }),
             .Name => |name| name: {
                 // check for sugar
-                if (deepEqual(name, "~")) {
+                if (u.deepEqual(name, "~")) {
                     break :name try self.putCore(
                         .{ .Abstract = try self.putCore(
                             .{ .Abstract = try self.putCore(
@@ -191,7 +191,7 @@ const Desugarer = struct {
                 var scalar_id: usize = 0;
                 while (i < scope.len) : (i += 1) {
                     const item = (scope[scope.len - 1 - i]);
-                    if (item.name != null and deepEqual(name, item.name.?)) {
+                    if (item.name != null and u.deepEqual(name, item.name.?)) {
                         break :name switch (item.kind) {
                             .Scalar => try self.putCore(.{ .ScalarId = .{ .id = scalar_id } }),
                             .UnboxScalar => try self.putCore(.{ .UnboxScalarId = .{ .id = scalar_id } }),
@@ -302,7 +302,7 @@ const Desugarer = struct {
         };
         if (self.watch_expr_id) |watch_expr_id| {
             if (watch_expr_id.id == syntax_expr_id.id) {
-                var watch_scope = ArrayList(core.Watch.ScopeItem).init(&self.arena.allocator);
+                var watch_scope = u.ArrayList(core.Watch.ScopeItem).init(&self.arena.allocator);
                 var i: usize = 0;
                 var scalar_id: usize = 0;
                 while (i < self.scope.items.len) : (i += 1) {
@@ -321,14 +321,14 @@ const Desugarer = struct {
 
     fn putDef(self: *Desugarer, expr_id: core.ExprId) Error!core.Box {
         // get list of free scalar_ids in expr
-        var free_ids = DeepHashSet(core.ScalarId).init(&self.arena.allocator);
+        var free_ids = u.DeepHashSet(core.ScalarId).init(&self.arena.allocator);
         for (try self.getDescendants(expr_id)) |descendant|
             for (try self.getScalarIds(descendant.expr_id)) |scalar_id|
                 if (scalar_id.id >= descendant.num_enclosing_abstracts)
                     try free_ids.put(.{ .id = scalar_id.id - descendant.num_enclosing_abstracts }, {});
 
         // wrap expr with one abstract for each free scalar_id
-        var args = ArrayList(core.ScalarId).init(&self.arena.allocator);
+        var args = u.ArrayList(core.ScalarId).init(&self.arena.allocator);
         {
             var iter = free_ids.iterator();
             while (iter.next()) |entry| try args.append(entry.key_ptr.*);
@@ -365,8 +365,8 @@ const Desugarer = struct {
         expr_id: core.ExprId,
     };
     fn getDescendants(self: *Desugarer, expr_id: core.ExprId) ![]const Descendant {
-        var stack = ArrayList(Descendant).init(&self.arena.allocator);
-        var result = ArrayList(Descendant).init(&self.arena.allocator);
+        var stack = u.ArrayList(Descendant).init(&self.arena.allocator);
+        var result = u.ArrayList(Descendant).init(&self.arena.allocator);
         try stack.append(.{ .num_enclosing_abstracts = 0, .expr_id = expr_id });
         while (stack.popOrNull()) |descendant| {
             try result.append(descendant);
@@ -381,7 +381,7 @@ const Desugarer = struct {
     }
 
     fn getScalarIds(self: *Desugarer, expr_id: core.ExprId) ![]const *core.ScalarId {
-        var scalar_ids = ArrayList(*core.ScalarId).init(&self.arena.allocator);
+        var scalar_ids = u.ArrayList(*core.ScalarId).init(&self.arena.allocator);
         switch (self.exprs.items[expr_id.id]) {
             .ScalarId, .UnboxScalarId => |*scalar_id| try scalar_ids.append(scalar_id),
             .Box => |*box| for (box.args) |*scalar_id| try scalar_ids.append(scalar_id),

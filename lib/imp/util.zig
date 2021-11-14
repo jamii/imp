@@ -1,7 +1,7 @@
+const std = @import("std");
+const builtin = @import("builtin");
 const imp = @import("../imp.zig");
 
-pub const std = @import("std");
-pub const builtin = @import("builtin");
 pub const warn = std.debug.warn;
 pub const assert = std.debug.assert;
 pub const expect = std.testing.expect;

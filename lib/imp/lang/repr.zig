@@ -1,5 +1,5 @@
 const imp = @import("../../imp.zig");
-usingnamespace imp.common;
+const u = imp.util;
 
 pub const syntax = @import("./repr/syntax.zig");
 pub const core = @import("./repr/core.zig");

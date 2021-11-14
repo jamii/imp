@@ -1,13 +1,14 @@
+const std = @import("std");
 const imp = @import("../../../imp.zig");
-usingnamespace imp.common;
+const u = imp.util;
 const value = imp.lang.repr.value;
 const core = imp.lang.repr.core;
 
 pub const ProgramType = struct {
-    defs: []const ArrayList(Specialization),
+    defs: []const u.ArrayList(Specialization),
     program_type: SetType,
 
-    pub fn dumpInto(self: ProgramType, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
+    pub fn dumpInto(self: ProgramType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         for (self.defs) |def, i| {
             if (i != 0) {
                 try writer.writeAll("\n");
@@ -30,7 +31,7 @@ pub const Specialization = struct {
     hint: []const ScalarType,
     set_type: SetType,
 
-    pub fn dumpInto(self: Specialization, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
+    pub fn dumpInto(self: Specialization, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         try writer.writeAll("(");
         for (self.hint) |scalar_type| {
             try writer.writeAll(", ");
@@ -51,7 +52,7 @@ pub const SetType = union(enum) {
         return self == .None or (self == .Concrete and self.Concrete.abstract_arity == 0);
     }
 
-    pub fn dumpInto(self: SetType, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
+    pub fn dumpInto(self: SetType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         switch (self) {
             .None => try writer.writeAll("none"),
             .Concrete => |concrete| {
@@ -60,14 +61,14 @@ pub const SetType = union(enum) {
         }
     }
 
-    pub const format = formatViaDump;
+    pub const format = u.formatViaDump;
 };
 
 pub const ConcreteSetType = struct {
     abstract_arity: usize,
     columns: TupleType,
 
-    pub fn dumpInto(self: ConcreteSetType, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
+    pub fn dumpInto(self: ConcreteSetType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         if (self.columns.len == 0) {
             try writer.writeAll("maybe");
         } else {
@@ -84,7 +85,7 @@ pub const ConcreteSetType = struct {
         }
     }
 
-    pub const format = formatViaDump;
+    pub const format = u.formatViaDump;
 };
 
 pub const TupleType = []const ScalarType;
@@ -94,7 +95,7 @@ pub const ScalarType = union(enum) {
     Number,
     Box: BoxType,
 
-    pub fn dumpInto(self: ScalarType, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
+    pub fn dumpInto(self: ScalarType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         switch (self) {
             .Text => try writer.writeAll("text"),
             .Number => try writer.writeAll("number"),
@@ -105,7 +106,7 @@ pub const ScalarType = union(enum) {
         }
     }
 
-    pub const format = formatViaDump;
+    pub const format = u.formatViaDump;
 };
 
 pub const BoxType = union(enum) {
@@ -120,7 +121,7 @@ pub const BoxType = union(enum) {
         set_type: SetType,
     },
 
-    pub fn dumpInto(self: BoxType, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
+    pub fn dumpInto(self: BoxType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         switch (self) {
             .Normal => |normal| {
                 try std.fmt.format(writer, "({}", .{normal.def_id});
@@ -138,5 +139,5 @@ pub const BoxType = union(enum) {
         }
     }
 
-    pub const format = formatViaDump;
+    pub const format = u.formatViaDump;
 };

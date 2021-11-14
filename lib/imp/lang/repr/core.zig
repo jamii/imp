@@ -1,5 +1,6 @@
+const std = @import("std");
 const imp = @import("../../../imp.zig");
-usingnamespace imp.common;
+const u = imp.util;
 const syntax = imp.lang.repr.syntax;
 const value = imp.lang.repr.value;
 
@@ -30,13 +31,13 @@ pub const Program = struct {
 };
 
 // Index into Program.exprs/from_syntax
-pub const ExprId = Id("e");
+pub const ExprId = u.Id("e");
 
 // Index into Program.defs
-pub const DefId = Id("d");
+pub const DefId = u.Id("d");
 
 // De Bruijn index to some enclosing Abstract
-pub const ScalarId = Id("s");
+pub const ScalarId = u.Id("s");
 
 pub const Expr = union(enum) {
     None,
@@ -61,8 +62,8 @@ pub const Expr = union(enum) {
     Watch: Watch,
     Native: Native,
 
-    pub fn getChildren(self: Expr) FixedSizeArrayList(2, ExprId) {
-        var children = FixedSizeArrayList(2, ExprId){};
+    pub fn getChildren(self: Expr) u.FixedSizeArrayList(2, ExprId) {
+        var children = u.FixedSizeArrayList(2, ExprId){};
         inline for (@typeInfo(Expr).Union.fields) |expr_field, i| {
             if (@enumToInt(std.meta.activeTag(self)) == @typeInfo(@typeInfo(Expr).Union.tag_type.?).Enum.fields[i].value) {
                 const T = expr_field.field_type;
@@ -201,7 +202,7 @@ pub const Native = enum {
     pub fn fromName(name: []const u8) ?Native {
         inline for (@typeInfo(Native).Enum.fields) |field| {
             const native = @intToEnum(Native, field.value);
-            if (deepEqual(name, comptime native.toName())) return native;
+            if (u.deepEqual(name, comptime native.toName())) return native;
         }
         return null;
     }

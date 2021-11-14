@@ -1,5 +1,5 @@
 const imp = @import("../lib/imp.zig");
-usingnamespace imp.common;
+const u = imp.util;
 
 fn fuzz_panic() noreturn {
     imp_panic("Internal error in fuzzer", .{});

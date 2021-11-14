@@ -1,5 +1,6 @@
+const std = @import("std");
 const imp = @import("../../../imp.zig");
-usingnamespace imp.common;
+const u = imp.util;
 const syntax = imp.lang.repr.syntax;
 
 // expr =
@@ -49,15 +50,15 @@ const syntax = imp.lang.repr.syntax;
 
 // TODO https://github.com/ziglang/zig/issues/2647
 pub fn parse(
-    arena: *ArenaAllocator,
+    arena: *u.ArenaAllocator,
     source: []const u8,
     error_info: *?ErrorInfo,
 ) Error!syntax.Program {
     var parser = Parser{
         .arena = arena,
         .source = source,
-        .exprs = ArrayList(syntax.Expr).init(&arena.allocator),
-        .from_source = ArrayList([2]usize).init(&arena.allocator),
+        .exprs = u.ArrayList(syntax.Expr).init(&arena.allocator),
+        .from_source = u.ArrayList([2]usize).init(&arena.allocator),
         .position = 0,
         .error_info = error_info,
     };
@@ -270,7 +271,7 @@ fn comparePrecedence(left: TokenTag, right: TokenTag) enum { LeftBindsTighter, R
     return .Ambiguous;
 }
 
-fn appendUtf8Char(bytes: *ArrayList(u8), char: u21) !void {
+fn appendUtf8Char(bytes: *u.ArrayList(u8), char: u21) !void {
     var char_bytes = [4]u8{ 0, 0, 0, 0 };
     const len = std.unicode.utf8Encode(char, &char_bytes)
     // we got this char from utf8Decode so it must be legit
@@ -279,10 +280,10 @@ fn appendUtf8Char(bytes: *ArrayList(u8), char: u21) !void {
 }
 
 pub const Parser = struct {
-    arena: *ArenaAllocator,
+    arena: *u.ArenaAllocator,
     source: []const u8,
-    exprs: ArrayList(syntax.Expr),
-    from_source: ArrayList([2]usize),
+    exprs: u.ArrayList(syntax.Expr),
+    from_source: u.ArrayList([2]usize),
     position: usize,
     error_info: *?ErrorInfo,
 
@@ -300,7 +301,7 @@ pub const Parser = struct {
     }
 
     fn setError(self: *Parser, start: usize, comptime fmt: []const u8, args: anytype) Error {
-        const message = try formatToString(&self.arena.allocator, fmt, args);
+        const message = try u.formatToString(&self.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
             .start = start,
             .end = self.position,
@@ -345,7 +346,7 @@ pub const Parser = struct {
 
     // called after seeing '"'
     fn tokenizeText(self: *Parser) ![]const u8 {
-        var bytes = ArrayList(u8).init(&self.arena.allocator);
+        var bytes = u.ArrayList(u8).init(&self.arena.allocator);
         const text_start = self.position - 1;
         while (true) {
             const char_start = self.position;
@@ -519,13 +520,13 @@ pub const Parser = struct {
                         return Token{ .Number = try self.tokenizeNumber() };
                     } else if (std.ascii.isAlpha(ascii_char1)) {
                         const name = try self.tokenizeName();
-                        if (deepEqual(name, "none")) return Token{ .None = {} };
-                        if (deepEqual(name, "some")) return Token{ .Some = {} };
-                        if (deepEqual(name, "then")) return Token{ .Then = {} };
-                        if (deepEqual(name, "fix")) return Token{ .Fix = {} };
-                        if (deepEqual(name, "reduce")) return Token{ .Reduce = {} };
-                        if (deepEqual(name, "enumerate")) return Token{ .Enumerate = {} };
-                        if (deepEqual(name, "else")) return Token{ .Else = {} };
+                        if (u.deepEqual(name, "none")) return Token{ .None = {} };
+                        if (u.deepEqual(name, "some")) return Token{ .Some = {} };
+                        if (u.deepEqual(name, "then")) return Token{ .Then = {} };
+                        if (u.deepEqual(name, "fix")) return Token{ .Fix = {} };
+                        if (u.deepEqual(name, "reduce")) return Token{ .Reduce = {} };
+                        if (u.deepEqual(name, "enumerate")) return Token{ .Enumerate = {} };
+                        if (u.deepEqual(name, "else")) return Token{ .Else = {} };
                         return Token{ .Name = name };
                     } else {
                         return self.setError(start, "invalid token", .{});
@@ -851,7 +852,7 @@ pub const Parser = struct {
 
 test "PrecedenceClass binding order" {
     // generate examples of all posible classes
-    var classes = ArrayList(PrecedenceClass).init(std.testing.allocator);
+    var classes = u.ArrayList(PrecedenceClass).init(std.testing.allocator);
     defer classes.deinit();
     inline for (@typeInfo(PrecedenceClass).Enum.fields) |fti| {
         try classes.append(@intToEnum(PrecedenceClass, fti.value));
@@ -859,16 +860,16 @@ test "PrecedenceClass binding order" {
 
     for (classes.items) |class1| {
         // non-reflexive
-        try expect(!class1.bindsTighterThan(class1));
+        try u.expect(!class1.bindsTighterThan(class1));
         for (classes.items) |class2| {
             // non-symmetric
             if (class1.bindsTighterThan(class2)) {
-                try expect(!class2.bindsTighterThan(class1));
+                try u.expect(!class2.bindsTighterThan(class1));
             }
             for (classes.items) |class3| {
                 // transitive
                 if (class1.bindsTighterThan(class2) and class2.bindsTighterThan(class3)) {
-                    try expect(class1.bindsTighterThan(class3));
+                    try u.expect(class1.bindsTighterThan(class3));
                 }
             }
         }

@@ -1,14 +1,15 @@
+const std = @import("std");
 const imp = @import("../../../imp.zig");
-usingnamespace imp.common;
+const u = imp.util;
 const core = imp.lang.repr.core;
 
 /// Invariant: all the Tuples in a Set must be the same length
 pub const Set = struct {
     arity: usize,
-    set: DeepHashSet(Tuple),
+    set: u.DeepHashSet(Tuple),
 
     // TODO this is not an ordering, only works for deepEqual
-    pub fn overrideDeepCompare(self: Set, other: Set) Ordering {
+    pub fn overrideDeepCompare(self: Set, other: Set) u.Ordering {
         if (self.set.count() != other.set.count()) {
             return .LessThan;
         }
@@ -22,25 +23,25 @@ pub const Set = struct {
     }
 
     pub fn overrideDeepHashInto(hasher: anytype, self: Set) void {
-        deepHashInto(hasher, self.arity);
+        u.deepHashInto(hasher, self.arity);
         // TODO this will break if hashmap starts using a random seed
         var iter = self.set.iterator();
         while (iter.next()) |entry| {
-            deepHashInto(hasher, entry.key_ptr.*);
+            u.deepHashInto(hasher, entry.key_ptr.*);
         }
     }
 
-    pub fn dumpInto(self: Set, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
-        var tuples = ArrayList(Tuple).init(dump_allocator);
+    pub fn dumpInto(self: Set, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
+        var tuples = u.ArrayList(Tuple).init(u.dump_allocator);
         defer tuples.deinit();
         var iter = self.set.iterator();
         while (iter.next()) |kv| {
             // TODO format doesn't always allow OOM
-            tuples.append(kv.key_ptr.*) catch imp_panic("oom", .{});
+            tuples.append(kv.key_ptr.*) catch u.imp_panic("oom", .{});
         }
         std.sort.sort(Tuple, tuples.items, {}, struct {
             fn lessThan(_: void, a: Tuple, b: Tuple) bool {
-                return deepCompare(a, b) == .LessThan;
+                return u.deepCompare(a, b) == .LessThan;
             }
         }.lessThan);
         if (tuples.items.len == 0) {
@@ -62,7 +63,7 @@ pub const Set = struct {
         }
     }
 
-    pub const format = formatViaDump;
+    pub const format = u.formatViaDump;
 };
 
 pub const Tuple = []const Scalar;
@@ -72,7 +73,7 @@ pub const Scalar = union(enum) {
     Number: f64,
     Box: Box,
 
-    pub fn dumpInto(self: Scalar, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
+    pub fn dumpInto(self: Scalar, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         switch (self) {
             // TODO proper escaping
             .Text => |text| try std.fmt.format(writer, "\"{s}\"", .{text}),
@@ -84,7 +85,7 @@ pub const Scalar = union(enum) {
         }
     }
 
-    pub const format = formatViaDump;
+    pub const format = u.formatViaDump;
 };
 
 pub const Box = union(enum) {
@@ -96,24 +97,24 @@ pub const Box = union(enum) {
     // TODO *const c_void is actually a *const Set - workaround for https://github.com/ziglang/zig/issues/5920
     FixOrReduce: *align(@alignOf(Set)) const c_void,
 
-    pub fn overrideDeepCompare(self: Box, other: Box) Ordering {
-        const tagOrdering = deepCompare(std.meta.activeTag(self), std.meta.activeTag(other));
+    pub fn overrideDeepCompare(self: Box, other: Box) u.Ordering {
+        const tagOrdering = u.deepCompare(std.meta.activeTag(self), std.meta.activeTag(other));
         if (tagOrdering != .Equal) return tagOrdering;
         switch (self) {
-            .Normal => return deepCompare(self.Normal, other.Normal),
-            .FixOrReduce => return deepCompare(self.getFixOrReduce(), other.getFixOrReduce()),
+            .Normal => return u.deepCompare(self.Normal, other.Normal),
+            .FixOrReduce => return u.deepCompare(self.getFixOrReduce(), other.getFixOrReduce()),
         }
     }
 
     pub fn overrideDeepHashInto(hasher: anytype, self: Box) void {
-        deepHashInto(hasher, std.meta.activeTag(self));
+        u.deepHashInto(hasher, std.meta.activeTag(self));
         switch (self) {
-            .Normal => |normal| deepHashInto(hasher, normal),
-            .FixOrReduce => deepHashInto(hasher, self.getFixOrReduce()),
+            .Normal => |normal| u.deepHashInto(hasher, normal),
+            .FixOrReduce => u.deepHashInto(hasher, self.getFixOrReduce()),
         }
     }
 
-    pub fn fixOrReduce(allocator: *Allocator, set: Set) !Box {
+    pub fn fixOrReduce(allocator: *u.Allocator, set: Set) !Box {
         const set_ptr = try allocator.create(Set);
         set_ptr.* = set;
         return Box{ .FixOrReduce = @ptrCast(*align(@alignOf(Set)) const c_void, set_ptr) };
@@ -124,7 +125,7 @@ pub const Box = union(enum) {
         return set_ptr.*;
     }
 
-    pub fn dumpInto(self: Box, writer: anytype, indent: u32) WriterError(@TypeOf(writer))!void {
+    pub fn dumpInto(self: Box, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         switch (self) {
             .Normal => |normal| {
                 try std.fmt.format(writer, "({}", .{normal.def_id});
@@ -142,5 +143,5 @@ pub const Box = union(enum) {
         }
     }
 
-    pub const format = formatViaDump;
+    pub const format = u.formatViaDump;
 };

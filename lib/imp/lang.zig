@@ -1,5 +1,6 @@
+const std = @import("std");
 const imp = @import("../imp.zig");
-usingnamespace imp.common;
+const u = imp.util;
 
 pub const repr = @import("./lang/repr.zig");
 pub const pass = @import("./lang/pass.zig");
@@ -44,7 +45,7 @@ pub const SourceSelection = union(enum) {
 };
 
 pub const Store = struct {
-    arena: *ArenaAllocator,
+    arena: *u.ArenaAllocator,
     interrupter: Interrupter,
 
     // inputs
@@ -60,7 +61,7 @@ pub const Store = struct {
     // outputs
     result: ?(Error!value.Set) = null,
     error_info: ?ErrorInfo = null,
-    watch_results: ?DeepHashSet(interpret.WatchResult) = null,
+    watch_results: ?u.DeepHashSet(interpret.WatchResult) = null,
 
     pub fn run(self: *Store) void {
         var parse_error_info: ?parse.ErrorInfo = null;
@@ -93,7 +94,7 @@ pub const Store = struct {
             return;
         };
 
-        self.watch_results = DeepHashSet(interpret.WatchResult).init(&self.arena.allocator);
+        self.watch_results = u.DeepHashSet(interpret.WatchResult).init(&self.arena.allocator);
         var interpret_error_info: ?interpret.ErrorInfo = null;
         self.result = interpret.interpret(self.arena, self.core_program.?, self.program_type.?, &self.watch_results.?, self.interrupter, &interpret_error_info) catch |err| {
             if (err == error.InterpretError or err == error.NativeError) {
@@ -157,13 +158,13 @@ pub const Store = struct {
 
                 if (self.watch_results.?.count() > 0) {
                     try writer.writeAll("\n\nwatch:\n\n");
-                    var sorted_watch_results = ArrayList(interpret.WatchResult).init(dump_allocator);
+                    var sorted_watch_results = u.ArrayList(interpret.WatchResult).init(u.dump_allocator);
                     defer sorted_watch_results.deinit();
                     var iter = self.watch_results.?.iterator();
                     while (iter.next()) |entry| try sorted_watch_results.append(entry.key_ptr.*);
                     std.sort.sort(interpret.WatchResult, sorted_watch_results.items, {}, struct {
                         fn lessThan(_: void, a: interpret.WatchResult, b: interpret.WatchResult) bool {
-                            return deepCompare(a, b) == .LessThan;
+                            return u.deepCompare(a, b) == .LessThan;
                         }
                     }.lessThan);
                     for (sorted_watch_results.items) |watch_result| {
@@ -190,7 +191,7 @@ pub const Store = struct {
 };
 
 pub const Worker = struct {
-    allocator: *Allocator,
+    allocator: *u.Allocator,
     config: Config,
 
     // mutex protects these fields
@@ -231,7 +232,7 @@ pub const Worker = struct {
 
     // --- called by outside thread ---
 
-    pub fn init(allocator: *Allocator, config: Config) !*Worker {
+    pub fn init(allocator: *u.Allocator, config: Config) !*Worker {
         const self = try allocator.create(Worker);
         self.* = Worker{
             .allocator = allocator,
@@ -325,7 +326,7 @@ pub const Worker = struct {
                 .requested_memory_limit = self.config.memory_limit_bytes orelse std.math.maxInt(usize),
             };
             defer _ = gpa.deinit();
-            var arena = ArenaAllocator.init(&gpa.allocator);
+            var arena = u.ArenaAllocator.init(&gpa.allocator);
             defer arena.deinit();
             const interrupter = Interrupter{
                 .current_id = new_request.id,
@@ -340,7 +341,7 @@ pub const Worker = struct {
             store.run();
 
             // print result
-            var response_buffer = ArrayList(u8).init(self.allocator);
+            var response_buffer = u.ArrayList(u8).init(self.allocator);
             defer response_buffer.deinit();
             try store.dumpInto(response_buffer.writer(), 0);
             const response_kind = if (store.result.?) |_|

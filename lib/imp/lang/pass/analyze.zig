@@ -1,22 +1,23 @@
+const std = @import("std");
 const imp = @import("../../../imp.zig");
-usingnamespace imp.common;
+const u = imp.util;
 const core = imp.lang.repr.core;
 const type_ = imp.lang.repr.type_;
 
 pub fn analyze(
-    arena: *ArenaAllocator,
+    arena: *u.ArenaAllocator,
     core_program: core.Program,
     interrupter: imp.lang.Interrupter,
     error_info: *?ErrorInfo,
 ) Error!type_.ProgramType {
-    var defs = try arena.allocator.alloc(ArrayList(type_.Specialization), core_program.defs.len);
+    var defs = try arena.allocator.alloc(u.ArrayList(type_.Specialization), core_program.defs.len);
     for (defs) |*def|
-        def.* = ArrayList(type_.Specialization).init(&arena.allocator);
+        def.* = u.ArrayList(type_.Specialization).init(&arena.allocator);
     var analyzer = Analyzer{
         .arena = arena,
         .core_program = core_program,
         .defs = defs,
-        .scope = ArrayList(type_.ScalarType).init(&arena.allocator),
+        .scope = u.ArrayList(type_.ScalarType).init(&arena.allocator),
         .interrupter = interrupter,
         .error_info = error_info,
     };
@@ -55,16 +56,16 @@ pub const ErrorKind = enum {
 // --------------------------------------------------------------------------------
 
 pub const Analyzer = struct {
-    arena: *ArenaAllocator,
+    arena: *u.ArenaAllocator,
     core_program: core.Program,
-    defs: []ArrayList(type_.Specialization),
+    defs: []u.ArrayList(type_.Specialization),
     // TODO maybe scope should be passed as an arg like hint
-    scope: ArrayList(type_.ScalarType),
+    scope: u.ArrayList(type_.ScalarType),
     interrupter: imp.lang.Interrupter,
     error_info: *?ErrorInfo,
 
     fn setError(self: *Analyzer, expr_id: core.ExprId, comptime fmt: []const u8, args: anytype, kind: ErrorKind) Error {
-        const message = try formatToString(&self.arena.allocator, fmt, args);
+        const message = try u.formatToString(&self.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
             .expr_id = expr_id,
             .message = message,
@@ -80,14 +81,14 @@ pub const Analyzer = struct {
         for (type_union.items) |specialization| {
             // if could specialize with a shorter hint, can specialize with this one
             if (specialization.hint.len <= hint.len and
-                deepEqual(specialization.hint, hint[0..specialization.hint.len]))
+                u.deepEqual(specialization.hint, hint[0..specialization.hint.len]))
                 return specialization.set_type;
         }
 
         // otherwise, analyze
         const old_scope = self.scope;
         defer self.scope = old_scope;
-        self.scope = ArrayList(type_.ScalarType).init(&self.arena.allocator);
+        self.scope = u.ArrayList(type_.ScalarType).init(&self.arena.allocator);
         const set_type = try self.analyzeExpr(self.core_program.defs[def_id.id], hint);
 
         // memoize result
@@ -95,7 +96,7 @@ pub const Analyzer = struct {
             // always empty so can't say how much of the hint was used
             .None => hint,
             // specialized, so cannot have used >concrete.columns.len of the hint
-            .Concrete => |concrete| hint[0..min(hint.len, concrete.columns.len)],
+            .Concrete => |concrete| hint[0..u.min(hint.len, concrete.columns.len)],
         };
         try self.defs[def_id.id].append(.{
             .hint = used_hint,
@@ -106,7 +107,7 @@ pub const Analyzer = struct {
     }
 
     fn analyzeBox(self: *Analyzer, box: core.Box, hint: type_.TupleType) Error!type_.SetType {
-        var box_hint = ArrayList(type_.ScalarType).init(&self.arena.allocator);
+        var box_hint = u.ArrayList(type_.ScalarType).init(&self.arena.allocator);
         for (box.args) |scalar_id|
             try box_hint.append(self.scope.items[self.scope.items.len - 1 - scalar_id.id]);
         try box_hint.appendSlice(hint);
@@ -139,7 +140,7 @@ pub const Analyzer = struct {
                 const scalar_type: type_.ScalarType = switch (scalar) {
                     .Text => .Text,
                     .Number => .Number,
-                    .Box => imp_panic("Shouldn't be any box literals", .{}),
+                    .Box => u.imp_panic("Shouldn't be any box literals", .{}),
                 };
                 return type_.SetType{
                     .Concrete = .{
@@ -156,7 +157,7 @@ pub const Analyzer = struct {
                 if (left.Concrete.columns.len != right.Concrete.columns.len) {
                     return self.setError(expr_id, "Mismatched arities: {} vs {}", .{ left.Concrete.columns.len, right.Concrete.columns.len }, .Other);
                 }
-                const abstract_arity = max(left.Concrete.abstract_arity, right.Concrete.abstract_arity);
+                const abstract_arity = u.max(left.Concrete.abstract_arity, right.Concrete.abstract_arity);
                 var columns = try self.arena.allocator.alloc(type_.ScalarType, left.Concrete.columns.len);
                 for (left.Concrete.columns) |left_type, i| {
                     try self.interrupter.check();
@@ -177,7 +178,7 @@ pub const Analyzer = struct {
             .Product => |pair| {
                 const left = try self.analyzeExpr(pair.left, hint);
                 if (left == .None) return type_.SetType{ .None = {} };
-                const right = try self.analyzeExpr(pair.right, hint[min(hint.len, left.Concrete.columns.len)..]);
+                const right = try self.analyzeExpr(pair.right, hint[u.min(hint.len, left.Concrete.columns.len)..]);
                 if (right == .None) return type_.SetType{ .None = {} };
                 const abstract_arity = if (right.Concrete.abstract_arity > 0)
                     left.Concrete.columns.len + right.Concrete.abstract_arity
@@ -299,7 +300,7 @@ pub const Analyzer = struct {
                         .None => return type_.SetType{ .None = {} },
                         .Concrete => |concrete| {
                             const abstract_arity = concrete.abstract_arity + 1;
-                            var columns = try ArrayList(type_.ScalarType).initCapacity(&self.arena.allocator, 1 + concrete.columns.len);
+                            var columns = try u.ArrayList(type_.ScalarType).initCapacity(&self.arena.allocator, 1 + concrete.columns.len);
                             try columns.append(hint[0]);
                             try columns.appendSlice(concrete.columns);
                             return type_.SetType{
@@ -388,7 +389,7 @@ pub const Analyzer = struct {
                             .columns = try std.mem.dupe(&self.arena.allocator, type_.ScalarType, fix_columns),
                         } };
                     } else {
-                        if (deepEqual(fix_type.Concrete.columns, fix_columns)) {
+                        if (u.deepEqual(fix_type.Concrete.columns, fix_columns)) {
                             // reached fixpoint
                             // TODO check that fix_box_type doesn't escape
                             return fix_type;
@@ -454,7 +455,7 @@ pub const Analyzer = struct {
                             .columns = try std.mem.dupe(&self.arena.allocator, type_.ScalarType, reduce_columns),
                         } };
                     } else {
-                        if (deepEqual(reduce_type.Concrete.columns, reduce_columns)) {
+                        if (u.deepEqual(reduce_type.Concrete.columns, reduce_columns)) {
                             // reached fixpoint
                             // TODO check that input_box_type and reduce_box_type do not escape
                             return reduce_type;
@@ -481,7 +482,7 @@ pub const Analyzer = struct {
                 if (!body_type.isFinite()) {
                     return self.setError(expr_id, "The body of `enumerate` must have finite type, found {}", .{body_type}, .Other);
                 }
-                var columns = try ArrayList(type_.ScalarType).initCapacity(&self.arena.allocator, 1 + body_type.Concrete.columns.len);
+                var columns = try u.ArrayList(type_.ScalarType).initCapacity(&self.arena.allocator, 1 + body_type.Concrete.columns.len);
                 try columns.append(.Number);
                 try columns.appendSlice(body_type.Concrete.columns);
                 return type_.SetType{
@@ -527,11 +528,11 @@ pub const Analyzer = struct {
         if (right_type == .None) return type_.SetType{ .None = {} };
         if (!left_type.isFinite() and !right_type.isFinite())
             return self.setError(parent_expr_id, "Cannot apply two maybe-infinite sets: {} applied to {}", .{ left_type, right_type }, .Other);
-        const joined_arity = min(left_type.Concrete.columns.len, right_type.Concrete.columns.len);
+        const joined_arity = u.min(left_type.Concrete.columns.len, right_type.Concrete.columns.len);
         for (left_type.Concrete.columns[0..joined_arity]) |column, i| {
             _ = try self.intersectScalar(parent_expr_id, column, right_type.Concrete.columns[i]);
         }
-        const prev_abstract_arity = max(left_type.Concrete.abstract_arity, right_type.Concrete.abstract_arity);
+        const prev_abstract_arity = u.max(left_type.Concrete.abstract_arity, right_type.Concrete.abstract_arity);
         const abstract_arity = if (prev_abstract_arity > joined_arity)
             prev_abstract_arity - joined_arity
         else
@@ -553,7 +554,7 @@ pub const Analyzer = struct {
     }
 
     fn unionScalar(self: *Analyzer, parent_expr_id: core.ExprId, a: type_.ScalarType, b: type_.ScalarType) Error!type_.ScalarType {
-        if (deepEqual(a, b)) {
+        if (u.deepEqual(a, b)) {
             return a;
         } else {
             return self.setError(parent_expr_id, "TODO type unions are not implemented yet: {} | {}", .{ a, b }, .Other);
@@ -561,7 +562,7 @@ pub const Analyzer = struct {
     }
 
     fn intersectScalar(self: *Analyzer, parent_expr_id: core.ExprId, a: type_.ScalarType, b: type_.ScalarType) Error!type_.ScalarType {
-        if (deepEqual(a, b)) {
+        if (u.deepEqual(a, b)) {
             return a;
         } else {
             return self.setError(parent_expr_id, "Intersection of {} and {} is empty", .{ a, b }, .Other);

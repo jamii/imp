@@ -1,5 +1,5 @@
 const imp = @import("../../../imp.zig");
-usingnamespace imp.common;
+const u = imp.util;
 const value = imp.lang.repr.value;
 const core = imp.lang.repr.core;
 const logical = imp.lang.repr.logical;

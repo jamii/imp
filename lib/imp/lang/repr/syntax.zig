@@ -1,5 +1,6 @@
+const std = @import("std");
 const imp = @import("../../../imp.zig");
-usingnamespace imp.common;
+const u = imp.util;
 const value = imp.lang.repr.value;
 
 pub const Program = struct {
@@ -22,7 +23,7 @@ pub const Program = struct {
 };
 
 // Index into Progam.exprs/from_source
-pub const ExprId = Id("e");
+pub const ExprId = u.Id("e");
 
 // ascii, non-empty
 pub const Name = []const u8;
@@ -49,8 +50,8 @@ pub const Expr = union(enum) {
     Enumerate: ExprId,
     Annotate: Annotate,
 
-    pub fn getChildren(self: Expr) FixedSizeArrayList(3, ExprId) {
-        var children = FixedSizeArrayList(3, ExprId){};
+    pub fn getChildren(self: Expr) u.FixedSizeArrayList(3, ExprId) {
+        var children = u.FixedSizeArrayList(3, ExprId){};
         inline for (@typeInfo(Expr).Union.fields) |expr_field, i| {
             if (@enumToInt(std.meta.activeTag(self)) == @typeInfo(@typeInfo(Expr).Union.tag_type.?).Enum.fields[i].value) {
                 const T = expr_field.field_type;

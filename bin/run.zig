@@ -1,5 +1,6 @@
+const std = @import("std");
 const imp = @import("../lib/imp.zig");
-usingnamespace imp.common;
+const u = imp.util;
 
 pub fn main() anyerror!void {
     var allocator = std.heap.c_allocator;
@@ -14,7 +15,7 @@ pub fn main() anyerror!void {
             try std.fs.cwd().openFile(arg, .{});
         const source = try file.reader().readAllAlloc(allocator, std.math.maxInt(usize));
 
-        var arena = ArenaAllocator.init(allocator);
+        var arena = u.ArenaAllocator.init(allocator);
         var desired_id: usize = 0;
         const interrupter = .{
             .current_id = 0,

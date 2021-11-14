@@ -1,5 +1,5 @@
 const imp = @import("../../imp.zig");
-usingnamespace imp.common;
+const u = imp.util;
 
 pub const parse = @import("./pass/parse.zig");
 pub const desugar = @import("./pass/desugar.zig");

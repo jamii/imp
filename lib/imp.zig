@@ -1,4 +1,4 @@
-pub const common = @import("./imp/common.zig");
+pub const util = @import("./imp/util.zig");
 pub const lang = @import("./imp/lang.zig");
 
 comptime {

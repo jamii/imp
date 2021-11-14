@@ -1,5 +1,6 @@
+const std = @import("std");
 const imp = @import("../lib/imp.zig");
-usingnamespace imp.common;
+const u = imp.util;
 
 pub fn main() anyerror!void {
     var allocator = std.heap.c_allocator;
@@ -19,7 +20,7 @@ pub fn main() anyerror!void {
             try std.fs.cwd().openFile(filename, .{});
 
         // TODO can't use readFileAlloc on stdin
-        var cases = ArrayList(u8).init(allocator);
+        var cases = u.ArrayList(u8).init(allocator);
         defer cases.deinit();
         {
             const chunk_size = 1024;
@@ -32,14 +33,14 @@ pub fn main() anyerror!void {
             }
         }
 
-        var cases_iter = std.mem.split(cases.items, "\n\n");
+        var cases_iter = std.mem.split(u8, cases.items, "\n\n");
         while (cases_iter.next()) |case| {
-            var case_iter = std.mem.split(case, "---");
+            var case_iter = std.mem.split(u8, case, "---");
             const input = std.mem.trim(u8, case_iter.next().?, "\n ");
             const expected = std.mem.trim(u8, case_iter.next().?, "\n ");
-            try expect(case_iter.next() == null);
+            try u.expect(case_iter.next() == null);
 
-            var arena = ArenaAllocator.init(allocator);
+            var arena = u.ArenaAllocator.init(allocator);
             defer arena.deinit();
 
             var desired_id: usize = 0;
@@ -54,7 +55,7 @@ pub fn main() anyerror!void {
             };
             store.run();
 
-            var bytes = ArrayList(u8).init(allocator);
+            var bytes = u.ArrayList(u8).init(allocator);
             defer bytes.deinit();
             const writer = bytes.writer();
             try store.dumpInto(writer, 0);
@@ -63,15 +64,15 @@ pub fn main() anyerror!void {
             num_tests += 1;
             if (!std.mem.eql(u8, expected, found)) {
                 num_failed += 1;
-                warn("Filename:\n\n{s}\nSource:\n{s}\n\nExpected:\n{s}\n\nFound:\n{s}\n\n---\n\n", .{ filename, input, expected, found });
+                u.warn("Filename:\n\n{s}\nSource:\n{s}\n\nExpected:\n{s}\n\nFound:\n{s}\n\n---\n\n", .{ filename, input, expected, found });
             }
         }
 
         if (num_failed > 0) {
-            warn("{}/{} tests failed!\n", .{ num_failed, num_tests });
+            u.warn("{}/{} tests failed!\n", .{ num_failed, num_tests });
             std.os.exit(1);
         } else {
-            warn("All {} tests passed\n", .{num_tests});
+            u.warn("All {} tests passed\n", .{num_tests});
             std.os.exit(0);
         }
     }

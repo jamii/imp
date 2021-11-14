@@ -1,28 +1,29 @@
+const std = @import("std");
 const imp = @import("../../../imp.zig");
-usingnamespace imp.common;
+const u = imp.util;
 const syntax = imp.lang.repr.syntax;
 const core = imp.lang.repr.core;
 const type_ = imp.lang.repr.type_;
 const value = imp.lang.repr.value;
 
 pub fn interpret(
-    arena: *ArenaAllocator,
+    arena: *u.ArenaAllocator,
     program: core.Program,
     program_type: type_.ProgramType,
-    watch_results: *DeepHashSet(WatchResult),
+    watch_results: *u.DeepHashSet(WatchResult),
     interrupter: imp.lang.Interrupter,
     error_info: *?ErrorInfo,
 ) Error!value.Set {
-    var def_sets = try arena.allocator.alloc(ArrayList(Interpreter.Memo), program.defs.len);
-    for (def_sets) |*def_set| def_set.* = ArrayList(Interpreter.Memo).init(&arena.allocator);
+    var def_sets = try arena.allocator.alloc(u.ArrayList(Interpreter.Memo), program.defs.len);
+    for (def_sets) |*def_set| def_set.* = u.ArrayList(Interpreter.Memo).init(&arena.allocator);
     var interpreter = Interpreter{
         .arena = arena,
         .program = program,
         .program_type = program_type,
         .watch_results = watch_results,
         .def_sets = def_sets,
-        .scope = ArrayList(value.Scalar).init(&arena.allocator),
-        .time = ArrayList(usize).init(&arena.allocator),
+        .scope = u.ArrayList(value.Scalar).init(&arena.allocator),
+        .time = u.ArrayList(usize).init(&arena.allocator),
         .interrupter = interrupter,
         .error_info = error_info,
     };
@@ -71,13 +72,13 @@ pub const WatchResult = struct {
 // --------------------------------------------------------------------------------
 
 const Interpreter = struct {
-    arena: *ArenaAllocator,
+    arena: *u.ArenaAllocator,
     program: core.Program,
     program_type: type_.ProgramType,
-    watch_results: *DeepHashSet(WatchResult),
-    def_sets: []ArrayList(Memo),
-    scope: ArrayList(value.Scalar),
-    time: ArrayList(usize),
+    watch_results: *u.DeepHashSet(WatchResult),
+    def_sets: []u.ArrayList(Memo),
+    scope: u.ArrayList(value.Scalar),
+    time: u.ArrayList(usize),
     interrupter: imp.lang.Interrupter,
     error_info: *?ErrorInfo,
 
@@ -87,7 +88,7 @@ const Interpreter = struct {
     };
 
     fn setError(self: *Interpreter, expr_id: core.ExprId, comptime fmt: []const u8, args: anytype) Error {
-        const message = try formatToString(&self.arena.allocator, fmt, args);
+        const message = try u.formatToString(&self.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
             .expr_id = expr_id,
             .message = message,
@@ -96,7 +97,7 @@ const Interpreter = struct {
     }
 
     fn setNativeError(self: *Interpreter, expr_id: core.ExprId, comptime fmt: []const u8, args: anytype) Error {
-        const message = try formatToString(&self.arena.allocator, fmt, args);
+        const message = try u.formatToString(&self.arena.allocator, fmt, args);
         self.error_info.* = ErrorInfo{
             .expr_id = expr_id,
             .message = message,
@@ -110,17 +111,17 @@ const Interpreter = struct {
         // check if already evaluated
         // TODO it's surprisingly hard to write a better lookup than this
         for (def_set.items) |memo|
-            if (deepEqual(memo.hint, hint))
+            if (u.deepEqual(memo.hint, hint))
                 return memo.set;
 
         // otherwise, evaluate
         const old_scope = self.scope;
         defer self.scope = old_scope;
-        self.scope = ArrayList(value.Scalar).init(&self.arena.allocator);
+        self.scope = u.ArrayList(value.Scalar).init(&self.arena.allocator);
         //TODO need to preserve time for watches, but does correctness ever depend on resetting time?
         //const old_time = self.time;
         //defer self.time = old_time;
-        //self.time = ArrayList(usize).init(&self.arena.allocator);
+        //self.time = u.ArrayList(usize).init(&self.arena.allocator);
         const set = try self.interpretExpr(self.program.defs[def_id.id], hint);
 
         // memoize
@@ -137,11 +138,11 @@ const Interpreter = struct {
         const set = try self.interpretDef(box.def_id, box_hint);
         var result_set = value.Set{
             .arity = set.arity - box.args.len,
-            .set = DeepHashSet(value.Tuple).init(&self.arena.allocator),
+            .set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator),
         };
         var set_iter = set.set.iterator();
         while (set_iter.next()) |entry|
-            if (deepEqual(entry.key_ptr.*[0..box.args.len], box_args))
+            if (u.deepEqual(entry.key_ptr.*[0..box.args.len], box_args))
                 try result_set.set.put(entry.key_ptr.*[box.args.len..], {});
         return result_set;
     }
@@ -151,14 +152,14 @@ const Interpreter = struct {
         const expr = self.program.exprs[expr_id.id];
         switch (expr) {
             .None => {
-                const set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                const set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 return value.Set{
                     .arity = 0,
                     .set = set,
                 };
             },
             .Some => {
-                var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                var set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 _ = try set.put(&.{}, {});
                 return value.Set{
                     .arity = 0,
@@ -166,7 +167,7 @@ const Interpreter = struct {
                 };
             },
             .Scalar => |scalar| {
-                var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                var set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 _ = try set.put(try self.dupeScalars(&.{scalar}), {});
                 return value.Set{
                     .arity = 1,
@@ -179,7 +180,7 @@ const Interpreter = struct {
                 if (left.arity != right.arity and left.set.count() > 0 and right.set.count() > 0) {
                     return self.setError(expr_id, "Tried to union sets with different arities: {} vs {}", .{ left.arity, right.arity });
                 }
-                var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                var set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 var left_iter = left.set.iterator();
                 while (left_iter.next()) |kv| {
                     try self.interrupter.check();
@@ -191,7 +192,7 @@ const Interpreter = struct {
                     _ = try set.put(kv.key_ptr.*, {});
                 }
                 return value.Set{
-                    .arity = max(left.arity, right.arity),
+                    .arity = u.max(left.arity, right.arity),
                     .set = set,
                 };
             },
@@ -201,7 +202,7 @@ const Interpreter = struct {
                 if (left.arity != right.arity and left.set.count() > 0 and right.set.count() > 0) {
                     return self.setError(expr_id, "Tried to intersect sets with different arities: {} vs {}", .{ left.arity, right.arity });
                 }
-                var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                var set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 var left_iter = left.set.iterator();
                 while (left_iter.next()) |kv| {
                     try self.interrupter.check();
@@ -210,14 +211,14 @@ const Interpreter = struct {
                     }
                 }
                 return value.Set{
-                    .arity = max(left.arity, right.arity),
+                    .arity = u.max(left.arity, right.arity),
                     .set = set,
                 };
             },
             .Product => |pair| {
                 const left = try self.interpretExpr(pair.left, hint);
-                const right = try self.interpretExpr(pair.right, hint[min(hint.len, left.arity)..]);
-                var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                const right = try self.interpretExpr(pair.right, hint[u.min(hint.len, left.arity)..]);
+                var set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 var left_iter = left.set.iterator();
                 while (left_iter.next()) |lkv| {
                     try self.interrupter.check();
@@ -246,7 +247,7 @@ const Interpreter = struct {
                 // the hint for expr doesn't tell us anything about left or right
                 const left = try self.interpretExpr(pair.left, &.{});
                 const right = try self.interpretExpr(pair.right, &.{});
-                var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                var set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 const isEqual = isEqual: {
                     var leftIter = left.set.iterator();
                     while (leftIter.next()) |kv| {
@@ -273,7 +274,7 @@ const Interpreter = struct {
                 };
             },
             .ScalarId => |scalar_id| {
-                var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                var set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 const scalar = self.scope.items[self.scope.items.len - 1 - scalar_id.id];
                 _ = try set.put(try self.dupeScalars(&.{scalar}), {});
                 return value.Set{
@@ -298,11 +299,11 @@ const Interpreter = struct {
                                 const set = try self.interpretDef(normal.def_id, box_hint);
                                 var result_set = value.Set{
                                     .arity = set.arity - normal.args.len,
-                                    .set = DeepHashSet(value.Tuple).init(&self.arena.allocator),
+                                    .set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator),
                                 };
                                 var set_iter = set.set.iterator();
                                 while (set_iter.next()) |entry|
-                                    if (deepEqual(entry.key_ptr.*[0..normal.args.len], normal.args))
+                                    if (u.deepEqual(entry.key_ptr.*[0..normal.args.len], normal.args))
                                         try result_set.set.put(entry.key_ptr.*[normal.args.len..], {});
                                 return result_set;
                             },
@@ -318,7 +319,7 @@ const Interpreter = struct {
             .Negate => |body| {
                 // the hint for expr doesn't tell us anything about body
                 const body_set = try self.interpretExpr(body, &.{});
-                var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                var set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 if (body_set.set.count() == 0) {
                     _ = try set.put(&.{}, {});
                 }
@@ -331,7 +332,7 @@ const Interpreter = struct {
                 // the hint for expr doesn't tell us anything about condition
                 const condition = try self.interpretExpr(then.condition, &.{});
                 if (condition.set.count() == 0) {
-                    const set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                    const set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                     return value.Set{
                         .arity = 0,
                         .set = set,
@@ -348,11 +349,11 @@ const Interpreter = struct {
                     const body_set = try self.interpretExpr(body, hint[1..]);
                     _ = self.scope.pop();
                     const arity = body_set.arity + 1;
-                    var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                    var set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                     var body_set_iter = body_set.set.iterator();
                     while (body_set_iter.next()) |kv| {
                         try self.interrupter.check();
-                        var tuple = try ArrayList(value.Scalar).initCapacity(&self.arena.allocator, kv.key_ptr.len + 1);
+                        var tuple = try u.ArrayList(value.Scalar).initCapacity(&self.arena.allocator, kv.key_ptr.len + 1);
                         try tuple.append(hint[0]);
                         try tuple.appendSlice(kv.key_ptr.*);
                         _ = try set.put(tuple.items, {});
@@ -389,7 +390,7 @@ const Interpreter = struct {
                     },
                 };
                 const tuple = try self.dupeScalars(&[1]value.Scalar{.{ .Box = scalar }});
-                var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                var set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 _ = try set.put(tuple, {});
                 return value.Set{
                     .arity = 1,
@@ -415,16 +416,16 @@ const Interpreter = struct {
                     const body_set = try self.interpretBox(fix.next, fix_hint);
                     var new_fix_set = value.Set{
                         .arity = if (body_set.arity == 0) 0 else body_set.arity - 1,
-                        .set = DeepHashSet(value.Tuple).init(&self.arena.allocator),
+                        .set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator),
                     };
                     var body_iter = body_set.set.iterator();
                     while (body_iter.next()) |kv| {
                         try self.interrupter.check();
-                        if (deepEqual(kv.key_ptr.*[0], value.Scalar{ .Box = fix_box })) {
+                        if (u.deepEqual(kv.key_ptr.*[0], value.Scalar{ .Box = fix_box })) {
                             _ = try new_fix_set.set.put(kv.key_ptr.*[1..], {});
                         }
                     }
-                    if (deepEqual(fix_set, new_fix_set)) {
+                    if (u.deepEqual(fix_set, new_fix_set)) {
                         return fix_set;
                     }
                     fix_set = new_fix_set;
@@ -433,7 +434,7 @@ const Interpreter = struct {
             },
             .Reduce => |reduce| {
                 const input_set = try self.interpretExpr(reduce.input, &.{});
-                var input_tuples = try ArrayList(value.Tuple).initCapacity(&self.arena.allocator, input_set.set.count());
+                var input_tuples = try u.ArrayList(value.Tuple).initCapacity(&self.arena.allocator, input_set.set.count());
                 var input_iter = input_set.set.iterator();
                 while (input_iter.next()) |kv| {
                     try self.interrupter.check();
@@ -442,7 +443,7 @@ const Interpreter = struct {
                 // TODO would like to be able to interrupt sorting
                 std.sort.sort(value.Tuple, input_tuples.items, {}, struct {
                     fn lessThan(_: void, a: value.Tuple, b: value.Tuple) bool {
-                        return deepCompare(a, b) == .LessThan;
+                        return u.deepCompare(a, b) == .LessThan;
                     }
                 }.lessThan);
 
@@ -461,7 +462,7 @@ const Interpreter = struct {
                     defer _ = self.time.pop();
                     var tuple_set = value.Set{
                         .arity = input_tuple.len,
-                        .set = DeepHashSet(value.Tuple).init(&self.arena.allocator),
+                        .set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator),
                     };
                     _ = try tuple_set.set.put(input_tuple, {});
                     const tuple_box = try value.Box.fixOrReduce(&self.arena.allocator, tuple_set);
@@ -470,12 +471,12 @@ const Interpreter = struct {
                     const body_set = try self.interpretBox(reduce.next, reduce_hint);
                     var new_reduce_set = value.Set{
                         .arity = if (body_set.arity == 0) 0 else body_set.arity - 2,
-                        .set = DeepHashSet(value.Tuple).init(&self.arena.allocator),
+                        .set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator),
                     };
                     var body_iter = body_set.set.iterator();
                     while (body_iter.next()) |kv| {
                         try self.interrupter.check();
-                        if (deepEqual(kv.key_ptr.*[0], value.Scalar{ .Box = reduce_box }) and deepEqual(kv.key_ptr.*[1], value.Scalar{ .Box = tuple_box })) {
+                        if (u.deepEqual(kv.key_ptr.*[0], value.Scalar{ .Box = reduce_box }) and u.deepEqual(kv.key_ptr.*[1], value.Scalar{ .Box = tuple_box })) {
                             _ = try new_reduce_set.set.put(kv.key_ptr.*[2..], {});
                         }
                     }
@@ -486,7 +487,7 @@ const Interpreter = struct {
             },
             .Enumerate => |body| {
                 const body_set = try self.interpretExpr(body, &.{});
-                var tuples = try ArrayList(value.Tuple).initCapacity(&self.arena.allocator, body_set.set.count());
+                var tuples = try u.ArrayList(value.Tuple).initCapacity(&self.arena.allocator, body_set.set.count());
                 var body_iter = body_set.set.iterator();
                 while (body_iter.next()) |kv| {
                     try self.interrupter.check();
@@ -495,14 +496,14 @@ const Interpreter = struct {
                 // TODO would like to be able to interrupt sorting
                 std.sort.sort(value.Tuple, tuples.items, {}, struct {
                     fn lessThan(_: void, a: value.Tuple, b: value.Tuple) bool {
-                        return deepCompare(a, b) == .LessThan;
+                        return u.deepCompare(a, b) == .LessThan;
                     }
                 }.lessThan);
                 // TODO HashMap.initCapacity is private?
-                var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                var set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 for (tuples.items) |tuple, i| {
                     try self.interrupter.check();
-                    var enumerated_tuple = try ArrayList(value.Scalar).initCapacity(&self.arena.allocator, 1 + tuple.len);
+                    var enumerated_tuple = try u.ArrayList(value.Scalar).initCapacity(&self.arena.allocator, 1 + tuple.len);
                     // TODO can we allocate enough tuples to overflow this conversion?
                     try enumerated_tuple.append(.{ .Number = @intToFloat(f64, i + 1) });
                     try enumerated_tuple.appendSlice(tuple);
@@ -519,7 +520,7 @@ const Interpreter = struct {
             .Watch => |watch| {
                 const result = self.interpretExpr(watch.body, hint);
                 if (result) |set| {
-                    var scope = ArrayList(WatchResult.ScopeItem).init(&self.arena.allocator);
+                    var scope = u.ArrayList(WatchResult.ScopeItem).init(&self.arena.allocator);
                     for (watch.scope) |scope_item|
                         try scope.append(.{
                             .name = scope_item.name,
@@ -551,7 +552,7 @@ const Interpreter = struct {
                             else => unreachable,
                         };
                         const tuple = try self.dupeScalars(&[_]value.Scalar{ hint[0], hint[1], .{ .Number = result } });
-                        var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                        var set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                         _ = try set.put(tuple, {});
                         return value.Set{
                             .arity = 3,
@@ -568,7 +569,7 @@ const Interpreter = struct {
                             return self.setNativeError(expr_id, "Inputs to `range` must be whole numbers, found `range {} {}`", .{ hint[0], hint[1] });
                         }
                         var i = lo;
-                        var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                        var set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                         while (i <= hi) : (i += 1) {
                             try self.interrupter.check();
                             const tuple = try self.dupeScalars(&[_]value.Scalar{ hint[0], hint[1], .{ .Number = @intToFloat(f64, i) } });
@@ -583,7 +584,7 @@ const Interpreter = struct {
                         if (hint.len < 2) {
                             return self.setError(expr_id, "No hint for native arg", .{});
                         }
-                        var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+                        var set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                         const satisfied = switch (native) {
                             .GreaterThan => hint[0].Number > hint[1].Number,
                             .GreaterThanOrEqual => hint[0].Number >= hint[1].Number,
@@ -603,7 +604,7 @@ const Interpreter = struct {
 
     fn interpretApply(self: *Interpreter, expr_id: core.ExprId, left_set: value.Set, right_expr_id: core.ExprId, hint: value.Tuple) Error!value.Set {
         var right_arity_o: ?usize = null;
-        var right_set_set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+        var right_set_set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
         {
             var left_iter = left_set.set.iterator();
             while (left_iter.next()) |left_entry| {
@@ -635,9 +636,9 @@ const Interpreter = struct {
             .arity = right_arity_o orelse 0,
             .set = right_set_set,
         };
-        const joined_arity = min(left_set.arity, right_set.arity);
-        const arity = max(left_set.arity, right_set.arity) - joined_arity;
-        var set = DeepHashSet(value.Tuple).init(&self.arena.allocator);
+        const joined_arity = u.min(left_set.arity, right_set.arity);
+        const arity = u.max(left_set.arity, right_set.arity) - joined_arity;
+        var set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
         {
             var left_iter = left_set.set.iterator();
             while (left_iter.next()) |left_entry| {
@@ -645,7 +646,7 @@ const Interpreter = struct {
                 var right_iter = right_set.set.iterator();
                 while (right_iter.next()) |right_entry| {
                     try self.interrupter.check();
-                    if (deepEqual(left_entry.key_ptr.*[0..joined_arity], right_entry.key_ptr.*[0..joined_arity])) {
+                    if (u.deepEqual(left_entry.key_ptr.*[0..joined_arity], right_entry.key_ptr.*[0..joined_arity])) {
                         _ = try set.put(if (left_set.arity > right_set.arity) left_entry.key_ptr.*[joined_arity..] else right_entry.key_ptr.*[joined_arity..], {});
                     }
                 }

@@ -250,16 +250,16 @@ pub const Worker = struct {
     }
 
     pub fn deinitSoon(self: *Worker) void {
-        const held = self.mutex.acquire();
-        defer held.release();
+        self.mutex.lock();
+        defer self.mutex.unlock();
         self.should_deinit = true;
         @atomicStore(usize, &self.desired_id, std.math.maxInt(usize), .SeqCst);
         self.state_changed_event.set();
     }
 
     pub fn setRequest(self: *Worker, request: Request) !void {
-        const held = self.mutex.acquire();
-        defer held.release();
+        self.mutex.lock();
+        defer self.mutex.unlock();
         if (self.new_request) |old_request| self.allocator.free(old_request.text);
         self.new_request = request;
         self.new_request.?.text = try std.mem.dupe(self.allocator, u8, self.new_request.?.text);
@@ -268,8 +268,8 @@ pub const Worker = struct {
     }
 
     pub fn getResponse(self: *Worker) ?Response {
-        const held = self.mutex.acquire();
-        defer held.release();
+        self.mutex.lock();
+        self.mutex.unlock();
         if (self.new_response) |response| {
             self.new_response = null;
             return response;
@@ -281,8 +281,8 @@ pub const Worker = struct {
     // --- called by worker thread ---
 
     fn deinit(self: *Worker) void {
-        const held = self.mutex.acquire();
-        defer held.release();
+        self.mutex.lock();
+        defer self.mutex.unlock();
         if (self.new_request) |request| self.allocator.free(request.text);
         if (self.new_response) |response| self.allocator.free(response.text);
         self.allocator.destroy(self);
@@ -296,8 +296,8 @@ pub const Worker = struct {
             // get new request
             var new_request: Request = undefined;
             {
-                const held = self.mutex.acquire();
-                defer held.release();
+                self.mutex.lock();
+                defer self.mutex.unlock();
                 if (self.should_deinit) {
                     self.deinit();
                     return;
@@ -351,8 +351,8 @@ pub const Worker = struct {
 
             // set response
             {
-                const held = self.mutex.acquire();
-                defer held.release();
+                self.mutex.lock();
+                defer self.mutex.unlock();
                 if (self.new_response) |old_response| self.allocator.free(old_response.text);
                 self.new_response = .{
                     .text = response_buffer.toOwnedSlice(),

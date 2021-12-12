@@ -63,10 +63,11 @@ pub fn Id(comptime dump_tag: []const u8) type {
 
 // This is only for debugging
 pub fn dump(thing: anytype) void {
-    const held = std.debug.getStderrMutex().acquire();
-    defer held.release();
+    const stderr_mutex = std.debug.getStderrMutex();
+    stderr_mutex.lock();
+    defer stderr_mutex.unlock();
     const my_stderr = std.io.getStdErr().writer();
-    imp.debug.dumpInto(my_stderr, 0, thing) catch return;
+    dumpInto(my_stderr, 0, thing) catch return;
     my_stderr.writeAll("\n") catch return;
 }
 

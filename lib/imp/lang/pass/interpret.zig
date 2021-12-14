@@ -148,6 +148,19 @@ const Interpreter = struct {
     }
 
     fn interpretExpr(self: *Interpreter, expr_id: core.ExprId, hint: value.Tuple) Error!value.Set {
+        const result = try self.interpretExprInner(expr_id, hint);
+        //{
+        //    var iter = result.set.iterator();
+        //    while (iter.next()) |tuple| {
+        //        if (tuple.key_ptr.len != result.arity) {
+        //            u.dump(.{ .expr_id = expr_id, .expr = self.program.exprs[expr_id.id], .tuple = tuple.key_ptr, .arity = result.arity, .exprs = self.program.exprs });
+        //        }
+        //    }
+        //}
+        return result;
+    }
+
+    fn interpretExprInner(self: *Interpreter, expr_id: core.ExprId, hint: value.Tuple) Error!value.Set {
         try self.interrupter.check();
         const expr = self.program.exprs[expr_id.id];
         switch (expr) {
@@ -180,6 +193,7 @@ const Interpreter = struct {
                 if (left.arity != right.arity and left.set.count() > 0 and right.set.count() > 0) {
                     return self.setError(expr_id, "Tried to union sets with different arities: {} vs {}", .{ left.arity, right.arity });
                 }
+                const arity = if (left.set.count() > 0) left.arity else right.arity;
                 var set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 var left_iter = left.set.iterator();
                 while (left_iter.next()) |kv| {
@@ -191,10 +205,7 @@ const Interpreter = struct {
                     try self.interrupter.check();
                     _ = try set.put(kv.key_ptr.*, {});
                 }
-                return value.Set{
-                    .arity = u.max(left.arity, right.arity),
-                    .set = set,
-                };
+                return value.Set{ .arity = arity, .set = set };
             },
             .Intersect => |pair| {
                 const left = try self.interpretExpr(pair.left, hint);
@@ -202,6 +213,7 @@ const Interpreter = struct {
                 if (left.arity != right.arity and left.set.count() > 0 and right.set.count() > 0) {
                     return self.setError(expr_id, "Tried to intersect sets with different arities: {} vs {}", .{ left.arity, right.arity });
                 }
+                const arity = if (left.set.count() > 0) left.arity else right.arity;
                 var set = u.DeepHashSet(value.Tuple).init(&self.arena.allocator);
                 var left_iter = left.set.iterator();
                 while (left_iter.next()) |kv| {
@@ -211,7 +223,7 @@ const Interpreter = struct {
                     }
                 }
                 return value.Set{
-                    .arity = u.max(left.arity, right.arity),
+                    .arity = arity,
                     .set = set,
                 };
             },

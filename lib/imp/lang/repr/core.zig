@@ -21,7 +21,7 @@ pub const Program = struct {
 
     pub fn dumpExprInto(self: Program, expr_id: ExprId, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         const expr = self.exprs[expr_id.id];
-        try expr.dumpInto(writer, indent);
+        try expr.dumpTagInto(writer, indent);
         for (expr.getChildren().slice()) |child| {
             try writer.writeAll("\n");
             try writer.writeByteNTimes(' ', indent + 4);
@@ -86,6 +86,13 @@ pub const Expr = union(enum) {
     }
 
     pub fn dumpInto(self: Expr, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
+        try self.dumpTagInto(writer, indent);
+        for (self.getChildren().slice()) |child| {
+            try std.fmt.format(writer, " {}", .{child});
+        }
+    }
+
+    pub fn dumpTagInto(self: Expr, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         switch (self) {
             .None => try writer.writeAll("none"),
             .Some => try writer.writeAll("some"),

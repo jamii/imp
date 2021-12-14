@@ -857,3 +857,40 @@ type:
 text, text, number, number
 value:
 | "bar", "boo", 0, 1
+
+max: ?@xs reduce xs (enumerate xs 1) ?@a ?@b a > b then a else b;
+min: ?@xs reduce xs (enumerate xs 1) ?@a ?@b a > b then b else a;
+sum: ?@xs reduce xs 0 ?@a ?@b a + b;
+book: 
+| "amazon", (
+    | "buy", 7, 8
+    | "sell", 9, 1
+)
+| "google", (
+    | "buy", (2, 5 | 6, 7)
+    | "sell", (7, 5 | 11, 9)
+);
+stonks: book (?s ?a_ ?b_ ?c_ s);
+stonks ?buy_stonk
+stonks ?sell_stonk
+buy_stonk sell_stonk ! then
+fix trades:
+  buy_book: book buy_stonk "buy" ?px ?qx
+    qx: qx - ((trades ?buy_px ?sell_px ?qx buy_px px then qx) @ sum);
+    qx > 0 then px, qx;
+  sell_book: book sell_stonk "sell" ?px ?qx
+    qx: qx - ((trades ?buy_px ?sell_px ?qx sell_px px then qx) @ sum);
+    qx > 0 then px, qx;
+  buy_px: buy_book (?px ?qx px) @ max;
+  sell_px: sell_book (?px ?qx px) @ min;
+  qx: (buy_book buy_px | sell_book sell_px) @ min;
+  | trades
+  | buy_px, sell_px, qx;
+buy_stonk, sell_stonk, trades
+---
+type:
+none
+value:
+| "amazon", "google", 7, 7, 5
+| "amazon", "google", 7, 11, 3
+| "google", "amazon", 6, 9, 1

@@ -9,7 +9,7 @@ pub const Program = struct {
     from_syntax: []const syntax.ExprId,
     defs: []const ExprId,
 
-    pub fn dumpInto(self: Program, writer: anytype, indent: u32) anyerror!void {
+    pub fn dumpInto(self: Program, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         for (self.defs) |expr_id, def_id| {
             if (def_id != 0) try writer.writeByteNTimes(' ', indent);
             try std.fmt.format(writer, "{}:\n", DefId{ .id = def_id });
@@ -19,7 +19,7 @@ pub const Program = struct {
         }
     }
 
-    pub fn dumpExprInto(self: Program, expr_id: ExprId, writer: anytype, indent: u32) anyerror!void {
+    pub fn dumpExprInto(self: Program, expr_id: ExprId, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         const expr = self.exprs[expr_id.id];
         try expr.dumpInto(writer, indent);
         for (expr.getChildren().slice()) |child| {
@@ -85,7 +85,7 @@ pub const Expr = union(enum) {
         return children;
     }
 
-    pub fn dumpInto(self: Expr, writer: anytype, indent: u32) anyerror!void {
+    pub fn dumpInto(self: Expr, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         switch (self) {
             .None => try writer.writeAll("none"),
             .Some => try writer.writeAll("some"),
@@ -169,10 +169,10 @@ pub const Watch = struct {
         scalar_id: ScalarId,
     };
 
-    pub fn dumpInto(self: Watch, writer: anytype, _: u32) anyerror!void {
+    pub fn dumpInto(self: Watch, writer: anytype, _: u32) u.WriterError(@TypeOf(writer))!void {
         try writer.writeAll("watch");
         for (self.scope) |scope_item|
-            try std.fmt.format(writer, "#{s} {}", .{ scope_item.name, scope_item.scalar_id });
+            try std.fmt.format(writer, " #{s} {}", .{ scope_item.name, scope_item.scalar_id });
     }
 };
 
@@ -207,7 +207,7 @@ pub const Native = enum {
         return null;
     }
 
-    pub fn dumpInto(self: Native, writer: anytype, _: u32) anyerror!void {
+    pub fn dumpInto(self: Native, writer: anytype, _: u32) u.WriterError(@TypeOf(writer))!void {
         try writer.writeAll(self.toName());
     }
 };

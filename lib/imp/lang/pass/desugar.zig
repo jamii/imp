@@ -345,6 +345,7 @@ const Desugarer = struct {
                     for (args.items) |arg, i| {
                         if (scalar_id.id - descendant.num_enclosing_abstracts == arg.id) {
                             scalar_id.id = args.items.len - 1 - i + descendant.num_enclosing_abstracts;
+                            break;
                         }
                     }
                 }

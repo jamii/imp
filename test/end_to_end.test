@@ -846,3 +846,14 @@ value:
 | 6, 6, "g"
 | 7, 7, "h"
 | 8, 8, "i"
+
+foo: "bar", "boo", 0, 1;
+trades: fix foo ?@trades
+  foo ?a ?b ?c ?d
+  a, b, c, (foo a b c @ ?@s s);
+trades
+---
+type:
+text, text, number, number
+value:
+| "bar", "boo", 0, 1

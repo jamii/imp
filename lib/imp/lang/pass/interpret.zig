@@ -55,7 +55,7 @@ pub const WatchResult = struct {
         scalar: value.Scalar,
     };
 
-    pub fn dumpInto(self: WatchResult, writer: anytype, indent: u32) anyerror!void {
+    pub fn dumpInto(self: WatchResult, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         for (self.time) |time, i|
             try std.fmt.format(writer, "fix{}: {}; ", .{ i, time });
         if (self.time.len > 0) try writer.writeAll("\n");

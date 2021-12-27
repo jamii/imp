@@ -10,14 +10,14 @@ pub fn analyze(
     interrupter: imp.lang.Interrupter,
     error_info: *?ErrorInfo,
 ) Error!type_.ProgramType {
-    var defs = try arena.allocator.alloc(u.ArrayList(type_.Specialization), core_program.defs.len);
+    var defs = try arena.allocator().alloc(u.ArrayList(type_.Specialization), core_program.defs.len);
     for (defs) |*def|
-        def.* = u.ArrayList(type_.Specialization).init(&arena.allocator);
+        def.* = u.ArrayList(type_.Specialization).init(arena.allocator());
     var analyzer = Analyzer{
         .arena = arena,
         .core_program = core_program,
         .defs = defs,
-        .scope = u.ArrayList(type_.ScalarType).init(&arena.allocator),
+        .scope = u.ArrayList(type_.ScalarType).init(arena.allocator()),
         .interrupter = interrupter,
         .error_info = error_info,
     };
@@ -65,7 +65,7 @@ pub const Analyzer = struct {
     error_info: *?ErrorInfo,
 
     fn setError(self: *Analyzer, expr_id: core.ExprId, comptime fmt: []const u8, args: anytype, kind: ErrorKind) Error {
-        const message = try u.formatToString(&self.arena.allocator, fmt, args);
+        const message = try u.formatToString(self.arena.allocator(), fmt, args);
         self.error_info.* = ErrorInfo{
             .expr_id = expr_id,
             .message = message,
@@ -88,7 +88,7 @@ pub const Analyzer = struct {
         // otherwise, analyze
         const old_scope = self.scope;
         defer self.scope = old_scope;
-        self.scope = u.ArrayList(type_.ScalarType).init(&self.arena.allocator);
+        self.scope = u.ArrayList(type_.ScalarType).init(self.arena.allocator());
         const set_type = try self.analyzeExpr(self.core_program.defs[def_id.id], hint);
 
         // memoize result
@@ -107,7 +107,7 @@ pub const Analyzer = struct {
     }
 
     fn analyzeBox(self: *Analyzer, box: core.Box, hint: type_.TupleType) Error!type_.SetType {
-        var box_hint = u.ArrayList(type_.ScalarType).init(&self.arena.allocator);
+        var box_hint = u.ArrayList(type_.ScalarType).init(self.arena.allocator());
         for (box.args) |scalar_id|
             try box_hint.append(self.scope.items[self.scope.items.len - 1 - scalar_id.id]);
         try box_hint.appendSlice(hint);
@@ -158,7 +158,7 @@ pub const Analyzer = struct {
                     return self.setError(expr_id, "Mismatched arities: {} vs {}", .{ left.Concrete.columns.len, right.Concrete.columns.len }, .Other);
                 }
                 const abstract_arity = u.max(left.Concrete.abstract_arity, right.Concrete.abstract_arity);
-                var columns = try self.arena.allocator.alloc(type_.ScalarType, left.Concrete.columns.len);
+                var columns = try self.arena.allocator().alloc(type_.ScalarType, left.Concrete.columns.len);
                 for (left.Concrete.columns) |left_type, i| {
                     try self.interrupter.check();
                     const right_type = right.Concrete.columns[i];
@@ -184,7 +184,7 @@ pub const Analyzer = struct {
                     left.Concrete.columns.len + right.Concrete.abstract_arity
                 else
                     left.Concrete.abstract_arity;
-                var columns = try self.arena.allocator.alloc(type_.ScalarType, left.Concrete.columns.len + right.Concrete.columns.len);
+                var columns = try self.arena.allocator().alloc(type_.ScalarType, left.Concrete.columns.len + right.Concrete.columns.len);
                 var i: usize = 0;
                 for (left.Concrete.columns) |left_type| {
                     columns[i] = left_type;
@@ -240,7 +240,7 @@ pub const Analyzer = struct {
                         switch (box) {
                             .Normal => |normal| {
                                 const box_hint = try std.mem.concat(
-                                    &self.arena.allocator,
+                                    self.arena.allocator(),
                                     type_.ScalarType,
                                     &.{
                                         normal.args,
@@ -300,7 +300,7 @@ pub const Analyzer = struct {
                         .None => return type_.SetType{ .None = {} },
                         .Concrete => |concrete| {
                             const abstract_arity = concrete.abstract_arity + 1;
-                            var columns = try u.ArrayList(type_.ScalarType).initCapacity(&self.arena.allocator, 1 + concrete.columns.len);
+                            var columns = try u.ArrayList(type_.ScalarType).initCapacity(self.arena.allocator(), 1 + concrete.columns.len);
                             try columns.append(hint[0]);
                             try columns.appendSlice(concrete.columns);
                             return type_.SetType{
@@ -331,7 +331,7 @@ pub const Analyzer = struct {
                 }
             },
             .Box => |box| {
-                const args = try self.arena.allocator.alloc(type_.ScalarType, box.args.len);
+                const args = try self.arena.allocator().alloc(type_.ScalarType, box.args.len);
                 for (args) |*arg, i|
                     arg.* = self.scope.items[self.scope.items.len - 1 - box.args[i].id];
                 const box_type = type_.ScalarType{
@@ -354,7 +354,7 @@ pub const Analyzer = struct {
                 if (!init_type.isFinite()) {
                     return self.setError(expr_id, "The initial value for fix must have finite type, found {}", .{init_type}, .Other);
                 }
-                var fix_hint = try self.arena.allocator.alloc(type_.ScalarType, 1);
+                var fix_hint = try self.arena.allocator().alloc(type_.ScalarType, 1);
                 var fix_type = init_type;
                 var fix_box_type = type_.BoxType{ .FixOrReduce = .{
                     .def_id = fix.next.def_id,
@@ -386,7 +386,7 @@ pub const Analyzer = struct {
                     if (fix_type == .None) {
                         fix_type = .{ .Concrete = .{
                             .abstract_arity = 0,
-                            .columns = try std.mem.dupe(&self.arena.allocator, type_.ScalarType, fix_columns),
+                            .columns = try self.arena.allocator().dupe(type_.ScalarType, fix_columns),
                         } };
                     } else {
                         if (u.deepEqual(fix_type.Concrete.columns, fix_columns)) {
@@ -397,7 +397,7 @@ pub const Analyzer = struct {
                         if (fix_type.Concrete.columns.len != fix_columns.len) {
                             return self.setError(expr_id, "The `next` argument for fix must have constant arity, changed from {} to {}", .{ fix_type.Concrete.columns.len, fix_columns.len }, .Other);
                         }
-                        var columns = try self.arena.allocator.alloc(type_.ScalarType, fix_type.Concrete.columns.len);
+                        var columns = try self.arena.allocator().alloc(type_.ScalarType, fix_type.Concrete.columns.len);
                         for (fix_columns) |column, i| {
                             columns[i] = try self.unionScalar(expr_id, fix_type.Concrete.columns[i], column);
                         }
@@ -420,7 +420,7 @@ pub const Analyzer = struct {
                 if (!init_type.isFinite()) {
                     return self.setError(expr_id, "The initial value for reduce must have finite type, found {}", .{init_type}, .Other);
                 }
-                var reduce_hint = try self.arena.allocator.alloc(type_.ScalarType, 2);
+                var reduce_hint = try self.arena.allocator().alloc(type_.ScalarType, 2);
                 var reduce_type = init_type;
                 var reduce_box_type = type_.BoxType{
                     .FixOrReduce = .{
@@ -452,7 +452,7 @@ pub const Analyzer = struct {
                     if (reduce_type == .None) {
                         reduce_type = .{ .Concrete = .{
                             .abstract_arity = 0,
-                            .columns = try std.mem.dupe(&self.arena.allocator, type_.ScalarType, reduce_columns),
+                            .columns = try self.arena.allocator().dupe(type_.ScalarType, reduce_columns),
                         } };
                     } else {
                         if (u.deepEqual(reduce_type.Concrete.columns, reduce_columns)) {
@@ -463,7 +463,7 @@ pub const Analyzer = struct {
                         if (reduce_type.Concrete.columns.len != reduce_columns.len) {
                             return self.setError(expr_id, "The body for reduce must have constant arity, changed from {} to {}", .{ reduce_type.Concrete.columns.len, reduce_columns.len }, .Other);
                         }
-                        var columns = try self.arena.allocator.alloc(type_.ScalarType, reduce_type.Concrete.columns.len);
+                        var columns = try self.arena.allocator().alloc(type_.ScalarType, reduce_type.Concrete.columns.len);
                         for (reduce_columns) |column, i| {
                             try self.interrupter.check();
                             columns[i] = try self.unionScalar(expr_id, reduce_type.Concrete.columns[i], column);
@@ -482,7 +482,7 @@ pub const Analyzer = struct {
                 if (!body_type.isFinite()) {
                     return self.setError(expr_id, "The body of `enumerate` must have finite type, found {}", .{body_type}, .Other);
                 }
-                var columns = try u.ArrayList(type_.ScalarType).initCapacity(&self.arena.allocator, 1 + body_type.Concrete.columns.len);
+                var columns = try u.ArrayList(type_.ScalarType).initCapacity(self.arena.allocator(), 1 + body_type.Concrete.columns.len);
                 try columns.append(.Number);
                 try columns.appendSlice(body_type.Concrete.columns);
                 return type_.SetType{
@@ -517,7 +517,7 @@ pub const Analyzer = struct {
     fn analyzeApply(self: *Analyzer, parent_expr_id: core.ExprId, left_type: type_.SetType, right_expr_id: core.ExprId, hint: type_.TupleType) Error!type_.SetType {
         if (left_type == .None) return type_.SetType{ .None = {} };
         const right_hint = try std.mem.concat(
-            &self.arena.allocator,
+            self.arena.allocator(),
             type_.ScalarType,
             &.{
                 left_type.Concrete.columns,
@@ -550,7 +550,7 @@ pub const Analyzer = struct {
     }
 
     fn dupeScalars(self: *Analyzer, scope: type_.TupleType) Error![]type_.ScalarType {
-        return std.mem.dupe(&self.arena.allocator, type_.ScalarType, scope);
+        return self.arena.allocator().dupe(type_.ScalarType, scope);
     }
 
     fn unionScalar(self: *Analyzer, parent_expr_id: core.ExprId, a: type_.ScalarType, b: type_.ScalarType) Error!type_.ScalarType {

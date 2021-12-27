@@ -94,8 +94,8 @@ pub const Box = union(enum) {
         args: []const Scalar,
     },
     // While interpreting fix or reduce, need to pass an actual value to avoid infinite recursion
-    // TODO *const c_void is actually a *const Set - workaround for https://github.com/ziglang/zig/issues/5920
-    FixOrReduce: *align(@alignOf(Set)) const c_void,
+    // TODO *const anyopaque is actually a *const Set - workaround for https://github.com/ziglang/zig/issues/5920
+    FixOrReduce: *align(@alignOf(Set)) const anyopaque,
 
     pub fn overrideDeepCompare(self: Box, other: Box) u.Ordering {
         const tagOrdering = u.deepCompare(std.meta.activeTag(self), std.meta.activeTag(other));
@@ -114,10 +114,10 @@ pub const Box = union(enum) {
         }
     }
 
-    pub fn fixOrReduce(allocator: *u.Allocator, set: Set) !Box {
+    pub fn fixOrReduce(allocator: u.Allocator, set: Set) !Box {
         const set_ptr = try allocator.create(Set);
         set_ptr.* = set;
-        return Box{ .FixOrReduce = @ptrCast(*align(@alignOf(Set)) const c_void, set_ptr) };
+        return Box{ .FixOrReduce = @ptrCast(*align(@alignOf(Set)) const anyopaque, set_ptr) };
     }
 
     pub fn getFixOrReduce(box: Box) Set {

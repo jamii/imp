@@ -57,8 +57,8 @@ pub fn parse(
     var parser = Parser{
         .arena = arena,
         .source = source,
-        .exprs = u.ArrayList(syntax.Expr).init(&arena.allocator),
-        .from_source = u.ArrayList([2]usize).init(&arena.allocator),
+        .exprs = u.ArrayList(syntax.Expr).init(arena.allocator()),
+        .from_source = u.ArrayList([2]usize).init(arena.allocator()),
         .position = 0,
         .error_info = error_info,
     };
@@ -301,7 +301,7 @@ pub const Parser = struct {
     }
 
     fn setError(self: *Parser, start: usize, comptime fmt: []const u8, args: anytype) Error {
-        const message = try u.formatToString(&self.arena.allocator, fmt, args);
+        const message = try u.formatToString(self.arena.allocator(), fmt, args);
         self.error_info.* = ErrorInfo{
             .start = start,
             .end = self.position,
@@ -346,7 +346,7 @@ pub const Parser = struct {
 
     // called after seeing '"'
     fn tokenizeText(self: *Parser) ![]const u8 {
-        var bytes = u.ArrayList(u8).init(&self.arena.allocator);
+        var bytes = u.ArrayList(u8).init(self.arena.allocator());
         const text_start = self.position - 1;
         while (true) {
             const char_start = self.position;

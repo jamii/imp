@@ -94,7 +94,7 @@ pub const Store = struct {
             return;
         };
 
-        self.watch_results = u.DeepHashSet(interpret.WatchResult).init(&self.arena.allocator);
+        self.watch_results = u.DeepHashSet(interpret.WatchResult).init(self.arena.allocator());
         var interpret_error_info: ?interpret.ErrorInfo = null;
         self.result = interpret.interpret(self.arena, self.core_program.?, self.program_type.?, &self.watch_results.?, self.interrupter, &interpret_error_info) catch |err| {
             if (err == error.InterpretError or err == error.NativeError) {
@@ -192,7 +192,7 @@ pub const Store = struct {
 };
 
 pub const Worker = struct {
-    allocator: *u.Allocator,
+    allocator: u.Allocator,
     config: Config,
 
     // mutex protects these fields
@@ -233,7 +233,7 @@ pub const Worker = struct {
 
     // --- called by outside thread ---
 
-    pub fn init(allocator: *u.Allocator, config: Config) !*Worker {
+    pub fn init(allocator: u.Allocator, config: Config) !*Worker {
         const self = try allocator.create(Worker);
         self.* = Worker{
             .allocator = allocator,
@@ -263,7 +263,7 @@ pub const Worker = struct {
         defer self.mutex.unlock();
         if (self.new_request) |old_request| self.allocator.free(old_request.text);
         self.new_request = request;
-        self.new_request.?.text = try std.mem.dupe(self.allocator, u8, self.new_request.?.text);
+        self.new_request.?.text = try self.allocator.dupe(u8, self.new_request.?.text);
         @atomicStore(usize, &self.desired_id, request.id, .SeqCst);
         self.state_changed_event.set();
     }
@@ -327,7 +327,7 @@ pub const Worker = struct {
                 .requested_memory_limit = self.config.memory_limit_bytes orelse std.math.maxInt(usize),
             };
             defer _ = gpa.deinit();
-            var arena = u.ArenaAllocator.init(&gpa.allocator);
+            var arena = u.ArenaAllocator.init(gpa.allocator());
             defer arena.deinit();
             const interrupter = Interrupter{
                 .current_id = new_request.id,

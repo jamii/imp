@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const imp = @import("../imp.zig");
 
-pub const warn = std.debug.warn;
+pub const warn = std.log.warn;
 pub const assert = std.debug.assert;
 pub const expect = std.testing.expect;
 pub const max = std.math.max;
@@ -24,7 +24,7 @@ pub fn TODO() noreturn {
     imp_panic("TODO", .{});
 }
 
-pub fn formatToString(allocator: *Allocator, comptime fmt: []const u8, args: anytype) ![]const u8 {
+pub fn formatToString(allocator: Allocator, comptime fmt: []const u8, args: anytype) ![]const u8 {
     var buf = ArrayList(u8).init(allocator);
     var writer = buf.writer();
     try std.fmt.format(writer, fmt, args);
@@ -401,7 +401,7 @@ pub fn DeepHashContext(comptime K: type) type {
 }
 
 pub fn DeepHashMap(comptime K: type, comptime V: type) type {
-    return std.HashMap(K, V, DeepHashContext(K), std.hash_map.DefaultMaxLoadPercentage);
+    return std.HashMap(K, V, DeepHashContext(K), std.hash_map.default_max_load_percentage);
 }
 
 pub fn DeepHashSet(comptime K: type) type {

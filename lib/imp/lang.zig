@@ -270,7 +270,7 @@ pub const Worker = struct {
 
     pub fn getResponse(self: *Worker) ?Response {
         self.mutex.lock();
-        self.mutex.unlock();
+        defer self.mutex.unlock();
         if (self.new_response) |response| {
             self.new_response = null;
             return response;

@@ -5,8 +5,30 @@ const core = imp.lang.repr.core;
 
 /// Invariant: all the Tuples in a Set must be the same length
 pub const Set = struct {
-    arity: usize,
     set: u.DeepHashSet(Tuple),
+
+    pub const Arity = union(enum) {
+        Unknown,
+        Known: usize,
+        Mixed,
+    };
+
+    pub fn getArity(self: Set) Arity {
+        var arity: Arity = .Unknown;
+        {
+            var iter = self.set.iterator();
+            while (iter.next()) |entry| {
+                switch (arity) {
+                    .Unknown => arity = .{ .Known = entry.key_ptr.len },
+                    .Known => |known| if (known != entry.key_ptr.len) {
+                        arity = .Mixed;
+                    },
+                    .Mixed => {},
+                }
+            }
+        }
+        return arity;
+    }
 
     // TODO this is not an ordering, only works for deepEqual
     pub fn overrideDeepCompare(self: Set, other: Set) u.Ordering {
@@ -23,7 +45,6 @@ pub const Set = struct {
     }
 
     pub fn overrideDeepHashInto(hasher: anytype, self: Set) void {
-        u.deepHashInto(hasher, self.arity);
         // TODO this will break if hashmap starts using a random seed
         var iter = self.set.iterator();
         while (iter.next()) |entry| {

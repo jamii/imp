@@ -137,7 +137,6 @@ const Interpreter = struct {
         const box_hint = try std.mem.concat(self.arena.allocator(), value.Scalar, &.{ box_args, hint });
         const set = try self.interpretDef(box.def_id, box_hint);
         var result_set = value.Set{
-            .arity = set.arity - box.args.len,
             .set = u.DeepHashSet(value.Tuple).init(self.arena.allocator()),
         };
         var set_iter = set.set.iterator();
@@ -148,26 +147,12 @@ const Interpreter = struct {
     }
 
     fn interpretExpr(self: *Interpreter, expr_id: core.ExprId, hint: value.Tuple) Error!value.Set {
-        const result = try self.interpretExprInner(expr_id, hint);
-        //{
-        //    var iter = result.set.iterator();
-        //    while (iter.next()) |tuple| {
-        //        if (tuple.key_ptr.len != result.arity) {
-        //            u.dump(.{ .expr_id = expr_id, .expr = self.program.exprs[expr_id.id], .tuple = tuple.key_ptr, .arity = result.arity, .exprs = self.program.exprs });
-        //        }
-        //    }
-        //}
-        return result;
-    }
-
-    fn interpretExprInner(self: *Interpreter, expr_id: core.ExprId, hint: value.Tuple) Error!value.Set {
         try self.interrupter.check();
         const expr = self.program.exprs[expr_id.id];
         switch (expr) {
             .None => {
                 const set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
                 return value.Set{
-                    .arity = 0,
                     .set = set,
                 };
             },
@@ -175,7 +160,6 @@ const Interpreter = struct {
                 var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
                 _ = try set.put(&.{}, {});
                 return value.Set{
-                    .arity = 0,
                     .set = set,
                 };
             },
@@ -183,17 +167,12 @@ const Interpreter = struct {
                 var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
                 _ = try set.put(try self.dupeScalars(&.{scalar}), {});
                 return value.Set{
-                    .arity = 1,
                     .set = set,
                 };
             },
             .Union => |pair| {
                 const left = try self.interpretExpr(pair.left, hint);
                 const right = try self.interpretExpr(pair.right, hint);
-                if (left.arity != right.arity and left.set.count() > 0 and right.set.count() > 0) {
-                    return self.setError(expr_id, "Tried to union sets with different arities: {} vs {}", .{ left.arity, right.arity });
-                }
-                const arity = if (left.set.count() > 0) left.arity else right.arity;
                 var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
                 var left_iter = left.set.iterator();
                 while (left_iter.next()) |kv| {
@@ -205,15 +184,11 @@ const Interpreter = struct {
                     try self.interrupter.check();
                     _ = try set.put(kv.key_ptr.*, {});
                 }
-                return value.Set{ .arity = arity, .set = set };
+                return value.Set{ .set = set };
             },
             .Intersect => |pair| {
                 const left = try self.interpretExpr(pair.left, hint);
                 const right = try self.interpretExpr(pair.right, hint);
-                if (left.arity != right.arity and left.set.count() > 0 and right.set.count() > 0) {
-                    return self.setError(expr_id, "Tried to intersect sets with different arities: {} vs {}", .{ left.arity, right.arity });
-                }
-                const arity = if (left.set.count() > 0) left.arity else right.arity;
                 var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
                 var left_iter = left.set.iterator();
                 while (left_iter.next()) |kv| {
@@ -223,14 +198,18 @@ const Interpreter = struct {
                     }
                 }
                 return value.Set{
-                    .arity = arity,
                     .set = set,
                 };
             },
             .Product => |pair| {
                 const left = try self.interpretExpr(pair.left, hint);
-                const right = try self.interpretExpr(pair.right, hint[u.min(hint.len, left.arity)..]);
                 var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
+                const right_hint_start = switch (left.getArity()) {
+                    .Unknown => return value.Set{ .set = set },
+                    .Known => |known| u.min(hint.len, known),
+                    .Mixed => hint.len, // no hint available
+                };
+                const right = try self.interpretExpr(pair.right, hint[right_hint_start..]);
                 var left_iter = left.set.iterator();
                 while (left_iter.next()) |lkv| {
                     try self.interrupter.check();
@@ -251,7 +230,6 @@ const Interpreter = struct {
                     }
                 }
                 return value.Set{
-                    .arity = left.arity + right.arity,
                     .set = set,
                 };
             },
@@ -281,7 +259,6 @@ const Interpreter = struct {
                     _ = try set.put(&.{}, {});
                 }
                 return value.Set{
-                    .arity = 0,
                     .set = set,
                 };
             },
@@ -290,7 +267,6 @@ const Interpreter = struct {
                 const scalar = self.scope.items[self.scope.items.len - 1 - scalar_id.id];
                 _ = try set.put(try self.dupeScalars(&.{scalar}), {});
                 return value.Set{
-                    .arity = 1,
                     .set = set,
                 };
             },
@@ -310,7 +286,6 @@ const Interpreter = struct {
                                 );
                                 const set = try self.interpretDef(normal.def_id, box_hint);
                                 var result_set = value.Set{
-                                    .arity = set.arity - normal.args.len,
                                     .set = u.DeepHashSet(value.Tuple).init(self.arena.allocator()),
                                 };
                                 var set_iter = set.set.iterator();
@@ -336,7 +311,6 @@ const Interpreter = struct {
                     _ = try set.put(&.{}, {});
                 }
                 return value.Set{
-                    .arity = 0,
                     .set = set,
                 };
             },
@@ -346,7 +320,6 @@ const Interpreter = struct {
                 if (condition.set.count() == 0) {
                     const set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
                     return value.Set{
-                        .arity = 0,
                         .set = set,
                     };
                 } else {
@@ -360,7 +333,6 @@ const Interpreter = struct {
                     try self.scope.append(hint[0]);
                     const body_set = try self.interpretExpr(body, hint[1..]);
                     _ = self.scope.pop();
-                    const arity = body_set.arity + 1;
                     var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
                     var body_set_iter = body_set.set.iterator();
                     while (body_set_iter.next()) |kv| {
@@ -371,7 +343,6 @@ const Interpreter = struct {
                         _ = try set.put(tuple.items, {});
                     }
                     return value.Set{
-                        .arity = arity,
                         .set = set,
                     };
                 }
@@ -379,12 +350,12 @@ const Interpreter = struct {
             .Apply => |pair| {
                 // can't make use of hint until we know which side is finite
                 if (self.interpretExpr(pair.left, &.{})) |left_type| {
-                    return self.interpretApply(expr_id, left_type, pair.right, hint);
+                    return self.interpretApply(left_type, pair.right, hint);
                 } else |_| {
                     // error might have been from lack of hints, so try other way around
                     // TODO could this cause exponential retries in large program?
                     if (self.interpretExpr(pair.right, &.{})) |right_type| {
-                        return self.interpretApply(expr_id, right_type, pair.left, hint);
+                        return self.interpretApply(right_type, pair.left, hint);
                     } else |err| {
                         return err;
                     }
@@ -405,7 +376,6 @@ const Interpreter = struct {
                 var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
                 _ = try set.put(tuple, {});
                 return value.Set{
-                    .arity = 1,
                     .set = set,
                 };
             },
@@ -427,7 +397,6 @@ const Interpreter = struct {
                     fix_hint[0] = .{ .Box = fix_box };
                     const body_set = try self.interpretBox(fix.next, fix_hint);
                     var new_fix_set = value.Set{
-                        .arity = if (body_set.arity == 0) 0 else body_set.arity - 1,
                         .set = u.DeepHashSet(value.Tuple).init(self.arena.allocator()),
                     };
                     var body_iter = body_set.set.iterator();
@@ -473,7 +442,6 @@ const Interpreter = struct {
                     try self.time.append(iteration);
                     defer _ = self.time.pop();
                     var tuple_set = value.Set{
-                        .arity = input_tuple.len,
                         .set = u.DeepHashSet(value.Tuple).init(self.arena.allocator()),
                     };
                     _ = try tuple_set.set.put(input_tuple, {});
@@ -482,7 +450,6 @@ const Interpreter = struct {
                     reduce_hint[1] = .{ .Box = tuple_box };
                     const body_set = try self.interpretBox(reduce.next, reduce_hint);
                     var new_reduce_set = value.Set{
-                        .arity = if (body_set.arity == 0) 0 else body_set.arity - 2,
                         .set = u.DeepHashSet(value.Tuple).init(self.arena.allocator()),
                     };
                     var body_iter = body_set.set.iterator();
@@ -522,7 +489,6 @@ const Interpreter = struct {
                     _ = try set.put(enumerated_tuple.items, {});
                 }
                 return value.Set{
-                    .arity = body_set.arity + 1,
                     .set = set,
                 };
             },
@@ -567,7 +533,6 @@ const Interpreter = struct {
                         var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
                         _ = try set.put(tuple, {});
                         return value.Set{
-                            .arity = 3,
                             .set = set,
                         };
                     },
@@ -588,7 +553,6 @@ const Interpreter = struct {
                             _ = try set.put(tuple, {});
                         }
                         return value.Set{
-                            .arity = 3,
                             .set = set,
                         };
                     },
@@ -605,7 +569,6 @@ const Interpreter = struct {
                         if (satisfied)
                             _ = try set.put(try self.dupeScalars(&.{ hint[0], hint[1] }), {});
                         return value.Set{
-                            .arity = 2,
                             .set = set,
                         };
                     },
@@ -614,28 +577,18 @@ const Interpreter = struct {
         }
     }
 
-    fn interpretApply(self: *Interpreter, expr_id: core.ExprId, left_set: value.Set, right_expr_id: core.ExprId, hint: value.Tuple) Error!value.Set {
-        var right_arity_o: ?usize = null;
+    fn interpretApply(self: *Interpreter, left_set: value.Set, right_expr_id: core.ExprId, hint: value.Tuple) Error!value.Set {
         var right_set_set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
         {
             var left_iter = left_set.set.iterator();
             while (left_iter.next()) |left_entry| {
                 try self.interrupter.check();
-                var right_hint = try std.mem.concat(
+                const right_hint = try std.mem.concat(
                     self.arena.allocator(),
                     value.Scalar,
                     &.{ left_entry.key_ptr.*, hint },
                 );
                 const right_part = try self.interpretExpr(right_expr_id, right_hint);
-                if (right_part.set.count() > 0) {
-                    if (right_arity_o) |right_arity| {
-                        if (right_arity != right_part.arity) {
-                            return self.setError(expr_id, "Apply resulted in unions over sets of different arities: {} vs {}", .{ right_arity, right_part.arity });
-                        }
-                    } else {
-                        right_arity_o = right_part.arity;
-                    }
-                }
                 var right_part_iter = right_part.set.iterator();
                 while (right_part_iter.next()) |right_entry| {
                     try self.interrupter.check();
@@ -644,12 +597,8 @@ const Interpreter = struct {
             }
         }
         const right_set = value.Set{
-            // TODO if right_arity is never set then arity of apply could be wrong - not sure if this matters
-            .arity = right_arity_o orelse 0,
             .set = right_set_set,
         };
-        const joined_arity = u.min(left_set.arity, right_set.arity);
-        const arity = u.max(left_set.arity, right_set.arity) - joined_arity;
         var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
         {
             var left_iter = left_set.set.iterator();
@@ -658,14 +607,14 @@ const Interpreter = struct {
                 var right_iter = right_set.set.iterator();
                 while (right_iter.next()) |right_entry| {
                     try self.interrupter.check();
+                    const joined_arity = u.min(left_entry.key_ptr.len, right_entry.key_ptr.len);
                     if (u.deepEqual(left_entry.key_ptr.*[0..joined_arity], right_entry.key_ptr.*[0..joined_arity])) {
-                        _ = try set.put(if (left_set.arity > right_set.arity) left_entry.key_ptr.*[joined_arity..] else right_entry.key_ptr.*[joined_arity..], {});
+                        _ = try set.put(if (left_entry.key_ptr.len > right_entry.key_ptr.len) left_entry.key_ptr.*[joined_arity..] else right_entry.key_ptr.*[joined_arity..], {});
                     }
                 }
             }
         }
         return value.Set{
-            .arity = arity,
             .set = set,
         };
     }

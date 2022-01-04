@@ -117,6 +117,13 @@ const Desugarer = struct {
                     .Box => u.imp_panic("Shouldn't be any box literals", .{}),
                 },
             }),
+            .Staged => |scalar| try self.putCore(.{
+                .Staged = switch (scalar) {
+                    .Text => |text| .{ .Text = text },
+                    .Number => |number| .{ .Number = number },
+                    .Box => u.imp_panic("Shouldn't be any box literals", .{}),
+                },
+            }),
             .Union => |pair| try self.putCore(.{
                 .Union = .{
                     .left = try self.desugar(pair.left),

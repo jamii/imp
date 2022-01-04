@@ -170,6 +170,13 @@ const Interpreter = struct {
                     .set = set,
                 };
             },
+            .Staged => |scalar| {
+                var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
+                _ = try set.put(try self.dupeScalars(&.{scalar}), {});
+                return value.Set{
+                    .set = set,
+                };
+            },
             .Union => |pair| {
                 const left = try self.interpretExpr(pair.left, hint);
                 const right = try self.interpretExpr(pair.right, hint);

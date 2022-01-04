@@ -143,6 +143,10 @@ pub const Analyzer = struct {
                 };
                 return type_.SetType.fromScalar(self.arena.allocator(), scalar_type);
             },
+            .Staged => |scalar| {
+                const scalar_type = type_.ScalarType{ .Staged = scalar };
+                return type_.SetType.fromScalar(self.arena.allocator(), scalar_type);
+            },
             .Union, .Intersect => |pair| {
                 var concretes = u.DeepHashSet(type_.ConcreteSetType).init(self.arena.allocator());
                 const left = try self.analyzeExpr(pair.left, hint);

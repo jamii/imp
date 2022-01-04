@@ -13,8 +13,7 @@ const syntax = imp.lang.repr.syntax;
 //   "(" expr ")"
 //   "none"
 //   "some"
-//   number
-//   text
+//   scalar
 //   name
 //   expr "!"
 //   "?" arg expr
@@ -25,6 +24,11 @@ const syntax = imp.lang.repr.syntax;
 //   "#" name expr_inner
 //   expr "then" expr ("else" expr)?
 //   "fix"? name ":" expr ";" expr
+//   ":" (name | scalar)
+
+// scalar =
+//   number
+//   text
 
 // name =
 //   alpha (alpha | digit | "_")*
@@ -546,6 +550,13 @@ pub const Parser = struct {
         }
     }
 
+    pub fn isWhitespaceNext(self: *Parser) !bool {
+        const start = self.position;
+        const is_wp = (try self.nextTokenMaybe()) == null;
+        self.position = start;
+        return is_wp;
+    }
+
     pub fn consumeWhitespace(self: *Parser) !void {
         while (true) {
             const start = self.position;
@@ -623,7 +634,7 @@ pub const Parser = struct {
             // name
             .Name => |name| {
                 const name_end = self.position;
-                if ((try self.nextToken()) == .Def) {
+                if (!(try self.isWhitespaceNext()) and (try self.nextToken()) == .Def) {
                     return self.parseDefBody(start, false, name);
                 } else {
                     self.position = name_end;
@@ -685,8 +696,18 @@ pub const Parser = struct {
             .Else => {
                 return self.setError(start, "Found `else` without `then`", .{});
             },
+            // ":" (name | scalar)
             .Def => {
-                return self.setError(start, "Found `:` without preceding name", .{});
+                if (try self.isWhitespaceNext())
+                    return self.setError(self.position, "Expected name or scalar, found whitespace", .{});
+                const staged_start = self.position;
+                const staged = try self.nextToken();
+                switch (staged) {
+                    .Name => |name| return self.putSyntax(.{ .Staged = .{ .Text = name } }, start, self.position),
+                    .Text => |text| return self.putSyntax(.{ .Staged = .{ .Text = text } }, start, self.position),
+                    .Number => |number| return self.putSyntax(.{ .Staged = .{ .Number = number } }, start, self.position),
+                    else => return self.setError(staged_start, "Expected name or scalar, found {}", .{staged}),
+                }
             },
             // allow starting with |&, for easy editing of lists
             .Product, .Union, .Intersect => {
@@ -713,15 +734,8 @@ pub const Parser = struct {
         var left = try self.parseExprInner();
         while (true) {
             const op_start = self.position;
-            var whitespace_before_op: bool = undefined;
-            var op: Token = undefined;
-            if (try self.nextTokenMaybe()) |token| {
-                whitespace_before_op = false;
-                op = token;
-            } else {
-                whitespace_before_op = true;
-                op = try self.nextToken();
-            }
+            const whitespace_before_op = try self.isWhitespaceNext();
+            const op = try self.nextToken();
             switch (op) {
                 // expr_inner binop expr
                 .Union, .Intersect, .Product, .Extend, .Equal, .Add, .Subtract, .Multiply, .Divide, .Modulus, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual => {

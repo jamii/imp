@@ -349,7 +349,7 @@ none
 
 3: 4; 5
 ---
-ParseError: Found `:` without preceding name
+ParseError: Expected name or scalar, found whitespace
 
 fix 1 ?@prev prev 10 then 10 else prev + 1
 ---
@@ -894,3 +894,47 @@ number
 value:
 | 3
 | 42
+
+:foo
+---
+type:
+:"foo"
+value:
+| "foo"
+
+| :foo, (1,2|3,4)
+| :bar, "quux"
+---
+type:
+:"bar", text | :"foo", number, number
+value:
+| "bar", "quux"
+| "foo", 1, 2
+| "foo", 3, 4
+
+db:
+| :foo, (1,2|3,4)
+| :bar, "quux";
+db :foo
+---
+type:
+number, number
+value:
+| 1, 2
+| 3, 4
+
+// TODO need to figure out how to handle branches like this
+f: ?a
+| a :text
+| (a :number) + 1;
+f (:number, 2)
+---
+AnalyzeError: Result of apply is always empty
+
+// TODO need to figure out how to handle branches like this
+f: ?a
+| a :text !! then a :text
+| a :number !! then (a :number) + 1;
+f (:number, 2)
+---
+AnalyzeError: Result of apply is always empty

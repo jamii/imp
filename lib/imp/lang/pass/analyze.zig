@@ -468,7 +468,7 @@ pub const Analyzer = struct {
 
                 var has_intersection = true;
                 for (left_concrete.columns[0..joined_arity]) |left_column, i| {
-                    if (!u.deepEqual(left_column.value, right_concrete.columns[i].value))
+                    if (!hasIntersection(left_column.value, right_concrete.columns[i].value))
                         has_intersection = false;
                 }
 
@@ -486,3 +486,9 @@ pub const Analyzer = struct {
         return type_.SetType{ .concretes = concretes };
     }
 };
+
+fn hasIntersection(left: type_.ScalarType, right: type_.ScalarType) bool {
+    return u.deepEqual(left, right) or
+        (left == .Staged and (u.deepEqual(@tagName(left.Staged), @tagName(right)))) or
+        (right == .Staged and (u.deepEqual(@tagName(right.Staged), @tagName(left))));
+}

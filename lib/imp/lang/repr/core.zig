@@ -14,20 +14,25 @@ pub const Program = struct {
             if (def_id != 0) try writer.writeByteNTimes(' ', indent);
             try std.fmt.format(writer, "{}:\n", DefId{ .id = def_id });
             try writer.writeByteNTimes(' ', indent + 4);
-            try self.dumpExprInto(expr_id, writer, indent + 4);
+            try (ProgramAndExprId{ .program = self, .expr_id = expr_id }).dumpInto(writer, indent + 4);
             try writer.writeAll(";\n");
         }
     }
 
-    pub fn dumpExprInto(self: Program, expr_id: ExprId, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
-        const expr = self.exprs[expr_id.id];
-        try expr.dumpTagInto(writer, indent);
-        for (expr.getChildren().slice()) |child| {
-            try writer.writeAll("\n");
-            try writer.writeByteNTimes(' ', indent + 4);
-            try self.dumpExprInto(child, writer, indent + 4);
+    pub const ProgramAndExprId = struct {
+        program: Program,
+        expr_id: ExprId,
+
+        pub fn dumpInto(self: ProgramAndExprId, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
+            const expr = self.program.exprs[self.expr_id.id];
+            try expr.dumpTagInto(writer, indent);
+            for (expr.getChildren().slice()) |child| {
+                try writer.writeAll("\n");
+                try writer.writeByteNTimes(' ', indent + 4);
+                try (ProgramAndExprId{ .program = self.program, .expr_id = child }).dumpInto(writer, indent + 4);
+            }
         }
-    }
+    };
 };
 
 // Index into Program.exprs/from_syntax

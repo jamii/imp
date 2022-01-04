@@ -109,6 +109,8 @@ pub const Scalar = union(enum) {
     pub const format = u.formatViaDump;
 };
 
+pub const Name = imp.lang.syntax.Name;
+
 pub const Box = union(enum) {
     Normal: struct {
         def_id: core.DefId,

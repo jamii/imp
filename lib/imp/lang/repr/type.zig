@@ -43,44 +43,62 @@ pub const Specialization = struct {
 };
 
 pub const SetType = union(enum) {
-    /// The empty set
-    None,
-    /// A set with these column types
-    Concrete: ConcreteSetType,
+    concretes: u.DeepHashSet(ConcreteSetType),
+
+    pub fn none(
+        allocator: u.Allocator,
+    ) SetType {
+        var concretes = u.DeepHashSet(ConcreteSetType).init(allocator);
+        return SetType{ .concretes = concretes };
+    }
+
+    pub fn some(
+        allocator: u.Allocator,
+    ) !SetType {
+        var concretes = u.DeepHashSet(ConcreteSetType).init(allocator);
+        try concretes.put(.{ .columns = &.{} }, {});
+        return SetType{ .concretes = concretes };
+    }
+
+    pub fn fromScalar(allocator: u.Allocator, scalar_type: ScalarType) !SetType {
+        var concretes = u.DeepHashSet(ConcreteSetType).init(allocator);
+        const columns = [_]ColumnType{.{ .abstract = false, .value = scalar_type }};
+        try concretes.put(.{ .columns = try allocator.dupe(ColumnType, &columns) }, {});
+        return SetType{ .concretes = concretes };
+    }
+
+    pub fn fromColumns(allocator: u.Allocator, columns: []const ColumnType) !SetType {
+        var concretes = u.DeepHashSet(ConcreteSetType).init(allocator);
+        try concretes.put(.{ .columns = try allocator.dupe(ColumnType, columns) }, {});
+        return SetType{ .concretes = concretes };
+    }
+
+    pub fn isBoolish(self: SetType) bool {
+        var concretes_iter = self.concretes.keyIterator();
+        while (concretes_iter.next()) |concrete| {
+            if (concrete.columns.len > 0) return false;
+        }
+        return true;
+    }
 
     pub fn isFinite(self: SetType) bool {
-        return self == .None or (self == .Concrete and self.Concrete.abstract_arity == 0);
+        var concretes_iter = self.concretes.keyIterator();
+        while (concretes_iter.next()) |concrete| {
+            if (!concrete.isFinite()) return false;
+        }
+        return true;
     }
 
     pub fn dumpInto(self: SetType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
-        switch (self) {
-            .None => try writer.writeAll("none"),
-            .Concrete => |concrete| {
-                try concrete.dumpInto(writer, indent);
-            },
-        }
-    }
-
-    pub const format = u.formatViaDump;
-};
-
-pub const ConcreteSetType = struct {
-    abstract_arity: usize,
-    columns: TupleType,
-
-    pub fn dumpInto(self: ConcreteSetType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
-        if (self.columns.len == 0) {
-            try writer.writeAll("maybe");
+        if (self.concretes.count() == 0) {
+            try writer.writeAll("none");
         } else {
-            for (self.columns) |scalar_type, scalar_type_ix| {
-                if (scalar_type_ix < self.abstract_arity) {
-                    try writer.writeAll("?");
-                    try scalar_type.dumpInto(writer, indent);
-                    try writer.writeAll(" ");
-                } else {
-                    if (scalar_type_ix != self.abstract_arity) try writer.writeAll(", ");
-                    try scalar_type.dumpInto(writer, indent);
-                }
+            var concretes_iter = self.concretes.keyIterator();
+            var is_first = true;
+            while (concretes_iter.next()) |concrete| {
+                if (!is_first) try writer.writeAll(" | ");
+                is_first = false;
+                try concrete.dumpInto(writer, indent);
             }
         }
     }
@@ -88,12 +106,47 @@ pub const ConcreteSetType = struct {
     pub const format = u.formatViaDump;
 };
 
-pub const TupleType = []const ScalarType;
+pub const ConcreteSetType = struct {
+    columns: []const ColumnType,
+
+    pub fn isFinite(self: ConcreteSetType) bool {
+        for (self.columns) |column| {
+            if (column.abstract) return false;
+        }
+        return true;
+    }
+
+    pub fn dumpInto(self: ConcreteSetType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
+        if (self.columns.len == 0) {
+            try writer.writeAll("maybe");
+        } else {
+            for (self.columns) |column_type, ix| {
+                if (ix > 0) try writer.writeAll(if (self.columns[ix - 1].abstract) " " else ", ");
+                try column_type.dumpInto(writer, indent);
+            }
+        }
+    }
+
+    pub const format = u.formatViaDump;
+};
+
+pub const ColumnType = struct {
+    abstract: bool,
+    value: ScalarType,
+
+    pub fn dumpInto(self: ColumnType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
+        if (self.abstract) try writer.writeAll("?");
+        try self.value.dumpInto(writer, indent);
+    }
+
+    pub const format = u.formatViaDump;
+};
 
 pub const ScalarType = union(enum) {
     Text,
     Number,
     Box: BoxType,
+    Staged: value.Scalar,
 
     pub fn dumpInto(self: ScalarType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         switch (self) {
@@ -103,6 +156,7 @@ pub const ScalarType = union(enum) {
                 try writer.writeAll("@");
                 try box_type.dumpInto(writer, indent);
             },
+            .Staged => |staged| try std.fmt.format(writer, ":{s}", .{staged}),
         }
     }
 

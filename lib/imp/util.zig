@@ -195,9 +195,27 @@ pub fn deepEqual(a: anytype, b: @TypeOf(a)) bool {
     return deepCompare(a, b) == .Equal;
 }
 
+// TODO This is needed for comparing/hashing DeepHashSet, but it's gross and slow.
+//      Would be better to use a sorted set instead of DeepHashSet
+const sorting_allocator = std.heap.c_allocator;
+fn sortHashMap(hash_map: anytype) []const @TypeOf(hash_map).Entry {
+    var elems = ArrayList(@TypeOf(hash_map).Entry).init(sorting_allocator);
+    var iter = hash_map.iterator();
+    while (iter.next()) |elem| elems.append(elem) catch imp_panic("OOM", .{});
+    deepSort(elems.items);
+    return elems.toOwnedSlice();
+}
+
 pub fn deepCompare(a: anytype, b: @TypeOf(a)) Ordering {
     const T = @TypeOf(a);
     const ti = @typeInfo(T);
+    if (comptime std.mem.startsWith(u8, @typeName(@TypeOf(a)), "std.hash_map.HashMap")) {
+        const a_elems = sortHashMap(a);
+        defer sorting_allocator.free(a_elems);
+        const b_elems = sortHashMap(b);
+        defer sorting_allocator.free(b_elems);
+        return deepCompare(a_elems, b_elems);
+    }
     switch (ti) {
         .Struct, .Enum, .Union => {
             if (@hasDecl(T, "overrideDeepCompare")) {
@@ -325,6 +343,15 @@ pub fn deepCompare(a: anytype, b: @TypeOf(a)) Ordering {
     }
 }
 
+pub fn deepSort(slice: anytype) void {
+    const T = @typeInfo(@TypeOf(slice)).Pointer.child;
+    std.sort.sort(T, slice, {}, struct {
+        fn lessThan(_: void, a: T, b: T) bool {
+            return deepCompare(a, b) == .LessThan;
+        }
+    }.lessThan);
+}
+
 pub fn deepHash(key: anytype) u64 {
     var hasher = std.hash.Wyhash.init(0);
     deepHashInto(&hasher, key);
@@ -334,6 +361,12 @@ pub fn deepHash(key: anytype) u64 {
 pub fn deepHashInto(hasher: anytype, key: anytype) void {
     const T = @TypeOf(key);
     const ti = @typeInfo(T);
+    if (comptime std.mem.startsWith(u8, @typeName(T), "std.hash_map.HashMap")) {
+        const elems = sortHashMap(key);
+        defer sorting_allocator.free(elems);
+        deepHashInto(hasher, elems);
+        return;
+    }
     switch (ti) {
         .Struct, .Enum, .Union => {
             if (@hasDecl(T, "overrideDeepHashInto")) {

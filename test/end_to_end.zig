@@ -14,6 +14,10 @@ pub fn main() anyerror!void {
     while (args.next(allocator)) |arg| {
         const filename = try arg;
 
+        // TODO This is a total hack.
+        //      When using `--test-cmd` to run with rr, `zig run` also passes the location of the zig binary as an extra argument. I don't know how to turn this off.
+        if (std.mem.endsWith(u8, filename, "zig")) continue;
+
         var file = if (std.mem.eql(u8, filename, "-"))
             std.io.getStdIn()
         else

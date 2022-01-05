@@ -172,7 +172,7 @@ pub const Analyzer = struct {
                     },
                     else => unreachable,
                 }
-                return type_.SetType{ .concretes = concretes };
+                return self.checkSetType(expr_id, .{ .concretes = concretes });
             },
             .Product => |pair| {
                 var concretes = u.DeepHashSet(type_.ConcreteSetType).init(self.arena.allocator());
@@ -261,7 +261,10 @@ pub const Analyzer = struct {
                 if (!condition_type.isBoolish()) {
                     return self.setError(expr_id, "The condition of `then` must have type `maybe`, found {}", .{condition_type}, .Other);
                 }
-                return try self.analyzeExpr(then.true_branch, hint);
+                return if (condition_type.concretes.count() == 0)
+                    type_.SetType.none(self.arena.allocator())
+                else
+                    try self.analyzeExpr(then.true_branch, hint);
             },
             .Abstract => |body| {
                 if (hint.len == 0) {
@@ -275,7 +278,7 @@ pub const Analyzer = struct {
                     var body_iter = body_type.concretes.keyIterator();
                     while (body_iter.next()) |body_concrete| {
                         const columns = try std.mem.concat(self.arena.allocator(), type_.ColumnType, &.{
-                            &[_]type_.ColumnType{.{ .abstract = false, .value = hint[0] }},
+                            &[_]type_.ColumnType{.{ .abstract = true, .value = hint[0] }},
                             body_concrete.columns,
                         });
                         try concretes.put(.{ .columns = columns }, {});
@@ -287,7 +290,7 @@ pub const Analyzer = struct {
                 // can't make use of hint until we know which side is finite
                 if (self.analyzeExpr(pair.left, &.{})) |left_type| {
                     if (left_type.isFinite())
-                        return self.analyzeApply(expr_id, left_type, pair.right, hint);
+                        return self.analyzeApply(expr_id, left_type, pair.right, hint, false);
                 } else |left_err| {
                     if (self.error_info.*.?.kind != .NoHintForArg)
                         return left_err;
@@ -297,7 +300,7 @@ pub const Analyzer = struct {
                 // error was from lack of hints, so try other way around
                 // TODO could this cause exponential retries in large program?
                 if (self.analyzeExpr(pair.right, &.{})) |right_type| {
-                    return self.analyzeApply(expr_id, right_type, pair.left, hint);
+                    return self.analyzeApply(expr_id, right_type, pair.left, hint, true);
                 } else |right_err| {
                     if (self.error_info.*.?.kind != .NoHintForArg) return right_err;
                 }
@@ -449,17 +452,15 @@ pub const Analyzer = struct {
         }
     }
 
-    fn analyzeApply(self: *Analyzer, parent_expr_id: core.ExprId, left_type: type_.SetType, right_expr_id: core.ExprId, hint: []const type_.ScalarType) Error!type_.SetType {
+    fn analyzeApply(self: *Analyzer, apply_expr_id: core.ExprId, left_type: type_.SetType, right_expr_id: core.ExprId, hint: []const type_.ScalarType, is_flipped: bool) Error!type_.SetType {
         var concretes = u.DeepHashSet(type_.ConcreteSetType).init(self.arena.allocator());
         var left_iter = left_type.concretes.keyIterator();
-        var num_right_concretes: usize = 0;
         while (left_iter.next()) |left_concrete| {
             var right_hint = try u.ArrayList(type_.ScalarType).initCapacity(self.arena.allocator(), left_concrete.columns.len + hint.len);
             for (left_concrete.columns) |column_type|
                 try right_hint.append(column_type.value);
             try right_hint.appendSlice(hint);
             const right_type = try self.analyzeExpr(right_expr_id, right_hint.toOwnedSlice());
-            num_right_concretes += right_type.concretes.count();
             var right_iter = right_type.concretes.keyIterator();
             while (right_iter.next()) |right_concrete| {
                 const joined_arity = u.min(left_concrete.columns.len, right_concrete.columns.len);
@@ -476,12 +477,45 @@ pub const Analyzer = struct {
                     else
                         right_concrete.columns[joined_arity..];
                     try concretes.put(.{ .columns = columns }, {});
+                } else {
+                    if (analyzeConcreteSetTypeUnion(left_concrete.*, right_concrete.*) == .Conflicting)
+                        return if (is_flipped)
+                            self.setError(apply_expr_id, "Can't apply {} to {}", .{ right_concrete, left_concrete }, .Other)
+                        else
+                            self.setError(apply_expr_id, "Can't apply {} to {}", .{ left_concrete, right_concrete }, .Other);
                 }
             }
         }
-        // Only want to return an error in the case where the result is `none` but neither `left` nor `right` is `none`
-        if (concretes.count() == 0 and num_right_concretes > 0)
-            return self.setError(parent_expr_id, "Result of apply is always empty", .{}, .Other);
-        return type_.SetType{ .concretes = concretes };
+        return self.checkSetType(apply_expr_id, .{ .concretes = concretes });
+    }
+
+    fn checkSetType(self: *Analyzer, expr_id: core.ExprId, set_type: type_.SetType) Error!type_.SetType {
+        var iter1 = set_type.concretes.keyIterator();
+        while (iter1.next()) |concrete1| {
+            var iter2 = set_type.concretes.keyIterator();
+            while (iter2.next()) |concrete2| {
+                switch (analyzeConcreteSetTypeUnion(concrete1.*, concrete2.*)) {
+                    .Ok => {},
+                    .Conflicting => return self.setError(expr_id, "Cannot union types {} and {}", .{ concrete1, concrete2 }, .Other),
+                }
+            }
+        }
+        return set_type;
+    }
+
+    /// For every two concrete types in a SetType, the first place at which they differ must be a staged type in both
+    fn analyzeConcreteSetTypeUnion(concrete1: type_.ConcreteSetType, concrete2: type_.ConcreteSetType) enum { Ok, Conflicting } {
+        const min_len = u.min(concrete1.columns.len, concrete2.columns.len);
+        var i: usize = 0;
+        while (i < min_len) : (i += 1)
+            if (!u.deepEqual(concrete1.columns[i], concrete2.columns[i]))
+                return if (concrete1.columns[i].value.isStaged() and concrete2.columns[i].value.isStaged())
+                    .Ok
+                else
+                    .Conflicting;
+        return if (concrete1.columns.len == concrete2.columns.len)
+            .Ok
+        else
+            .Conflicting;
     }
 };

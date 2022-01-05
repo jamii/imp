@@ -206,13 +206,13 @@ value:
 ---
 DesugarError: Name not in scope: c
 
+"foo" | 2
+---
+AnalyzeError: Cannot union types number and text
+
 1, "foo" | 2
 ---
-type:
-number | number, text
-value:
-| 2
-| 1, "foo"
+AnalyzeError: Cannot union types number and number, text
 
 1 1 !
 ---
@@ -254,7 +254,7 @@ value:
 none then 1,2
 ---
 type:
-number, number
+none
 value:
 none
 
@@ -295,11 +295,7 @@ foo2: ?a ((?b a,b)@);
 bar: foo1 1 | foo2 2;
 bar ?@f f 3
 ---
-type:
-number, number
-value:
-| 1, 3
-| 2, 3
+AnalyzeError: Cannot union types @(d0 number) and @(d2 number)
 
 foo: 1, 1 | 2, 2;
 foo foo
@@ -501,7 +497,7 @@ value:
 
 reduce (3 | 4 | 5) 0 ?a ?b a + b
 ---
-AnalyzeError: Result of apply is always empty
+AnalyzeError: Can't apply ?number ?number number to @(#d0 number)
 
 // testing specialization caching
 f: ?i i+1;
@@ -882,18 +878,16 @@ value:
 
 ("foo", 1 | 2, "bar") "foo"
 ---
-type:
-number
-value:
-| 1
+AnalyzeError: Cannot union types number, text and text, number
 
+// TODO would like to support this
 ((?a ?b a + b) | (1, 2, 42)) 1 2
 ---
-type:
-number
-value:
-| 3
-| 42
+AnalyzeError: Cannot union types ?number ?number number and number, number, number
+
+(?a "foo") (1, 2)
+---
+AnalyzeError: Can't apply ?number text to number, number
 
 :foo
 ---
@@ -923,24 +917,24 @@ value:
 | 1, 2
 | 3, 4
 
-(:number, 2 | :text, "foo") :number
+// No type errors for mistakes with staged names
+db:
+| :foo, (1,2|3,4)
+| :bar, "quux";
+db :fo
 ---
 type:
-number
+none
 value:
-| 2
+none
 
-(:number, 2) "text"
+// But we do get type errors for using the wrong types
+db:
+| :foo, (1,2|3,4)
+| :bar, "quux";
+db "fo"
 ---
-AnalyzeError: Result of apply is always empty
-
-(:text, "foo") "text"
----
-AnalyzeError: Result of apply is always empty
-
-(:number, 2) :text
----
-AnalyzeError: Result of apply is always empty
+AnalyzeError: Can't apply :"bar", text to text
 
 f: ?k ?v
 | k :number then :number, (v + 1);
@@ -951,19 +945,67 @@ type:
 value:
 | :"number", 3
 
-// TODO Need to figure out how to handle branches like this.
-//      Maybe allow opting in to suppressing errors
+// TODO this is a surprising parse
 f: ?k ?v
 | k :text then :text, v
 | k :number then :number, (v + 1);
 f (:number, 2)
 ---
-AnalyzeError: Result of apply is always empty
+type:
+none
+value:
+none
 
-// TODO Should warn about this.
-1 + (2 | "foo")
+f: ?k ?v
+| (k :text then :text, v)
+| (k :number then :number, (v + 1));
+f (:number, 2)
 ---
 type:
-number
+:"number", number
 value:
-| 3
+| :"number", 3
+
+f: ?k ?v
+| (k :text then :text, v)
+| (k :number then :number, (v + 1));
+f (:thing, 2)
+---
+type:
+none
+value:
+none
+
+f: ?k ?v
+  k :number then :number, (v + 1) else k, v;
+f (:thing, "thing" | :number, 1)
+---
+type:
+:"number", number | :"thing", text
+value:
+| :"thing", "thing"
+| :"number", 2
+
+1 + "foo"
+---
+AnalyzeError: Can't apply ?number number to text
+
+1 + :foo
+---
+AnalyzeError: Can't apply ?number number to :"foo"
+
+(:foo, :bar) | (:foo)
+---
+AnalyzeError: Cannot union types :"foo", :"bar" and :"foo"
+
+(:foo, :bar, 1) | (:foo, 2)
+---
+AnalyzeError: Cannot union types :"foo", number and :"foo", :"bar", number
+
+(:foo, :bar, 1) | (:foo, :quux, 2)
+---
+type:
+:"foo", :"bar", number | :"foo", :"quux", number
+value:
+| :"foo", :"bar", 1
+| :"foo", :"quux", 2

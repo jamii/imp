@@ -149,6 +149,13 @@ pub const ScalarType = union(enum) {
     StagedText: []const u8, // valid utf8
     StagedNumber: f64,
 
+    pub fn isStaged(self: ScalarType) bool {
+        return switch (self) {
+            .Number, .Text, .Box => false,
+            .StagedNumber, .StagedText => true,
+        };
+    }
+
     pub fn dumpInto(self: ScalarType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         switch (self) {
             .Text => try writer.writeAll("text"),

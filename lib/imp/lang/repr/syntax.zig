@@ -32,7 +32,6 @@ pub const Expr = union(enum) {
     None,
     Some,
     Scalar: value.Scalar,
-    Staged: value.Scalar,
     Union: Pair,
     Intersect: Pair,
     Product: Pair,
@@ -80,10 +79,6 @@ pub const Expr = union(enum) {
             .None => try writer.writeAll("none"),
             .Some => try writer.writeAll("some"),
             .Scalar => |scalar| try scalar.dumpInto(writer, indent),
-            .Staged => |scalar| {
-                try writer.writeAll(":");
-                try scalar.dumpInto(writer, indent);
-            },
             .Union => try writer.writeAll("|"),
             .Intersect => try writer.writeAll("&"),
             .Product => try writer.writeAll(","),

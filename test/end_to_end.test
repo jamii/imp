@@ -900,7 +900,7 @@ value:
 type:
 :"foo"
 value:
-| "foo"
+| :"foo"
 
 | :foo, (1,2|3,4)
 | :bar, "quux"
@@ -908,9 +908,9 @@ value:
 type:
 :"bar", text | :"foo", number, number
 value:
-| "bar", "quux"
-| "foo", 1, 2
-| "foo", 3, 4
+| :"bar", "quux"
+| :"foo", 1, 2
+| :"foo", 3, 4
 
 db:
 | :foo, (1,2|3,4)
@@ -930,42 +930,35 @@ number
 value:
 | 2
 
-// TODO should we allow this, or make staged values non-equal to non-staged?
-(:number, 2 | :text, "foo") "number"
----
-type:
-number | text
-value:
-| 2
-
 (:number, 2) "text"
 ---
-type:
-number
-value:
-none
+AnalyzeError: Result of apply is always empty
+
+(:text, "foo") "text"
+---
+AnalyzeError: Result of apply is always empty
 
 (:number, 2) :text
 ---
 AnalyzeError: Result of apply is always empty
 
-// TODO need to figure out how to handle branches like this
 f: ?k ?v
-| (k :text then :text, v)
-| (k :number then :number, (v + 1));
-f (:number, 2)
----
-AnalyzeError: Result of apply is always empty
-
-f: ?k ?v
-| (k "text" then :text, v)
-| (k "number" then :number, (v + 1));
+| k :number then :number, (v + 1);
 f (:number, 2)
 ---
 type:
-:"number", number | :"text", number
+:"number", number
 value:
-| "number", 3
+| :"number", 3
+
+// TODO Need to figure out how to handle branches like this.
+//      Maybe allow opting in to suppressing errors
+f: ?k ?v
+| k :text then :text, v
+| k :number then :number, (v + 1);
+f (:number, 2)
+---
+AnalyzeError: Result of apply is always empty
 
 // TODO Need to check types more carefully in natives
 // 1 + (2 | "foo")

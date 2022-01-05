@@ -703,9 +703,9 @@ pub const Parser = struct {
                 const staged_start = self.position;
                 const staged = try self.nextToken();
                 switch (staged) {
-                    .Name => |name| return self.putSyntax(.{ .Staged = .{ .Text = name } }, start, self.position),
-                    .Text => |text| return self.putSyntax(.{ .Staged = .{ .Text = text } }, start, self.position),
-                    .Number => |number| return self.putSyntax(.{ .Staged = .{ .Number = number } }, start, self.position),
+                    .Name => |name| return self.putSyntax(.{ .Scalar = .{ .StagedText = name } }, start, self.position),
+                    .Text => |text| return self.putSyntax(.{ .Scalar = .{ .StagedText = text } }, start, self.position),
+                    .Number => |number| return self.putSyntax(.{ .Scalar = .{ .StagedNumber = number } }, start, self.position),
                     else => return self.setError(staged_start, "Expected name or scalar, found {}", .{staged}),
                 }
             },

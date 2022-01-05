@@ -140,11 +140,9 @@ pub const Analyzer = struct {
                     .Text => .Text,
                     .Number => .Number,
                     .Box => u.imp_panic("Shouldn't be any box literals", .{}),
+                    .StagedText => |text| .{ .StagedText = text },
+                    .StagedNumber => |number| .{ .StagedNumber = number },
                 };
-                return type_.SetType.fromScalar(self.arena.allocator(), scalar_type);
-            },
-            .Staged => |scalar| {
-                const scalar_type = type_.ScalarType{ .Staged = scalar };
                 return type_.SetType.fromScalar(self.arena.allocator(), scalar_type);
             },
             .Union, .Intersect => |pair| {
@@ -468,7 +466,7 @@ pub const Analyzer = struct {
 
                 var has_intersection = true;
                 for (left_concrete.columns[0..joined_arity]) |left_column, i| {
-                    if (!hasIntersection(left_column.value, right_concrete.columns[i].value))
+                    if (!u.deepEqual(left_column.value, right_concrete.columns[i].value))
                         has_intersection = false;
                 }
 
@@ -481,14 +479,9 @@ pub const Analyzer = struct {
                 }
             }
         }
+        // Only want to return an error in the case where the result is `none` but neither `left` nor `right` is `none`
         if (concretes.count() == 0 and num_right_concretes > 0)
             return self.setError(parent_expr_id, "Result of apply is always empty", .{}, .Other);
         return type_.SetType{ .concretes = concretes };
     }
 };
-
-fn hasIntersection(left: type_.ScalarType, right: type_.ScalarType) bool {
-    return u.deepEqual(left, right) or
-        (left == .Staged and (u.deepEqual(@tagName(left.Staged), @tagName(right)))) or
-        (right == .Staged and (u.deepEqual(@tagName(right.Staged), @tagName(left))));
-}

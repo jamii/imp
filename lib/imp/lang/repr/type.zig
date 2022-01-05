@@ -146,7 +146,8 @@ pub const ScalarType = union(enum) {
     Text,
     Number,
     Box: BoxType,
-    Staged: value.Scalar,
+    StagedText: []const u8, // valid utf8
+    StagedNumber: f64,
 
     pub fn dumpInto(self: ScalarType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         switch (self) {
@@ -156,7 +157,8 @@ pub const ScalarType = union(enum) {
                 try writer.writeAll("@");
                 try box_type.dumpInto(writer, indent);
             },
-            .Staged => |staged| try std.fmt.format(writer, ":{s}", .{staged}),
+            .StagedText => |text| try (value.Scalar{ .StagedText = text }).dumpInto(writer, indent),
+            .StagedNumber => |number| try (value.Scalar{ .StagedNumber = number }).dumpInto(writer, indent),
         }
     }
 

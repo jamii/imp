@@ -93,6 +93,8 @@ pub const Scalar = union(enum) {
     Text: []const u8, // valid utf8
     Number: f64,
     Box: Box,
+    StagedText: []const u8, // valid utf8
+    StagedNumber: f64,
 
     pub fn dumpInto(self: Scalar, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         switch (self) {
@@ -103,6 +105,9 @@ pub const Scalar = union(enum) {
                 try writer.writeAll("@");
                 try box.dumpInto(writer, indent);
             },
+            // TODO if text is valid symbol, print without quotes
+            .StagedText => |text| try std.fmt.format(writer, ":\"{s}\"", .{text}),
+            .StagedNumber => |number| try std.fmt.format(writer, ":{d}", .{number}),
         }
     }
 

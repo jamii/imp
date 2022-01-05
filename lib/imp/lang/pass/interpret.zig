@@ -521,17 +521,19 @@ const Interpreter = struct {
                         if (native == .Divide and hint[1].Number == 0) {
                             return self.setNativeError(expr_id, "Divide by 0", .{});
                         }
-                        const result = switch (native) {
-                            .Add => hint[0].Number + hint[1].Number,
-                            .Subtract => hint[0].Number - hint[1].Number,
-                            .Multiply => hint[0].Number * hint[1].Number,
-                            .Divide => hint[0].Number / hint[1].Number,
-                            .Modulus => @mod(hint[0].Number, hint[1].Number),
-                            else => unreachable,
-                        };
-                        const tuple = try self.dupeScalars(&[_]value.Scalar{ hint[0], hint[1], .{ .Number = result } });
                         var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
-                        _ = try set.put(tuple, {});
+                        if (hint[0] == .Number and hint[1] == .Number) {
+                            const result = switch (native) {
+                                .Add => hint[0].Number + hint[1].Number,
+                                .Subtract => hint[0].Number - hint[1].Number,
+                                .Multiply => hint[0].Number * hint[1].Number,
+                                .Divide => hint[0].Number / hint[1].Number,
+                                .Modulus => @mod(hint[0].Number, hint[1].Number),
+                                else => unreachable,
+                            };
+                            const tuple = try self.dupeScalars(&[_]value.Scalar{ hint[0], hint[1], .{ .Number = result } });
+                            _ = try set.put(tuple, {});
+                        }
                         return value.Set{
                             .set = set,
                         };
@@ -540,17 +542,19 @@ const Interpreter = struct {
                         if (hint.len < 2) {
                             return self.setError(expr_id, "No hint for native arg", .{});
                         }
-                        const lo = @floatToInt(i64, hint[0].Number);
-                        const hi = @floatToInt(i64, hint[1].Number);
-                        if (@intToFloat(f64, lo) != hint[0].Number or @intToFloat(f64, hi) != hint[1].Number) {
-                            return self.setNativeError(expr_id, "Inputs to `range` must be whole numbers, found `range {} {}`", .{ hint[0], hint[1] });
-                        }
-                        var i = lo;
                         var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
-                        while (i <= hi) : (i += 1) {
-                            try self.interrupter.check();
-                            const tuple = try self.dupeScalars(&[_]value.Scalar{ hint[0], hint[1], .{ .Number = @intToFloat(f64, i) } });
-                            _ = try set.put(tuple, {});
+                        if (hint[0] == .Number and hint[1] == .Number) {
+                            const lo = @floatToInt(i64, hint[0].Number);
+                            const hi = @floatToInt(i64, hint[1].Number);
+                            if (@intToFloat(f64, lo) != hint[0].Number or @intToFloat(f64, hi) != hint[1].Number) {
+                                return self.setNativeError(expr_id, "Inputs to `range` must be whole numbers, found `range {} {}`", .{ hint[0], hint[1] });
+                            }
+                            var i = lo;
+                            while (i <= hi) : (i += 1) {
+                                try self.interrupter.check();
+                                const tuple = try self.dupeScalars(&[_]value.Scalar{ hint[0], hint[1], .{ .Number = @intToFloat(f64, i) } });
+                                _ = try set.put(tuple, {});
+                            }
                         }
                         return value.Set{
                             .set = set,
@@ -561,13 +565,15 @@ const Interpreter = struct {
                             return self.setError(expr_id, "No hint for native arg", .{});
                         }
                         var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
-                        const satisfied = switch (native) {
-                            .GreaterThan => hint[0].Number > hint[1].Number,
-                            .GreaterThanOrEqual => hint[0].Number >= hint[1].Number,
-                            else => unreachable,
-                        };
-                        if (satisfied)
-                            _ = try set.put(try self.dupeScalars(&.{ hint[0], hint[1] }), {});
+                        if (hint[0] == .Number and hint[1] == .Number) {
+                            const satisfied = switch (native) {
+                                .GreaterThan => hint[0].Number > hint[1].Number,
+                                .GreaterThanOrEqual => hint[0].Number >= hint[1].Number,
+                                else => unreachable,
+                            };
+                            if (satisfied)
+                                _ = try set.put(try self.dupeScalars(&.{ hint[0], hint[1] }), {});
+                        }
                         return value.Set{
                             .set = set,
                         };

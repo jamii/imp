@@ -960,11 +960,10 @@ f (:number, 2)
 ---
 AnalyzeError: Result of apply is always empty
 
-// TODO Need to check types more carefully in natives
-// 1 + (2 | "foo")
-1
+// TODO Should warn about this.
+1 + (2 | "foo")
 ---
 type:
 number
 value:
-| 1
+| 3

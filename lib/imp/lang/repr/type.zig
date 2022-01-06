@@ -27,12 +27,19 @@ pub const ProgramType = struct {
     }
 };
 
+pub const HintMode = enum {
+    Apply,
+    Intersect,
+};
+
 pub const Specialization = struct {
     hint: []const ScalarType,
+    hint_mode: HintMode,
     set_type: SetType,
 
     pub fn dumpInto(self: Specialization, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         try writer.writeAll("(");
+        try std.fmt.format(writer, "{} ", .{self.hint_mode});
         for (self.hint) |scalar_type| {
             try writer.writeAll(", ");
             try scalar_type.dumpInto(writer, indent);

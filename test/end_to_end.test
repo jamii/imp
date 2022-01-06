@@ -1016,3 +1016,10 @@ type:
 value:
 | :"foo", :"bar", 1
 | :"foo", :"quux", 2
+
+(1, 2) & ((?a a 1), (?b b 2))
+---
+type:
+number, number
+value:
+| 1, 2

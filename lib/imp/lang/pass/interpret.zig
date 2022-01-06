@@ -27,7 +27,7 @@ pub fn interpret(
         .interrupter = interrupter,
         .error_info = error_info,
     };
-    return interpreter.interpretDef(.{ .id = program.defs.len - 1 }, &.{});
+    return interpreter.interpretDef(.{ .id = program.defs.len - 1 }, &.{}, .Apply);
 }
 
 pub const Error = error{
@@ -105,7 +105,7 @@ const Interpreter = struct {
         return error.NativeError;
     }
 
-    fn interpretDef(self: *Interpreter, def_id: core.DefId, hint: value.Tuple) Error!value.Set {
+    fn interpretDef(self: *Interpreter, def_id: core.DefId, hint: value.Tuple, hint_mode: type_.HintMode) Error!value.Set {
         const def_set = &self.def_sets[def_id.id];
 
         // check if already evaluated
@@ -122,7 +122,7 @@ const Interpreter = struct {
         //const old_time = self.time;
         //defer self.time = old_time;
         //self.time = u.ArrayList(usize).init(self.arena.allocator());
-        const set = try self.interpretExpr(self.program.defs[def_id.id], hint);
+        const set = try self.interpretExpr(self.program.defs[def_id.id], hint, hint_mode);
 
         // memoize
         try def_set.append(.{ .hint = hint, .set = set });
@@ -130,12 +130,12 @@ const Interpreter = struct {
         return set;
     }
 
-    fn interpretBox(self: *Interpreter, box: core.Box, hint: value.Tuple) Error!value.Set {
+    fn interpretBox(self: *Interpreter, box: core.Box, hint: value.Tuple, hint_mode: type_.HintMode) Error!value.Set {
         const box_args = try self.arena.allocator().alloc(value.Scalar, box.args.len);
         for (box_args) |*box_arg, i|
             box_arg.* = self.scope.items[self.scope.items.len - 1 - box.args[i].id];
         const box_hint = try std.mem.concat(self.arena.allocator(), value.Scalar, &.{ box_args, hint });
-        const set = try self.interpretDef(box.def_id, box_hint);
+        const set = try self.interpretDef(box.def_id, box_hint, hint_mode);
         var result_set = value.Set{
             .set = u.DeepHashSet(value.Tuple).init(self.arena.allocator()),
         };
@@ -146,7 +146,7 @@ const Interpreter = struct {
         return result_set;
     }
 
-    fn interpretExpr(self: *Interpreter, expr_id: core.ExprId, hint: value.Tuple) Error!value.Set {
+    fn interpretExpr(self: *Interpreter, expr_id: core.ExprId, hint: value.Tuple, hint_mode: type_.HintMode) Error!value.Set {
         try self.interrupter.check();
         const expr = self.program.exprs[expr_id.id];
         switch (expr) {
@@ -171,8 +171,8 @@ const Interpreter = struct {
                 };
             },
             .Union => |pair| {
-                const left = try self.interpretExpr(pair.left, hint);
-                const right = try self.interpretExpr(pair.right, hint);
+                const left = try self.interpretExpr(pair.left, hint, hint_mode);
+                const right = try self.interpretExpr(pair.right, hint, hint_mode);
                 var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
                 var left_iter = left.set.iterator();
                 while (left_iter.next()) |kv| {
@@ -187,29 +187,25 @@ const Interpreter = struct {
                 return value.Set{ .set = set };
             },
             .Intersect => |pair| {
-                const left = try self.interpretExpr(pair.left, hint);
-                const right = try self.interpretExpr(pair.right, hint);
-                var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
-                var left_iter = left.set.iterator();
-                while (left_iter.next()) |kv| {
-                    try self.interrupter.check();
-                    if (right.set.contains(kv.key_ptr.*)) {
-                        _ = try set.put(kv.key_ptr.*, {});
+                if (self.interpretExpr(pair.left, hint, hint_mode)) |left| {
+                    return self.interpretIntersect(left, pair.right);
+                } else |_| {
+                    if (self.interpretExpr(pair.right, hint, hint_mode)) |right| {
+                        return self.interpretIntersect(right, pair.left);
+                    } else |err| {
+                        return err;
                     }
                 }
-                return value.Set{
-                    .set = set,
-                };
             },
             .Product => |pair| {
-                const left = try self.interpretExpr(pair.left, hint);
+                const left = try self.interpretExpr(pair.left, hint, hint_mode);
                 var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
                 const right_hint_start = switch (left.getArity()) {
                     .Unknown => return value.Set{ .set = set },
                     .Known => |known| u.min(hint.len, known),
                     .Mixed => hint.len, // no hint available
                 };
-                const right = try self.interpretExpr(pair.right, hint[right_hint_start..]);
+                const right = try self.interpretExpr(pair.right, hint[right_hint_start..], hint_mode);
                 var left_iter = left.set.iterator();
                 while (left_iter.next()) |lkv| {
                     try self.interrupter.check();
@@ -235,8 +231,8 @@ const Interpreter = struct {
             },
             .Equal => |pair| {
                 // the hint for expr doesn't tell us anything about left or right
-                const left = try self.interpretExpr(pair.left, &.{});
-                const right = try self.interpretExpr(pair.right, &.{});
+                const left = try self.interpretExpr(pair.left, &.{}, .Apply);
+                const right = try self.interpretExpr(pair.right, &.{}, .Apply);
                 var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
                 const isEqual = isEqual: {
                     var leftIter = left.set.iterator();
@@ -284,7 +280,7 @@ const Interpreter = struct {
                                         hint,
                                     },
                                 );
-                                const set = try self.interpretDef(normal.def_id, box_hint);
+                                const set = try self.interpretDef(normal.def_id, box_hint, hint_mode);
                                 var result_set = value.Set{
                                     .set = u.DeepHashSet(value.Tuple).init(self.arena.allocator()),
                                 };
@@ -302,10 +298,10 @@ const Interpreter = struct {
                     },
                 }
             },
-            .DefId => |def_id| return self.interpretDef(def_id, hint),
+            .DefId => |def_id| return self.interpretDef(def_id, hint, hint_mode),
             .Negate => |body| {
                 // the hint for expr doesn't tell us anything about body
-                const body_set = try self.interpretExpr(body, &.{});
+                const body_set = try self.interpretExpr(body, &.{}, hint_mode);
                 var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
                 if (body_set.set.count() == 0) {
                     _ = try set.put(&.{}, {});
@@ -316,22 +312,30 @@ const Interpreter = struct {
             },
             .Then => |then| {
                 // the hint for expr doesn't tell us anything about condition
-                const condition = try self.interpretExpr(then.condition, &.{});
+                const condition = try self.interpretExpr(then.condition, &.{}, hint_mode);
                 if (condition.set.count() == 0) {
                     const set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
                     return value.Set{
                         .set = set,
                     };
                 } else {
-                    return self.interpretExpr(then.true_branch, hint);
+                    return self.interpretExpr(then.true_branch, hint, hint_mode);
                 }
             },
             .Abstract => |body| {
                 if (hint.len == 0) {
-                    return self.setError(expr_id, "No hint for arg", .{});
+                    switch (hint_mode) {
+                        .Apply => return self.setError(expr_id, "No hint for arg", .{}),
+                        .Intersect => {
+                            const set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
+                            return value.Set{
+                                .set = set,
+                            };
+                        },
+                    }
                 } else {
                     try self.scope.append(hint[0]);
-                    const body_set = try self.interpretExpr(body, hint[1..]);
+                    const body_set = try self.interpretExpr(body, hint[1..], hint_mode);
                     _ = self.scope.pop();
                     var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
                     var body_set_iter = body_set.set.iterator();
@@ -349,13 +353,13 @@ const Interpreter = struct {
             },
             .Apply => |pair| {
                 // can't make use of hint until we know which side is finite
-                if (self.interpretExpr(pair.left, &.{})) |left_type| {
-                    return self.interpretApply(left_type, pair.right, hint);
+                if (self.interpretExpr(pair.left, &.{}, .Apply)) |left_type| {
+                    return self.interpretApply(left_type, pair.right, hint, hint_mode);
                 } else |_| {
                     // error might have been from lack of hints, so try other way around
                     // TODO could this cause exponential retries in large program?
-                    if (self.interpretExpr(pair.right, &.{})) |right_type| {
-                        return self.interpretApply(right_type, pair.left, hint);
+                    if (self.interpretExpr(pair.right, &.{}, .Apply)) |right_type| {
+                        return self.interpretApply(right_type, pair.left, hint, hint_mode);
                     } else |err| {
                         return err;
                     }
@@ -381,7 +385,7 @@ const Interpreter = struct {
             },
             .Fix => |fix| {
                 try self.time.append(0);
-                const init_set = try self.interpretExpr(fix.init, &.{});
+                const init_set = try self.interpretExpr(fix.init, &.{}, .Apply);
                 _ = self.time.pop();
                 const init_box = try value.Box.fixOrReduce(self.arena.allocator(), init_set);
 
@@ -395,7 +399,7 @@ const Interpreter = struct {
                     try self.time.append(iteration);
                     defer _ = self.time.pop();
                     fix_hint[0] = .{ .Box = fix_box };
-                    const body_set = try self.interpretBox(fix.next, fix_hint);
+                    const body_set = try self.interpretBox(fix.next, fix_hint, .Apply);
                     var new_fix_set = value.Set{
                         .set = u.DeepHashSet(value.Tuple).init(self.arena.allocator()),
                     };
@@ -414,7 +418,7 @@ const Interpreter = struct {
                 }
             },
             .Reduce => |reduce| {
-                const input_set = try self.interpretExpr(reduce.input, &.{});
+                const input_set = try self.interpretExpr(reduce.input, &.{}, .Apply);
                 var input_tuples = try u.ArrayList(value.Tuple).initCapacity(self.arena.allocator(), input_set.set.count());
                 var input_iter = input_set.set.iterator();
                 while (input_iter.next()) |kv| {
@@ -429,7 +433,7 @@ const Interpreter = struct {
                 }.lessThan);
 
                 try self.time.append(0);
-                const init_set = try self.interpretExpr(reduce.init, &.{});
+                const init_set = try self.interpretExpr(reduce.init, &.{}, .Apply);
                 _ = self.time.pop();
                 const init_box = try value.Box.fixOrReduce(self.arena.allocator(), init_set);
 
@@ -448,7 +452,7 @@ const Interpreter = struct {
                     const tuple_box = try value.Box.fixOrReduce(self.arena.allocator(), tuple_set);
                     reduce_hint[0] = .{ .Box = reduce_box };
                     reduce_hint[1] = .{ .Box = tuple_box };
-                    const body_set = try self.interpretBox(reduce.next, reduce_hint);
+                    const body_set = try self.interpretBox(reduce.next, reduce_hint, .Apply);
                     var new_reduce_set = value.Set{
                         .set = u.DeepHashSet(value.Tuple).init(self.arena.allocator()),
                     };
@@ -465,7 +469,7 @@ const Interpreter = struct {
                 return reduce_set;
             },
             .Enumerate => |body| {
-                const body_set = try self.interpretExpr(body, &.{});
+                const body_set = try self.interpretExpr(body, &.{}, .Apply);
                 var tuples = try u.ArrayList(value.Tuple).initCapacity(self.arena.allocator(), body_set.set.count());
                 var body_iter = body_set.set.iterator();
                 while (body_iter.next()) |kv| {
@@ -493,10 +497,10 @@ const Interpreter = struct {
                 };
             },
             .Annotate => |annotate| {
-                return self.interpretExpr(annotate.body, hint);
+                return self.interpretExpr(annotate.body, hint, hint_mode);
             },
             .Watch => |watch| {
-                const result = self.interpretExpr(watch.body, hint);
+                const result = self.interpretExpr(watch.body, hint, hint_mode);
                 if (result) |set| {
                     var scope = u.ArrayList(WatchResult.ScopeItem).init(self.arena.allocator());
                     for (watch.scope) |scope_item|
@@ -583,7 +587,22 @@ const Interpreter = struct {
         }
     }
 
-    fn interpretApply(self: *Interpreter, left_set: value.Set, right_expr_id: core.ExprId, hint: value.Tuple) Error!value.Set {
+    fn interpretIntersect(self: *Interpreter, left_set: value.Set, right_expr_id: core.ExprId) Error!value.Set {
+        var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
+        var left_iter = left_set.set.keyIterator();
+        while (left_iter.next()) |left_row| {
+            try self.interrupter.check();
+            const right = try self.interpretExpr(right_expr_id, left_row.*, .Intersect);
+            if (right.set.contains(left_row.*)) {
+                _ = try set.put(left_row.*, {});
+            }
+        }
+        return value.Set{
+            .set = set,
+        };
+    }
+
+    fn interpretApply(self: *Interpreter, left_set: value.Set, right_expr_id: core.ExprId, hint: value.Tuple, hint_mode: type_.HintMode) Error!value.Set {
         var right_set_set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
         {
             var left_iter = left_set.set.iterator();
@@ -594,7 +613,7 @@ const Interpreter = struct {
                     value.Scalar,
                     &.{ left_entry.key_ptr.*, hint },
                 );
-                const right_part = try self.interpretExpr(right_expr_id, right_hint);
+                const right_part = try self.interpretExpr(right_expr_id, right_hint, hint_mode);
                 var right_part_iter = right_part.set.iterator();
                 while (right_part_iter.next()) |right_entry| {
                     try self.interrupter.check();

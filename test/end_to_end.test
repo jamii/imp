@@ -212,7 +212,7 @@ AnalyzeError: Cannot union types number and text
 
 1, "foo" | 2
 ---
-AnalyzeError: Cannot union types number and number, text
+AnalyzeError: Cannot union types number, text and number
 
 1 1 !
 ---
@@ -295,7 +295,7 @@ foo2: ?a ((?b a,b)@);
 bar: foo1 1 | foo2 2;
 bar ?@f f 3
 ---
-AnalyzeError: Cannot union types @(d0 number) and @(d2 number)
+AnalyzeError: Cannot union types @(d2 number) and @(d0 number)
 
 foo: 1, 1 | 2, 2;
 foo foo
@@ -444,7 +444,7 @@ AnalyzeError: The `next` argument for fix must take a box as it's first argument
 
 fix 1 ?@prev prev,2
 ---
-AnalyzeError: Type of fix failed to converge, reached number, number, number, number, number, number, number, number, number, number, number | number | number, number, number, number, number, number | number, number, number, number, number, number, number | number, number, number, number, number, number, number, number, number, number | number, number | number, number, number, number, number, number, number, number, number | number, number, number, number, number, number, number, number | number, number, number, number, number | number, number, number | number, number, number, number
+AnalyzeError: Type of fix failed to converge, reached number, number, number, number, number, number | number, number, number, number, number, number, number, number, number, number, number | number, number, number | number, number, number, number, number, number, number, number | number, number, number, number | number | number, number, number, number, number, number, number | number, number | number, number, number, number, number, number, number, number, number | number, number, number, number, number, number, number, number, number, number | number, number, number, number, number
 
 range (0 - 3) 3
 ---
@@ -497,7 +497,7 @@ value:
 
 reduce (3 | 4 | 5) 0 ?a ?b a + b
 ---
-AnalyzeError: Can't apply ?number ?number number to @(#d0 number)
+AnalyzeError: Can't apply number, number, number to @(#d0 number)
 
 // testing specialization caching
 f: ?i i+1;
@@ -880,14 +880,21 @@ value:
 ---
 AnalyzeError: Cannot union types number, text and text, number
 
-// TODO would like to support this
+((?a ?b a + b) | (1, 2, 42)) 1
+---
+AnalyzeError: Could not infer the type of abstract arg
+
 ((?a ?b a + b) | (1, 2, 42)) 1 2
 ---
-AnalyzeError: Cannot union types ?number ?number number and number, number, number
+type:
+number
+value:
+| 3
+| 42
 
 (?a "foo") (1, 2)
 ---
-AnalyzeError: Can't apply ?number text to number, number
+AnalyzeError: Can't apply number, text to number, number
 
 :foo
 ---
@@ -981,22 +988,22 @@ f: ?k ?v
 f (:thing, "thing" | :number, 1)
 ---
 type:
-:"number", number | :"thing", text
+:"thing", text | :"number", number
 value:
 | :"thing", "thing"
 | :"number", 2
 
 1 + "foo"
 ---
-AnalyzeError: Can't apply ?number number to text
+AnalyzeError: Can't apply number, number to text
 
 1 + :foo
 ---
-AnalyzeError: Can't apply ?number number to :"foo"
+AnalyzeError: Can't apply number, number to :"foo"
 
 (:foo, :bar) | (:foo)
 ---
-AnalyzeError: Cannot union types :"foo", :"bar" and :"foo"
+AnalyzeError: Cannot union types :"foo" and :"foo", :"bar"
 
 (:foo, :bar, 1) | (:foo, 2)
 ---
@@ -1005,7 +1012,7 @@ AnalyzeError: Cannot union types :"foo", number and :"foo", :"bar", number
 (:foo, :bar, 1) | (:foo, :quux, 2)
 ---
 type:
-:"foo", :"bar", number | :"foo", :"quux", number
+:"foo", :"quux", number | :"foo", :"bar", number
 value:
 | :"foo", :"bar", 1
 | :"foo", :"quux", 2

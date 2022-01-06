@@ -182,11 +182,11 @@ pub const Analyzer = struct {
                     const right = try self.analyzeExpr(pair.right, hint[u.min(hint.len, left_concrete.columns.len)..]);
                     var right_iter = right.concretes.keyIterator();
                     while (right_iter.next()) |right_concrete| {
-                        const columns_inputs = [2][]const type_.ColumnType{
+                        const columns_inputs = [2][]const type_.ScalarType{
                             left_concrete.columns,
                             right_concrete.columns,
                         };
-                        const columns = try std.mem.concat(self.arena.allocator(), type_.ColumnType, &columns_inputs);
+                        const columns = try std.mem.concat(self.arena.allocator(), type_.ScalarType, &columns_inputs);
                         try concretes.put(.{ .columns = columns }, {});
                     }
                 }
@@ -196,9 +196,6 @@ pub const Analyzer = struct {
                 // the hint for expr doesn't tell us anything about left or right
                 const left = try self.analyzeExpr(pair.left, &.{});
                 const right = try self.analyzeExpr(pair.right, &.{});
-                if (!left.isFinite() or !right.isFinite()) {
-                    return self.setError(expr_id, "Cannot equal one or more maybe-infinite sets: {} = {}", .{ left, right }, .Other);
-                }
                 var is_intersection_empty = true;
                 var left_iter = left.concretes.keyIterator();
                 while (left_iter.next()) |left_concrete| {
@@ -249,10 +246,7 @@ pub const Analyzer = struct {
             .DefId => |def_id| return self.analyzeDef(def_id, hint),
             .Negate => |body| {
                 // the hint for expr doesn't tell us anything about body
-                const body_type = try self.analyzeExpr(body, &.{});
-                if (!body_type.isFinite()) {
-                    return self.setError(expr_id, "The body of `!` must have finite type, found {}", .{body_type}, .Other);
-                }
+                _ = try self.analyzeExpr(body, &.{});
                 return try type_.SetType.some(self.arena.allocator());
             },
             .Then => |then| {
@@ -277,8 +271,8 @@ pub const Analyzer = struct {
                     var concretes = u.DeepHashSet(type_.ConcreteSetType).init(self.arena.allocator());
                     var body_iter = body_type.concretes.keyIterator();
                     while (body_iter.next()) |body_concrete| {
-                        const columns = try std.mem.concat(self.arena.allocator(), type_.ColumnType, &.{
-                            &[_]type_.ColumnType{.{ .abstract = true, .value = hint[0] }},
+                        const columns = try std.mem.concat(self.arena.allocator(), type_.ScalarType, &.{
+                            &[_]type_.ScalarType{hint[0]},
                             body_concrete.columns,
                         });
                         try concretes.put(.{ .columns = columns }, {});
@@ -289,8 +283,7 @@ pub const Analyzer = struct {
             .Apply => |pair| {
                 // can't make use of hint until we know which side is finite
                 if (self.analyzeExpr(pair.left, &.{})) |left_type| {
-                    if (left_type.isFinite())
-                        return self.analyzeApply(expr_id, left_type, pair.right, hint, false);
+                    return self.analyzeApply(expr_id, left_type, pair.right, hint, false);
                 } else |left_err| {
                     if (self.error_info.*.?.kind != .NoHintForArg)
                         return left_err;
@@ -323,9 +316,6 @@ pub const Analyzer = struct {
             },
             .Fix => |fix| {
                 const init_type = try self.analyzeExpr(fix.init, &.{});
-                if (!init_type.isFinite()) {
-                    return self.setError(expr_id, "The initial value for fix must have finite type, found {}", .{init_type}, .Other);
-                }
                 var fix_hint = try self.arena.allocator().alloc(type_.ScalarType, 1);
                 var fix_type = init_type;
                 var fix_box_type = type_.BoxType{ .FixOrReduce = .{
@@ -345,11 +335,9 @@ pub const Analyzer = struct {
                     while (next_iter.next()) |next_concrete| {
                         if (next_concrete.columns.len < 1)
                             return self.setError(expr_id, "The `next` argument for fix must have arity >= 1", .{}, .Other);
-                        if (next_concrete.columns[0].value != .Box)
+                        if (next_concrete.columns[0] != .Box)
                             return self.setError(expr_id, "The `next` argument for fix must take a box as it's first argument. Found {}", .{next_type}, .Other);
                         const new_fix_concrete = type_.ConcreteSetType{ .columns = next_concrete.columns[1..] };
-                        if (!new_fix_concrete.isFinite())
-                            return self.setError(expr_id, "The body for fix must have finite type, found {}", .{next_type}, .Other);
                         try new_fix_concretes.put(new_fix_concrete, {});
                     }
                     const new_fix_type = type_.SetType{ .concretes = new_fix_concretes };
@@ -365,17 +353,11 @@ pub const Analyzer = struct {
             },
             .Reduce => |reduce| {
                 const input_type = try self.analyzeExpr(reduce.input, &.{});
-                if (!input_type.isFinite()) {
-                    return self.setError(expr_id, "The input for reduce must have finite type, found {}", .{input_type}, .Other);
-                }
                 const input_box_type = type_.BoxType{ .FixOrReduce = .{
                     .def_id = reduce.next.def_id,
                     .set_type = input_type,
                 } };
                 const init_type = try self.analyzeExpr(reduce.init, &.{});
-                if (!init_type.isFinite()) {
-                    return self.setError(expr_id, "The initial value for reduce must have finite type, found {}", .{init_type}, .Other);
-                }
                 var reduce_hint = try self.arena.allocator().alloc(type_.ScalarType, 2);
                 var reduce_type = init_type;
                 var reduce_box_type = type_.BoxType{
@@ -396,12 +378,9 @@ pub const Analyzer = struct {
                         if (next_concrete.columns.len < 2)
                             return self.setError(expr_id, "The `next` argument for reduce must have arity >= 1", .{}, .Other);
 
-                        if (next_concrete.columns[0].value != .Box or next_concrete.columns[1].value != .Box)
+                        if (next_concrete.columns[0] != .Box or next_concrete.columns[1] != .Box)
                             return self.setError(expr_id, "The body for reduce must take boxes as it's first two arguments. Found {}", .{next_type}, .Other);
                         const new_reduce_concrete = type_.ConcreteSetType{ .columns = next_concrete.columns[2..] };
-                        if (!new_reduce_concrete.isFinite()) {
-                            return self.setError(expr_id, "The body for reduce must have finite type, found {}", .{next_type}, .Other);
-                        }
                         try new_reduce_concretes.put(new_reduce_concrete, {});
                     }
                     const new_reduce_type = type_.SetType{ .concretes = new_reduce_concretes };
@@ -417,14 +396,11 @@ pub const Analyzer = struct {
             },
             .Enumerate => |body| {
                 const body_type = try self.analyzeExpr(body, &.{});
-                if (!body_type.isFinite()) {
-                    return self.setError(expr_id, "The body of `enumerate` must have finite type, found {}", .{body_type}, .Other);
-                }
                 var concretes = u.DeepHashSet(type_.ConcreteSetType).init(self.arena.allocator());
                 var body_iter = body_type.concretes.keyIterator();
                 while (body_iter.next()) |body_concrete| {
-                    const columns = try std.mem.concat(self.arena.allocator(), type_.ColumnType, &.{
-                        &[_]type_.ColumnType{.{ .abstract = false, .value = .Number }},
+                    const columns = try std.mem.concat(self.arena.allocator(), type_.ScalarType, &.{
+                        &[_]type_.ScalarType{.Number},
                         body_concrete.columns,
                     });
                     try concretes.put(.{ .columns = columns }, {});
@@ -438,15 +414,8 @@ pub const Analyzer = struct {
             .Watch => |watch| return try self.analyzeExpr(watch.body, hint),
             .Native => |native| {
                 return type_.SetType.fromColumns(self.arena.allocator(), switch (native) {
-                    .Add, .Subtract, .Multiply, .Divide, .Modulus, .Range => &.{
-                        .{ .abstract = true, .value = .Number },
-                        .{ .abstract = true, .value = .Number },
-                        .{ .abstract = false, .value = .Number },
-                    },
-                    .GreaterThan, .GreaterThanOrEqual => &.{
-                        .{ .abstract = true, .value = .Number },
-                        .{ .abstract = true, .value = .Number },
-                    },
+                    .Add, .Subtract, .Multiply, .Divide, .Modulus, .Range => &.{ .Number, .Number, .Number },
+                    .GreaterThan, .GreaterThanOrEqual => &.{ .Number, .Number },
                 });
             },
         }
@@ -458,7 +427,7 @@ pub const Analyzer = struct {
         while (left_iter.next()) |left_concrete| {
             var right_hint = try u.ArrayList(type_.ScalarType).initCapacity(self.arena.allocator(), left_concrete.columns.len + hint.len);
             for (left_concrete.columns) |column_type|
-                try right_hint.append(column_type.value);
+                try right_hint.append(column_type);
             try right_hint.appendSlice(hint);
             const right_type = try self.analyzeExpr(right_expr_id, right_hint.toOwnedSlice());
             var right_iter = right_type.concretes.keyIterator();
@@ -467,7 +436,7 @@ pub const Analyzer = struct {
 
                 var has_intersection = true;
                 for (left_concrete.columns[0..joined_arity]) |left_column, i| {
-                    if (!u.deepEqual(left_column.value, right_concrete.columns[i].value))
+                    if (!u.deepEqual(left_column, right_concrete.columns[i]))
                         has_intersection = false;
                 }
 
@@ -509,7 +478,7 @@ pub const Analyzer = struct {
         var i: usize = 0;
         while (i < min_len) : (i += 1)
             if (!u.deepEqual(concrete1.columns[i], concrete2.columns[i]))
-                return if (concrete1.columns[i].value.isStaged() and concrete2.columns[i].value.isStaged())
+                return if (concrete1.columns[i].isStaged() and concrete2.columns[i].isStaged())
                     .Ok
                 else
                     .Conflicting;

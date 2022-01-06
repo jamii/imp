@@ -62,14 +62,14 @@ pub const SetType = union(enum) {
 
     pub fn fromScalar(allocator: u.Allocator, scalar_type: ScalarType) !SetType {
         var concretes = u.DeepHashSet(ConcreteSetType).init(allocator);
-        const columns = [_]ColumnType{.{ .abstract = false, .value = scalar_type }};
-        try concretes.put(.{ .columns = try allocator.dupe(ColumnType, &columns) }, {});
+        const columns = [_]ScalarType{scalar_type};
+        try concretes.put(.{ .columns = try allocator.dupe(ScalarType, &columns) }, {});
         return SetType{ .concretes = concretes };
     }
 
-    pub fn fromColumns(allocator: u.Allocator, columns: []const ColumnType) !SetType {
+    pub fn fromColumns(allocator: u.Allocator, columns: []const ScalarType) !SetType {
         var concretes = u.DeepHashSet(ConcreteSetType).init(allocator);
-        try concretes.put(.{ .columns = try allocator.dupe(ColumnType, columns) }, {});
+        try concretes.put(.{ .columns = try allocator.dupe(ScalarType, columns) }, {});
         return SetType{ .concretes = concretes };
     }
 
@@ -107,36 +107,17 @@ pub const SetType = union(enum) {
 };
 
 pub const ConcreteSetType = struct {
-    columns: []const ColumnType,
-
-    pub fn isFinite(self: ConcreteSetType) bool {
-        for (self.columns) |column| {
-            if (column.abstract) return false;
-        }
-        return true;
-    }
+    columns: []const ScalarType,
 
     pub fn dumpInto(self: ConcreteSetType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         if (self.columns.len == 0) {
             try writer.writeAll("maybe");
         } else {
             for (self.columns) |column_type, ix| {
-                if (ix > 0) try writer.writeAll(if (self.columns[ix - 1].abstract) " " else ", ");
+                if (ix > 0) try writer.writeAll(", ");
                 try column_type.dumpInto(writer, indent);
             }
         }
-    }
-
-    pub const format = u.formatViaDump;
-};
-
-pub const ColumnType = struct {
-    abstract: bool,
-    value: ScalarType,
-
-    pub fn dumpInto(self: ColumnType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
-        if (self.abstract) try writer.writeAll("?");
-        try self.value.dumpInto(writer, indent);
     }
 
     pub const format = u.formatViaDump;

@@ -206,14 +206,6 @@ value:
 ---
 DesugarError: Name not in scope: c
 
-"foo" | 2
----
-AnalyzeError: Cannot union types number and text
-
-1, "foo" | 2
----
-AnalyzeError: Cannot union types number, text and number
-
 1 1 !
 ---
 type:
@@ -295,7 +287,11 @@ foo2: ?a ((?b a,b)@);
 bar: foo1 1 | foo2 2;
 bar ?@f f 3
 ---
-AnalyzeError: Cannot union types @(d2 number) and @(d0 number)
+type:
+number, number
+value:
+| 1, 3
+| 2, 3
 
 foo: 1, 1 | 2, 2;
 foo foo
@@ -497,7 +493,7 @@ value:
 
 reduce (3 | 4 | 5) 0 ?a ?b a + b
 ---
-AnalyzeError: Can't apply number, number, number to @(#d0 number)
+AnalyzeError: The result of applying @(#d0 number) to number, number, number will always be empty
 
 // testing specialization caching
 f: ?i i+1;
@@ -876,81 +872,118 @@ value:
 | "amazon", "google", 7, 11, 3
 | "google", "amazon", 6, 9, 1
 
-("foo", 1 | 2, "bar") "foo"
+1 | "foo"
 ---
-AnalyzeError: Cannot union types number, text and text, number
+type:
+number | text
+value:
+| "foo"
+| 1
 
-((?a ?b a + b) | (1, 2, 42)) 1
+1 | 1, "foo"
 ---
-AnalyzeError: Could not infer the type of abstract arg
+type:
+number, text | number
+value:
+| 1
+| 1, "foo"
 
-((?a ?b a + b) | (1, 2, 42)) 1 2
+(1) & (?a a 1)
 ---
 type:
 number
 value:
-| 3
-| 42
+| 1
 
-(?a "foo") (1, 2)
----
-AnalyzeError: Can't apply number, text to number, number
-
-:foo
+(1) & (?a a 2)
 ---
 type:
-:"foo"
+number
 value:
-| :"foo"
+none
 
-| :foo, (1,2|3,4)
-| :bar, "quux"
+(1 | 1, 2) & ((?a a 1) | (?a a 1), (?b b 2))
 ---
 type:
-:"bar", text | :"foo", number, number
+number | number, number
 value:
-| :"bar", "quux"
-| :"foo", 1, 2
-| :"foo", 3, 4
+| 1
+| 1, 2
 
-db:
-| :foo, (1,2|3,4)
-| :bar, "quux";
+(1 | 2, 2) & ((?a a 2) | (?a a 2), (?b b 2))
+---
+type:
+number | number, number
+value:
+| 2, 2
+
+("foo", 1 | 2, "bar") "foo"
+---
+type:
+number
+value:
+| 1
+
+db: :foo, 1 | :bar, "a";
 db :foo
 ---
 type:
-number, number
+number
 value:
-| 1, 2
-| 3, 4
+| 1
 
-// No type errors for mistakes with staged names
-db:
-| :foo, (1,2|3,4)
-| :bar, "quux";
+db: :foo, 1 | :bar, "a";
 db :fo
 ---
-type:
-none
-value:
-none
+AnalyzeError: The result of applying :"fo" to :"bar", text | :"foo", number will always be empty
 
-// But we do get type errors for using the wrong types
-db:
-| :foo, (1,2|3,4)
-| :bar, "quux";
-db "fo"
+1 + "foo"
 ---
-AnalyzeError: Can't apply :"bar", text to text
+AnalyzeError: The result of applying text to number, number will always be empty
 
-f: ?k ?v
-| k :number then :number, (v + 1);
-f (:number, 2)
+"foo" + 1
+---
+AnalyzeError: The result of applying text to number, number, number will always be empty
+
+// TODO want this to warn
+1 + (1 | "foo")
 ---
 type:
-:"number", number
+number
 value:
-| :"number", 3
+| 2
+
+// TODO want this to warn
+(1 | "foo") + 1
+---
+type:
+number
+value:
+| 2
+
+// TODO want this to work
+(?@expr 
+| :number, (expr :number) + 1
+| :union, (expr :union))
+(:number, 1)@
+---
+AnalyzeError: The result of applying :"union" to :"number", number will always be empty
+
+// TODO want this to work
+(?@expr 
+| :number, (expr :number) + 1
+| :union, (expr :union))
+(:union, "a", "b")@
+---
+AnalyzeError: The result of applying :"number" to :"union", text, text will always be empty
+
+// TODO want to be able to opt in to this working
+(?@expr 
+| :number, (expr :number) + 1
+| :union, (expr :union))
+(:intersect, "a", "b")@
+---
+AnalyzeError: The result of applying :"number" to :"intersect", text, text will always be empty
 
 // TODO this is a surprising parse
 f: ?k ?v
@@ -958,68 +991,4 @@ f: ?k ?v
 | k :number then :number, (v + 1);
 f (:number, 2)
 ---
-type:
-none
-value:
-none
-
-f: ?k ?v
-| (k :text then :text, v)
-| (k :number then :number, (v + 1));
-f (:number, 2)
----
-type:
-:"number", number
-value:
-| :"number", 3
-
-f: ?k ?v
-| (k :text then :text, v)
-| (k :number then :number, (v + 1));
-f (:thing, 2)
----
-type:
-none
-value:
-none
-
-f: ?k ?v
-  k :number then :number, (v + 1) else k, v;
-f (:thing, "thing" | :number, 1)
----
-type:
-:"thing", text | :"number", number
-value:
-| :"thing", "thing"
-| :"number", 2
-
-1 + "foo"
----
-AnalyzeError: Can't apply number, number to text
-
-1 + :foo
----
-AnalyzeError: Can't apply number, number to :"foo"
-
-(:foo, :bar) | (:foo)
----
-AnalyzeError: Cannot union types :"foo" and :"foo", :"bar"
-
-(:foo, :bar, 1) | (:foo, 2)
----
-AnalyzeError: Cannot union types :"foo", number and :"foo", :"bar", number
-
-(:foo, :bar, 1) | (:foo, :quux, 2)
----
-type:
-:"foo", :"quux", number | :"foo", :"bar", number
-value:
-| :"foo", :"bar", 1
-| :"foo", :"quux", 2
-
-(1, 2) & ((?a a 1), (?b b 2))
----
-type:
-number, number
-value:
-| 1, 2
+AnalyzeError: The result of applying :"text" to :"number" will always be empty

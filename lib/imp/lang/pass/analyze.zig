@@ -159,7 +159,7 @@ pub const Analyzer = struct {
                 while (right_iter.next()) |right_concrete| {
                     try concretes.put(right_concrete.*, {});
                 }
-                return self.checkSetType(expr_id, .{ .concretes = concretes });
+                return type_.SetType{ .concretes = concretes };
             },
             .Intersect => |pair| {
                 if (self.analyzeExpr(pair.left, hint, hint_mode)) |left| {
@@ -433,24 +433,31 @@ pub const Analyzer = struct {
 
     fn analyzeIntersect(self: *Analyzer, intersect_expr_id: core.ExprId, left_type: type_.SetType, right_expr_id: core.ExprId, is_flipped: bool) Error!type_.SetType {
         var concretes = u.DeepHashSet(type_.ConcreteSetType).init(self.arena.allocator());
+        var right_concretes = u.DeepHashSet(type_.ConcreteSetType).init(self.arena.allocator());
         var left_iter = left_type.concretes.keyIterator();
         while (left_iter.next()) |left_concrete| {
-            const right = try self.analyzeExpr(right_expr_id, left_concrete.columns, .Intersect);
-            if (right.concretes.contains(left_concrete.*)) {
+            const right_type = try self.analyzeExpr(right_expr_id, left_concrete.columns, .Intersect);
+            var right_iter = right_type.concretes.keyIterator();
+            while (right_iter.next()) |right_concrete| {
+                try right_concretes.put(right_concrete.*, {});
+            }
+            if (right_type.concretes.contains(left_concrete.*)) {
                 try concretes.put(left_concrete.*, {});
             }
         }
-        if (concretes.count() == 0)
-            return if (is_flipped)
-                self.setError(intersect_expr_id, "Intersection of {} and left will always be empty", .{left_type}, .Other)
+        const total_right_type = type_.SetType{ .concretes = right_concretes };
+        return if (concretes.count() == 0 and right_concretes.count() != 0)
+            if (is_flipped)
+                self.setError(intersect_expr_id, "The intersection of {} with {} will always be empty", .{ left_type, total_right_type }, .Other)
             else
-                self.setError(intersect_expr_id, "Intersection of {} and right will always be empty", .{left_type}, .Other)
+                self.setError(intersect_expr_id, "The intersection of {} with {} will always be empty", .{ total_right_type, left_type }, .Other)
         else
-            return type_.SetType{ .concretes = concretes };
+            type_.SetType{ .concretes = concretes };
     }
 
     fn analyzeApply(self: *Analyzer, apply_expr_id: core.ExprId, left_type: type_.SetType, right_expr_id: core.ExprId, hint: []const type_.ScalarType, hint_mode: type_.HintMode, is_flipped: bool) Error!type_.SetType {
         var concretes = u.DeepHashSet(type_.ConcreteSetType).init(self.arena.allocator());
+        var right_concretes = u.DeepHashSet(type_.ConcreteSetType).init(self.arena.allocator());
         var left_iter = left_type.concretes.keyIterator();
         while (left_iter.next()) |left_concrete| {
             var right_hint = try u.ArrayList(type_.ScalarType).initCapacity(self.arena.allocator(), left_concrete.columns.len + hint.len);
@@ -460,6 +467,8 @@ pub const Analyzer = struct {
             const right_type = try self.analyzeExpr(right_expr_id, right_hint.toOwnedSlice(), hint_mode);
             var right_iter = right_type.concretes.keyIterator();
             while (right_iter.next()) |right_concrete| {
+                try right_concretes.put(right_concrete.*, {});
+
                 const joined_arity = u.min(left_concrete.columns.len, right_concrete.columns.len);
 
                 var has_intersection = true;
@@ -474,45 +483,16 @@ pub const Analyzer = struct {
                     else
                         right_concrete.columns[joined_arity..];
                     try concretes.put(.{ .columns = columns }, {});
-                } else {
-                    if (analyzeConcreteSetTypeUnion(left_concrete.*, right_concrete.*) == .Conflicting)
-                        return if (is_flipped)
-                            self.setError(apply_expr_id, "Can't apply {} to {}", .{ right_concrete, left_concrete }, .Other)
-                        else
-                            self.setError(apply_expr_id, "Can't apply {} to {}", .{ left_concrete, right_concrete }, .Other);
                 }
             }
         }
-        return self.checkSetType(apply_expr_id, .{ .concretes = concretes });
-    }
-
-    fn checkSetType(self: *Analyzer, expr_id: core.ExprId, set_type: type_.SetType) Error!type_.SetType {
-        var iter1 = set_type.concretes.keyIterator();
-        while (iter1.next()) |concrete1| {
-            var iter2 = set_type.concretes.keyIterator();
-            while (iter2.next()) |concrete2| {
-                switch (analyzeConcreteSetTypeUnion(concrete1.*, concrete2.*)) {
-                    .Ok => {},
-                    .Conflicting => return self.setError(expr_id, "Cannot union types {} and {}", .{ concrete1, concrete2 }, .Other),
-                }
-            }
-        }
-        return set_type;
-    }
-
-    /// For every two concrete types in a SetType, the first place at which they differ must be a staged type in both
-    fn analyzeConcreteSetTypeUnion(concrete1: type_.ConcreteSetType, concrete2: type_.ConcreteSetType) enum { Ok, Conflicting } {
-        const min_len = u.min(concrete1.columns.len, concrete2.columns.len);
-        var i: usize = 0;
-        while (i < min_len) : (i += 1)
-            if (!u.deepEqual(concrete1.columns[i], concrete2.columns[i]))
-                return if (concrete1.columns[i].isStaged() and concrete2.columns[i].isStaged())
-                    .Ok
-                else
-                    .Conflicting;
-        return if (concrete1.columns.len == concrete2.columns.len)
-            .Ok
+        const total_right_type = type_.SetType{ .concretes = right_concretes };
+        return if (concretes.count() == 0 and right_concretes.count() != 0)
+            if (is_flipped)
+                self.setError(apply_expr_id, "The result of applying {} to {} will always be empty", .{ left_type, total_right_type }, .Other)
+            else
+                self.setError(apply_expr_id, "The result of applying {} to {} will always be empty", .{ total_right_type, left_type }, .Other)
         else
-            .Conflicting;
+            return type_.SetType{ .concretes = concretes };
     }
 };

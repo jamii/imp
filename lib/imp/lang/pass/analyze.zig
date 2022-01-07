@@ -437,6 +437,19 @@ pub const Analyzer = struct {
             },
             .Watch => |watch| return try self.analyzeExpr(watch.body, hint, hint_mode),
             .Native => |native| {
+                if (hint.len < 2)
+                    return switch (hint_mode) {
+                        .Apply => self.setError(expr_id, "Could not infer the type of abstract arg", .{}, .NoHintForArg),
+                        .Intersect => return type_.SetType.none(self.arena.allocator()),
+                    };
+                if (hint[0] != .Number) {
+                    try self.addWarning(expr_id, "First argument to {} should have type number, not {}", .{ native, hint[0] });
+                    return type_.SetType.none(self.arena.allocator());
+                }
+                if (hint[1] != .Number) {
+                    try self.addWarning(expr_id, "Second argument to {} should have type number, not {}", .{ native, hint[1] });
+                    return type_.SetType.none(self.arena.allocator());
+                }
                 return type_.SetType.fromColumns(self.arena.allocator(), switch (native) {
                     .Add, .Subtract, .Multiply, .Divide, .Modulus, .Range => &.{ .Number, .Number, .Number },
                     .GreaterThan, .GreaterThanOrEqual => &.{ .Number, .Number },

@@ -168,8 +168,9 @@ pub const Store = struct {
                 try set.dumpInto(writer, indent);
                 const warnings = self.program_type.?.warnings;
                 if (warnings.len > 0) {
-                    try writer.writeAll("\nwarnings:\n");
+                    try writer.writeAll("\nwarnings:");
                     for (warnings) |warning| {
+                        try writer.writeAll("\n");
                         try warning.dumpInto(writer, indent);
                     }
                 }

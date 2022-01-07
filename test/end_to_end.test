@@ -498,7 +498,7 @@ number
 value:
 none
 warnings:
-The result of applying @(#d0 number) to number, number, number will always be empty
+First argument to Native.Add should have type number, not @(#d0 number)
 
 // testing specialization caching
 f: ?i i+1;
@@ -954,14 +954,17 @@ none
 value:
 none
 warnings:
-The result of applying text to number, number will always be empty
+Second argument to Native.Add should have type number, not text
 
+// TODO no way to apply nowarn to the native itself
 1 + "foo" ?
 ---
 type:
 none
 value:
 none
+warnings:
+Second argument to Native.Add should have type number, not text
 
 "foo" + 1
 ---
@@ -970,9 +973,9 @@ none
 value:
 none
 warnings:
-The result of applying text to number, number, number will always be empty
+First argument to Native.Add should have type number, not text
 
-// TODO isn't any way to apply nowarn to the first arg of add
+// TODO no way to apply nowarn to the first arg of native
 "foo" + 1 ?
 ---
 type:
@@ -980,23 +983,35 @@ none
 value:
 none
 warnings:
-The result of applying text to number, number, number will always be empty
+First argument to Native.Add should have type number, not text
 
-// TODO want this to warn
 1 + (1 | "foo")
 ---
 type:
 number
 value:
 | 2
+warnings:
+Second argument to Native.Add should have type number, not text
 
-// TODO want this to warn
 (1 | "foo") + 1
 ---
 type:
 number
 value:
 | 2
+warnings:
+First argument to Native.Add should have type number, not text
+
+plus: ?a ?b a + b;
+plus 1 "foo"
+---
+type:
+none
+value:
+none
+warnings:
+Second argument to Native.Add should have type number, not text
 
 (:number, 1)@
 (?@expr 
@@ -1052,7 +1067,8 @@ none
 value:
 none
 warnings:
-The result of applying :"number" to :"intersect", text, text will always be emptyThe result of applying :"union" to :"intersect", text, text will always be empty
+The result of applying :"number" to :"intersect", text, text will always be empty
+The result of applying :"union" to :"intersect", text, text will always be empty
 
 (:intersect, "a", "b")@
 (?@expr 
@@ -1101,3 +1117,7 @@ type:
 number
 value:
 | 2
+
+some + some
+---
+AnalyzeError: Could not infer the type of abstract arg

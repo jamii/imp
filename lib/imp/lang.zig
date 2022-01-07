@@ -148,6 +148,17 @@ pub const Store = struct {
         }
     }
 
+    pub fn getWarningsRanges(self: Store, allocator: u.Allocator) ![]const [2]usize {
+        var ranges = u.ArrayList([2]usize).init(allocator);
+        if (self.program_type) |program_type| {
+            for (program_type.warnings) |warning| {
+                const syntax_expr_id = self.core_program.?.from_syntax[warning.expr_id.id];
+                try ranges.append(self.syntax_program.?.from_source[syntax_expr_id.id]);
+            }
+        }
+        return ranges.toOwnedSlice();
+    }
+
     pub fn dumpInto(self: Store, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         if (self.result) |result| {
             if (result) |set| {
@@ -231,6 +242,12 @@ pub const Worker = struct {
         id: usize,
         text: []const u8,
         kind: ResponseKind,
+        warnings: []const [2]usize,
+
+        pub fn deinit(self: Response, allocator: u.Allocator) void {
+            allocator.free(self.warnings);
+            allocator.free(self.text);
+        }
     };
 
     pub const ResponseKind = union(enum) {
@@ -292,7 +309,7 @@ pub const Worker = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         if (self.new_request) |request| self.allocator.free(request.text);
-        if (self.new_response) |response| self.allocator.free(response.text);
+        if (self.new_response) |response| response.deinit(self.allocator);
         self.allocator.destroy(self);
     }
 
@@ -356,6 +373,7 @@ pub const Worker = struct {
                 ResponseKind{ .Ok = store.getWatchRange() }
             else |_|
                 ResponseKind{ .Err = store.getErrorRange() };
+            const warnings = try store.getWarningsRanges(self.allocator);
 
             // set response
             {
@@ -366,6 +384,7 @@ pub const Worker = struct {
                     .text = response_buffer.toOwnedSlice(),
                     .id = new_request.id,
                     .kind = response_kind,
+                    .warnings = warnings,
                 };
             }
         }

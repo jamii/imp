@@ -16,6 +16,7 @@ pub fn desugar(
         .defs = u.ArrayList(core.ExprId).init(arena.allocator()),
         .exprs = u.ArrayList(core.Expr).init(arena.allocator()),
         .from_syntax = u.ArrayList(syntax.ExprId).init(arena.allocator()),
+        .parent = u.ArrayList(?core.ExprId).init(arena.allocator()),
         .scope = u.ArrayList(Desugarer.ScopeItem).init(arena.allocator()),
         .current_expr_id = null,
         .error_info = error_info,
@@ -25,6 +26,7 @@ pub fn desugar(
         .defs = desugarer.defs.toOwnedSlice(),
         .exprs = desugarer.exprs.toOwnedSlice(),
         .from_syntax = desugarer.from_syntax.toOwnedSlice(),
+        .parent = desugarer.parent.toOwnedSlice(),
     };
 }
 
@@ -50,6 +52,7 @@ const Desugarer = struct {
     defs: u.ArrayList(core.ExprId),
     exprs: u.ArrayList(core.Expr),
     from_syntax: u.ArrayList(syntax.ExprId),
+    parent: u.ArrayList(?core.ExprId),
     scope: u.ArrayList(ScopeItem),
     current_expr_id: ?syntax.ExprId,
     error_info: *?ErrorInfo,
@@ -75,7 +78,11 @@ const Desugarer = struct {
     fn putCore(self: *Desugarer, core_expr: core.Expr) !core.ExprId {
         try self.exprs.append(core_expr);
         try self.from_syntax.append(self.current_expr_id.?);
-        return core.ExprId{ .id = self.exprs.items.len - 1 };
+        const id = core.ExprId{ .id = self.exprs.items.len - 1 };
+        try self.parent.append(null);
+        for (core_expr.getChildren().slice()) |child_id|
+            self.parent.items[child_id.id] = id;
+        return id;
     }
 
     fn scopeAppend(self: *Desugarer, item: ScopeItem) !void {

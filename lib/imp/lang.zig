@@ -155,6 +155,13 @@ pub const Store = struct {
                 try self.program_type.?.program_type.dumpInto(writer, indent);
                 try writer.writeAll("\nvalue:\n");
                 try set.dumpInto(writer, indent);
+                const warnings = self.program_type.?.warnings;
+                if (warnings.len > 0) {
+                    try writer.writeAll("\nwarnings:\n");
+                    for (warnings) |warning| {
+                        try warning.dumpInto(writer, indent);
+                    }
+                }
             } else |err| {
                 try std.fmt.format(writer, "{s}", .{@errorName(err)});
                 switch (err) {

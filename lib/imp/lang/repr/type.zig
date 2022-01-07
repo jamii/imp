@@ -7,6 +7,7 @@ const core = imp.lang.repr.core;
 pub const ProgramType = struct {
     defs: []const u.ArrayList(Specialization),
     program_type: SetType,
+    warnings: []const Warning,
 
     pub fn dumpInto(self: ProgramType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         for (self.defs) |def, i| {
@@ -24,12 +25,17 @@ pub const ProgramType = struct {
         try writer.writeAll("\n");
         try writer.writeByteNTimes(' ', indent);
         try self.program_type.dumpInto(writer, indent);
+        if (self.warnings.len > 0) {
+            try writer.writeAll("\n");
+            try writer.writeByteNTimes(' ', indent);
+            try writer.writeAll("warnings:");
+            for (self.warnings) |warning| {
+                try writer.writeAll("\n");
+                try writer.writeByteNTimes(' ', indent + 4);
+                try warning.dumpInto(writer, indent);
+            }
+        }
     }
-};
-
-pub const HintMode = enum {
-    Apply,
-    Intersect,
 };
 
 pub const Specialization = struct {
@@ -47,6 +53,11 @@ pub const Specialization = struct {
         try writer.writeAll(") ");
         try self.set_type.dumpInto(writer, indent);
     }
+};
+
+pub const HintMode = enum {
+    Apply,
+    Intersect,
 };
 
 pub const SetType = union(enum) {
@@ -191,4 +202,14 @@ pub const BoxType = union(enum) {
     }
 
     pub const format = u.formatViaDump;
+};
+
+pub const Warning = struct {
+    expr_id: core.ExprId,
+    message: []const u8,
+
+    pub fn dumpInto(self: Warning, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
+        _ = indent;
+        try writer.writeAll(self.message);
+    }
 };

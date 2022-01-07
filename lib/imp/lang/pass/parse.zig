@@ -484,7 +484,7 @@ pub const Parser = struct {
                 '?' => {
                     const position = self.position;
                     const next_char = (try self.nextAsciiChar()) orelse 0;
-                    if (std.ascii.isSpace(next_char)) {
+                    if (!std.ascii.isAlpha(next_char) and next_char != '@') {
                         return Token{ .NoWarn = {} };
                     } else {
                         self.position = position;

@@ -20,11 +20,13 @@ pub fn analyze(
         .scope = u.ArrayList(type_.ScalarType).init(arena.allocator()),
         .interrupter = interrupter,
         .error_info = error_info,
+        .warnings = u.ArrayList(type_.Warning).init(arena.allocator()),
     };
     const program_type = try analyzer.analyzeDef(.{ .id = core_program.defs.len - 1 }, &.{}, .Apply);
     return type_.ProgramType{
         .defs = analyzer.defs,
         .program_type = program_type,
+        .warnings = analyzer.warnings.toOwnedSlice(),
     };
 }
 
@@ -63,6 +65,7 @@ pub const Analyzer = struct {
     scope: u.ArrayList(type_.ScalarType),
     interrupter: imp.lang.Interrupter,
     error_info: *?ErrorInfo,
+    warnings: u.ArrayList(type_.Warning),
 
     fn setError(self: *Analyzer, expr_id: core.ExprId, comptime fmt: []const u8, args: anytype, kind: ErrorKind) Error {
         const message = try u.formatToString(self.arena.allocator(), fmt, args);
@@ -72,6 +75,14 @@ pub const Analyzer = struct {
             .kind = kind,
         };
         return error.AnalyzeError;
+    }
+
+    fn addWarning(self: *Analyzer, expr_id: core.ExprId, comptime fmt: []const u8, args: anytype) !void {
+        const message = try u.formatToString(self.arena.allocator(), fmt, args);
+        if (self.core_program.parent[expr_id.id]) |parent_expr_id|
+            if (self.core_program.exprs[parent_expr_id.id] == .NoWarn)
+                return;
+        try self.warnings.append(.{ .expr_id = expr_id, .message = message });
     }
 
     fn analyzeDef(self: *Analyzer, def_id: core.DefId, hint: []const type_.ScalarType, hint_mode: type_.HintMode) Error!type_.SetType {
@@ -211,7 +222,7 @@ pub const Analyzer = struct {
                     }
                 }
                 if (is_intersection_empty)
-                    return self.setError(expr_id, "Will never be equal: {} vs {}", .{ left, right }, .Other);
+                    try self.addWarning(expr_id, "Will never be equal: {} vs {}", .{ left, right });
                 return type_.SetType.some(self.arena.allocator());
             },
             .ScalarId => |scalar_id| {
@@ -260,7 +271,7 @@ pub const Analyzer = struct {
                 // the hint for expr doesn't tell us anything about condition
                 const condition_type = try self.analyzeExpr(then.condition, &.{}, .Apply);
                 if (!condition_type.isBoolish()) {
-                    return self.setError(expr_id, "The condition of `then` must have type `maybe`, found {}", .{condition_type}, .Other);
+                    try self.addWarning(expr_id, "The condition of `then` must have type `maybe`, found {}", .{condition_type});
                 }
                 return if (condition_type.concretes.count() == 0)
                     type_.SetType.none(self.arena.allocator())
@@ -449,13 +460,12 @@ pub const Analyzer = struct {
             }
         }
         const total_right_type = type_.SetType{ .concretes = right_concretes };
-        return if (concretes.count() == 0 and right_concretes.count() != 0)
+        if (concretes.count() == 0 and right_concretes.count() != 0)
             if (is_flipped)
-                self.setError(intersect_expr_id, "The intersection of {} with {} will always be empty", .{ left_type, total_right_type }, .Other)
+                try self.addWarning(intersect_expr_id, "The intersection of {} with {} will always be empty", .{ left_type, total_right_type })
             else
-                self.setError(intersect_expr_id, "The intersection of {} with {} will always be empty", .{ total_right_type, left_type }, .Other)
-        else
-            type_.SetType{ .concretes = concretes };
+                try self.addWarning(intersect_expr_id, "The intersection of {} with {} will always be empty", .{ total_right_type, left_type });
+        return type_.SetType{ .concretes = concretes };
     }
 
     fn analyzeApply(self: *Analyzer, apply_expr_id: core.ExprId, left_type: type_.SetType, right_expr_id: core.ExprId, hint: []const type_.ScalarType, hint_mode: type_.HintMode, is_flipped: bool) Error!type_.SetType {
@@ -490,12 +500,11 @@ pub const Analyzer = struct {
             }
         }
         const total_right_type = type_.SetType{ .concretes = right_concretes };
-        return if (concretes.count() == 0 and right_concretes.count() != 0)
+        if (concretes.count() == 0 and right_concretes.count() != 0)
             if (is_flipped)
-                self.setError(apply_expr_id, "The result of applying {} to {} will always be empty", .{ left_type, total_right_type }, .Other)
+                try self.addWarning(apply_expr_id, "The result of applying {} to {} will always be empty", .{ left_type, total_right_type })
             else
-                self.setError(apply_expr_id, "The result of applying {} to {} will always be empty", .{ total_right_type, left_type }, .Other)
-        else
-            return type_.SetType{ .concretes = concretes };
+                try self.addWarning(apply_expr_id, "The result of applying {} to {} will always be empty", .{ total_right_type, left_type });
+        return type_.SetType{ .concretes = concretes };
     }
 };

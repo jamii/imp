@@ -66,9 +66,9 @@ pub const Set = struct {
             }
         }.lessThan);
         if (tuples.items.len == 0) {
-            try writer.writeAll("none\n");
+            try writer.writeAll("none");
         } else if (tuples.items.len == 1 and tuples.items[0].len == 0) {
-            try writer.writeAll("some\n");
+            try writer.writeAll("some");
         } else {
             for (tuples.items) |tuple, i| {
                 if (i != 0) {

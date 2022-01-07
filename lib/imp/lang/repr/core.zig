@@ -8,6 +8,7 @@ pub const Program = struct {
     exprs: []const Expr,
     from_syntax: []const syntax.ExprId,
     defs: []const ExprId,
+    parent: []const ?ExprId,
 
     pub fn dumpInto(self: Program, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         for (self.defs) |expr_id, def_id| {

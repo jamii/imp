@@ -493,7 +493,12 @@ value:
 
 reduce (3 | 4 | 5) 0 ?a ?b a + b
 ---
-AnalyzeError: The result of applying @(#d0 number) to number, number, number will always be empty
+type:
+number
+value:
+none
+warnings:
+The result of applying @(#d0 number) to number, number, number will always be empty
 
 // testing specialization caching
 f: ?i i+1;
@@ -935,15 +940,47 @@ value:
 db: :foo, 1 | :bar, "a";
 db :fo
 ---
-AnalyzeError: The result of applying :"fo" to :"bar", text | :"foo", number will always be empty
+type:
+none
+value:
+none
+warnings:
+The result of applying :"fo" to :"bar", text | :"foo", number will always be empty
 
 1 + "foo"
 ---
-AnalyzeError: The result of applying text to number, number will always be empty
+type:
+none
+value:
+none
+warnings:
+The result of applying text to number, number will always be empty
+
+1 + "foo" ?
+---
+type:
+none
+value:
+none
 
 "foo" + 1
 ---
-AnalyzeError: The result of applying text to number, number, number will always be empty
+type:
+none
+value:
+none
+warnings:
+The result of applying text to number, number, number will always be empty
+
+// TODO isn't any way to apply nowarn to the first arg of add
+"foo" + 1 ?
+---
+type:
+none
+value:
+none
+warnings:
+The result of applying text to number, number, number will always be empty
 
 // TODO want this to warn
 1 + (1 | "foo")
@@ -961,34 +998,106 @@ number
 value:
 | 2
 
-// TODO want this to work
-(?@expr 
-| :number, (expr :number) + 1
-| :union, (expr :union))
 (:number, 1)@
----
-AnalyzeError: The result of applying :"union" to :"number", number will always be empty
-
-// TODO want this to work
 (?@expr 
-| :number, (expr :number) + 1
-| :union, (expr :union))
+| (:number, (expr :number) + 1)
+| (:union, (expr :union)))
+---
+type:
+:"number", number
+value:
+| :"number", 2
+warnings:
+The result of applying :"union" to :"number", number will always be empty
+
+(:number, 1)@
+(?@expr 
+| (:number, (expr :number ?) + 1)
+| (:union, (expr :union ?)))
+---
+type:
+:"number", number
+value:
+| :"number", 2
+
 (:union, "a", "b")@
----
-AnalyzeError: The result of applying :"number" to :"union", text, text will always be empty
-
-// TODO want to be able to opt in to this working
 (?@expr 
-| :number, (expr :number) + 1
-| :union, (expr :union))
-(:intersect, "a", "b")@
+| (:number, (expr :number) + 1)
+| (:union, (expr :union)))
 ---
-AnalyzeError: The result of applying :"number" to :"intersect", text, text will always be empty
+type:
+:"union", text, text
+value:
+| :"union", "a", "b"
+warnings:
+The result of applying :"number" to :"union", text, text will always be empty
+
+(:union, "a", "b")@
+(?@expr 
+| (:number, (expr :number ?) + 1)
+| (:union, (expr :union ?)))
+---
+type:
+:"union", text, text
+value:
+| :"union", "a", "b"
+
+(:intersect, "a", "b")@
+(?@expr 
+| (:number, (expr :number) + 1)
+| (:union, (expr :union)))
+---
+type:
+none
+value:
+none
+warnings:
+The result of applying :"number" to :"intersect", text, text will always be emptyThe result of applying :"union" to :"intersect", text, text will always be empty
+
+(:intersect, "a", "b")@
+(?@expr 
+| (:number, (expr :number ?) + 1)
+| (:union, (expr :union ?)))
+---
+type:
+none
+value:
+none
 
 // TODO this is a surprising parse
-f: ?k ?v
-| k :text then :text, v
-| k :number then :number, (v + 1);
-f (:number, 2)
+(:union, "a", "b")@
+(?@expr 
+| :number, (expr :number ?) + 1
+| :union, (expr :union ?))
 ---
-AnalyzeError: The result of applying :"text" to :"number" will always be empty
+type:
+:"number", :"union", text, text
+value:
+| :"number", :"union", "a", "b"
+
+1 then 2
+---
+type:
+number
+value:
+| 2
+warnings:
+The condition of `then` must have type `maybe`, found number
+
+// TODO this is the intuitive place to put the warning
+//      but I guess can silence with !! instead
+1 ? then 2
+---
+type:
+number
+value:
+| 2
+warnings:
+The condition of `then` must have type `maybe`, found number
+
+(1 then 2) ?
+---
+type:
+number
+value:
+| 2

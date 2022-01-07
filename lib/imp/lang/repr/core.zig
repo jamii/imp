@@ -64,6 +64,7 @@ pub const Expr = union(enum) {
     Reduce: Reduce,
     Enumerate: ExprId,
     Annotate: Annotate,
+    NoWarn: ExprId,
     Watch: Watch,
     Native: Native,
 
@@ -133,6 +134,7 @@ pub const Expr = union(enum) {
             },
             .Enumerate => try writer.writeAll("enumerate"),
             .Annotate => |annotate| try std.fmt.format(writer, "# {any}", .{annotate.annotation}),
+            .Negate => try writer.writeAll("nowarn"),
             .Watch => |watch| try watch.dumpInto(writer, indent),
             .Native => |native| try native.dumpInto(writer, indent),
         }

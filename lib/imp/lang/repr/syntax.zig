@@ -49,6 +49,7 @@ pub const Expr = union(enum) {
     Reduce: Reduce,
     Enumerate: ExprId,
     Annotate: Annotate,
+    NoWarn: ExprId,
 
     pub fn getChildren(self: Expr) u.FixedSizeArrayList(3, ExprId) {
         var children = u.FixedSizeArrayList(3, ExprId){};
@@ -103,6 +104,7 @@ pub const Expr = union(enum) {
             .Reduce => try writer.writeAll("reduce"),
             .Enumerate => try writer.writeAll("enumerate"),
             .Annotate => |annotate| try std.fmt.format(writer, "# {s}", .{annotate.annotation}),
+            .NoWarn => try writer.writeAll("nowarn"),
         }
     }
 };

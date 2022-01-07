@@ -421,6 +421,9 @@ pub const Analyzer = struct {
                 // TODO some annotations affect types eg solve
                 return try self.analyzeExpr(annotate.body, hint, hint_mode);
             },
+            .NoWarn => |body| {
+                return try self.analyzeExpr(body, hint, hint_mode);
+            },
             .Watch => |watch| return try self.analyzeExpr(watch.body, hint, hint_mode),
             .Native => |native| {
                 return type_.SetType.fromColumns(self.arena.allocator(), switch (native) {

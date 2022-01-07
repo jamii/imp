@@ -245,6 +245,7 @@ const Desugarer = struct {
                     .body = try self.desugar(annotate.body),
                 },
             }),
+            .NoWarn => |body| try self.putCore(.{ .NoWarn = try self.desugar(body) }),
             .ThenElse => |then_else| then_else: {
                 // `c then t else f` => `tmp: c; ((tmp then t) | (tmp! then f))`
                 const tmp = try self.boxToExpr(try self.putDef(try self.desugar(then_else.condition)));

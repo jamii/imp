@@ -61,62 +61,62 @@ pub const HintMode = enum {
 };
 
 pub const SetType = union(enum) {
-    concretes: u.DeepHashSet(ConcreteSetType),
+    row_types: u.DeepHashSet(RowType),
 
     pub fn none(
         allocator: u.Allocator,
     ) SetType {
-        var concretes = u.DeepHashSet(ConcreteSetType).init(allocator);
-        return SetType{ .concretes = concretes };
+        var row_types = u.DeepHashSet(RowType).init(allocator);
+        return SetType{ .row_types = row_types };
     }
 
     pub fn some(
         allocator: u.Allocator,
     ) !SetType {
-        var concretes = u.DeepHashSet(ConcreteSetType).init(allocator);
-        try concretes.put(.{ .columns = &.{} }, {});
-        return SetType{ .concretes = concretes };
+        var row_types = u.DeepHashSet(RowType).init(allocator);
+        try row_types.put(.{ .columns = &.{} }, {});
+        return SetType{ .row_types = row_types };
     }
 
     pub fn fromScalar(allocator: u.Allocator, scalar_type: ScalarType) !SetType {
-        var concretes = u.DeepHashSet(ConcreteSetType).init(allocator);
+        var row_types = u.DeepHashSet(RowType).init(allocator);
         const columns = [_]ScalarType{scalar_type};
-        try concretes.put(.{ .columns = try allocator.dupe(ScalarType, &columns) }, {});
-        return SetType{ .concretes = concretes };
+        try row_types.put(.{ .columns = try allocator.dupe(ScalarType, &columns) }, {});
+        return SetType{ .row_types = row_types };
     }
 
     pub fn fromColumns(allocator: u.Allocator, columns: []const ScalarType) !SetType {
-        var concretes = u.DeepHashSet(ConcreteSetType).init(allocator);
-        try concretes.put(.{ .columns = try allocator.dupe(ScalarType, columns) }, {});
-        return SetType{ .concretes = concretes };
+        var row_types = u.DeepHashSet(RowType).init(allocator);
+        try row_types.put(.{ .columns = try allocator.dupe(ScalarType, columns) }, {});
+        return SetType{ .row_types = row_types };
     }
 
     pub fn isBoolish(self: SetType) bool {
-        var concretes_iter = self.concretes.keyIterator();
-        while (concretes_iter.next()) |concrete| {
-            if (concrete.columns.len > 0) return false;
+        var row_types_iter = self.row_types.keyIterator();
+        while (row_types_iter.next()) |row_type| {
+            if (row_type.columns.len > 0) return false;
         }
         return true;
     }
 
     pub fn isFinite(self: SetType) bool {
-        var concretes_iter = self.concretes.keyIterator();
-        while (concretes_iter.next()) |concrete| {
-            if (!concrete.isFinite()) return false;
+        var row_types_iter = self.row_types.keyIterator();
+        while (row_types_iter.next()) |row_type| {
+            if (!row_type.isFinite()) return false;
         }
         return true;
     }
 
     pub fn dumpInto(self: SetType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
-        if (self.concretes.count() == 0) {
+        if (self.row_types.count() == 0) {
             try writer.writeAll("none");
         } else {
-            var concretes_iter = self.concretes.keyIterator();
+            var row_types_iter = self.row_types.keyIterator();
             var is_first = true;
-            while (concretes_iter.next()) |concrete| {
+            while (row_types_iter.next()) |row_type| {
                 if (!is_first) try writer.writeAll(" | ");
                 is_first = false;
-                try concrete.dumpInto(writer, indent);
+                try row_type.dumpInto(writer, indent);
             }
         }
     }
@@ -124,10 +124,10 @@ pub const SetType = union(enum) {
     pub const format = u.formatViaDump;
 };
 
-pub const ConcreteSetType = struct {
+pub const RowType = struct {
     columns: []const ScalarType,
 
-    pub fn dumpInto(self: ConcreteSetType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
+    pub fn dumpInto(self: RowType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         if (self.columns.len == 0) {
             try writer.writeAll("maybe");
         } else {

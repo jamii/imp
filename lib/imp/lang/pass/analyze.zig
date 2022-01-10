@@ -150,8 +150,8 @@ pub const Analyzer = struct {
                     .Text => .Text,
                     .Number => .Number,
                     .Box => u.imp_panic("Shouldn't be any box literals", .{}),
-                    .StagedText => |text| .{ .StagedText = text },
-                    .StagedNumber => |number| .{ .StagedNumber = number },
+                    .TextTag => |text| .{ .TextTag = text },
+                    .NumberTag => |number| .{ .NumberTag = number },
                 };
                 return type_.SetType.fromScalar(self.arena.allocator(), scalar_type);
             },

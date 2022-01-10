@@ -725,13 +725,13 @@ pub const Parser = struct {
             .Def => {
                 if (try self.isWhitespaceNext())
                     return self.setError(self.position, "Expected name or scalar, found whitespace", .{});
-                const staged_start = self.position;
-                const staged = try self.nextToken();
-                switch (staged) {
-                    .Name => |name| return self.putSyntax(.{ .Scalar = .{ .StagedText = name } }, start, self.position),
-                    .Text => |text| return self.putSyntax(.{ .Scalar = .{ .StagedText = text } }, start, self.position),
-                    .Number => |number| return self.putSyntax(.{ .Scalar = .{ .StagedNumber = number } }, start, self.position),
-                    else => return self.setError(staged_start, "Expected name or scalar, found {}", .{staged}),
+                const tag_start = self.position;
+                const tag = try self.nextToken();
+                switch (tag) {
+                    .Name => |name| return self.putSyntax(.{ .Scalar = .{ .TextTag = name } }, start, self.position),
+                    .Text => |text| return self.putSyntax(.{ .Scalar = .{ .TextTag = text } }, start, self.position),
+                    .Number => |number| return self.putSyntax(.{ .Scalar = .{ .NumberTag = number } }, start, self.position),
+                    else => return self.setError(tag_start, "Expected name or scalar, found {}", .{tag}),
                 }
             },
             // allow starting with |&, for easy editing of lists

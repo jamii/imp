@@ -145,13 +145,13 @@ pub const ScalarType = union(enum) {
     Text,
     Number,
     Box: BoxType,
-    StagedText: []const u8, // valid utf8
-    StagedNumber: f64,
+    TextTag: []const u8, // valid utf8
+    NumberTag: f64,
 
-    pub fn isStaged(self: ScalarType) bool {
+    pub fn isTag(self: ScalarType) bool {
         return switch (self) {
             .Number, .Text, .Box => false,
-            .StagedNumber, .StagedText => true,
+            .NumberTag, .TextTag => true,
         };
     }
 
@@ -163,8 +163,8 @@ pub const ScalarType = union(enum) {
                 try writer.writeAll("@");
                 try box_type.dumpInto(writer, indent);
             },
-            .StagedText => |text| try (value.Scalar{ .StagedText = text }).dumpInto(writer, indent),
-            .StagedNumber => |number| try (value.Scalar{ .StagedNumber = number }).dumpInto(writer, indent),
+            .TextTag => |text| try (value.Scalar{ .TextTag = text }).dumpInto(writer, indent),
+            .NumberTag => |number| try (value.Scalar{ .NumberTag = number }).dumpInto(writer, indent),
         }
     }
 

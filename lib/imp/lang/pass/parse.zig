@@ -52,7 +52,6 @@ const syntax = imp.lang.repr.syntax;
 //   ">="
 //   "<"
 //   "<="
-//   "?"
 
 // TODO https://github.com/ziglang/zig/issues/2647
 pub fn parse(
@@ -112,7 +111,6 @@ pub const TokenTag = enum {
     Reduce,
     Enumerate,
     Annotate,
-    NoWarn,
 
     // sugar
     Negate,
@@ -161,7 +159,6 @@ pub const TokenTag = enum {
             .Reduce => "`reduce`",
             .Enumerate => "`enumerate`",
             .Annotate => "`#`",
-            .NoWarn => "`?`",
 
             .Negate => "`!`",
             .Else => "`else`",
@@ -207,7 +204,6 @@ pub const Token = union(TokenTag) {
     Reduce,
     Enumerate,
     Annotate,
-    NoWarn,
 
     // sugar
     Negate, // TODO not currently desugared because `none` is typed as 0 arity
@@ -481,16 +477,7 @@ pub const Parser = struct {
                 '&' => return Token{ .Intersect = {} },
                 ',' => return Token{ .Product = {} },
                 '=' => return Token{ .Equal = {} },
-                '?' => {
-                    const position = self.position;
-                    const next_char = (try self.nextAsciiChar()) orelse 0;
-                    if (!std.ascii.isAlpha(next_char) and next_char != '@') {
-                        return Token{ .NoWarn = {} };
-                    } else {
-                        self.position = position;
-                        return Token{ .Arg = {} };
-                    }
-                },
+                '?' => return Token{ .Arg = {} },
                 '-' => return Token{ .Subtract = {} },
                 '@' => return Token{ .Box = {} },
                 '#' => return Token{ .Annotate = {} },
@@ -815,15 +802,6 @@ pub const Parser = struct {
                     if (prev_op == null or !whitespace_before_op) {
                         const swap = try self.putSyntax(.{ .Name = "~" }, op_start, self.position);
                         left = try self.putSyntax(.{ .Apply = .{ .left = left, .right = swap } }, start, self.position);
-                    } else {
-                        self.position = op_start;
-                        return left;
-                    }
-                },
-
-                .NoWarn => {
-                    if (prev_op == null or !whitespace_before_op) {
-                        left = try self.putSyntax(.{ .NoWarn = left }, start, self.position);
                     } else {
                         self.position = op_start;
                         return left;

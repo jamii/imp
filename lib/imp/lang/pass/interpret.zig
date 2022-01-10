@@ -499,9 +499,6 @@ const Interpreter = struct {
             .Annotate => |annotate| {
                 return self.interpretExpr(annotate.body, hint, hint_mode);
             },
-            .NoWarn => |body| {
-                return self.interpretExpr(body, hint, hint_mode);
-            },
             .Watch => |watch| {
                 const result = self.interpretExpr(watch.body, hint, hint_mode);
                 if (result) |set| {

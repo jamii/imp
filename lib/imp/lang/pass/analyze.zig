@@ -79,9 +79,6 @@ pub const Analyzer = struct {
 
     fn addWarning(self: *Analyzer, expr_id: core.ExprId, comptime fmt: []const u8, args: anytype) !void {
         const message = try u.formatToString(self.arena.allocator(), fmt, args);
-        if (self.core_program.parent[expr_id.id]) |parent_expr_id|
-            if (self.core_program.exprs[parent_expr_id.id] == .NoWarn)
-                return;
         try self.warnings.append(.{ .expr_id = expr_id, .message = message });
     }
 
@@ -271,7 +268,7 @@ pub const Analyzer = struct {
                 // the hint for expr doesn't tell us anything about condition
                 const condition_type = try self.analyzeExpr(then.condition, &.{}, .Apply);
                 if (!condition_type.isBoolish()) {
-                    try self.addWarning(expr_id, "The condition of `then` must have type `maybe`, found {}", .{condition_type});
+                    try self.addWarning(expr_id, "The condition of `then` should have type `maybe`, found {}", .{condition_type});
                 }
                 return if (condition_type.concretes.count() == 0)
                     type_.SetType.none(self.arena.allocator())
@@ -431,9 +428,6 @@ pub const Analyzer = struct {
             .Annotate => |annotate| {
                 // TODO some annotations affect types eg solve
                 return try self.analyzeExpr(annotate.body, hint, hint_mode);
-            },
-            .NoWarn => |body| {
-                return try self.analyzeExpr(body, hint, hint_mode);
             },
             .Watch => |watch| return try self.analyzeExpr(watch.body, hint, hint_mode),
             .Native => |native| {

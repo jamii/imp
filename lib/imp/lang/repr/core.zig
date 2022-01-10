@@ -65,7 +65,6 @@ pub const Expr = union(enum) {
     Reduce: Reduce,
     Enumerate: ExprId,
     Annotate: Annotate,
-    NoWarn: ExprId,
     Watch: Watch,
     Native: Native,
 

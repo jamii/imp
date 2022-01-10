@@ -956,27 +956,7 @@ none
 warnings:
 Second argument to Native.Add should have type number, not text
 
-// TODO no way to apply nowarn to the native itself
-1 + "foo" ?
----
-type:
-none
-value:
-none
-warnings:
-Second argument to Native.Add should have type number, not text
-
 "foo" + 1
----
-type:
-none
-value:
-none
-warnings:
-First argument to Native.Add should have type number, not text
-
-// TODO no way to apply nowarn to the first arg of native
-"foo" + 1 ?
 ---
 type:
 none
@@ -1025,16 +1005,6 @@ value:
 warnings:
 The result of applying :"union" to :"number", number will always be empty
 
-(:number, 1)@
-(?@expr 
-| (:number, (expr :number ?) + 1)
-| (:union, (expr :union ?)))
----
-type:
-:"number", number
-value:
-| :"number", 2
-
 (:union, "a", "b")@
 (?@expr 
 | (:number, (expr :number) + 1)
@@ -1046,16 +1016,6 @@ value:
 | :"union", "a", "b"
 warnings:
 The result of applying :"number" to :"union", text, text will always be empty
-
-(:union, "a", "b")@
-(?@expr 
-| (:number, (expr :number ?) + 1)
-| (:union, (expr :union ?)))
----
-type:
-:"union", text, text
-value:
-| :"union", "a", "b"
 
 (:intersect, "a", "b")@
 (?@expr 
@@ -1070,26 +1030,18 @@ warnings:
 The result of applying :"number" to :"intersect", text, text will always be empty
 The result of applying :"union" to :"intersect", text, text will always be empty
 
-(:intersect, "a", "b")@
-(?@expr 
-| (:number, (expr :number ?) + 1)
-| (:union, (expr :union ?)))
----
-type:
-none
-value:
-none
-
 // TODO this is a surprising parse
 (:union, "a", "b")@
 (?@expr 
-| :number, (expr :number ?) + 1
-| :union, (expr :union ?))
+| :number, (expr :number) + 1
+| :union, (expr :union))
 ---
 type:
-:"number", :"union", text, text
+:"union", text, text
 value:
-| :"number", :"union", "a", "b"
+| :"union", "a", "b"
+warnings:
+The result of applying :"number" to :"union", text, text will always be empty
 
 1 then 2
 ---
@@ -1098,26 +1050,4 @@ number
 value:
 | 2
 warnings:
-The condition of `then` must have type `maybe`, found number
-
-// TODO this is the intuitive place to put the warning
-//      but I guess can silence with !! instead
-1 ? then 2
----
-type:
-number
-value:
-| 2
-warnings:
-The condition of `then` must have type `maybe`, found number
-
-(1 then 2) ?
----
-type:
-number
-value:
-| 2
-
-some + some
----
-AnalyzeError: Could not infer the type of abstract arg
+The condition of `then` should have type `maybe`, found number

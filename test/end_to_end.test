@@ -1191,3 +1191,13 @@ value:
 none
 warnings:
 [0:75] This `is!` might fail: :"intersect", text, text is not contained in :"union", text, text
+
+// TODO Inference for the right side of `as` is hacky.
+//      This should have type number.
+//      Requires being able to represent types of non-enumerable values.
+1 as (?a number a)
+---
+type:
+none
+value:
+| 1

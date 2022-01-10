@@ -582,7 +582,50 @@ const Interpreter = struct {
                             .set = set,
                         };
                     },
+                    .Number, .Text => {
+                        var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
+                        if (hint.len < 1)
+                            return switch (hint_mode) {
+                                .Apply => self.setError(expr_id, "Could not infer the type of abstract arg", .{}),
+                                .Intersect => return value.Set{
+                                    .set = set,
+                                },
+                            };
+                        const satisfied =
+                            switch (native) {
+                            .Number => hint[0] == .Number,
+                            .Text => hint[0] == .Text,
+                            else => unreachable,
+                        };
+                        if (satisfied)
+                            _ = try set.put(try self.dupeScalars(&.{hint[0]}), {});
+                        return value.Set{
+                            .set = set,
+                        };
+                    },
                 }
+            },
+            .IsTest => |pair| {
+                const left_set = try self.interpretExpr(pair.left, &.{}, .Apply);
+                const left_and_right_set = try self.interpretIntersect(left_set, pair.right);
+                var set = u.DeepHashSet(value.Tuple).init(self.arena.allocator());
+                if (u.deepEqual(left_set, left_and_right_set))
+                    _ = try set.put(&.{}, {});
+                return value.Set{
+                    .set = set,
+                };
+            },
+            .IsAssert => |pair| {
+                const left_set = try self.interpretExpr(pair.left, &.{}, .Apply);
+                const left_and_right_set = try self.interpretIntersect(left_set, pair.right);
+                return if (u.deepEqual(left_set, left_and_right_set))
+                    left_set
+                else
+                    self.setError(expr_id, "Assert failed: {} is not contained in right.", .{left_set});
+            },
+            .As => |pair| {
+                const left_set = try self.interpretExpr(pair.left, &.{}, .Apply);
+                return self.interpretIntersect(left_set, pair.right);
             },
         }
     }

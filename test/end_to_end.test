@@ -498,7 +498,9 @@ number
 value:
 none
 warnings:
-First argument to Native.Add should have type number, not @(#d0 number)
+[27:32] First argument to Native.Add should have type number, not @(#d0 number)
+[27:32] In apply: right row type @(#d0 number) has no match in left set type none
+[27:32] In apply: right row type @(#d0 number) has no match in left set type none
 
 // testing specialization caching
 f: ?i i+1;
@@ -945,7 +947,7 @@ none
 value:
 none
 warnings:
-The result of applying :"fo" to :"bar", text | :"foo", number will always be empty
+[25:31] The result of applying :"bar", text | :"foo", number to :"fo" will always be empty
 
 1 + "foo"
 ---
@@ -954,7 +956,9 @@ none
 value:
 none
 warnings:
-Second argument to Native.Add should have type number, not text
+[0:9] Second argument to Native.Add should have type number, not text
+[0:9] In apply: right row type number has no match in left set type none
+[0:9] In apply: right row type text has no match in left set type none
 
 "foo" + 1
 ---
@@ -963,7 +967,9 @@ none
 value:
 none
 warnings:
-First argument to Native.Add should have type number, not text
+[0:9] First argument to Native.Add should have type number, not text
+[0:9] In apply: right row type text has no match in left set type none
+[0:9] In apply: right row type number has no match in left set type none
 
 1 + (1 | "foo")
 ---
@@ -972,7 +978,9 @@ number
 value:
 | 2
 warnings:
-Second argument to Native.Add should have type number, not text
+[0:15] Second argument to Native.Add should have type number, not text
+[0:15] In apply: right row type number has no match in left set type none
+[0:15] In apply: right row type text has no match in left set type none
 
 (1 | "foo") + 1
 ---
@@ -981,7 +989,8 @@ number
 value:
 | 2
 warnings:
-First argument to Native.Add should have type number, not text
+[0:15] First argument to Native.Add should have type number, not text
+[0:15] In apply: right row type text has no match in left set type none
 
 plus: ?a ?b a + b;
 plus 1 "foo"
@@ -991,7 +1000,11 @@ none
 value:
 none
 warnings:
-Second argument to Native.Add should have type number, not text
+[12:17] Second argument to Native.Add should have type number, not text
+[12:17] In apply: right row type number has no match in left set type none
+[12:17] In apply: right row type text has no match in left set type none
+[19:25] In apply: right row type number has no match in left set type none
+[19:31] In apply: right row type text has no match in left set type none
 
 (:number, 1)@
 (?@expr 
@@ -1003,7 +1016,7 @@ type:
 value:
 | :"number", 2
 warnings:
-The result of applying :"union" to :"number", number will always be empty
+[67:78] The result of applying :"number", number to :"union" will always be empty
 
 (:union, "a", "b")@
 (?@expr 
@@ -1015,7 +1028,7 @@ type:
 value:
 | :"union", "a", "b"
 warnings:
-The result of applying :"number" to :"union", text, text will always be empty
+[42:54] The result of applying :"union", text, text to :"number" will always be empty
 
 (:intersect, "a", "b")@
 (?@expr 
@@ -1027,8 +1040,9 @@ none
 value:
 none
 warnings:
-The result of applying :"number" to :"intersect", text, text will always be empty
-The result of applying :"union" to :"intersect", text, text will always be empty
+[46:58] The result of applying :"intersect", text, text to :"number" will always be empty
+[77:88] The result of applying :"intersect", text, text to :"union" will always be empty
+[0:91] In apply: left row type @(d0) has no match in right set type none
 
 // TODO this is a surprising parse
 (:union, "a", "b")@
@@ -1041,7 +1055,7 @@ type:
 value:
 | :"union", "a", "b"
 warnings:
-The result of applying :"number" to :"union", text, text will always be empty
+[76:88] The result of applying :"union", text, text to :"number" will always be empty
 
 1 then 2
 ---
@@ -1050,4 +1064,130 @@ number
 value:
 | 2
 warnings:
-The condition of `then` should have type `maybe`, found number
+[0:8] The condition of `then` should have type `maybe`, found number
+
+(1 | "yo") & (text | :foo)
+---
+type:
+text
+value:
+| "yo"
+
+(1 | "text") & (number | :foo)
+---
+type:
+number
+value:
+| 1
+
+(1 | "text") as (number | :foo)
+---
+type:
+number | :"foo"
+value:
+| 1
+
+db: :foo, 1;
+db :bar
+---
+type:
+none
+value:
+none
+warnings:
+[13:20] The result of applying :"foo", number to :"bar" will always be empty
+
+(:foo, 1) as ((:foo, number) | (:bar, text))
+---
+type:
+:"bar", text | :"foo", number
+value:
+| :"foo", 1
+
+db: (:foo, 1) as ((:foo, number) | (:bar, text));
+db :bar
+---
+type:
+text
+value:
+none
+
+(:number, 1)
+(?k
+k is? :number then ?v :number, v + 1 else
+k is? :union then ?a ?b :union, a, b)
+---
+type:
+:"number", number
+value:
+| :"number", 2
+
+(:union, "a", "b")
+(?k
+(k is? :number) then (?v :number, v + 1) else
+(k is? :union) then (?a ?b :union, a, b))
+---
+type:
+:"union", text, text
+value:
+| :"union", "a", "b"
+
+(:intersect, "a", "b")
+(?k
+k is? :number then ?v :number, v + 1 else
+k is? :union then ?a ?b :union, a, b)
+---
+type:
+none
+value:
+none
+warnings:
+[0:106] In apply: left row type :"intersect", text, text has no match in right set type none
+
+(:intersect, "a", "b") as (:number, number | :union, text, text)
+(?k
+k is? :number then ?v :number, v + 1 else
+k is? :union then ?a ?b :union, a, b)
+---
+type:
+:"number", number | :"union", text, text
+value:
+none
+
+(:union, "a", "b") is! (:number, number | :union, text, text)
+---
+type:
+:"union", text, text
+value:
+| :"union", "a", "b"
+
+(none as (:union, text, text, text)) is! (:number, number | :union, text, text)
+---
+type:
+none
+value:
+none
+warnings:
+[0:79] This `is!` might fail: :"union", text, text, text is not contained in :"union", text, text
+
+(none as (:number, number | :union, text, text, text)) is! (:number, number | :union, text, text)
+---
+type:
+:"number", number
+value:
+none
+warnings:
+[0:97] This `is!` might fail: :"union", text, text, text is not contained in :"union", text, text
+
+(:intersect, "a", "b") is! (:number, number | :union, text, text)
+---
+InterpretError: Assert failed: | :"intersect", "a", "b" is not contained in right.
+
+(none as (:intersect, "a", "b")) is! (:number, number | :union, text, text)
+---
+type:
+none
+value:
+none
+warnings:
+[0:75] This `is!` might fail: :"intersect", text, text is not contained in :"union", text, text

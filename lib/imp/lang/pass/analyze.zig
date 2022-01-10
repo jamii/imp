@@ -218,7 +218,7 @@ pub const Analyzer = struct {
                         is_intersection_empty = false;
                     }
                 }
-                if (is_intersection_empty)
+                if (is_intersection_empty and left.concretes.count() > 0 and right.concretes.count() > 0)
                     try self.addWarning(expr_id, "Will never be equal: {} vs {}", .{ left, right });
                 return type_.SetType.some(self.arena.allocator());
             },
@@ -301,7 +301,14 @@ pub const Analyzer = struct {
             .Apply => |pair| {
                 // can't make use of hint until we know which side is finite
                 if (self.analyzeExpr(pair.left, &.{}, .Apply)) |left_type| {
-                    return self.analyzeApply(expr_id, left_type, pair.right, hint, hint_mode, false);
+                    if (self.analyzeExpr(pair.right, &.{}, .Apply)) |right_type| {
+                        return self.analyzeApplyFinite(expr_id, left_type, right_type);
+                    } else |right_err| {
+                        if (self.error_info.*.?.kind != .NoHintForArg)
+                            return right_err;
+                        self.error_info.* = null;
+                        return self.analyzeApplyNonfinite(expr_id, left_type, pair.right, hint, hint_mode, false);
+                    }
                 } else |left_err| {
                     if (self.error_info.*.?.kind != .NoHintForArg)
                         return left_err;
@@ -311,7 +318,7 @@ pub const Analyzer = struct {
                 // error was from lack of hints, so try other way around
                 // TODO could this cause exponential retries in large program?
                 if (self.analyzeExpr(pair.right, &.{}, .Apply)) |right_type| {
-                    return self.analyzeApply(expr_id, right_type, pair.left, hint, hint_mode, true);
+                    return self.analyzeApplyNonfinite(expr_id, right_type, pair.left, hint, hint_mode, true);
                 } else |right_err| {
                     if (self.error_info.*.?.kind != .NoHintForArg) return right_err;
                 }
@@ -431,23 +438,82 @@ pub const Analyzer = struct {
             },
             .Watch => |watch| return try self.analyzeExpr(watch.body, hint, hint_mode),
             .Native => |native| {
-                if (hint.len < 2)
-                    return switch (hint_mode) {
-                        .Apply => self.setError(expr_id, "Could not infer the type of abstract arg", .{}, .NoHintForArg),
-                        .Intersect => return type_.SetType.none(self.arena.allocator()),
-                    };
-                if (hint[0] != .Number) {
-                    try self.addWarning(expr_id, "First argument to {} should have type number, not {}", .{ native, hint[0] });
-                    return type_.SetType.none(self.arena.allocator());
+                switch (native) {
+                    .Add, .Subtract, .Multiply, .Divide, .Modulus, .Range, .GreaterThan, .GreaterThanOrEqual => {
+                        if (hint.len < 2)
+                            return switch (hint_mode) {
+                                .Apply => self.setError(expr_id, "Could not infer the type of abstract arg", .{}, .NoHintForArg),
+                                .Intersect => return type_.SetType.none(self.arena.allocator()),
+                            };
+                        if (hint[0] != .Number) {
+                            try self.addWarning(expr_id, "First argument to {} should have type number, not {}", .{ native, hint[0] });
+                            return type_.SetType.none(self.arena.allocator());
+                        }
+                        if (hint[1] != .Number) {
+                            try self.addWarning(expr_id, "Second argument to {} should have type number, not {}", .{ native, hint[1] });
+                            return type_.SetType.none(self.arena.allocator());
+                        }
+                        return type_.SetType.fromColumns(self.arena.allocator(), switch (native) {
+                            .Add, .Subtract, .Multiply, .Divide, .Modulus, .Range => &.{ .Number, .Number, .Number },
+                            .GreaterThan, .GreaterThanOrEqual => &.{ .Number, .Number },
+                            else => unreachable,
+                        });
+                    },
+                    .Number, .Text => {
+                        if (hint.len < 1)
+                            return switch (hint_mode) {
+                                .Apply => self.setError(expr_id, "Could not infer the type of abstract arg", .{}, .NoHintForArg),
+                                // TODO this is kind of a hack to support `as` - might break things if we ever use .Intersect in a place that can actually return `native`
+                                .Intersect => type_.SetType.fromScalar(self.arena.allocator(), switch (native) {
+                                    .Number => type_.ScalarType.Number,
+                                    .Text => type_.ScalarType.Text,
+                                    else => unreachable,
+                                }),
+                            };
+                        const satisfied =
+                            switch (native) {
+                            .Number => hint[0] == .Number,
+                            .Text => hint[0] == .Text,
+                            else => unreachable,
+                        };
+                        return if (satisfied)
+                            type_.SetType.fromScalar(self.arena.allocator(), hint[0])
+                        else
+                            type_.SetType.none(self.arena.allocator());
+                    },
                 }
-                if (hint[1] != .Number) {
-                    try self.addWarning(expr_id, "Second argument to {} should have type number, not {}", .{ native, hint[1] });
-                    return type_.SetType.none(self.arena.allocator());
+            },
+            .IsTest => |pair| {
+                const left_type = try self.analyzeExpr(pair.left, &.{}, .Apply);
+                var is_none = false;
+                var left_iter = left_type.concretes.keyIterator();
+                while (left_iter.next()) |left_concrete| {
+                    const right_type = try self.analyzeExpr(pair.right, left_concrete.columns, .Intersect);
+                    if (!right_type.concretes.contains(left_concrete.*)) is_none = true;
                 }
-                return type_.SetType.fromColumns(self.arena.allocator(), switch (native) {
-                    .Add, .Subtract, .Multiply, .Divide, .Modulus, .Range => &.{ .Number, .Number, .Number },
-                    .GreaterThan, .GreaterThanOrEqual => &.{ .Number, .Number },
-                });
+                return if (is_none)
+                    type_.SetType.none(self.arena.allocator())
+                else
+                    type_.SetType.some(self.arena.allocator());
+            },
+            .IsAssert => |pair| {
+                const left_type = try self.analyzeExpr(pair.left, &.{}, .Apply);
+                var left_iter = left_type.concretes.keyIterator();
+                var concretes = u.DeepHashSet(type_.ConcreteSetType).init(self.arena.allocator());
+                while (left_iter.next()) |left_concrete| {
+                    const right_type = try self.analyzeExpr(pair.right, left_concrete.columns, .Intersect);
+                    if (right_type.concretes.contains(left_concrete.*))
+                        _ = try concretes.put(left_concrete.*, {})
+                    else
+                        try self.addWarning(expr_id, "This `is!` might fail: {} is not contained in {}", .{ left_concrete, right_type });
+                }
+                return type_.SetType{ .concretes = concretes };
+            },
+            .As => |pair| {
+                _ = try self.analyzeExpr(pair.left, &.{}, .Apply);
+                // TODO using .Intersect here is a total hack - will totally break if we use a non-type thing on the right eg `?a a number`
+                const right_type = try self.analyzeExpr(pair.right, &.{}, .Intersect);
+                return right_type;
             },
         }
     }
@@ -475,20 +541,12 @@ pub const Analyzer = struct {
         return type_.SetType{ .concretes = concretes };
     }
 
-    fn analyzeApply(self: *Analyzer, apply_expr_id: core.ExprId, left_type: type_.SetType, right_expr_id: core.ExprId, hint: []const type_.ScalarType, hint_mode: type_.HintMode, is_flipped: bool) Error!type_.SetType {
+    fn analyzeApplyFinite(self: *Analyzer, apply_expr_id: core.ExprId, left_type: type_.SetType, right_type: type_.SetType) Error!type_.SetType {
         var concretes = u.DeepHashSet(type_.ConcreteSetType).init(self.arena.allocator());
-        var right_concretes = u.DeepHashSet(type_.ConcreteSetType).init(self.arena.allocator());
         var left_iter = left_type.concretes.keyIterator();
         while (left_iter.next()) |left_concrete| {
-            var right_hint = try u.ArrayList(type_.ScalarType).initCapacity(self.arena.allocator(), left_concrete.columns.len + hint.len);
-            for (left_concrete.columns) |column_type|
-                try right_hint.append(column_type);
-            try right_hint.appendSlice(hint);
-            const right_type = try self.analyzeExpr(right_expr_id, right_hint.toOwnedSlice(), hint_mode);
             var right_iter = right_type.concretes.keyIterator();
             while (right_iter.next()) |right_concrete| {
-                try right_concretes.put(right_concrete.*, {});
-
                 const joined_arity = u.min(left_concrete.columns.len, right_concrete.columns.len);
 
                 var has_intersection = true;
@@ -506,12 +564,52 @@ pub const Analyzer = struct {
                 }
             }
         }
-        const total_right_type = type_.SetType{ .concretes = right_concretes };
-        if (concretes.count() == 0 and right_concretes.count() != 0)
-            if (is_flipped)
-                try self.addWarning(apply_expr_id, "The result of applying {} to {} will always be empty", .{ left_type, total_right_type })
-            else
-                try self.addWarning(apply_expr_id, "The result of applying {} to {} will always be empty", .{ total_right_type, left_type });
+        if (concretes.count() == 0 and
+            left_type.concretes.count() != 0 and
+            right_type.concretes.count() != 0 and
+            self.core_program.exprs[apply_expr_id.id].Apply.kind == .User)
+            try self.addWarning(apply_expr_id, "The result of applying {} to {} will always be empty", .{ left_type, right_type });
+        return type_.SetType{ .concretes = concretes };
+    }
+
+    fn analyzeApplyNonfinite(self: *Analyzer, apply_expr_id: core.ExprId, left_type: type_.SetType, right_expr_id: core.ExprId, hint: []const type_.ScalarType, hint_mode: type_.HintMode, is_flipped: bool) Error!type_.SetType {
+        var concretes = u.DeepHashSet(type_.ConcreteSetType).init(self.arena.allocator());
+        var left_iter = left_type.concretes.keyIterator();
+        while (left_iter.next()) |left_concrete| {
+            var right_hint = try u.ArrayList(type_.ScalarType).initCapacity(self.arena.allocator(), left_concrete.columns.len + hint.len);
+            for (left_concrete.columns) |column_type|
+                try right_hint.append(column_type);
+            try right_hint.appendSlice(hint);
+            const right_type = try self.analyzeExpr(right_expr_id, right_hint.toOwnedSlice(), hint_mode);
+            var left_has_intersection = false;
+            var right_iter = right_type.concretes.keyIterator();
+            while (right_iter.next()) |right_concrete| {
+                const joined_arity = u.min(left_concrete.columns.len, right_concrete.columns.len);
+
+                var has_intersection = true;
+                for (left_concrete.columns[0..joined_arity]) |left_column, i| {
+                    if (!u.deepEqual(left_column, right_concrete.columns[i]))
+                        has_intersection = false;
+                }
+
+                if (has_intersection) {
+                    left_has_intersection = true;
+                    const columns = if (left_concrete.columns.len > right_concrete.columns.len)
+                        left_concrete.columns[joined_arity..]
+                    else
+                        right_concrete.columns[joined_arity..];
+                    try concretes.put(.{ .columns = columns }, {});
+                }
+            }
+            if (!left_has_intersection and
+                self.core_program.exprs[apply_expr_id.id].Apply.kind == .User)
+            {
+                if (is_flipped)
+                    try self.addWarning(apply_expr_id, "In apply: right row type {} has no match in left set type {}", .{ left_concrete, right_type })
+                else
+                    try self.addWarning(apply_expr_id, "In apply: left row type {} has no match in right set type {}", .{ left_concrete, right_type });
+            }
+        }
         return type_.SetType{ .concretes = concretes };
     }
 };

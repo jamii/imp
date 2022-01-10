@@ -171,6 +171,9 @@ pub const Store = struct {
                     try writer.writeAll("\nwarnings:");
                     for (warnings) |warning| {
                         try writer.writeAll("\n");
+                        const syntax_expr_id = self.core_program.?.from_syntax[warning.expr_id.id];
+                        const range = self.syntax_program.?.from_source[syntax_expr_id.id];
+                        try std.fmt.format(writer, "[{}:{}] ", .{ range[0], range[1] });
                         try warning.dumpInto(writer, indent);
                     }
                 }

@@ -52,6 +52,9 @@ const syntax = imp.lang.repr.syntax;
 //   ">="
 //   "<"
 //   "<="
+//   "is?"
+//   "is!"
+//   "as"
 
 // TODO https://github.com/ziglang/zig/issues/2647
 pub fn parse(
@@ -130,6 +133,9 @@ pub const TokenTag = enum {
     GreaterThan,
     GreaterThanOrEqual,
     Swap,
+    IsTest,
+    IsAssert,
+    As,
 
     // not an actual token but used for precedence
     Apply,
@@ -176,6 +182,9 @@ pub const TokenTag = enum {
             .GreaterThan => "`>`",
             .GreaterThanOrEqual => "`>=`",
             .Swap => "~",
+            .IsTest => "is?",
+            .IsAssert => "is!",
+            .As => "as",
 
             .Apply => "` `",
 
@@ -223,6 +232,9 @@ pub const Token = union(TokenTag) {
     GreaterThan,
     GreaterThanOrEqual,
     Swap,
+    IsTest,
+    IsAssert,
+    As,
 
     // not an actual token but used for precedence
     Apply,
@@ -258,7 +270,7 @@ const PrecedenceClass = enum {
 
 fn precedenceClass(token_tag: TokenTag) PrecedenceClass {
     return switch (token_tag) {
-        .Apply, .Extend => .Apply,
+        .Apply, .Extend, .IsTest, .IsAssert, .As => .Apply,
         .Union,
         .Intersect,
         => .Union,
@@ -534,6 +546,16 @@ pub const Parser = struct {
                         if (u.deepEqual(name, "reduce")) return Token{ .Reduce = {} };
                         if (u.deepEqual(name, "enumerate")) return Token{ .Enumerate = {} };
                         if (u.deepEqual(name, "else")) return Token{ .Else = {} };
+                        if (u.deepEqual(name, "is")) {
+                            const char2_start = self.position;
+                            const char2 = try self.nextAsciiChar();
+                            return switch (char2 orelse 0) {
+                                '?' => Token{ .IsTest = {} },
+                                '!' => Token{ .IsAssert = {} },
+                                else => self.setError(char2_start, "Expected `!` or `?` after `is`. Found {}.", .{char2}),
+                            };
+                        }
+                        if (u.deepEqual(name, "as")) return Token{ .As = {} };
                         return Token{ .Name = name };
                     } else {
                         return self.setError(start, "invalid token", .{});
@@ -741,7 +763,7 @@ pub const Parser = struct {
             const op = try self.nextToken();
             switch (op) {
                 // expr_inner binop expr
-                .Union, .Intersect, .Product, .Extend, .Equal, .Add, .Subtract, .Multiply, .Divide, .Modulus, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual => {
+                .Union, .Intersect, .Product, .Extend, .Equal, .Add, .Subtract, .Multiply, .Divide, .Modulus, .LessThan, .LessThanOrEqual, .GreaterThan, .GreaterThanOrEqual, .IsTest, .IsAssert, .As => {
                     const precedence = if (prev_op == null) .RightBindsTighter else comparePrecedence(std.meta.activeTag(prev_op.?), std.meta.activeTag(op));
                     switch (precedence) {
                         .RightBindsTighter => {
@@ -766,6 +788,11 @@ pub const Parser = struct {
                                 .LessThanOrEqual => self.putApplyOp("<=", left, right, start, self.position),
                                 .GreaterThan => self.putApplyOp(">", left, right, start, self.position),
                                 .GreaterThanOrEqual => self.putApplyOp(">=", left, right, start, self.position),
+
+                                // type functions
+                                .IsTest => self.putSyntax(.{ .IsTest = .{ .left = left, .right = right } }, start, self.position),
+                                .IsAssert => self.putSyntax(.{ .IsAssert = .{ .left = left, .right = right } }, start, self.position),
+                                .As => self.putSyntax(.{ .As = .{ .left = left, .right = right } }, start, self.position),
 
                                 else => unreachable,
                             };

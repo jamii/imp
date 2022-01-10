@@ -27,6 +27,7 @@ pub const Program = struct {
         pub fn dumpInto(self: ProgramAndExprId, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
             const expr = self.program.exprs[self.expr_id.id];
             try expr.dumpTagInto(writer, indent);
+            try std.fmt.format(writer, " ({})", .{self.expr_id});
             for (expr.getChildren().slice()) |child| {
                 try writer.writeAll("\n");
                 try writer.writeByteNTimes(' ', indent + 4);
@@ -59,7 +60,7 @@ pub const Expr = union(enum) {
     Negate: ExprId,
     Then: Then,
     Abstract: ExprId,
-    Apply: Pair,
+    Apply: Apply,
     Box: Box,
     Fix: Fix,
     Reduce: Reduce,
@@ -67,6 +68,9 @@ pub const Expr = union(enum) {
     Annotate: Annotate,
     Watch: Watch,
     Native: Native,
+    IsTest: Pair,
+    IsAssert: Pair,
+    As: Pair,
 
     pub fn getChildren(self: Expr) u.FixedSizeArrayList(2, ExprId) {
         var children = u.FixedSizeArrayList(2, ExprId){};
@@ -77,7 +81,7 @@ pub const Expr = union(enum) {
                 switch (T) {
                     void, value.Scalar, ScalarId, DefId, Native => {},
                     ExprId => children.append(v),
-                    Pair, Then, Box, Fix, Reduce, Annotate, Watch => {
+                    Pair, Then, Apply, Box, Fix, Reduce, Annotate, Watch => {
                         inline for (@typeInfo(T).Struct.fields) |value_field| {
                             if (value_field.field_type == ExprId) {
                                 children.append(@field(v, value_field.name));
@@ -113,7 +117,7 @@ pub const Expr = union(enum) {
             .Negate => try writer.writeAll("negate"),
             .Then => try writer.writeAll("then"),
             .Abstract => try writer.writeAll("?"),
-            .Apply => try writer.writeAll("apply"),
+            .Apply => |apply| try std.fmt.format(writer, "apply {}", .{apply.kind}),
             .Box => |box| {
                 try std.fmt.format(writer, "box {}", .{box.def_id});
                 for (box.args) |scalar_id| {
@@ -134,9 +138,11 @@ pub const Expr = union(enum) {
             },
             .Enumerate => try writer.writeAll("enumerate"),
             .Annotate => |annotate| try std.fmt.format(writer, "# {any}", .{annotate.annotation}),
-            .Negate => try writer.writeAll("nowarn"),
             .Watch => |watch| try watch.dumpInto(writer, indent),
             .Native => |native| try native.dumpInto(writer, indent),
+            .IsTest => try writer.writeAll("is?"),
+            .IsAssert => try writer.writeAll("is!"),
+            .As => try writer.writeAll("as"),
         }
     }
 };
@@ -151,6 +157,12 @@ pub const NameIx = usize;
 pub const Then = struct {
     condition: ExprId,
     true_branch: ExprId,
+};
+
+pub const Apply = struct {
+    left: ExprId,
+    right: ExprId,
+    kind: enum { User, Desugar },
 };
 
 pub const Box = struct {
@@ -199,6 +211,8 @@ pub const Native = enum {
     Range,
     GreaterThan,
     GreaterThanOrEqual,
+    Number,
+    Text,
 
     pub fn toName(self: Native) []const u8 {
         return switch (self) {
@@ -210,6 +224,8 @@ pub const Native = enum {
             .Range => "range",
             .GreaterThan => ">",
             .GreaterThanOrEqual => ">=",
+            .Number => "number",
+            .Text => "text",
         };
     }
 

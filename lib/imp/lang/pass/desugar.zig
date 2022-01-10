@@ -157,11 +157,13 @@ const Desugarer = struct {
                                         .{ .Apply = .{
                                             .left = try self.putCore(.{ .ScalarId = .{ .id = 0 } }),
                                             .right = right,
+                                            .kind = .Desugar,
                                         } },
                                     ),
                                 } },
                             ) },
                         ),
+                        .kind = .User,
                     } },
                 );
             },
@@ -227,6 +229,7 @@ const Desugarer = struct {
                 .Apply = .{
                     .left = try self.desugar(pair.left),
                     .right = try self.desugar(pair.right),
+                    .kind = .User,
                 },
             }),
             .Box => |expr| try self.putCore(.{
@@ -300,6 +303,24 @@ const Desugarer = struct {
                 try self.scopePop();
                 break :def body;
             },
+            .IsTest => |pair| try self.putCore(.{
+                .IsTest = .{
+                    .left = try self.desugar(pair.left),
+                    .right = try self.desugar(pair.right),
+                },
+            }),
+            .IsAssert => |pair| try self.putCore(.{
+                .IsAssert = .{
+                    .left = try self.desugar(pair.left),
+                    .right = try self.desugar(pair.right),
+                },
+            }),
+            .As => |pair| try self.putCore(.{
+                .As = .{
+                    .left = try self.desugar(pair.left),
+                    .right = try self.desugar(pair.right),
+                },
+            }),
         };
         if (self.watch_expr_id) |watch_expr_id| {
             if (watch_expr_id.id == syntax_expr_id.id) {
@@ -415,6 +436,7 @@ const Desugarer = struct {
                 .Apply = .{
                     .left = result,
                     .right = try self.putCore(.{ .ScalarId = arg }),
+                    .kind = .Desugar,
                 },
             });
         }

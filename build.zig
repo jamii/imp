@@ -18,6 +18,7 @@ pub fn build(b: *std.build.Builder) !void {
     test_unit_step.dependOn(&test_unit_run.step);
 
     const test_step = b.step("test", "Run all tests");
+    // Make sure that run.zig builds
     test_step.dependOn(&run.bin.step);
     test_step.dependOn(test_end_to_end.step);
     test_step.dependOn(test_unit_step);

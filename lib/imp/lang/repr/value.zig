@@ -3,9 +3,9 @@ const imp = @import("../../../imp.zig");
 const u = imp.util;
 const core = imp.lang.repr.core;
 
-/// Invariant: all the Tuples in a Set must be the same length
+/// Invariant: all the Rows in a Set must be the same length
 pub const Set = struct {
-    set: u.DeepHashSet(Tuple),
+    set: u.DeepHashSet(Row),
 
     pub const Arity = union(enum) {
         Unknown,
@@ -53,30 +53,30 @@ pub const Set = struct {
     }
 
     pub fn dumpInto(self: Set, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
-        var tuples = u.ArrayList(Tuple).init(u.dump_allocator);
-        defer tuples.deinit();
+        var rows = u.ArrayList(Row).init(u.dump_allocator);
+        defer rows.deinit();
         var iter = self.set.iterator();
         while (iter.next()) |kv| {
             // TODO format doesn't always allow OOM
-            tuples.append(kv.key_ptr.*) catch u.imp_panic("oom", .{});
+            rows.append(kv.key_ptr.*) catch u.imp_panic("oom", .{});
         }
-        std.sort.sort(Tuple, tuples.items, {}, struct {
-            fn lessThan(_: void, a: Tuple, b: Tuple) bool {
+        std.sort.sort(Row, rows.items, {}, struct {
+            fn lessThan(_: void, a: Row, b: Row) bool {
                 return u.deepCompare(a, b) == .LessThan;
             }
         }.lessThan);
-        if (tuples.items.len == 0) {
+        if (rows.items.len == 0) {
             try writer.writeAll("none");
-        } else if (tuples.items.len == 1 and tuples.items[0].len == 0) {
+        } else if (rows.items.len == 1 and rows.items[0].len == 0) {
             try writer.writeAll("some");
         } else {
-            for (tuples.items) |tuple, i| {
+            for (rows.items) |row, i| {
                 if (i != 0) {
                     try writer.writeAll("\n");
                     try writer.writeByteNTimes(' ', indent);
                 }
                 try writer.writeAll("| ");
-                for (tuple) |scalar, scalar_ix| {
+                for (row) |scalar, scalar_ix| {
                     if (scalar_ix != 0) try writer.writeAll(", ");
                     try scalar.dumpInto(writer, indent);
                 }
@@ -87,7 +87,7 @@ pub const Set = struct {
     pub const format = u.formatViaDump;
 };
 
-pub const Tuple = []const Scalar;
+pub const Row = []const Scalar;
 
 pub const Scalar = union(enum) {
     Text: []const u8, // valid utf8

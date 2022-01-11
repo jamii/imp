@@ -44,7 +44,7 @@ pub const ErrorInfo = struct {
     // TODO want something like a stack of specializations
     //callstack: []const struct {
     //    def_id: DefId,
-    //    hint: type_.TupleType,
+    //    hint: type_.RowType,
     //},
     message: []const u8,
     kind: ErrorKind = .Other,

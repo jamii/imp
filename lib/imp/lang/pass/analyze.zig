@@ -149,7 +149,7 @@ pub const Analyzer = struct {
                 const scalar_type: type_.ScalarType = switch (scalar) {
                     .Text => .Text,
                     .Number => .Number,
-                    .Box => u.imp_panic("Shouldn't be any box literals", .{}),
+                    .Box => u.panic("Shouldn't be any box literals", .{}),
                     .TextTag => |text| .{ .TextTag = text },
                     .NumberTag => |number| .{ .NumberTag = number },
                 };

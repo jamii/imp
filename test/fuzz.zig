@@ -2,7 +2,7 @@ const imp = @import("../lib/imp.zig");
 const u = imp.util;
 
 fn fuzz_panic() noreturn {
-    imp_panic("Internal error in fuzzer", .{});
+    panic("Internal error in fuzzer", .{});
 }
 
 const Input = struct {
@@ -681,6 +681,6 @@ fn fuzz_interpret_deterministic(arena: *ArenaAllocator, store_and_expr: Core.Sto
 //     const bytes = data[0..len];
 //     var input = Input.init(std.heap.c_allocator, bytes);
 //     no_fo(&input) catch |err| {
-//         imp_panic("Test failed with {}", err); // TODO trace
+//         panic("Test failed with {}", err); // TODO trace
 //     };
 // }

@@ -58,7 +58,7 @@ pub const Set = struct {
         var iter = self.set.iterator();
         while (iter.next()) |kv| {
             // TODO format doesn't always allow OOM
-            rows.append(kv.key_ptr.*) catch u.imp_panic("oom", .{});
+            rows.append(kv.key_ptr.*) catch u.panic("oom", .{});
         }
         std.sort.sort(Row, rows.items, {}, struct {
             fn lessThan(_: void, a: Row, b: Row) bool {

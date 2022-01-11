@@ -11,7 +11,7 @@ pub const Allocator = std.mem.Allocator;
 pub const ArenaAllocator = std.heap.ArenaAllocator;
 pub const ArrayList = std.ArrayList;
 
-pub fn imp_panic(comptime fmt: []const u8, args: anytype) noreturn {
+pub fn panic(comptime fmt: []const u8, args: anytype) noreturn {
     const message = formatToString(std.heap.c_allocator, fmt, args) catch |err| message: {
         switch (err) {
             error.OutOfMemory => break :message "OOM inside panic",
@@ -21,7 +21,7 @@ pub fn imp_panic(comptime fmt: []const u8, args: anytype) noreturn {
 }
 
 pub fn TODO() noreturn {
-    imp_panic("TODO", .{});
+    panic("TODO", .{});
 }
 
 pub fn formatToString(allocator: Allocator, comptime fmt: []const u8, args: anytype) ![]const u8 {
@@ -201,7 +201,7 @@ const sorting_allocator = std.heap.c_allocator;
 fn sortHashMap(hash_map: anytype) []const @TypeOf(hash_map).Entry {
     var elems = ArrayList(@TypeOf(hash_map).Entry).init(sorting_allocator);
     var iter = hash_map.iterator();
-    while (iter.next()) |elem| elems.append(elem) catch imp_panic("OOM", .{});
+    while (iter.next()) |elem| elems.append(elem) catch panic("OOM", .{});
     deepSort(elems.items);
     return elems.toOwnedSlice();
 }

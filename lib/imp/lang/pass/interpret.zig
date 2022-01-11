@@ -137,12 +137,12 @@ const Interpreter = struct {
         const box_hint = try std.mem.concat(self.arena.allocator(), value.Scalar, &.{ box_args, hint });
         const set = try self.interpretDef(box.def_id, box_hint, hint_mode);
         var result_set = value.Set{
-            .set = u.DeepHashSet(value.Row).init(self.arena.allocator()),
+            .rows = u.DeepHashSet(value.Row).init(self.arena.allocator()),
         };
-        var set_iter = set.set.iterator();
+        var set_iter = set.rows.iterator();
         while (set_iter.next()) |entry|
             if (u.deepEqual(entry.key_ptr.*[0..box.args.len], box_args))
-                try result_set.set.put(entry.key_ptr.*[box.args.len..], {});
+                try result_set.rows.put(entry.key_ptr.*[box.args.len..], {});
         return result_set;
     }
 
@@ -151,40 +151,40 @@ const Interpreter = struct {
         const expr = self.program.exprs[expr_id.id];
         switch (expr) {
             .None => {
-                const set = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                const rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
                 return value.Set{
-                    .set = set,
+                    .rows = rows,
                 };
             },
             .Some => {
-                var set = u.DeepHashSet(value.Row).init(self.arena.allocator());
-                _ = try set.put(&.{}, {});
+                var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                _ = try rows.put(&.{}, {});
                 return value.Set{
-                    .set = set,
+                    .rows = rows,
                 };
             },
             .Scalar => |scalar| {
-                var set = u.DeepHashSet(value.Row).init(self.arena.allocator());
-                _ = try set.put(try self.dupeScalars(&.{scalar}), {});
+                var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                _ = try rows.put(try self.dupeScalars(&.{scalar}), {});
                 return value.Set{
-                    .set = set,
+                    .rows = rows,
                 };
             },
             .Union => |pair| {
                 const left = try self.interpretExpr(pair.left, hint, hint_mode);
                 const right = try self.interpretExpr(pair.right, hint, hint_mode);
-                var set = u.DeepHashSet(value.Row).init(self.arena.allocator());
-                var left_iter = left.set.iterator();
+                var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                var left_iter = left.rows.iterator();
                 while (left_iter.next()) |kv| {
                     try self.interrupter.check();
-                    _ = try set.put(kv.key_ptr.*, {});
+                    _ = try rows.put(kv.key_ptr.*, {});
                 }
-                var right_iter = right.set.iterator();
+                var right_iter = right.rows.iterator();
                 while (right_iter.next()) |kv| {
                     try self.interrupter.check();
-                    _ = try set.put(kv.key_ptr.*, {});
+                    _ = try rows.put(kv.key_ptr.*, {});
                 }
-                return value.Set{ .set = set };
+                return value.Set{ .rows = rows };
             },
             .Intersect => |pair| {
                 if (self.interpretExpr(pair.left, hint, hint_mode)) |left| {
@@ -199,17 +199,17 @@ const Interpreter = struct {
             },
             .Product => |pair| {
                 const left = try self.interpretExpr(pair.left, hint, hint_mode);
-                var set = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
                 const right_hint_start = switch (left.getArity()) {
-                    .Unknown => return value.Set{ .set = set },
+                    .Unknown => return value.Set{ .rows = rows },
                     .Known => |known| u.min(hint.len, known),
                     .Mixed => hint.len, // no hint available
                 };
                 const right = try self.interpretExpr(pair.right, hint[right_hint_start..], hint_mode);
-                var left_iter = left.set.iterator();
+                var left_iter = left.rows.iterator();
                 while (left_iter.next()) |lkv| {
                     try self.interrupter.check();
-                    var right_iter = right.set.iterator();
+                    var right_iter = right.rows.iterator();
                     while (right_iter.next()) |rkv| {
                         try self.interrupter.check();
                         var row = try self.arena.allocator().alloc(value.Scalar, lkv.key_ptr.len + rkv.key_ptr.len);
@@ -222,48 +222,48 @@ const Interpreter = struct {
                             row[i] = scalar;
                             i += 1;
                         }
-                        _ = try set.put(row, {});
+                        _ = try rows.put(row, {});
                     }
                 }
                 return value.Set{
-                    .set = set,
+                    .rows = rows,
                 };
             },
             .Equal => |pair| {
                 // the hint for expr doesn't tell us anything about left or right
                 const left = try self.interpretExpr(pair.left, &.{}, .Apply);
                 const right = try self.interpretExpr(pair.right, &.{}, .Apply);
-                var set = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
                 const isEqual = isEqual: {
-                    var leftIter = left.set.iterator();
+                    var leftIter = left.rows.iterator();
                     while (leftIter.next()) |kv| {
                         try self.interrupter.check();
-                        if (!right.set.contains(kv.key_ptr.*)) {
+                        if (!right.rows.contains(kv.key_ptr.*)) {
                             break :isEqual false;
                         }
                     }
-                    var rightIter = right.set.iterator();
+                    var rightIter = right.rows.iterator();
                     while (rightIter.next()) |kv| {
                         try self.interrupter.check();
-                        if (!left.set.contains(kv.key_ptr.*)) {
+                        if (!left.rows.contains(kv.key_ptr.*)) {
                             break :isEqual false;
                         }
                     }
                     break :isEqual true;
                 };
                 if (isEqual) {
-                    _ = try set.put(&.{}, {});
+                    _ = try rows.put(&.{}, {});
                 }
                 return value.Set{
-                    .set = set,
+                    .rows = rows,
                 };
             },
             .ScalarId => |scalar_id| {
-                var set = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
                 const scalar = self.scope.items[self.scope.items.len - 1 - scalar_id.id];
-                _ = try set.put(try self.dupeScalars(&.{scalar}), {});
+                _ = try rows.put(try self.dupeScalars(&.{scalar}), {});
                 return value.Set{
-                    .set = set,
+                    .rows = rows,
                 };
             },
             .UnboxScalarId => |scalar_id| {
@@ -282,12 +282,12 @@ const Interpreter = struct {
                                 );
                                 const set = try self.interpretDef(normal.def_id, box_hint, hint_mode);
                                 var result_set = value.Set{
-                                    .set = u.DeepHashSet(value.Row).init(self.arena.allocator()),
+                                    .rows = u.DeepHashSet(value.Row).init(self.arena.allocator()),
                                 };
-                                var set_iter = set.set.iterator();
+                                var set_iter = set.rows.iterator();
                                 while (set_iter.next()) |entry|
                                     if (u.deepEqual(entry.key_ptr.*[0..normal.args.len], normal.args))
-                                        try result_set.set.put(entry.key_ptr.*[normal.args.len..], {});
+                                        try result_set.rows.put(entry.key_ptr.*[normal.args.len..], {});
                                 return result_set;
                             },
                             .FixOrReduce => |_| return box.getFixOrReduce(),
@@ -302,21 +302,21 @@ const Interpreter = struct {
             .Negate => |body| {
                 // the hint for expr doesn't tell us anything about body
                 const body_set = try self.interpretExpr(body, &.{}, hint_mode);
-                var set = u.DeepHashSet(value.Row).init(self.arena.allocator());
-                if (body_set.set.count() == 0) {
-                    _ = try set.put(&.{}, {});
+                var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                if (body_set.rows.count() == 0) {
+                    _ = try rows.put(&.{}, {});
                 }
                 return value.Set{
-                    .set = set,
+                    .rows = rows,
                 };
             },
             .Then => |then| {
                 // the hint for expr doesn't tell us anything about condition
                 const condition = try self.interpretExpr(then.condition, &.{}, hint_mode);
-                if (condition.set.count() == 0) {
-                    const set = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                if (condition.rows.count() == 0) {
+                    const rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
                     return value.Set{
-                        .set = set,
+                        .rows = rows,
                     };
                 } else {
                     return self.interpretExpr(then.true_branch, hint, hint_mode);
@@ -327,9 +327,9 @@ const Interpreter = struct {
                     switch (hint_mode) {
                         .Apply => return self.setError(expr_id, "No hint for arg", .{}),
                         .Intersect => {
-                            const set = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                            const rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
                             return value.Set{
-                                .set = set,
+                                .rows = rows,
                             };
                         },
                     }
@@ -337,17 +337,17 @@ const Interpreter = struct {
                     try self.scope.append(hint[0]);
                     const body_set = try self.interpretExpr(body, hint[1..], hint_mode);
                     _ = self.scope.pop();
-                    var set = u.DeepHashSet(value.Row).init(self.arena.allocator());
-                    var body_set_iter = body_set.set.iterator();
+                    var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                    var body_set_iter = body_set.rows.iterator();
                     while (body_set_iter.next()) |kv| {
                         try self.interrupter.check();
                         var row = try u.ArrayList(value.Scalar).initCapacity(self.arena.allocator(), kv.key_ptr.len + 1);
                         try row.append(hint[0]);
                         try row.appendSlice(kv.key_ptr.*);
-                        _ = try set.put(row.items, {});
+                        _ = try rows.put(row.items, {});
                     }
                     return value.Set{
-                        .set = set,
+                        .rows = rows,
                     };
                 }
             },
@@ -377,10 +377,10 @@ const Interpreter = struct {
                     },
                 };
                 const row = try self.dupeScalars(&[1]value.Scalar{.{ .Box = scalar }});
-                var set = u.DeepHashSet(value.Row).init(self.arena.allocator());
-                _ = try set.put(row, {});
+                var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                _ = try rows.put(row, {});
                 return value.Set{
-                    .set = set,
+                    .rows = rows,
                 };
             },
             .Fix => |fix| {
@@ -401,13 +401,13 @@ const Interpreter = struct {
                     fix_hint[0] = .{ .Box = fix_box };
                     const body_set = try self.interpretBox(fix.next, fix_hint, .Apply);
                     var new_fix_set = value.Set{
-                        .set = u.DeepHashSet(value.Row).init(self.arena.allocator()),
+                        .rows = u.DeepHashSet(value.Row).init(self.arena.allocator()),
                     };
-                    var body_iter = body_set.set.iterator();
+                    var body_iter = body_set.rows.iterator();
                     while (body_iter.next()) |kv| {
                         try self.interrupter.check();
                         if (u.deepEqual(kv.key_ptr.*[0], value.Scalar{ .Box = fix_box })) {
-                            _ = try new_fix_set.set.put(kv.key_ptr.*[1..], {});
+                            _ = try new_fix_set.rows.put(kv.key_ptr.*[1..], {});
                         }
                     }
                     if (u.deepEqual(fix_set, new_fix_set)) {
@@ -419,8 +419,8 @@ const Interpreter = struct {
             },
             .Reduce => |reduce| {
                 const input_set = try self.interpretExpr(reduce.input, &.{}, .Apply);
-                var input_rows = try u.ArrayList(value.Row).initCapacity(self.arena.allocator(), input_set.set.count());
-                var input_iter = input_set.set.iterator();
+                var input_rows = try u.ArrayList(value.Row).initCapacity(self.arena.allocator(), input_set.rows.count());
+                var input_iter = input_set.rows.iterator();
                 while (input_iter.next()) |kv| {
                     try self.interrupter.check();
                     try input_rows.append(kv.key_ptr.*);
@@ -446,21 +446,21 @@ const Interpreter = struct {
                     try self.time.append(iteration);
                     defer _ = self.time.pop();
                     var row_set = value.Set{
-                        .set = u.DeepHashSet(value.Row).init(self.arena.allocator()),
+                        .rows = u.DeepHashSet(value.Row).init(self.arena.allocator()),
                     };
-                    _ = try row_set.set.put(input_row, {});
+                    _ = try row_set.rows.put(input_row, {});
                     const row_box = try value.Box.fixOrReduce(self.arena.allocator(), row_set);
                     reduce_hint[0] = .{ .Box = reduce_box };
                     reduce_hint[1] = .{ .Box = row_box };
                     const body_set = try self.interpretBox(reduce.next, reduce_hint, .Apply);
                     var new_reduce_set = value.Set{
-                        .set = u.DeepHashSet(value.Row).init(self.arena.allocator()),
+                        .rows = u.DeepHashSet(value.Row).init(self.arena.allocator()),
                     };
-                    var body_iter = body_set.set.iterator();
+                    var body_iter = body_set.rows.iterator();
                     while (body_iter.next()) |kv| {
                         try self.interrupter.check();
                         if (u.deepEqual(kv.key_ptr.*[0], value.Scalar{ .Box = reduce_box }) and u.deepEqual(kv.key_ptr.*[1], value.Scalar{ .Box = row_box })) {
-                            _ = try new_reduce_set.set.put(kv.key_ptr.*[2..], {});
+                            _ = try new_reduce_set.rows.put(kv.key_ptr.*[2..], {});
                         }
                     }
                     reduce_set = new_reduce_set;
@@ -470,30 +470,30 @@ const Interpreter = struct {
             },
             .Enumerate => |body| {
                 const body_set = try self.interpretExpr(body, &.{}, .Apply);
-                var rows = try u.ArrayList(value.Row).initCapacity(self.arena.allocator(), body_set.set.count());
-                var body_iter = body_set.set.iterator();
+                var body_rows = try u.ArrayList(value.Row).initCapacity(self.arena.allocator(), body_set.rows.count());
+                var body_iter = body_set.rows.iterator();
                 while (body_iter.next()) |kv| {
                     try self.interrupter.check();
-                    try rows.append(kv.key_ptr.*);
+                    try body_rows.append(kv.key_ptr.*);
                 }
                 // TODO would like to be able to interrupt sorting
-                std.sort.sort(value.Row, rows.items, {}, struct {
+                std.sort.sort(value.Row, body_rows.items, {}, struct {
                     fn lessThan(_: void, a: value.Row, b: value.Row) bool {
                         return u.deepCompare(a, b) == .LessThan;
                     }
                 }.lessThan);
                 // TODO HashMap.initCapacity is private?
-                var set = u.DeepHashSet(value.Row).init(self.arena.allocator());
-                for (rows.items) |row, i| {
+                var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                for (body_rows.items) |row, i| {
                     try self.interrupter.check();
                     var enumerated_row = try u.ArrayList(value.Scalar).initCapacity(self.arena.allocator(), 1 + row.len);
                     // TODO can we allocate enough rows to overflow this conversion?
                     try enumerated_row.append(.{ .Number = @intToFloat(f64, i + 1) });
                     try enumerated_row.appendSlice(row);
-                    _ = try set.put(enumerated_row.items, {});
+                    _ = try rows.put(enumerated_row.items, {});
                 }
                 return value.Set{
-                    .set = set,
+                    .rows = rows,
                 };
             },
             .Annotate => |annotate| {
@@ -525,7 +525,7 @@ const Interpreter = struct {
                         if (native == .Divide and hint[1].Number == 0) {
                             return self.setNativeError(expr_id, "Divide by 0", .{});
                         }
-                        var set = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                        var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
                         if (hint[0] == .Number and hint[1] == .Number) {
                             const result = switch (native) {
                                 .Add => hint[0].Number + hint[1].Number,
@@ -536,17 +536,17 @@ const Interpreter = struct {
                                 else => unreachable,
                             };
                             const row = try self.dupeScalars(&[_]value.Scalar{ hint[0], hint[1], .{ .Number = result } });
-                            _ = try set.put(row, {});
+                            _ = try rows.put(row, {});
                         }
                         return value.Set{
-                            .set = set,
+                            .rows = rows,
                         };
                     },
                     .Range => {
                         if (hint.len < 2) {
                             return self.setError(expr_id, "No hint for native arg", .{});
                         }
-                        var set = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                        var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
                         if (hint[0] == .Number and hint[1] == .Number) {
                             const lo = @floatToInt(i64, hint[0].Number);
                             const hi = @floatToInt(i64, hint[1].Number);
@@ -557,18 +557,18 @@ const Interpreter = struct {
                             while (i <= hi) : (i += 1) {
                                 try self.interrupter.check();
                                 const row = try self.dupeScalars(&[_]value.Scalar{ hint[0], hint[1], .{ .Number = @intToFloat(f64, i) } });
-                                _ = try set.put(row, {});
+                                _ = try rows.put(row, {});
                             }
                         }
                         return value.Set{
-                            .set = set,
+                            .rows = rows,
                         };
                     },
                     .GreaterThan, .GreaterThanOrEqual => {
                         if (hint.len < 2) {
                             return self.setError(expr_id, "No hint for native arg", .{});
                         }
-                        var set = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                        var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
                         if (hint[0] == .Number and hint[1] == .Number) {
                             const satisfied = switch (native) {
                                 .GreaterThan => hint[0].Number > hint[1].Number,
@@ -576,19 +576,19 @@ const Interpreter = struct {
                                 else => unreachable,
                             };
                             if (satisfied)
-                                _ = try set.put(try self.dupeScalars(&.{ hint[0], hint[1] }), {});
+                                _ = try rows.put(try self.dupeScalars(&.{ hint[0], hint[1] }), {});
                         }
                         return value.Set{
-                            .set = set,
+                            .rows = rows,
                         };
                     },
                     .Number, .Text => {
-                        var set = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                        var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
                         if (hint.len < 1)
                             return switch (hint_mode) {
                                 .Apply => self.setError(expr_id, "Could not infer the type of abstract arg", .{}),
                                 .Intersect => return value.Set{
-                                    .set = set,
+                                    .rows = rows,
                                 },
                             };
                         const satisfied =
@@ -598,9 +598,9 @@ const Interpreter = struct {
                             else => unreachable,
                         };
                         if (satisfied)
-                            _ = try set.put(try self.dupeScalars(&.{hint[0]}), {});
+                            _ = try rows.put(try self.dupeScalars(&.{hint[0]}), {});
                         return value.Set{
-                            .set = set,
+                            .rows = rows,
                         };
                     },
                 }
@@ -608,11 +608,11 @@ const Interpreter = struct {
             .IsTest => |pair| {
                 const left_set = try self.interpretExpr(pair.left, &.{}, .Apply);
                 const left_and_right_set = try self.interpretIntersect(left_set, pair.right);
-                var set = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
                 if (u.deepEqual(left_set, left_and_right_set))
-                    _ = try set.put(&.{}, {});
+                    _ = try rows.put(&.{}, {});
                 return value.Set{
-                    .set = set,
+                    .rows = rows,
                 };
             },
             .IsAssert => |pair| {
@@ -631,24 +631,24 @@ const Interpreter = struct {
     }
 
     fn interpretIntersect(self: *Interpreter, left_set: value.Set, right_expr_id: core.ExprId) Error!value.Set {
-        var set = u.DeepHashSet(value.Row).init(self.arena.allocator());
-        var left_iter = left_set.set.keyIterator();
+        var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
+        var left_iter = left_set.rows.keyIterator();
         while (left_iter.next()) |left_row| {
             try self.interrupter.check();
             const right = try self.interpretExpr(right_expr_id, left_row.*, .Intersect);
-            if (right.set.contains(left_row.*)) {
-                _ = try set.put(left_row.*, {});
+            if (right.rows.contains(left_row.*)) {
+                _ = try rows.put(left_row.*, {});
             }
         }
         return value.Set{
-            .set = set,
+            .rows = rows,
         };
     }
 
     fn interpretApply(self: *Interpreter, left_set: value.Set, right_expr_id: core.ExprId, hint: value.Row, hint_mode: type_.HintMode) Error!value.Set {
-        var right_set_set = u.DeepHashSet(value.Row).init(self.arena.allocator());
+        var right_rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
         {
-            var left_iter = left_set.set.iterator();
+            var left_iter = left_set.rows.iterator();
             while (left_iter.next()) |left_entry| {
                 try self.interrupter.check();
                 const right_hint = try std.mem.concat(
@@ -657,33 +657,33 @@ const Interpreter = struct {
                     &.{ left_entry.key_ptr.*, hint },
                 );
                 const right_part = try self.interpretExpr(right_expr_id, right_hint, hint_mode);
-                var right_part_iter = right_part.set.iterator();
+                var right_part_iter = right_part.rows.iterator();
                 while (right_part_iter.next()) |right_entry| {
                     try self.interrupter.check();
-                    _ = try right_set_set.put(right_entry.key_ptr.*, {});
+                    _ = try right_rows.put(right_entry.key_ptr.*, {});
                 }
             }
         }
         const right_set = value.Set{
-            .set = right_set_set,
+            .rows = right_rows,
         };
-        var set = u.DeepHashSet(value.Row).init(self.arena.allocator());
+        var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
         {
-            var left_iter = left_set.set.iterator();
+            var left_iter = left_set.rows.iterator();
             while (left_iter.next()) |left_entry| {
                 try self.interrupter.check();
-                var right_iter = right_set.set.iterator();
+                var right_iter = right_set.rows.iterator();
                 while (right_iter.next()) |right_entry| {
                     try self.interrupter.check();
                     const joined_arity = u.min(left_entry.key_ptr.len, right_entry.key_ptr.len);
                     if (u.deepEqual(left_entry.key_ptr.*[0..joined_arity], right_entry.key_ptr.*[0..joined_arity])) {
-                        _ = try set.put(if (left_entry.key_ptr.len > right_entry.key_ptr.len) left_entry.key_ptr.*[joined_arity..] else right_entry.key_ptr.*[joined_arity..], {});
+                        _ = try rows.put(if (left_entry.key_ptr.len > right_entry.key_ptr.len) left_entry.key_ptr.*[joined_arity..] else right_entry.key_ptr.*[joined_arity..], {});
                     }
                 }
             }
         }
         return value.Set{
-            .set = set,
+            .rows = rows,
         };
     }
 

@@ -5,7 +5,7 @@ const core = imp.lang.repr.core;
 
 /// Invariant: all the Rows in a Set must be the same length
 pub const Set = struct {
-    set: u.DeepHashSet(Row),
+    rows: u.DeepHashSet(Row),
 
     pub const Arity = union(enum) {
         Unknown,
@@ -16,7 +16,7 @@ pub const Set = struct {
     pub fn getArity(self: Set) Arity {
         var arity: Arity = .Unknown;
         {
-            var iter = self.set.iterator();
+            var iter = self.rows.iterator();
             while (iter.next()) |entry| {
                 switch (arity) {
                     .Unknown => arity = .{ .Known = entry.key_ptr.len },
@@ -32,12 +32,12 @@ pub const Set = struct {
 
     // TODO this is not an ordering, only works for deepEqual
     pub fn overrideDeepCompare(self: Set, other: Set) u.Ordering {
-        if (self.set.count() != other.set.count()) {
+        if (self.rows.count() != other.rows.count()) {
             return .LessThan;
         }
-        var self_iter = self.set.iterator();
+        var self_iter = self.rows.iterator();
         while (self_iter.next()) |kv| {
-            if (!other.set.contains(kv.key_ptr.*)) {
+            if (!other.rows.contains(kv.key_ptr.*)) {
                 return .LessThan;
             }
         }
@@ -46,7 +46,7 @@ pub const Set = struct {
 
     pub fn overrideDeepHashInto(hasher: anytype, self: Set) void {
         // TODO this will break if hashmap starts using a random seed
-        var iter = self.set.iterator();
+        var iter = self.rows.iterator();
         while (iter.next()) |entry| {
             u.deepHashInto(hasher, entry.key_ptr.*);
         }
@@ -55,7 +55,7 @@ pub const Set = struct {
     pub fn dumpInto(self: Set, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         var rows = u.ArrayList(Row).init(u.dump_allocator);
         defer rows.deinit();
-        var iter = self.set.iterator();
+        var iter = self.rows.iterator();
         while (iter.next()) |kv| {
             // TODO format doesn't always allow OOM
             rows.append(kv.key_ptr.*) catch u.panic("oom", .{});

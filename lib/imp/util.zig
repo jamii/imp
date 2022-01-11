@@ -24,6 +24,14 @@ pub fn TODO() noreturn {
     panic("TODO", .{});
 }
 
+pub fn comptimeAssert(comptime condition: bool, comptime message: []const u8, comptime args: anytype) void {
+    if (!condition) compileError(message, args);
+}
+
+pub fn compileError(comptime message: []const u8, comptime args: anytype) void {
+    @compileError(comptime std.fmt.comptimePrint(message, args));
+}
+
 pub fn formatToString(allocator: Allocator, comptime fmt: []const u8, args: anytype) ![]const u8 {
     var buf = ArrayList(u8).init(allocator);
     var writer = buf.writer();
@@ -439,4 +447,78 @@ pub fn DeepHashMap(comptime K: type, comptime V: type) type {
 
 pub fn DeepHashSet(comptime K: type) type {
     return DeepHashMap(K, void);
+}
+
+// TODO this can be error-prone - maybe should explicitly list allowed types?
+pub fn deepClone(thing: anytype, allocator: Allocator) error{OutOfMemory}!@TypeOf(thing) {
+    const T = @TypeOf(thing);
+    const ti = @typeInfo(T);
+
+    if (T == std.mem.Allocator)
+        return allocator;
+
+    if (comptime std.mem.startsWith(u8, @typeName(T), "std.array_list.ArrayList")) {
+        var cloned = try ArrayList(@TypeOf(thing.items[0])).initCapacity(allocator, thing.items.len);
+        cloned.appendSliceAssumeCapacity(thing.items);
+        for (cloned.items) |*item| item.* = try deepClone(item.*, allocator);
+        return cloned;
+    }
+
+    if (comptime std.mem.startsWith(u8, @typeName(T), "std.hash_map.HashMap")) {
+        var cloned = try thing.cloneWithAllocator(allocator);
+        var iter = cloned.iterator();
+        while (iter.next()) |entry| {
+            entry.key_ptr.* = try deepClone(entry.key_ptr.*, allocator);
+            entry.value_ptr.* = try deepClone(entry.value_ptr.*, allocator);
+        }
+        return cloned;
+    }
+
+    switch (ti) {
+        .Bool, .Int, .Float, .Enum, .Void, .Fn => return thing,
+        .Pointer => |pti| {
+            switch (pti.size) {
+                .One => {
+                    const cloned = try allocator.create(pti.child);
+                    cloned.* = try deepClone(thing.*, allocator);
+                    return cloned;
+                },
+                .Slice => {
+                    const cloned = try allocator.alloc(pti.child, thing.len);
+                    for (thing) |item, i| cloned[i] = try deepClone(item, allocator);
+                    return cloned;
+                },
+                .Many, .C => compileError("Cannot deepClone {}", .{T}),
+            }
+        },
+        .Array => {
+            var cloned = thing;
+            for (cloned) |*item| item.* = try deepClone(item.*, allocator);
+            return cloned;
+        },
+        .Optional => {
+            return if (thing == null) null else try deepClone(thing.?, allocator);
+        },
+        .Struct => |sti| {
+            var cloned: T = thing;
+            inline for (sti.fields) |fti| {
+                @field(cloned, fti.name) = try deepClone(@field(thing, fti.name), allocator);
+            }
+            return cloned;
+        },
+        .Union => |uti| {
+            if (uti.tag_type) |tag_type| {
+                const tag = @enumToInt(std.meta.activeTag(thing));
+                inline for (@typeInfo(tag_type).Enum.fields) |fti| {
+                    if (tag == fti.value) {
+                        return @unionInit(T, fti.name, try deepClone(@field(thing, fti.name), allocator));
+                    }
+                }
+                unreachable;
+            } else {
+                compileError("Cannot deepClone {}", .{T});
+            }
+        },
+        else => compileError("Cannot deepClone {}", .{T}),
+    }
 }

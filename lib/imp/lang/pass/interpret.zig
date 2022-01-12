@@ -150,26 +150,7 @@ const Interpreter = struct {
         try self.interrupter.check();
         const expr = self.program.exprs[expr_id.id];
         switch (expr) {
-            .None => {
-                const rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
-                return value.Set{
-                    .rows = rows,
-                };
-            },
-            .Some => {
-                var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
-                _ = try rows.put(&.{}, {});
-                return value.Set{
-                    .rows = rows,
-                };
-            },
-            .Scalar => |scalar| {
-                var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
-                _ = try rows.put(try self.dupeScalars(&.{scalar}), {});
-                return value.Set{
-                    .rows = rows,
-                };
-            },
+            .Set => |set| return set,
             .Union => |pair| {
                 const left = try self.interpretExpr(pair.left, hint, hint_mode);
                 const right = try self.interpretExpr(pair.right, hint, hint_mode);

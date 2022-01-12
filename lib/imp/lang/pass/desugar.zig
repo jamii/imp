@@ -2,16 +2,19 @@ const imp = @import("../../../imp.zig");
 const u = imp.util;
 const core = imp.lang.repr.core;
 const syntax = imp.lang.repr.syntax;
+const value = imp.lang.repr.value;
 
 pub fn desugar(
     arena: *u.ArenaAllocator,
     syntax_program: syntax.Program,
+    constants: u.DeepHashMap(syntax.Name, value.Set),
     watch_expr_id: ?syntax.ExprId,
     error_info: *?ErrorInfo,
 ) Error!core.Program {
     var desugarer = Desugarer{
         .arena = arena,
         .syntax_program = syntax_program,
+        .constants = constants,
         .watch_expr_id = watch_expr_id,
         .defs = u.ArrayList(core.ExprId).init(arena.allocator()),
         .exprs = u.ArrayList(core.Expr).init(arena.allocator()),
@@ -48,6 +51,7 @@ pub const ErrorInfo = struct {
 const Desugarer = struct {
     arena: *u.ArenaAllocator,
     syntax_program: syntax.Program,
+    constants: u.DeepHashMap(syntax.Name, value.Set),
     watch_expr_id: ?syntax.ExprId,
     defs: u.ArrayList(core.ExprId),
     exprs: u.ArrayList(core.Expr),
@@ -115,9 +119,20 @@ const Desugarer = struct {
         defer self.current_expr_id = prev_expr_id;
         const syntax_expr = self.syntax_program.exprs[syntax_expr_id.id];
         const core_expr_id = switch (syntax_expr) {
-            .None => try self.putCore(.None),
-            .Some => try self.putCore(.Some),
-            .Scalar => |scalar| try self.putCore(.{ .Scalar = scalar }),
+            .None => none: {
+                var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                break :none try self.putCore(.{ .Set = .{ .rows = rows } });
+            },
+            .Some => some: {
+                var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                try rows.put(&.{}, {});
+                break :some try self.putCore(.{ .Set = .{ .rows = rows } });
+            },
+            .Scalar => |scalar| scalar: {
+                var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                try rows.put(try self.arena.allocator().dupe(value.Scalar, &.{scalar}), {});
+                break :scalar try self.putCore(.{ .Set = .{ .rows = rows } });
+            },
             .Union => |pair| try self.putCore(.{
                 .Union = .{
                     .left = try self.desugar(pair.left),
@@ -204,10 +219,15 @@ const Desugarer = struct {
                     if (item.kind != .Set) scalar_id += 1;
                 }
 
-                // otherwise look for native
-                const native = core.Native.fromName(name) orelse
-                    return self.setError("Name not in scope: {s}", .{name});
-                break :name try self.putCore(.{ .Native = native });
+                // look for name in constants
+                if (self.constants.get(name)) |constant|
+                    break :name try self.putCore(.{ .Set = constant });
+
+                // look for native function
+                if (core.Native.fromName(name)) |native|
+                    break :name try self.putCore(.{ .Native = native });
+
+                return self.setError("Name not in scope: {s}", .{name});
             },
             .Negate => |expr| try self.putCore(.{ .Negate = try self.desugar(expr) }),
             .Then => |then| try self.putCore(.{
@@ -276,7 +296,7 @@ const Desugarer = struct {
                 });
             },
             .Def => |def| def: {
-                const value = value: {
+                const def_value = value: {
                     if (def.fix) {
                         // `fix n: v;` => `n: fix none ?@n v;`
                         try self.scopeAppend(.{
@@ -287,7 +307,7 @@ const Desugarer = struct {
                         try self.scopePop();
                         break :value try self.putCore(.{
                             .Fix = .{
-                                .init = try self.putCore(.None),
+                                .init = try self.putCore(.{ .Set = .{ .rows = u.DeepHashSet(value.Row).init(self.arena.allocator()) } }),
                                 .next = try self.putDef(try self.putCore(.{ .Abstract = fix_body })),
                             },
                         });
@@ -297,7 +317,7 @@ const Desugarer = struct {
                 };
                 try self.scopeAppend(.{
                     .name = def.name,
-                    .kind = .{ .Set = try self.putDef(value) },
+                    .kind = .{ .Set = try self.putDef(def_value) },
                 });
                 const body = try self.desugar(def.body);
                 try self.scopePop();

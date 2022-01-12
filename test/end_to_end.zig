@@ -56,6 +56,7 @@ pub fn main() anyerror!void {
                 .arena = &arena,
                 .interrupter = interrupter,
                 .source = input,
+                .constants = u.DeepHashMap(imp.lang.repr.syntax.Name, imp.lang.repr.value.Set).init(arena.allocator()),
             };
             store.run();
 

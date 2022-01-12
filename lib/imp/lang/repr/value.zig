@@ -2,6 +2,7 @@ const std = @import("std");
 const imp = @import("../../../imp.zig");
 const u = imp.util;
 const core = imp.lang.repr.core;
+const type_ = imp.lang.repr.type_;
 
 /// Invariant: all the Rows in a Set must be the same length
 pub const Set = struct {
@@ -12,6 +13,8 @@ pub const Set = struct {
         Known: usize,
         Mixed,
     };
+
+    // TODO Set.none, Set.some, Set.fromScalar, Set.fromRow
 
     pub fn getArity(self: Set) Arity {
         var arity: Arity = .Unknown;
@@ -28,6 +31,14 @@ pub const Set = struct {
             }
         }
         return arity;
+    }
+
+    pub fn getType(self: Set, allocator: u.Allocator) !type_.SetType {
+        var row_types = u.DeepHashSet(type_.RowType).init(allocator);
+        var iter = self.rows.keyIterator();
+        while (iter.next()) |row|
+            try row_types.put(try getRowType(row.*, allocator), {});
+        return type_.SetType{ .row_types = row_types };
     }
 
     // TODO this is not an ordering, only works for deepEqual
@@ -89,12 +100,29 @@ pub const Set = struct {
 
 pub const Row = []const Scalar;
 
+pub fn getRowType(self: Row, allocator: u.Allocator) !type_.RowType {
+    var scalar_types = u.ArrayList(type_.ScalarType).init(allocator);
+    for (self) |scalar|
+        try scalar_types.append(try scalar.getType(allocator));
+    return type_.RowType{ .scalar_types = scalar_types.toOwnedSlice() };
+}
+
 pub const Scalar = union(enum) {
     Text: []const u8, // valid utf8
     Number: f64,
     Box: Box,
     TextTag: []const u8, // valid utf8
     NumberTag: f64,
+
+    pub fn getType(self: Scalar, allocator: u.Allocator) !type_.ScalarType {
+        return switch (self) {
+            .Text => .Text,
+            .Number => .Number,
+            .Box => |box| .{ .Box = try box.getType(allocator) },
+            .TextTag => |text| .{ .TextTag = text },
+            .NumberTag => |number| .{ .NumberTag = number },
+        };
+    }
 
     pub fn dumpInto(self: Scalar, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         switch (self) {
@@ -124,6 +152,20 @@ pub const Box = union(enum) {
     // While interpreting fix or reduce, need to pass an actual value to avoid infinite recursion
     // TODO *const anyopaque is actually a *const Set - workaround for https://github.com/ziglang/zig/issues/5920
     FixOrReduce: *align(@alignOf(Set)) const anyopaque,
+
+    pub fn getType(self: Box, allocator: u.Allocator) error{OutOfMemory}!type_.BoxType {
+        switch (self) {
+            .Normal => |normal| {
+                const args = try allocator.alloc(type_.ScalarType, normal.args.len);
+                for (args) |*arg, i|
+                    arg.* = try normal.args[i].getType(allocator);
+                return type_.BoxType{ .Normal = .{ .def_id = normal.def_id, .args = args } };
+            },
+            .FixOrReduce =>
+            // We only use getType on constants, so this shouldn't be reachable
+            u.panic("TODO: cannot infer type of Box.FixOrReduce", .{}),
+        }
+    }
 
     pub fn overrideDeepCompare(self: Box, other: Box) u.Ordering {
         const tagOrdering = u.deepCompare(std.meta.activeTag(self), std.meta.activeTag(other));

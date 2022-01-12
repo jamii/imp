@@ -47,9 +47,7 @@ pub const DefId = u.Id("d");
 pub const ScalarId = u.Id("s");
 
 pub const Expr = union(enum) {
-    None,
-    Some,
-    Scalar: value.Scalar,
+    Set: value.Set,
     Union: Pair,
     Intersect: Pair,
     Product: Pair,
@@ -79,7 +77,7 @@ pub const Expr = union(enum) {
                 const T = expr_field.field_type;
                 const v = @field(self, expr_field.name);
                 switch (T) {
-                    void, value.Scalar, ScalarId, DefId, Native => {},
+                    value.Set, ScalarId, DefId, Native => {},
                     ExprId => children.append(v),
                     Pair, Then, Apply, Box, Fix, Reduce, Annotate, Watch => {
                         inline for (@typeInfo(T).Struct.fields) |value_field| {
@@ -104,9 +102,13 @@ pub const Expr = union(enum) {
 
     pub fn dumpTagInto(self: Expr, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         switch (self) {
-            .None => try writer.writeAll("none"),
-            .Some => try writer.writeAll("some"),
-            .Scalar => |scalar| try scalar.dumpInto(writer, indent),
+            .Set => |set| {
+                const string = try u.formatToString(u.dump_allocator, "{}", set);
+                defer u.dump_allocator.free(string);
+                var lines = std.mem.split(u8, string, '\n');
+                while (lines.next()) |line|
+                    try std.fmt.format(writer, "{s} ", .{line});
+            },
             .Union => try writer.writeAll("|"),
             .Intersect => try writer.writeAll("&"),
             .Product => try writer.writeAll(","),

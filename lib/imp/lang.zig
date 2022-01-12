@@ -44,7 +44,12 @@ pub const SourceSelection = union(enum) {
     Range: [2]usize,
 };
 
-pub fn eval(arena: *u.ArenaAllocator, source: []const u8, error_info: *?ErrorInfo) !value.Set {
+pub fn eval(
+    arena: *u.ArenaAllocator,
+    source: []const u8,
+    constants: u.DeepHashMap(syntax.Name, value.Set),
+    error_info: *?ErrorInfo,
+) !value.Set {
     var desired_id: usize = 0;
     const interrupter = .{
         .current_id = 0,
@@ -54,6 +59,7 @@ pub fn eval(arena: *u.ArenaAllocator, source: []const u8, error_info: *?ErrorInf
         .arena = arena,
         .interrupter = interrupter,
         .source = source,
+        .constants = constants,
     };
     store.run();
     if (store.result.?) |set| {
@@ -70,6 +76,7 @@ pub const Store = struct {
 
     // inputs
     source: []const u8,
+    constants: u.DeepHashMap(syntax.Name, value.Set),
     watch_selection: ?SourceSelection = null,
 
     // intermediate results
@@ -97,7 +104,7 @@ pub const Store = struct {
             self.watch_expr_id = self.findSyntaxExprAt(watch_selection);
 
         var desugar_error_info: ?desugar.ErrorInfo = null;
-        self.core_program = desugar.desugar(self.arena, self.syntax_program.?, self.watch_expr_id, &desugar_error_info) catch |err| {
+        self.core_program = desugar.desugar(self.arena, self.syntax_program.?, self.constants, self.watch_expr_id, &desugar_error_info) catch |err| {
             if (err == error.DesugarError) {
                 self.error_info = .{ .Desugar = desugar_error_info.? };
             }

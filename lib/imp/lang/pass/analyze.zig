@@ -104,7 +104,7 @@ pub const Analyzer = struct {
         var used_hint_ix: ?usize = null;
         var iter = set_type.row_types.keyIterator();
         while (iter.next()) |row_type| {
-            used_hint_ix = u.max(used_hint_ix orelse 0, row_type.columns.len);
+            used_hint_ix = u.max(used_hint_ix orelse 0, row_type.scalar_types.len);
         }
         const used_hint = hint[0..u.min(hint.len, used_hint_ix orelse 0)];
         try self.defs[def_id.id].append(.{
@@ -125,7 +125,7 @@ pub const Analyzer = struct {
         var row_types = u.DeepHashSet(type_.RowType).init(self.arena.allocator());
         var row_types_iter = set_type.row_types.keyIterator();
         while (row_types_iter.next()) |row_type| {
-            try row_types.put(.{ .columns = row_type.columns[box.args.len..] }, {});
+            try row_types.put(.{ .scalar_types = row_type.scalar_types[box.args.len..] }, {});
         }
         return type_.SetType{ .row_types = row_types };
     }
@@ -139,22 +139,7 @@ pub const Analyzer = struct {
         try self.interrupter.check();
         const expr = self.core_program.exprs[expr_id.id];
         switch (expr) {
-            .None => {
-                return type_.SetType.none(self.arena.allocator());
-            },
-            .Some => {
-                return type_.SetType.some(self.arena.allocator());
-            },
-            .Scalar => |scalar| {
-                const scalar_type: type_.ScalarType = switch (scalar) {
-                    .Text => .Text,
-                    .Number => .Number,
-                    .Box => u.panic("Shouldn't be any box literals", .{}),
-                    .TextTag => |text| .{ .TextTag = text },
-                    .NumberTag => |number| .{ .NumberTag = number },
-                };
-                return type_.SetType.fromScalar(self.arena.allocator(), scalar_type);
-            },
+            .Set => |set| return set.getType(self.arena.allocator()),
             .Union => |pair| {
                 var row_types = u.DeepHashSet(type_.RowType).init(self.arena.allocator());
                 const left = try self.analyzeExpr(pair.left, hint, hint_mode);
@@ -194,15 +179,15 @@ pub const Analyzer = struct {
                 const left = try self.analyzeExpr(pair.left, hint, hint_mode);
                 var left_iter = left.row_types.keyIterator();
                 while (left_iter.next()) |left_row_type| {
-                    const right = try self.analyzeExpr(pair.right, hint[u.min(hint.len, left_row_type.columns.len)..], hint_mode);
+                    const right = try self.analyzeExpr(pair.right, hint[u.min(hint.len, left_row_type.scalar_types.len)..], hint_mode);
                     var right_iter = right.row_types.keyIterator();
                     while (right_iter.next()) |right_row_type| {
-                        const columns_inputs = [2][]const type_.ScalarType{
-                            left_row_type.columns,
-                            right_row_type.columns,
+                        const scalar_types_inputs = [2][]const type_.ScalarType{
+                            left_row_type.scalar_types,
+                            right_row_type.scalar_types,
                         };
-                        const columns = try std.mem.concat(self.arena.allocator(), type_.ScalarType, &columns_inputs);
-                        try row_types.put(.{ .columns = columns }, {});
+                        const scalar_types = try std.mem.concat(self.arena.allocator(), type_.ScalarType, &scalar_types_inputs);
+                        try row_types.put(.{ .scalar_types = scalar_types }, {});
                     }
                 }
                 return type_.SetType{ .row_types = row_types };
@@ -224,7 +209,7 @@ pub const Analyzer = struct {
             },
             .ScalarId => |scalar_id| {
                 const scalar_type = self.scope.items[self.scope.items.len - 1 - scalar_id.id];
-                return type_.SetType.fromScalar(self.arena.allocator(), scalar_type);
+                return type_.SetType.fromScalarType(self.arena.allocator(), scalar_type);
             },
             .UnboxScalarId => |scalar_id| {
                 const scalar_type = self.scope.items[self.scope.items.len - 1 - scalar_id.id];
@@ -244,7 +229,7 @@ pub const Analyzer = struct {
                                 var row_types = u.DeepHashSet(type_.RowType).init(self.arena.allocator());
                                 var row_types_iter = set_type.row_types.keyIterator();
                                 while (row_types_iter.next()) |row_type| {
-                                    try row_types.put(.{ .columns = row_type.columns[normal.args.len..] }, {});
+                                    try row_types.put(.{ .scalar_types = row_type.scalar_types[normal.args.len..] }, {});
                                 }
                                 return type_.SetType{ .row_types = row_types };
                             },
@@ -289,11 +274,11 @@ pub const Analyzer = struct {
                     var row_types = u.DeepHashSet(type_.RowType).init(self.arena.allocator());
                     var body_iter = body_type.row_types.keyIterator();
                     while (body_iter.next()) |body_row_type| {
-                        const columns = try std.mem.concat(self.arena.allocator(), type_.ScalarType, &.{
+                        const scalar_types = try std.mem.concat(self.arena.allocator(), type_.ScalarType, &.{
                             &[_]type_.ScalarType{hint[0]},
-                            body_row_type.columns,
+                            body_row_type.scalar_types,
                         });
-                        try row_types.put(.{ .columns = columns }, {});
+                        try row_types.put(.{ .scalar_types = scalar_types }, {});
                     }
                     return type_.SetType{ .row_types = row_types };
                 }
@@ -337,7 +322,7 @@ pub const Analyzer = struct {
                         },
                     },
                 };
-                return type_.SetType.fromScalar(self.arena.allocator(), box_type);
+                return type_.SetType.fromScalarType(self.arena.allocator(), box_type);
             },
             .Fix => |fix| {
                 const init_type = try self.analyzeExpr(fix.init, &.{}, .Apply);
@@ -356,11 +341,11 @@ pub const Analyzer = struct {
                     const next_type = try self.analyzeBox(fix.next, fix_hint, .Apply);
                     var next_iter = next_type.row_types.keyIterator();
                     while (next_iter.next()) |next_row_type| {
-                        if (next_row_type.columns.len < 1)
+                        if (next_row_type.scalar_types.len < 1)
                             return self.setError(expr_id, "The `next` argument for fix must have arity >= 1", .{}, .Other);
-                        if (next_row_type.columns[0] != .Box)
+                        if (next_row_type.scalar_types[0] != .Box)
                             return self.setError(expr_id, "The `next` argument for fix must take a box as it's first argument. Found {}", .{next_type}, .Other);
-                        const new_fix_row_type = type_.RowType{ .columns = next_row_type.columns[1..] };
+                        const new_fix_row_type = type_.RowType{ .scalar_types = next_row_type.scalar_types[1..] };
                         try new_fix_row_types.put(new_fix_row_type, {});
                     }
                     const new_fix_type = type_.SetType{ .row_types = new_fix_row_types };
@@ -398,12 +383,12 @@ pub const Analyzer = struct {
                     const next_type = try self.analyzeBox(reduce.next, reduce_hint, .Apply);
                     var next_iter = next_type.row_types.keyIterator();
                     while (next_iter.next()) |next_row_type| {
-                        if (next_row_type.columns.len < 2)
+                        if (next_row_type.scalar_types.len < 2)
                             return self.setError(expr_id, "The `next` argument for reduce must have arity >= 1", .{}, .Other);
 
-                        if (next_row_type.columns[0] != .Box or next_row_type.columns[1] != .Box)
+                        if (next_row_type.scalar_types[0] != .Box or next_row_type.scalar_types[1] != .Box)
                             return self.setError(expr_id, "The body for reduce must take boxes as it's first two arguments. Found {}", .{next_type}, .Other);
-                        const new_reduce_row_type = type_.RowType{ .columns = next_row_type.columns[2..] };
+                        const new_reduce_row_type = type_.RowType{ .scalar_types = next_row_type.scalar_types[2..] };
                         try new_reduce_row_types.put(new_reduce_row_type, {});
                     }
                     const new_reduce_type = type_.SetType{ .row_types = new_reduce_row_types };
@@ -422,11 +407,11 @@ pub const Analyzer = struct {
                 var row_types = u.DeepHashSet(type_.RowType).init(self.arena.allocator());
                 var body_iter = body_type.row_types.keyIterator();
                 while (body_iter.next()) |body_row_type| {
-                    const columns = try std.mem.concat(self.arena.allocator(), type_.ScalarType, &.{
+                    const scalar_types = try std.mem.concat(self.arena.allocator(), type_.ScalarType, &.{
                         &[_]type_.ScalarType{.Number},
-                        body_row_type.columns,
+                        body_row_type.scalar_types,
                     });
-                    try row_types.put(.{ .columns = columns }, {});
+                    try row_types.put(.{ .scalar_types = scalar_types }, {});
                 }
                 return type_.SetType{ .row_types = row_types };
             },
@@ -451,7 +436,7 @@ pub const Analyzer = struct {
                             try self.addWarning(expr_id, "Second argument to {} should have type number, not {}", .{ native, hint[1] });
                             return type_.SetType.none(self.arena.allocator());
                         }
-                        return type_.SetType.fromColumns(self.arena.allocator(), switch (native) {
+                        return type_.SetType.fromScalarTypes(self.arena.allocator(), switch (native) {
                             .Add, .Subtract, .Multiply, .Divide, .Modulus, .Range => &.{ .Number, .Number, .Number },
                             .GreaterThan, .GreaterThanOrEqual => &.{ .Number, .Number },
                             else => unreachable,
@@ -462,7 +447,7 @@ pub const Analyzer = struct {
                             return switch (hint_mode) {
                                 .Apply => self.setError(expr_id, "Could not infer the type of abstract arg", .{}, .NoHintForArg),
                                 // TODO this is kind of a hack to support `as` - might break things if we ever use .Intersect in a place that can actually return `native`
-                                .Intersect => type_.SetType.fromScalar(self.arena.allocator(), switch (native) {
+                                .Intersect => type_.SetType.fromScalarType(self.arena.allocator(), switch (native) {
                                     .Number => type_.ScalarType.Number,
                                     .Text => type_.ScalarType.Text,
                                     else => unreachable,
@@ -475,7 +460,7 @@ pub const Analyzer = struct {
                             else => unreachable,
                         };
                         return if (satisfied)
-                            type_.SetType.fromScalar(self.arena.allocator(), hint[0])
+                            type_.SetType.fromScalarType(self.arena.allocator(), hint[0])
                         else
                             type_.SetType.none(self.arena.allocator());
                     },
@@ -486,7 +471,7 @@ pub const Analyzer = struct {
                 var is_none = false;
                 var left_iter = left_type.row_types.keyIterator();
                 while (left_iter.next()) |left_row_type| {
-                    const right_type = try self.analyzeExpr(pair.right, left_row_type.columns, .Intersect);
+                    const right_type = try self.analyzeExpr(pair.right, left_row_type.scalar_types, .Intersect);
                     if (!right_type.row_types.contains(left_row_type.*)) is_none = true;
                 }
                 return if (is_none)
@@ -499,7 +484,7 @@ pub const Analyzer = struct {
                 var left_iter = left_type.row_types.keyIterator();
                 var row_types = u.DeepHashSet(type_.RowType).init(self.arena.allocator());
                 while (left_iter.next()) |left_row_type| {
-                    const right_type = try self.analyzeExpr(pair.right, left_row_type.columns, .Intersect);
+                    const right_type = try self.analyzeExpr(pair.right, left_row_type.scalar_types, .Intersect);
                     if (right_type.row_types.contains(left_row_type.*))
                         _ = try row_types.put(left_row_type.*, {})
                     else
@@ -521,7 +506,7 @@ pub const Analyzer = struct {
         var right_row_types = u.DeepHashSet(type_.RowType).init(self.arena.allocator());
         var left_iter = left_type.row_types.keyIterator();
         while (left_iter.next()) |left_row_type| {
-            const right_type = try self.analyzeExpr(right_expr_id, left_row_type.columns, .Intersect);
+            const right_type = try self.analyzeExpr(right_expr_id, left_row_type.scalar_types, .Intersect);
             var right_iter = right_type.row_types.keyIterator();
             while (right_iter.next()) |right_row_type| {
                 try right_row_types.put(right_row_type.*, {});
@@ -545,20 +530,20 @@ pub const Analyzer = struct {
         while (left_iter.next()) |left_row_type| {
             var right_iter = right_type.row_types.keyIterator();
             while (right_iter.next()) |right_row_type| {
-                const joined_arity = u.min(left_row_type.columns.len, right_row_type.columns.len);
+                const joined_arity = u.min(left_row_type.scalar_types.len, right_row_type.scalar_types.len);
 
                 var has_intersection = true;
-                for (left_row_type.columns[0..joined_arity]) |left_column, i| {
-                    if (!u.deepEqual(left_column, right_row_type.columns[i]))
+                for (left_row_type.scalar_types[0..joined_arity]) |left_scalar_type, i| {
+                    if (!u.deepEqual(left_scalar_type, right_row_type.scalar_types[i]))
                         has_intersection = false;
                 }
 
                 if (has_intersection) {
-                    const columns = if (left_row_type.columns.len > right_row_type.columns.len)
-                        left_row_type.columns[joined_arity..]
+                    const scalar_types = if (left_row_type.scalar_types.len > right_row_type.scalar_types.len)
+                        left_row_type.scalar_types[joined_arity..]
                     else
-                        right_row_type.columns[joined_arity..];
-                    try row_types.put(.{ .columns = columns }, {});
+                        right_row_type.scalar_types[joined_arity..];
+                    try row_types.put(.{ .scalar_types = scalar_types }, {});
                 }
             }
         }
@@ -574,29 +559,29 @@ pub const Analyzer = struct {
         var row_types = u.DeepHashSet(type_.RowType).init(self.arena.allocator());
         var left_iter = left_type.row_types.keyIterator();
         while (left_iter.next()) |left_row_type| {
-            var right_hint = try u.ArrayList(type_.ScalarType).initCapacity(self.arena.allocator(), left_row_type.columns.len + hint.len);
-            for (left_row_type.columns) |column_type|
-                try right_hint.append(column_type);
+            var right_hint = try u.ArrayList(type_.ScalarType).initCapacity(self.arena.allocator(), left_row_type.scalar_types.len + hint.len);
+            for (left_row_type.scalar_types) |scalar_type|
+                try right_hint.append(scalar_type);
             try right_hint.appendSlice(hint);
             const right_type = try self.analyzeExpr(right_expr_id, right_hint.toOwnedSlice(), hint_mode);
             var left_has_intersection = false;
             var right_iter = right_type.row_types.keyIterator();
             while (right_iter.next()) |right_row_type| {
-                const joined_arity = u.min(left_row_type.columns.len, right_row_type.columns.len);
+                const joined_arity = u.min(left_row_type.scalar_types.len, right_row_type.scalar_types.len);
 
                 var has_intersection = true;
-                for (left_row_type.columns[0..joined_arity]) |left_column, i| {
-                    if (!u.deepEqual(left_column, right_row_type.columns[i]))
+                for (left_row_type.scalar_types[0..joined_arity]) |left_scalar_type, i| {
+                    if (!u.deepEqual(left_scalar_type, right_row_type.scalar_types[i]))
                         has_intersection = false;
                 }
 
                 if (has_intersection) {
                     left_has_intersection = true;
-                    const columns = if (left_row_type.columns.len > right_row_type.columns.len)
-                        left_row_type.columns[joined_arity..]
+                    const scalar_types = if (left_row_type.scalar_types.len > right_row_type.scalar_types.len)
+                        left_row_type.scalar_types[joined_arity..]
                     else
-                        right_row_type.columns[joined_arity..];
-                    try row_types.put(.{ .columns = columns }, {});
+                        right_row_type.scalar_types[joined_arity..];
+                    try row_types.put(.{ .scalar_types = scalar_types }, {});
                 }
             }
             if (!left_has_intersection and

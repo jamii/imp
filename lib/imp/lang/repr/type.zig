@@ -73,28 +73,24 @@ pub const SetType = union(enum) {
     pub fn some(
         allocator: u.Allocator,
     ) !SetType {
-        var row_types = u.DeepHashSet(RowType).init(allocator);
-        try row_types.put(.{ .columns = &.{} }, {});
-        return SetType{ .row_types = row_types };
+        return SetType.fromScalarTypes(allocator, &.{});
     }
 
-    pub fn fromScalar(allocator: u.Allocator, scalar_type: ScalarType) !SetType {
-        var row_types = u.DeepHashSet(RowType).init(allocator);
-        const columns = [_]ScalarType{scalar_type};
-        try row_types.put(.{ .columns = try allocator.dupe(ScalarType, &columns) }, {});
-        return SetType{ .row_types = row_types };
+    pub fn fromScalarType(allocator: u.Allocator, scalar_type: ScalarType) !SetType {
+        const scalar_types = [_]ScalarType{scalar_type};
+        return SetType.fromScalarTypes(allocator, &scalar_types);
     }
 
-    pub fn fromColumns(allocator: u.Allocator, columns: []const ScalarType) !SetType {
+    pub fn fromScalarTypes(allocator: u.Allocator, scalar_types: []const ScalarType) !SetType {
         var row_types = u.DeepHashSet(RowType).init(allocator);
-        try row_types.put(.{ .columns = try allocator.dupe(ScalarType, columns) }, {});
+        try row_types.put(.{ .scalar_types = try allocator.dupe(ScalarType, scalar_types) }, {});
         return SetType{ .row_types = row_types };
     }
 
     pub fn isBoolish(self: SetType) bool {
         var row_types_iter = self.row_types.keyIterator();
         while (row_types_iter.next()) |row_type| {
-            if (row_type.columns.len > 0) return false;
+            if (row_type.scalar_types.len > 0) return false;
         }
         return true;
     }
@@ -125,13 +121,13 @@ pub const SetType = union(enum) {
 };
 
 pub const RowType = struct {
-    columns: []const ScalarType,
+    scalar_types: []const ScalarType,
 
     pub fn dumpInto(self: RowType, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
-        if (self.columns.len == 0) {
+        if (self.scalar_types.len == 0) {
             try writer.writeAll("maybe");
         } else {
-            for (self.columns) |column_type, ix| {
+            for (self.scalar_types) |column_type, ix| {
                 if (ix > 0) try writer.writeAll(", ");
                 try column_type.dumpInto(writer, indent);
             }

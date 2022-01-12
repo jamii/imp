@@ -12,6 +12,7 @@
 const std = @import("std");
 const imp = @import("../imp.zig");
 const u = imp.util;
+const syntax = imp.lang.repr.syntax;
 const value = imp.lang.repr.value;
 
 const c = @cImport({
@@ -121,8 +122,9 @@ pub fn getTransactions(arena: *u.ArenaAllocator, db: *c.sqlite3) !value.Set {
     // Convert transactions to imp.
     var transactions = u.DeepHashSet(value.Row).init(arena.allocator());
     for (serialized_transactions) |serialized_transaction| {
+        const constants = u.DeepHashMap(syntax.Name, value.Set).init(arena.allocator());
         var error_info: ?imp.lang.ErrorInfo = null;
-        if (imp.lang.eval(arena, serialized_transaction[0].Text, &error_info)) |transaction| {
+        if (imp.lang.eval(arena, serialized_transaction[0].Text, constants, &error_info)) |transaction| {
             var iter = transaction.rows.keyIterator();
             while (iter.next()) |row|
                 try transactions.put(row.*, {});
@@ -303,7 +305,8 @@ const TestState = struct {
     }
 
     pub fn applyDiff(self: *TestState, diff_source: []const u8) !void {
-        const diff = try imp.lang.eval(&self.arena, diff_source, &self.error_info);
+        const constants = u.DeepHashMap(syntax.Name, value.Set).init(self.arena.allocator());
+        const diff = try imp.lang.eval(&self.arena, diff_source, constants, &self.error_info);
         const transaction = try diffToTransaction(&self.arena, self.tids_and_rows, self.next_tid.*, diff);
         self.next_tid.* += 1;
         try putTransaction(&self.arena, self.db, transaction);

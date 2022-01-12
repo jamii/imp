@@ -44,6 +44,26 @@ pub const SourceSelection = union(enum) {
     Range: [2]usize,
 };
 
+pub fn eval(arena: *u.ArenaAllocator, source: []const u8, error_info: *?ErrorInfo) !value.Set {
+    var desired_id: usize = 0;
+    const interrupter = .{
+        .current_id = 0,
+        .desired_id = &desired_id,
+    };
+    var store = imp.lang.Store{
+        .arena = arena,
+        .interrupter = interrupter,
+        .source = source,
+    };
+    store.run();
+    if (store.result.?) |set| {
+        return set;
+    } else |err| {
+        error_info.* = store.error_info;
+        return err;
+    }
+}
+
 pub const Store = struct {
     arena: *u.ArenaAllocator,
     interrupter: Interrupter,

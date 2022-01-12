@@ -19,7 +19,92 @@ const c = @cImport({
     @cInclude("sqlite3.h");
 });
 
-pub fn open(arena: *u.ArenaAllocator, db_path: [:0]const u8) !*c.sqlite3 {
+pub const DB = struct {
+    allocator: u.Allocator,
+    arena: *u.ArenaAllocator,
+    db: *c.sqlite3,
+    tid_gen: TidGen,
+    transactions: value.Set,
+    tids_and_rows: value.Set,
+    rows: value.Set,
+    error_info: ?imp.lang.ErrorInfo,
+
+    const TidGen = union(enum) {
+        Real: std.rand.DefaultCsprng,
+        Testing: *u52,
+    };
+
+    pub fn init(allocator: u.Allocator, db_path: []const u8) !DB {
+        const arena = try allocator.create(u.ArenaAllocator);
+        arena.* = u.ArenaAllocator.init(allocator);
+        const empty_set = value.Set{ .rows = u.DeepHashSet(value.Row).init(arena.allocator()) };
+        var seed: [32]u8 = undefined;
+        try std.os.getrandom(&seed);
+        return DB{
+            .allocator = allocator,
+            .arena = arena,
+            .tid_gen = .{ .Real = std.rand.DefaultCsprng.init(seed) },
+            .db = try open(arena, db_path),
+            .transactions = empty_set,
+            .tids_and_rows = empty_set,
+            .rows = empty_set,
+            .error_info = null,
+        };
+    }
+
+    pub fn initTesting(next_tid: *u52) !DB {
+        const arena = try std.testing.allocator.create(u.ArenaAllocator);
+        arena.* = u.ArenaAllocator.init(std.testing.allocator);
+        const empty_set = value.Set{ .rows = u.DeepHashSet(value.Row).init(arena.allocator()) };
+        return DB{
+            .allocator = std.testing.allocator,
+            .arena = arena,
+            .tid_gen = .{ .Testing = next_tid },
+            .db = try open(arena, ":memory:"),
+            .transactions = empty_set,
+            .tids_and_rows = empty_set,
+            .rows = empty_set,
+            .error_info = null,
+        };
+    }
+
+    pub fn deinit(self: DB) void {
+        close(self.db);
+        self.arena.deinit();
+        self.allocator.destroy(self.arena);
+    }
+
+    pub fn applyDiff(self: *DB, diff_source: []const u8) !void {
+        const constants = u.DeepHashMap(syntax.Name, value.Set).init(self.arena.allocator());
+        const diff = try imp.lang.eval(self.arena, diff_source, constants, &self.error_info);
+        const tid = switch (self.tid_gen) {
+            .Real => |*rng| rng.random().int(u52),
+            .Testing => |next_tid| tid: {
+                next_tid.* += 1;
+                break :tid next_tid.* - 1;
+            },
+        };
+        const transaction = try diffToTransaction(self.arena, self.tids_and_rows, tid, diff);
+        try putTransaction(self.arena, self.db, transaction);
+        self.transactions = try getTransactions(self.arena, self.db);
+        self.tids_and_rows = try transactionsToTidAndRows(self.arena, self.transactions);
+        self.rows = try tidAndRowsToRows(self.arena, self.tids_and_rows);
+    }
+
+    pub fn syncFrom(self: *DB, other: DB) !void {
+        try putTransaction(self.arena, self.db, other.transactions);
+        self.transactions = try getTransactions(self.arena, self.db);
+        self.tids_and_rows = try transactionsToTidAndRows(self.arena, self.transactions);
+        self.rows = try tidAndRowsToRows(self.arena, self.tids_and_rows);
+    }
+
+    pub fn expectEqual(self: *DB, string: []const u8) !void {
+        const self_string = try u.formatToString(self.arena.allocator(), "{}", .{self.tids_and_rows});
+        try std.testing.expectEqualStrings(string, self_string);
+    }
+};
+
+fn open(arena: *u.ArenaAllocator, db_path: [:0]const u8) !*c.sqlite3 {
     // Open db.
     var db: ?*c.sqlite3 = null;
     const result = c.sqlite3_open_v2(
@@ -43,17 +128,11 @@ pub fn open(arena: *u.ArenaAllocator, db_path: [:0]const u8) !*c.sqlite3 {
     return db.?;
 }
 
-pub fn close(db: *c.sqlite3) void {
+fn close(db: *c.sqlite3) void {
     _ = c.sqlite3_close(db);
 }
 
-pub fn initRng() std.rand.DefaultCsprng {
-    var seed: [32]u8 = undefined;
-    try std.os.getrandom(&seed);
-    return std.rand.DefaultCsprng.init(seed);
-}
-
-pub fn diffToTransaction(arena: *u.ArenaAllocator, tids_and_rows: value.Set, tid: u52, diff: value.Set) !value.Set {
+fn diffToTransaction(arena: *u.ArenaAllocator, tids_and_rows: value.Set, tid: u52, diff: value.Set) !value.Set {
     var transaction_rows = u.DeepHashSet(value.Row).init(arena.allocator());
 
     // Handle inserts. Build an index of deletes.
@@ -103,7 +182,7 @@ pub fn diffToTransaction(arena: *u.ArenaAllocator, tids_and_rows: value.Set, tid
     return value.Set{ .rows = transaction_rows };
 }
 
-pub fn putTransaction(arena: *u.ArenaAllocator, db: *c.sqlite3, transaction: value.Set) !void {
+fn putTransaction(arena: *u.ArenaAllocator, db: *c.sqlite3, transaction: value.Set) !void {
     // Convert transaction to string.
     const transaction_string = try u.formatToString(arena.allocator(), "{}", .{transaction});
 
@@ -113,7 +192,7 @@ pub fn putTransaction(arena: *u.ArenaAllocator, db: *c.sqlite3, transaction: val
     , &[_]value.Scalar{.{ .Text = transaction_string }});
 }
 
-pub fn getTransactions(arena: *u.ArenaAllocator, db: *c.sqlite3) !value.Set {
+fn getTransactions(arena: *u.ArenaAllocator, db: *c.sqlite3) !value.Set {
     // Get transactions from sqlite.
     const serialized_transactions = try query(arena, db,
         \\ select data from imp_transactions;
@@ -136,7 +215,7 @@ pub fn getTransactions(arena: *u.ArenaAllocator, db: *c.sqlite3) !value.Set {
     return value.Set{ .rows = transactions };
 }
 
-pub fn transactionsToTidAndRows(arena: *u.ArenaAllocator, transactions: value.Set) !value.Set {
+fn transactionsToTidAndRows(arena: *u.ArenaAllocator, transactions: value.Set) !value.Set {
     var rows = u.DeepHashSet(value.Row).init(arena.allocator());
 
     // Handle inserts.
@@ -171,7 +250,7 @@ pub fn transactionsToTidAndRows(arena: *u.ArenaAllocator, transactions: value.Se
     return value.Set{ .rows = rows };
 }
 
-pub fn tidAndRowsToRows(arena: *u.ArenaAllocator, tid_and_rows: value.Set) !value.Set {
+fn tidAndRowsToRows(arena: *u.ArenaAllocator, tid_and_rows: value.Set) !value.Set {
     // Just have to discard the tid in column 0.
     var rows = u.DeepHashSet(value.Row).init(arena.allocator());
     var iter = tid_and_rows.rows.keyIterator();
@@ -252,85 +331,9 @@ fn check_sqlite_error(db: ?*c.sqlite3, result: c_int) void {
     }
 }
 
-// copied from std.rand
-const SequentialPrng = struct {
-    const Self = @This();
-    next_value: u8,
-
-    pub fn init() Self {
-        return Self{
-            .next_value = 0,
-        };
-    }
-
-    pub fn random(self: *Self) std.rand.Random {
-        return std.rand.Random.init(self, fill);
-    }
-
-    pub fn fill(self: *Self, buf: []u8) void {
-        for (buf) |*b| {
-            b.* = self.next_value;
-        }
-        self.next_value +%= 1;
-    }
-};
-
-const TestState = struct {
-    arena: u.ArenaAllocator,
-    next_tid: *u52,
-    db: *c.sqlite3,
-    transactions: value.Set,
-    tids_and_rows: value.Set,
-    rows: value.Set,
-    error_info: ?imp.lang.ErrorInfo,
-
-    pub fn init(next_tid: *u52) !TestState {
-        var arena = u.ArenaAllocator.init(std.testing.allocator);
-        const db = try open(&arena, ":memory:");
-        const empty_set = value.Set{ .rows = u.DeepHashSet(value.Row).init(arena.allocator()) };
-        return TestState{
-            .arena = arena,
-            .next_tid = next_tid,
-            .db = db,
-            .transactions = empty_set,
-            .tids_and_rows = empty_set,
-            .rows = empty_set,
-            .error_info = null,
-        };
-    }
-
-    pub fn deinit(self: TestState) void {
-        self.arena.deinit();
-        close(self.db);
-    }
-
-    pub fn applyDiff(self: *TestState, diff_source: []const u8) !void {
-        const constants = u.DeepHashMap(syntax.Name, value.Set).init(self.arena.allocator());
-        const diff = try imp.lang.eval(&self.arena, diff_source, constants, &self.error_info);
-        const transaction = try diffToTransaction(&self.arena, self.tids_and_rows, self.next_tid.*, diff);
-        self.next_tid.* += 1;
-        try putTransaction(&self.arena, self.db, transaction);
-        self.transactions = try getTransactions(&self.arena, self.db);
-        self.tids_and_rows = try transactionsToTidAndRows(&self.arena, self.transactions);
-        self.rows = try tidAndRowsToRows(&self.arena, self.tids_and_rows);
-    }
-
-    pub fn syncFrom(self: *TestState, other: TestState) !void {
-        try putTransaction(&self.arena, self.db, other.transactions);
-        self.transactions = try getTransactions(&self.arena, self.db);
-        self.tids_and_rows = try transactionsToTidAndRows(&self.arena, self.transactions);
-        self.rows = try tidAndRowsToRows(&self.arena, self.tids_and_rows);
-    }
-
-    pub fn expectEqual(self: *TestState, string: []const u8) !void {
-        const self_string = try u.formatToString(self.arena.allocator(), "{}", .{self.tids_and_rows});
-        try std.testing.expectEqualStrings(string, self_string);
-    }
-};
-
 test "sqlite diffs" {
     var next_tid: u52 = 0;
-    var alice = try TestState.init(&next_tid);
+    var alice = try DB.initTesting(&next_tid);
     defer alice.deinit();
 
     // basic insert
@@ -371,9 +374,9 @@ test "sqlite diffs" {
 
 test "sqlite transactions" {
     var next_tid: u52 = 0;
-    var alice = try TestState.init(&next_tid);
+    var alice = try DB.initTesting(&next_tid);
     defer alice.deinit();
-    var bob = try TestState.init(&next_tid);
+    var bob = try DB.initTesting(&next_tid);
     defer bob.deinit();
 
     // merging transactions from peer - order doesn't matter

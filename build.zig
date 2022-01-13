@@ -50,9 +50,20 @@ fn commonSetup(
     target: std.zig.CrossTarget,
 ) void {
     bin.setMainPkgPath("./");
-    bin.linkLibC();
-    bin.addIncludeDir("deps/sqlite-amalgamation-3370000/");
-    bin.addCSourceFile("deps/sqlite-amalgamation-3370000/sqlite3.c", &[_][]const u8{"-std=c99"});
+    addDeps(bin);
     bin.setBuildMode(mode);
     bin.setTarget(target);
+}
+
+fn getRelativePath() []const u8 {
+    comptime var src: std.builtin.SourceLocation = @src();
+    return std.fs.path.dirname(src.file).? ++ std.fs.path.sep_str;
+}
+
+pub fn addDeps(
+    bin: *std.build.LibExeObjStep,
+) void {
+    bin.linkLibC();
+    bin.addIncludeDir(getRelativePath() ++ "deps/sqlite-amalgamation-3370000/");
+    bin.addCSourceFile(getRelativePath() ++ "deps/sqlite-amalgamation-3370000/sqlite3.c", &[_][]const u8{"-std=c99"});
 }

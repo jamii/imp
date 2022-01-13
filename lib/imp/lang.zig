@@ -243,6 +243,7 @@ pub const Store = struct {
 pub const Worker = struct {
     allocator: u.Allocator,
     config: Config,
+    db: imp.db.DB,
 
     // mutex protects these fields
     mutex: std.Thread.Mutex,
@@ -254,12 +255,13 @@ pub const Worker = struct {
     new_request: ?Request,
     new_response: ?Response,
     // desired_id is the most recent id set in new_request
-    // if the interpreter is running and notices that desired_id has changed, it gives up and returns error.WasInterrupted so we can start again with then new program
+    // if the interpreter is running and notices that desired_id has changed, it gives up and returns error.WasInterrupted so we can start again with the new program
     // desired_id is only changed inside mutex but is read atomically by the Interrupter outside the mutex
     // TODO I think this is safe because it only ever increases and we don't care exactly how long it takes for the interpreter to notice
     desired_id: usize,
 
     pub const Config = struct {
+        db_path: [:0]const u8,
         memory_limit_bytes: ?usize = null,
     };
 
@@ -293,6 +295,7 @@ pub const Worker = struct {
         self.* = Worker{
             .allocator = allocator,
             .config = config,
+            .db = try imp.db.DB.init(allocator, config.db_path),
             .mutex = .{},
             .state_changed_event = .{},
             .should_deinit = false,
@@ -388,10 +391,13 @@ pub const Worker = struct {
                 .current_id = new_request.id,
                 .desired_id = &self.desired_id,
             };
+            var constants = u.DeepHashMap(syntax.Name, value.Set).init(arena.allocator());
+            _ = try constants.put("db", self.db.rows);
             var store = Store{
                 .arena = &arena,
                 .interrupter = interrupter,
                 .source = new_request.text,
+                .constants = constants,
                 .watch_selection = new_request.selection,
             };
             store.run();

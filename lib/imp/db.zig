@@ -34,7 +34,7 @@ pub const DB = struct {
         Testing: *u52,
     };
 
-    pub fn init(allocator: u.Allocator, db_path: []const u8) !DB {
+    pub fn init(allocator: u.Allocator, db_path: [:0]const u8) !DB {
         const arena = try allocator.create(u.ArenaAllocator);
         arena.* = u.ArenaAllocator.init(allocator);
         const empty_set = value.Set{ .rows = u.DeepHashSet(value.Row).init(arena.allocator()) };

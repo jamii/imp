@@ -52,31 +52,13 @@ pub const DB = struct {
         };
     }
 
-    pub fn initTesting(next_tid: *u52) !DB {
-        const arena = try std.testing.allocator.create(u.ArenaAllocator);
-        arena.* = u.ArenaAllocator.init(std.testing.allocator);
-        const empty_set = value.Set{ .rows = u.DeepHashSet(value.Row).init(arena.allocator()) };
-        return DB{
-            .allocator = std.testing.allocator,
-            .arena = arena,
-            .tid_gen = .{ .Testing = next_tid },
-            .db = try open(arena, ":memory:"),
-            .transactions = empty_set,
-            .tids_and_rows = empty_set,
-            .rows = empty_set,
-            .error_info = null,
-        };
-    }
-
     pub fn deinit(self: DB) void {
         close(self.db);
         self.arena.deinit();
         self.allocator.destroy(self.arena);
     }
 
-    pub fn applyDiff(self: *DB, diff_source: []const u8) !void {
-        const constants = u.DeepHashMap(syntax.Name, value.Set).init(self.arena.allocator());
-        const diff = try imp.lang.eval(self.arena, diff_source, constants, &self.error_info);
+    pub fn applyDiff(self: *DB, diff: value.Set) !void {
         const tid = switch (self.tid_gen) {
             .Real => |*rng| rng.random().int(u52),
             .Testing => |next_tid| tid: {
@@ -96,6 +78,30 @@ pub const DB = struct {
         self.transactions = try getTransactions(self.arena, self.db);
         self.tids_and_rows = try transactionsToTidAndRows(self.arena, self.transactions);
         self.rows = try tidAndRowsToRows(self.arena, self.tids_and_rows);
+    }
+
+    // --- for testing ---
+
+    pub fn initTesting(next_tid: *u52) !DB {
+        const arena = try std.testing.allocator.create(u.ArenaAllocator);
+        arena.* = u.ArenaAllocator.init(std.testing.allocator);
+        const empty_set = value.Set{ .rows = u.DeepHashSet(value.Row).init(arena.allocator()) };
+        return DB{
+            .allocator = std.testing.allocator,
+            .arena = arena,
+            .tid_gen = .{ .Testing = next_tid },
+            .db = try open(arena, ":memory:"),
+            .transactions = empty_set,
+            .tids_and_rows = empty_set,
+            .rows = empty_set,
+            .error_info = null,
+        };
+    }
+
+    pub fn applyDiffFromSource(self: *DB, diff_source: []const u8) !void {
+        const constants = u.DeepHashMap(syntax.Name, value.Set).init(self.arena.allocator());
+        const diff = try imp.lang.eval(self.arena, diff_source, constants, &self.error_info);
+        try self.applyDiff(diff);
     }
 
     pub fn expectEqual(self: *DB, string: []const u8) !void {
@@ -337,7 +343,7 @@ test "sqlite diffs" {
     defer alice.deinit();
 
     // basic insert
-    try alice.applyDiff(
+    try alice.applyDiffFromSource(
         \\| :insert, :foo, 42
         \\| :insert, :bar, "a", "b"
     );
@@ -347,7 +353,7 @@ test "sqlite diffs" {
     );
 
     // delete something that exists - it goes away
-    try alice.applyDiff(
+    try alice.applyDiffFromSource(
         \\| :delete, :foo, 42
     );
     try alice.expectEqual(
@@ -355,7 +361,7 @@ test "sqlite diffs" {
     );
 
     // delete something that doesn't exist - noop
-    try alice.applyDiff(
+    try alice.applyDiffFromSource(
         \\| :delete, :bar, "a", "not b"
     );
     try alice.expectEqual(
@@ -363,7 +369,7 @@ test "sqlite diffs" {
     );
 
     // insert something that was previously deleted - works
-    try alice.applyDiff(
+    try alice.applyDiffFromSource(
         \\| :insert, :bar, "a", "not b"
     );
     try alice.expectEqual(
@@ -380,10 +386,10 @@ test "sqlite transactions" {
     defer bob.deinit();
 
     // merging transactions from peer - order doesn't matter
-    try alice.applyDiff(
+    try alice.applyDiffFromSource(
         \\| :insert, :quux
     );
-    try alice.applyDiff(
+    try alice.applyDiffFromSource(
         \\| :delete, :quux
     );
     try bob.syncFrom(alice);
@@ -392,10 +398,10 @@ test "sqlite transactions" {
     );
 
     // deletes from peers only affect inserts from peers that were visible on that peer
-    try bob.applyDiff(
+    try bob.applyDiffFromSource(
         \\| :insert, :yo
     );
-    try bob.applyDiff(
+    try bob.applyDiffFromSource(
         \\| :insert, :yo
     );
     try bob.expectEqual(
@@ -403,10 +409,10 @@ test "sqlite transactions" {
         \\| 3, :"yo"
     );
     try alice.syncFrom(bob);
-    try alice.applyDiff(
+    try alice.applyDiffFromSource(
         \\| :delete, :yo
     );
-    try bob.applyDiff(
+    try bob.applyDiffFromSource(
         \\| :insert, :yo
     );
     try bob.syncFrom(alice);

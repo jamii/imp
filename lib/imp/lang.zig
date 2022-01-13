@@ -268,7 +268,13 @@ pub const Worker = struct {
     pub const Request = struct {
         id: usize,
         text: []const u8,
+        action: Action,
         selection: SourceSelection,
+
+        pub const Action = enum {
+            Eval,
+            Commit,
+        };
     };
 
     pub const Response = struct {
@@ -402,8 +408,26 @@ pub const Worker = struct {
             };
             store.run();
 
-            // print result
             var response_buffer = u.ArrayList(u8).init(self.allocator);
+
+            // maybe commit
+            if (new_request.action == .Commit) {
+                if (store.result) |result_e| {
+                    if (result_e) |result| {
+                        if (self.db.applyDiff(result)) {
+                            try response_buffer.writer().writeAll("Committed:\n\n");
+                        } else |err| {
+                            try std.fmt.format(
+                                response_buffer.writer(),
+                                "Error in commit: {}\n{s}\n",
+                                .{ err, if (self.db.error_info) |error_info| error_info.getMessage() else "" },
+                            );
+                        }
+                    } else |_| {}
+                }
+            }
+
+            // print result
             defer response_buffer.deinit();
             try store.dumpInto(response_buffer.writer(), 0);
             const response_kind = if (store.result.?) |_|

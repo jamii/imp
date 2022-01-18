@@ -624,6 +624,27 @@ const Interpreter = struct {
                             .rows = rows,
                         };
                     },
+                    .Read => {
+                        if (hint.len < 1) {
+                            return self.setError(expr_id, "No hint for native arg", .{});
+                        }
+                        var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                        if (hint[0] == .Text) {
+                            const file = std.fs.cwd().openFile(hint[0].Text, .{}) catch |err|
+                                return self.setError(expr_id, "Error opening {}: {}", .{ hint[0], err });
+                            const contents = file.reader().readAllAlloc(self.arena.allocator(), std.math.maxInt(usize)) catch |err| {
+                                switch (err) {
+                                    error.OutOfMemory => return error.OutOfMemory,
+                                    else => return self.setError(expr_id, "Error reading from {}: {}", .{ hint[0], err }),
+                                }
+                            };
+                            const row = try self.dupeScalars(&[_]value.Scalar{ hint[0], .{ .Text = contents } });
+                            _ = try rows.put(row, {});
+                        }
+                        return value.Set{
+                            .rows = rows,
+                        };
+                    },
                 }
             },
             .IsTest => |pair| {

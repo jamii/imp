@@ -217,6 +217,7 @@ pub const Native = enum {
     Text,
     Split,
     ParseNumber,
+    Read,
 
     pub fn toName(self: Native) []const u8 {
         return switch (self) {
@@ -232,6 +233,7 @@ pub const Native = enum {
             .Text => "text",
             .Split => "split",
             .ParseNumber => "parse_number",
+            .Read => "read",
         };
     }
 

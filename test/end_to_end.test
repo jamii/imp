@@ -19,13 +19,19 @@ text
 value:
 | "foo"
 
-// TODO print escapes properly
 "foo\"bar"
 ---
 type:
 text
 value:
-| "foo"bar"
+| "foo\"bar"
+
+"foo\nbar"
+---
+type:
+text
+value:
+| "foo\nbar"
 
 // TODO expand boxes
 1 @

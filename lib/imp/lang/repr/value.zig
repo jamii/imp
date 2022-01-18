@@ -127,7 +127,7 @@ pub const Scalar = union(enum) {
     pub fn dumpInto(self: Scalar, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
         switch (self) {
             // TODO proper escaping
-            .Text => |text| try std.fmt.format(writer, "\"{s}\"", .{text}),
+            .Text => |text| try std.fmt.format(writer, "\"{}\"", .{std.zig.fmtEscapes(text)}),
             .Number => |number| try std.fmt.format(writer, "{d}", .{number}),
             .Box => |box| {
                 try writer.writeAll("@");

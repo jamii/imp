@@ -348,8 +348,8 @@ test "sqlite diffs" {
         \\| :insert, :bar, "a", "b"
     );
     try alice.expectEqual(
-        \\| 0, :"foo", 42
-        \\| 0, :"bar", "a", "b"
+        \\| 0, :foo, 42
+        \\| 0, :bar, "a", "b"
     );
 
     // delete something that exists - it goes away
@@ -357,7 +357,7 @@ test "sqlite diffs" {
         \\| :delete, :foo, 42
     );
     try alice.expectEqual(
-        \\| 0, :"bar", "a", "b"
+        \\| 0, :bar, "a", "b"
     );
 
     // delete something that doesn't exist - noop
@@ -365,7 +365,7 @@ test "sqlite diffs" {
         \\| :delete, :bar, "a", "not b"
     );
     try alice.expectEqual(
-        \\| 0, :"bar", "a", "b"
+        \\| 0, :bar, "a", "b"
     );
 
     // insert something that was previously deleted - works
@@ -373,8 +373,8 @@ test "sqlite diffs" {
         \\| :insert, :bar, "a", "not b"
     );
     try alice.expectEqual(
-        \\| 0, :"bar", "a", "b"
-        \\| 3, :"bar", "a", "not b"
+        \\| 0, :bar, "a", "b"
+        \\| 3, :bar, "a", "not b"
     );
 }
 
@@ -405,8 +405,8 @@ test "sqlite transactions" {
         \\| :insert, :yo
     );
     try bob.expectEqual(
-        \\| 2, :"yo"
-        \\| 3, :"yo"
+        \\| 2, :yo
+        \\| 3, :yo
     );
     try alice.syncFrom(bob);
     try alice.applyDiffFromSource(
@@ -417,6 +417,6 @@ test "sqlite transactions" {
     );
     try bob.syncFrom(alice);
     try bob.expectEqual(
-        \\| 5, :"yo"
+        \\| 5, :yo
     );
 }

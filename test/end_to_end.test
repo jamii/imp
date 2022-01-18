@@ -33,6 +33,27 @@ text
 value:
 | "foo\nbar"
 
+:foo
+---
+type:
+:foo
+value:
+| :foo
+
+:"foo\"bar"
+---
+type:
+:"foo\"bar"
+value:
+| :"foo\"bar"
+
+:"foo\nbar"
+---
+type:
+:"foo\nbar"
+value:
+| :"foo\nbar"
+
 // TODO expand boxes
 1 @
 ---
@@ -953,7 +974,7 @@ none
 value:
 none
 warnings:
-[25:31] The result of applying :"bar", text | :"foo", number to :"fo" will always be empty
+[25:31] The result of applying :bar, text | :foo, number to :fo will always be empty
 
 1 + "foo"
 ---
@@ -1018,11 +1039,11 @@ warnings:
 | (:union, (expr :union)))
 ---
 type:
-:"number", number
+:number, number
 value:
-| :"number", 2
+| :number, 2
 warnings:
-[66:77] The result of applying :"number", number to :"union" will always be empty
+[66:77] The result of applying :number, number to :union will always be empty
 
 (:union, "a", "b")@
 (?@expr
@@ -1030,11 +1051,11 @@ warnings:
 | (:union, (expr :union)))
 ---
 type:
-:"union", text, text
+:union, text, text
 value:
-| :"union", "a", "b"
+| :union, "a", "b"
 warnings:
-[41:53] The result of applying :"union", text, text to :"number" will always be empty
+[41:53] The result of applying :union, text, text to :number will always be empty
 
 (:intersect, "a", "b")@
 (?@expr
@@ -1046,8 +1067,8 @@ none
 value:
 none
 warnings:
-[45:57] The result of applying :"intersect", text, text to :"number" will always be empty
-[76:87] The result of applying :"intersect", text, text to :"union" will always be empty
+[45:57] The result of applying :intersect, text, text to :number will always be empty
+[76:87] The result of applying :intersect, text, text to :union will always be empty
 [0:90] In apply: left row type @(d0) has no match in right set type none
 
 // TODO this is a surprising parse
@@ -1057,11 +1078,11 @@ warnings:
 | :union, (expr :union))
 ---
 type:
-:"union", text, text
+:union, text, text
 value:
-| :"union", "a", "b"
+| :union, "a", "b"
 warnings:
-[75:87] The result of applying :"union", text, text to :"number" will always be empty
+[75:87] The result of applying :union, text, text to :number will always be empty
 
 1 then 2
 ---
@@ -1089,7 +1110,7 @@ value:
 (1 | "text") as (number | :foo)
 ---
 type:
-number | :"foo"
+number | :foo
 value:
 | 1
 
@@ -1101,14 +1122,14 @@ none
 value:
 none
 warnings:
-[13:20] The result of applying :"foo", number to :"bar" will always be empty
+[13:20] The result of applying :foo, number to :bar will always be empty
 
 (:foo, 1) as ((:foo, number) | (:bar, text))
 ---
 type:
-:"bar", text | :"foo", number
+:bar, text | :foo, number
 value:
-| :"foo", 1
+| :foo, 1
 
 db: (:foo, 1) as ((:foo, number) | (:bar, text));
 db :bar
@@ -1124,9 +1145,9 @@ k is? :number then ?v :number, v + 1 else
 k is? :union then ?a ?b :union, a, b)
 ---
 type:
-:"number", number
+:number, number
 value:
-| :"number", 2
+| :number, 2
 
 (:union, "a", "b")
 (?k
@@ -1134,9 +1155,9 @@ value:
 (k is? :union) then (?a ?b :union, a, b))
 ---
 type:
-:"union", text, text
+:union, text, text
 value:
-| :"union", "a", "b"
+| :union, "a", "b"
 
 (:intersect, "a", "b")
 (?k
@@ -1148,7 +1169,7 @@ none
 value:
 none
 warnings:
-[0:106] In apply: left row type :"intersect", text, text has no match in right set type none
+[0:106] In apply: left row type :intersect, text, text has no match in right set type none
 
 (:intersect, "a", "b") as (:number, number | :union, text, text)
 (?k
@@ -1156,16 +1177,16 @@ k is? :number then ?v :number, v + 1 else
 k is? :union then ?a ?b :union, a, b)
 ---
 type:
-:"number", number | :"union", text, text
+:number, number | :union, text, text
 value:
 none
 
 (:union, "a", "b") is! (:number, number | :union, text, text)
 ---
 type:
-:"union", text, text
+:union, text, text
 value:
-| :"union", "a", "b"
+| :union, "a", "b"
 
 (none as (:union, text, text, text)) is! (:number, number | :union, text, text)
 ---
@@ -1174,20 +1195,20 @@ none
 value:
 none
 warnings:
-[0:79] This `is!` might fail: :"union", text, text, text is not contained in :"union", text, text
+[0:79] This `is!` might fail: :union, text, text, text is not contained in :union, text, text
 
 (none as (:number, number | :union, text, text, text)) is! (:number, number | :union, text, text)
 ---
 type:
-:"number", number
+:number, number
 value:
 none
 warnings:
-[0:97] This `is!` might fail: :"union", text, text, text is not contained in :"union", text, text
+[0:97] This `is!` might fail: :union, text, text, text is not contained in :union, text, text
 
 (:intersect, "a", "b") is! (:number, number | :union, text, text)
 ---
-InterpretError: Assert failed: | :"intersect", "a", "b" is not contained in right.
+InterpretError: Assert failed: | :intersect, "a", "b" is not contained in right.
 
 (none as (:intersect, "a", "b")) is! (:number, number | :union, text, text)
 ---
@@ -1196,7 +1217,7 @@ none
 value:
 none
 warnings:
-[0:75] This `is!` might fail: :"intersect", text, text is not contained in :"union", text, text
+[0:75] This `is!` might fail: :intersect, text, text is not contained in :union, text, text
 
 // TODO Inference for the right side of `as` is hacky.
 //      This should have type number.
@@ -1250,11 +1271,11 @@ split "\n" csv ?r ?row
   )
 ---
 type:
-number, :"name", text | number, :"id", number | number, :"something_else", number
+number, :name, text | number, :id, number | number, :something_else, number
 value:
-| 1, :"id", 1
-| 1, :"name", "bob"
-| 1, :"something_else", 23.3
-| 2, :"id", 42
-| 2, :"name", "alice"
-| 2, :"something_else", 20
+| 1, :id, 1
+| 1, :name, "bob"
+| 1, :something_else, 23.3
+| 2, :id, 42
+| 2, :name, "alice"
+| 2, :something_else, 20

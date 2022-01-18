@@ -78,6 +78,8 @@ pub fn parse(
     };
 }
 
+pub const isName = Parser.isName;
+
 pub const Error = error{
     // sets error_info
     ParseError,
@@ -426,6 +428,13 @@ pub const Parser = struct {
             }
         }
         return self.source[start..self.position];
+    }
+
+    pub fn isName(source: []const u8) bool {
+        for (source) |char|
+            if (!(std.ascii.isAlpha(char) or std.ascii.isDigit(char) or char == '_'))
+                return false;
+        return true;
     }
 
     // called after seeing first digit of number

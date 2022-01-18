@@ -133,8 +133,13 @@ pub const Scalar = union(enum) {
                 try writer.writeAll("@");
                 try box.dumpInto(writer, indent);
             },
-            // TODO if text is valid symbol, print without quotes
-            .TextTag => |text| try std.fmt.format(writer, ":\"{s}\"", .{text}),
+            .TextTag => |text| {
+                // If text is valid name, print without quotes
+                if (imp.lang.pass.parse.isName(text))
+                    try std.fmt.format(writer, ":{s}", .{text})
+                else
+                    try std.fmt.format(writer, ":\"{}\"", .{std.zig.fmtEscapes(text)});
+            },
             .NumberTag => |number| try std.fmt.format(writer, ":{d}", .{number}),
         }
     }

@@ -845,7 +845,7 @@ value:
 max: ?@xs reduce xs (enumerate xs 1) ?@a ?@b a > b then a else b;
 min: ?@xs reduce xs (enumerate xs 1) ?@a ?@b a > b then b else a;
 sum: ?@xs reduce xs 0 ?@a ?@b a + b;
-book: 
+book:
 | "amazon", (
     | "buy", 7, 8
     | "sell", 9, 1
@@ -1007,7 +1007,7 @@ warnings:
 [19:31] In apply: right row type text has no match in left set type none
 
 (:number, 1)@
-(?@expr 
+(?@expr
 | (:number, (expr :number) + 1)
 | (:union, (expr :union)))
 ---
@@ -1016,10 +1016,10 @@ type:
 value:
 | :"number", 2
 warnings:
-[67:78] The result of applying :"number", number to :"union" will always be empty
+[66:77] The result of applying :"number", number to :"union" will always be empty
 
 (:union, "a", "b")@
-(?@expr 
+(?@expr
 | (:number, (expr :number) + 1)
 | (:union, (expr :union)))
 ---
@@ -1028,10 +1028,10 @@ type:
 value:
 | :"union", "a", "b"
 warnings:
-[42:54] The result of applying :"union", text, text to :"number" will always be empty
+[41:53] The result of applying :"union", text, text to :"number" will always be empty
 
 (:intersect, "a", "b")@
-(?@expr 
+(?@expr
 | (:number, (expr :number) + 1)
 | (:union, (expr :union)))
 ---
@@ -1040,13 +1040,13 @@ none
 value:
 none
 warnings:
-[46:58] The result of applying :"intersect", text, text to :"number" will always be empty
-[77:88] The result of applying :"intersect", text, text to :"union" will always be empty
-[0:91] In apply: left row type @(d0) has no match in right set type none
+[45:57] The result of applying :"intersect", text, text to :"number" will always be empty
+[76:87] The result of applying :"intersect", text, text to :"union" will always be empty
+[0:90] In apply: left row type @(d0) has no match in right set type none
 
 // TODO this is a surprising parse
 (:union, "a", "b")@
-(?@expr 
+(?@expr
 | :number, (expr :number) + 1
 | :union, (expr :union))
 ---
@@ -1055,7 +1055,7 @@ type:
 value:
 | :"union", "a", "b"
 warnings:
-[76:88] The result of applying :"union", text, text to :"number" will always be empty
+[75:87] The result of applying :"union", text, text to :"number" will always be empty
 
 1 then 2
 ---
@@ -1201,3 +1201,54 @@ type:
 none
 value:
 | 1
+
+split "\n" "foo\nbar\n"
+---
+type:
+number, text
+value:
+| 1, "foo"
+| 2, "bar"
+| 3, ""
+
+split "\n" ""
+---
+type:
+number, text
+value:
+| 1, ""
+
+split "" "foo\nbar\n"
+---
+InterpretError: Cannot split on empty delimiter
+
+parse_number "1.32"
+---
+type:
+number
+value:
+| 1.32
+
+parse_number ""
+---
+InterpretError: Error parsing number: error.InvalidCharacter
+
+csv: "1, bob, 23.3\n42, alice, 20\n";
+split "\n" csv ?r ?row
+  row "" ! then
+  cols: split ", " row;
+  r, (
+    | :id, cols 1 parse_number
+    | :name, cols 2
+    | :something_else, cols 3 parse_number
+  )
+---
+type:
+number, :"name", text | number, :"id", number | number, :"something_else", number
+value:
+| 1, :"id", 1
+| 1, :"name", "bob"
+| 1, :"something_else", 23.3
+| 2, :"id", 42
+| 2, :"name", "alice"
+| 2, :"something_else", 20

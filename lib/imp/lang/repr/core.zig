@@ -215,6 +215,8 @@ pub const Native = enum {
     GreaterThanOrEqual,
     Number,
     Text,
+    Split,
+    ParseNumber,
 
     pub fn toName(self: Native) []const u8 {
         return switch (self) {
@@ -228,6 +230,8 @@ pub const Native = enum {
             .GreaterThanOrEqual => ">=",
             .Number => "number",
             .Text => "text",
+            .Split => "split",
+            .ParseNumber => "parse_number",
         };
     }
 

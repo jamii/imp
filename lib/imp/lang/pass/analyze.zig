@@ -464,6 +464,40 @@ pub const Analyzer = struct {
                         else
                             type_.SetType.none(self.arena.allocator());
                     },
+                    .Split => {
+                        if (hint.len < 2)
+                            return switch (hint_mode) {
+                                .Apply => self.setError(expr_id, "Could not infer the type of abstract arg", .{}, .NoHintForArg),
+                                .Intersect => return type_.SetType.none(self.arena.allocator()),
+                            };
+                        if (hint[0] != .Text) {
+                            try self.addWarning(expr_id, "First argument to {} should have type text, not {}", .{ native, hint[0] });
+                            return type_.SetType.none(self.arena.allocator());
+                        }
+                        if (hint[1] != .Text) {
+                            try self.addWarning(expr_id, "Second argument to {} should have type text, not {}", .{ native, hint[1] });
+                            return type_.SetType.none(self.arena.allocator());
+                        }
+                        return type_.SetType.fromScalarTypes(
+                            self.arena.allocator(),
+                            &.{ .Text, .Text, .Number, .Text },
+                        );
+                    },
+                    .ParseNumber => {
+                        if (hint.len < 1)
+                            return switch (hint_mode) {
+                                .Apply => self.setError(expr_id, "Could not infer the type of abstract arg", .{}, .NoHintForArg),
+                                .Intersect => return type_.SetType.none(self.arena.allocator()),
+                            };
+                        if (hint[0] != .Text) {
+                            try self.addWarning(expr_id, "First argument to {} should have type text, not {}", .{ native, hint[0] });
+                            return type_.SetType.none(self.arena.allocator());
+                        }
+                        return type_.SetType.fromScalarTypes(
+                            self.arena.allocator(),
+                            &.{ .Text, .Number },
+                        );
+                    },
                 }
             },
             .IsTest => |pair| {

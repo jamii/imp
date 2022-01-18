@@ -584,6 +584,46 @@ const Interpreter = struct {
                             .rows = rows,
                         };
                     },
+                    .Split => {
+                        if (hint.len < 2) {
+                            return self.setError(expr_id, "No hint for native arg", .{});
+                        }
+                        var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                        if (hint[0] == .Text and hint[1] == .Text) {
+                            const needle = hint[0].Text;
+                            const haystack = hint[1].Text;
+                            if (needle.len == 0)
+                                return self.setError(expr_id, "Cannot split on empty delimiter", .{});
+                            var iter = std.mem.split(u8, haystack, needle);
+                            var i: usize = 1;
+                            while (iter.next()) |item| {
+                                try self.interrupter.check();
+                                const row = try self.dupeScalars(&[_]value.Scalar{ hint[0], hint[1], .{ .Number = @intToFloat(f64, i) }, .{ .Text = item } });
+                                _ = try rows.put(row, {});
+                                i += 1;
+                            }
+                        }
+                        return value.Set{
+                            .rows = rows,
+                        };
+                    },
+                    .ParseNumber => {
+                        if (hint.len < 1) {
+                            return self.setError(expr_id, "No hint for native arg", .{});
+                        }
+                        var rows = u.DeepHashSet(value.Row).init(self.arena.allocator());
+                        if (hint[0] == .Text) {
+                            if (std.fmt.parseFloat(f64, hint[0].Text)) |number| {
+                                const row = try self.dupeScalars(&[_]value.Scalar{ hint[0], .{ .Number = number } });
+                                _ = try rows.put(row, {});
+                            } else |err| {
+                                return self.setError(expr_id, "Error parsing number: {}", .{err});
+                            }
+                        }
+                        return value.Set{
+                            .rows = rows,
+                        };
+                    },
                 }
             },
             .IsTest => |pair| {

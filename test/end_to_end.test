@@ -520,14 +520,14 @@ value:
 
 reduce (3 | 4 | 5) 0 ?a ?b a + b
 ---
-type:
-number
-value:
-none
 warnings:
 [27:32] First argument to Native.Add should have type number, not @(#d0 number)
 [27:32] In apply: right row type @(#d0 number) has no match in left set type none
 [27:32] In apply: right row type @(#d0 number) has no match in left set type none
+type:
+number
+value:
+none
 
 // testing specialization caching
 f: ?i i+1;
@@ -969,107 +969,107 @@ value:
 db: :foo, 1 | :bar, "a";
 db :fo
 ---
+warnings:
+[25:31] The result of applying :bar, text | :foo, number to :fo will always be empty
 type:
 none
 value:
 none
-warnings:
-[25:31] The result of applying :bar, text | :foo, number to :fo will always be empty
 
 1 + "foo"
 ---
-type:
-none
-value:
-none
 warnings:
 [0:9] Second argument to Native.Add should have type number, not text
 [0:9] In apply: right row type number has no match in left set type none
 [0:9] In apply: right row type text has no match in left set type none
-
-"foo" + 1
----
 type:
 none
 value:
 none
+
+"foo" + 1
+---
 warnings:
 [0:9] First argument to Native.Add should have type number, not text
 [0:9] In apply: right row type text has no match in left set type none
 [0:9] In apply: right row type number has no match in left set type none
+type:
+none
+value:
+none
 
 1 + (1 | "foo")
 ---
-type:
-number
-value:
-| 2
 warnings:
 [0:15] Second argument to Native.Add should have type number, not text
 [0:15] In apply: right row type number has no match in left set type none
 [0:15] In apply: right row type text has no match in left set type none
-
-(1 | "foo") + 1
----
 type:
 number
 value:
 | 2
+
+(1 | "foo") + 1
+---
 warnings:
 [0:15] First argument to Native.Add should have type number, not text
 [0:15] In apply: right row type text has no match in left set type none
+type:
+number
+value:
+| 2
 
 plus: ?a ?b a + b;
 plus 1 "foo"
 ---
-type:
-none
-value:
-none
 warnings:
 [12:17] Second argument to Native.Add should have type number, not text
 [12:17] In apply: right row type number has no match in left set type none
 [12:17] In apply: right row type text has no match in left set type none
 [19:25] In apply: right row type number has no match in left set type none
 [19:31] In apply: right row type text has no match in left set type none
+type:
+none
+value:
+none
 
 (:number, 1)@
 (?@expr
 | (:number, (expr :number) + 1)
 | (:union, (expr :union)))
 ---
+warnings:
+[66:77] The result of applying :number, number to :union will always be empty
 type:
 :number, number
 value:
 | :number, 2
-warnings:
-[66:77] The result of applying :number, number to :union will always be empty
 
 (:union, "a", "b")@
 (?@expr
 | (:number, (expr :number) + 1)
 | (:union, (expr :union)))
 ---
+warnings:
+[41:53] The result of applying :union, text, text to :number will always be empty
 type:
 :union, text, text
 value:
 | :union, "a", "b"
-warnings:
-[41:53] The result of applying :union, text, text to :number will always be empty
 
 (:intersect, "a", "b")@
 (?@expr
 | (:number, (expr :number) + 1)
 | (:union, (expr :union)))
 ---
-type:
-none
-value:
-none
 warnings:
 [45:57] The result of applying :intersect, text, text to :number will always be empty
 [76:87] The result of applying :intersect, text, text to :union will always be empty
 [0:90] In apply: left row type @(d0) has no match in right set type none
+type:
+none
+value:
+none
 
 // TODO this is a surprising parse
 (:union, "a", "b")@
@@ -1077,21 +1077,21 @@ warnings:
 | :number, (expr :number) + 1
 | :union, (expr :union))
 ---
+warnings:
+[75:87] The result of applying :union, text, text to :number will always be empty
 type:
 :union, text, text
 value:
 | :union, "a", "b"
-warnings:
-[75:87] The result of applying :union, text, text to :number will always be empty
 
 1 then 2
 ---
+warnings:
+[0:8] The condition of `then` should have type `maybe`, found number
 type:
 number
 value:
 | 2
-warnings:
-[0:8] The condition of `then` should have type `maybe`, found number
 
 (1 | "yo") & (text | :foo)
 ---
@@ -1117,12 +1117,12 @@ value:
 db: :foo, 1;
 db :bar
 ---
+warnings:
+[13:20] The result of applying :foo, number to :bar will always be empty
 type:
 none
 value:
 none
-warnings:
-[13:20] The result of applying :foo, number to :bar will always be empty
 
 (:foo, 1) as ((:foo, number) | (:bar, text))
 ---
@@ -1164,12 +1164,12 @@ value:
 k is? :number then ?v :number, v + 1 else
 k is? :union then ?a ?b :union, a, b)
 ---
+warnings:
+[0:106] In apply: left row type :intersect, text, text has no match in right set type none
 type:
 none
 value:
 none
-warnings:
-[0:106] In apply: left row type :intersect, text, text has no match in right set type none
 
 (:intersect, "a", "b") as (:number, number | :union, text, text)
 (?k
@@ -1190,34 +1190,36 @@ value:
 
 (none as (:union, text, text, text)) is! (:number, number | :union, text, text)
 ---
+warnings:
+[0:79] This `is!` might fail: :union, text, text, text is not contained in :union, text, text
 type:
 none
 value:
 none
-warnings:
-[0:79] This `is!` might fail: :union, text, text, text is not contained in :union, text, text
 
 (none as (:number, number | :union, text, text, text)) is! (:number, number | :union, text, text)
 ---
+warnings:
+[0:97] This `is!` might fail: :union, text, text, text is not contained in :union, text, text
 type:
 :number, number
 value:
 none
-warnings:
-[0:97] This `is!` might fail: :union, text, text, text is not contained in :union, text, text
 
 (:intersect, "a", "b") is! (:number, number | :union, text, text)
 ---
+warnings:
+[0:65] This `is!` might fail: :intersect, text, text is not contained in :union, text, text
 InterpretError: Assert failed: | :intersect, "a", "b" is not contained in right.
 
 (none as (:intersect, "a", "b")) is! (:number, number | :union, text, text)
 ---
+warnings:
+[0:75] This `is!` might fail: :intersect, text, text is not contained in :union, text, text
 type:
 none
 value:
 none
-warnings:
-[0:75] This `is!` might fail: :intersect, text, text is not contained in :union, text, text
 
 // TODO Inference for the right side of `as` is hacky.
 //      This should have type number.

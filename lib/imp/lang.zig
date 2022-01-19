@@ -187,23 +187,25 @@ pub const Store = struct {
     }
 
     pub fn dumpInto(self: Store, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
+        if (self.program_type) |program_type| {
+            if (program_type.warnings.len > 0) {
+                try writer.writeAll("warnings:\n");
+                for (program_type.warnings) |warning| {
+                    const syntax_expr_id = self.core_program.?.from_syntax[warning.expr_id.id];
+                    const range = self.syntax_program.?.from_source[syntax_expr_id.id];
+                    try std.fmt.format(writer, "[{}:{}] ", .{ range[0], range[1] });
+                    try warning.dumpInto(writer, indent);
+                    try writer.writeAll("\n");
+                }
+            }
+        }
         if (self.result) |result| {
             if (result) |set| {
                 try writer.writeAll("type:\n");
                 try self.program_type.?.program_type.dumpInto(writer, indent);
                 try writer.writeAll("\nvalue:\n");
                 try set.dumpInto(writer, indent);
-                const warnings = self.program_type.?.warnings;
-                if (warnings.len > 0) {
-                    try writer.writeAll("\nwarnings:");
-                    for (warnings) |warning| {
-                        try writer.writeAll("\n");
-                        const syntax_expr_id = self.core_program.?.from_syntax[warning.expr_id.id];
-                        const range = self.syntax_program.?.from_source[syntax_expr_id.id];
-                        try std.fmt.format(writer, "[{}:{}] ", .{ range[0], range[1] });
-                        try warning.dumpInto(writer, indent);
-                    }
-                }
+                try writer.writeAll("\n");
             } else |err| {
                 try std.fmt.format(writer, "{s}", .{@errorName(err)});
                 switch (err) {

@@ -197,6 +197,27 @@ pub const Store = struct {
                     try warning.dumpInto(writer, indent);
                     try writer.writeAll("\n");
                 }
+                // TODO inserting a gap here breaks tests :(
+                //try writer.writeAll("\n");
+            }
+        }
+        if (self.watch_results) |watch_results| {
+            if (watch_results.count() > 0) {
+                try writer.writeAll("watch:\n");
+                var sorted_watch_results = u.ArrayList(interpret.WatchResult).init(u.dump_allocator);
+                defer sorted_watch_results.deinit();
+                var iter = watch_results.iterator();
+                while (iter.next()) |entry| sorted_watch_results.append(entry.key_ptr.*) catch u.panic("OOM", .{});
+                std.sort.sort(interpret.WatchResult, sorted_watch_results.items, {}, struct {
+                    fn lessThan(_: void, a: interpret.WatchResult, b: interpret.WatchResult) bool {
+                        return u.deepCompare(a, b) == .LessThan;
+                    }
+                }.lessThan);
+                for (sorted_watch_results.items) |watch_result| {
+                    try watch_result.dumpInto(writer, indent);
+                    try writer.writeAll("\n---\n");
+                }
+                try writer.writeAll("\n");
             }
         }
         if (self.result) |result| {
@@ -218,24 +239,6 @@ pub const Store = struct {
                     error.OutOfMemory,
                     error.WasInterrupted,
                     => {},
-                }
-            }
-        }
-        if (self.watch_results) |watch_results| {
-            if (watch_results.count() > 0) {
-                try writer.writeAll("\n\nwatch:\n\n");
-                var sorted_watch_results = u.ArrayList(interpret.WatchResult).init(u.dump_allocator);
-                defer sorted_watch_results.deinit();
-                var iter = watch_results.iterator();
-                while (iter.next()) |entry| sorted_watch_results.append(entry.key_ptr.*) catch u.panic("OOM", .{});
-                std.sort.sort(interpret.WatchResult, sorted_watch_results.items, {}, struct {
-                    fn lessThan(_: void, a: interpret.WatchResult, b: interpret.WatchResult) bool {
-                        return u.deepCompare(a, b) == .LessThan;
-                    }
-                }.lessThan);
-                for (sorted_watch_results.items) |watch_result| {
-                    try watch_result.dumpInto(writer, indent);
-                    try writer.writeAll("\n\n");
                 }
             }
         }

@@ -8,11 +8,19 @@ pub fn main() anyerror!void {
     var num_tests: usize = 0;
     var num_failed: usize = 0;
 
+    var rewrite_tests = false;
+
     var args = std.process.args();
     // arg 0 is executable
     _ = try args.next(allocator).?;
     while (args.next(allocator)) |arg| {
+        var rewritten_tests = u.ArrayList(u8).init(allocator);
         const filename = try arg;
+
+        if (std.mem.eql(u8, filename, "--rewrite-tests")) {
+            rewrite_tests = true;
+            continue;
+        }
 
         // TODO This is a total hack.
         //      When using `--test-cmd` to run with rr, `zig run` also passes the location of the zig binary as an extra argument. I don't know how to turn this off.
@@ -21,7 +29,7 @@ pub fn main() anyerror!void {
         var file = if (std.mem.eql(u8, filename, "-"))
             std.io.getStdIn()
         else
-            try std.fs.cwd().openFile(filename, .{});
+            try std.fs.cwd().openFile(filename, .{ .read = true, .write = true });
 
         // TODO can't use readFileAlloc on stdin
         var cases = u.ArrayList(u8).init(allocator);
@@ -71,6 +79,18 @@ pub fn main() anyerror!void {
                 num_failed += 1;
                 u.warn("Filename:\n\n{s}\nSource:\n{s}\n\nExpected:\n{s}\n\nFound:\n{s}\n\n---\n\n", .{ filename, input, expected, found });
             }
+
+            if (rewrite_tests) {
+                if (rewritten_tests.items.len > 0)
+                    try rewritten_tests.appendSlice("\n\n");
+                try std.fmt.format(rewritten_tests.writer(), "{s}\n---\n{s}", .{ input, found });
+            }
+        }
+
+        if (rewrite_tests) {
+            try file.seekTo(0);
+            try file.setEndPos(0);
+            try file.writeAll(rewritten_tests.items);
         }
 
         if (num_failed > 0) {

@@ -688,7 +688,7 @@ pub const Parser = struct {
                             const name = (try self.expect(.Name)).Name;
                             break :arg syntax.Arg{ .name = name, .unbox = true };
                         },
-                        else => return self.setError(start, "Expected ?name or ?[name], found ?{}", .{arg_token}),
+                        else => return self.setError(start, "Expected ?name or ?@name, found ?{}", .{arg_token}),
                     }
                 };
                 const body = try self.parseExpr();

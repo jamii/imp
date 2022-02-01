@@ -1,4 +1,4 @@
-See [https://scattered-thoughts.net/writing/imp-intro/](https://scattered-thoughts.net/#imp) for details.
+See [scattered-thoughts.net/#imp](https://scattered-thoughts.net/#imp) for details.
 
 ```
 nix-shell

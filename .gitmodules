@@ -1,0 +1,3 @@
+[submodule "deps/ZT"]
+	path = deps/ZT
+	url = https://github.com/jamii/ZT

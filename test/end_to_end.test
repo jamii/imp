@@ -1,0 +1,329 @@
+parent("Alice", "Bob").
+parent("Bob", "Eve").
+age("Eve", 101).
+weight("Eve", 42.7).
+ancestor(x,z) <- parent(x,y), ancestor(y,z).
+---
+Program{
+    .rules = []Rule[
+        Rule{
+            .head = Clause{
+                .set_name = "parent",
+                .args = []Arg[
+                    Arg{
+                        .Constant = Atom{
+                            .Text = "Alice"
+                        }
+                    },
+                    Arg{
+                        .Constant = Atom{
+                            .Text = "Bob"
+                        }
+                    },
+                ],
+            },
+            .body = []Clause[
+            ],
+        },
+        Rule{
+            .head = Clause{
+                .set_name = "parent",
+                .args = []Arg[
+                    Arg{
+                        .Constant = Atom{
+                            .Text = "Bob"
+                        }
+                    },
+                    Arg{
+                        .Constant = Atom{
+                            .Text = "Eve"
+                        }
+                    },
+                ],
+            },
+            .body = []Clause[
+            ],
+        },
+        Rule{
+            .head = Clause{
+                .set_name = "age",
+                .args = []Arg[
+                    Arg{
+                        .Constant = Atom{
+                            .Text = "Eve"
+                        }
+                    },
+                    Arg{
+                        .Constant = Atom{
+                            .Number = 1.01e+02
+                        }
+                    },
+                ],
+            },
+            .body = []Clause[
+            ],
+        },
+        Rule{
+            .head = Clause{
+                .set_name = "weight",
+                .args = []Arg[
+                    Arg{
+                        .Constant = Atom{
+                            .Text = "Eve"
+                        }
+                    },
+                    Arg{
+                        .Constant = Atom{
+                            .Number = 4.27e+01
+                        }
+                    },
+                ],
+            },
+            .body = []Clause[
+            ],
+        },
+        Rule{
+            .head = Clause{
+                .set_name = "ancestor",
+                .args = []Arg[
+                    Arg{
+                        .Variable = "x"
+                    },
+                    Arg{
+                        .Variable = "z"
+                    },
+                ],
+            },
+            .body = []Clause[
+                Clause{
+                    .set_name = "parent",
+                    .args = []Arg[
+                        Arg{
+                            .Variable = "x"
+                        },
+                        Arg{
+                            .Variable = "y"
+                        },
+                    ],
+                },
+                Clause{
+                    .set_name = "ancestor",
+                    .args = []Arg[
+                        Arg{
+                            .Variable = "y"
+                        },
+                        Arg{
+                            .Variable = "z"
+                        },
+                    ],
+                },
+            ],
+        },
+    ],
+}
+---
+ProgramPlan{
+    .rules = []RulePlan[
+        RulePlan{
+            .set_name = "parent",
+            .body = PlanExpr{
+                .Project = struct:443:14{
+                    .in = &PlanExpr{
+                        .Product = struct:440:14{
+                            .in = [2]*const PlanExpr[
+                                &PlanExpr{
+                                    .Row = struct:424:10{
+                                        .atoms = []Atom[
+                                        ],
+                                    }
+                                },
+                                &PlanExpr{
+                                    .Row = struct:424:10{
+                                        .atoms = []Atom[
+                                            Atom{
+                                                .Text = "Alice"
+                                            },
+                                            Atom{
+                                                .Text = "Bob"
+                                            },
+                                        ],
+                                    }
+                                },
+                            ],
+                        }
+                    },
+                    .columns = []usize[
+                        0,
+                        1,
+                    ],
+                }
+            },
+        },
+        RulePlan{
+            .set_name = "parent",
+            .body = PlanExpr{
+                .Project = struct:443:14{
+                    .in = &PlanExpr{
+                        .Product = struct:440:14{
+                            .in = [2]*const PlanExpr[
+                                &PlanExpr{
+                                    .Row = struct:424:10{
+                                        .atoms = []Atom[
+                                        ],
+                                    }
+                                },
+                                &PlanExpr{
+                                    .Row = struct:424:10{
+                                        .atoms = []Atom[
+                                            Atom{
+                                                .Text = "Bob"
+                                            },
+                                            Atom{
+                                                .Text = "Eve"
+                                            },
+                                        ],
+                                    }
+                                },
+                            ],
+                        }
+                    },
+                    .columns = []usize[
+                        0,
+                        1,
+                    ],
+                }
+            },
+        },
+        RulePlan{
+            .set_name = "age",
+            .body = PlanExpr{
+                .Project = struct:443:14{
+                    .in = &PlanExpr{
+                        .Product = struct:440:14{
+                            .in = [2]*const PlanExpr[
+                                &PlanExpr{
+                                    .Row = struct:424:10{
+                                        .atoms = []Atom[
+                                        ],
+                                    }
+                                },
+                                &PlanExpr{
+                                    .Row = struct:424:10{
+                                        .atoms = []Atom[
+                                            Atom{
+                                                .Text = "Eve"
+                                            },
+                                            Atom{
+                                                .Number = 1.01e+02
+                                            },
+                                        ],
+                                    }
+                                },
+                            ],
+                        }
+                    },
+                    .columns = []usize[
+                        0,
+                        1,
+                    ],
+                }
+            },
+        },
+        RulePlan{
+            .set_name = "weight",
+            .body = PlanExpr{
+                .Project = struct:443:14{
+                    .in = &PlanExpr{
+                        .Product = struct:440:14{
+                            .in = [2]*const PlanExpr[
+                                &PlanExpr{
+                                    .Row = struct:424:10{
+                                        .atoms = []Atom[
+                                        ],
+                                    }
+                                },
+                                &PlanExpr{
+                                    .Row = struct:424:10{
+                                        .atoms = []Atom[
+                                            Atom{
+                                                .Text = "Eve"
+                                            },
+                                            Atom{
+                                                .Number = 4.27e+01
+                                            },
+                                        ],
+                                    }
+                                },
+                            ],
+                        }
+                    },
+                    .columns = []usize[
+                        0,
+                        1,
+                    ],
+                }
+            },
+        },
+        RulePlan{
+            .set_name = "ancestor",
+            .body = PlanExpr{
+                .Project = struct:443:14{
+                    .in = &PlanExpr{
+                        .Product = struct:440:14{
+                            .in = [2]*const PlanExpr[
+                                &PlanExpr{
+                                    .FilterEqual = struct:436:18{
+                                        .in = &PlanExpr{
+                                            .Product = struct:440:14{
+                                                .in = [2]*const PlanExpr[
+                                                    &PlanExpr{
+                                                        .Product = struct:440:14{
+                                                            .in = [2]*const PlanExpr[
+                                                                &PlanExpr{
+                                                                    .Row = struct:424:10{
+                                                                        .atoms = []Atom[
+                                                                        ],
+                                                                    }
+                                                                },
+                                                                &PlanExpr{
+                                                                    .Scan = struct:427:11{
+                                                                        .set_name = "parent",
+                                                                        .num_columns = 2,
+                                                                    }
+                                                                },
+                                                            ],
+                                                        }
+                                                    },
+                                                    &PlanExpr{
+                                                        .Scan = struct:427:11{
+                                                            .set_name = "ancestor",
+                                                            .num_columns = 2,
+                                                        }
+                                                    },
+                                                ],
+                                            }
+                                        },
+                                        .columns = [2]usize[
+                                            1,
+                                            2,
+                                        ],
+                                    }
+                                },
+                                &PlanExpr{
+                                    .Row = struct:424:10{
+                                        .atoms = []Atom[
+                                        ],
+                                    }
+                                },
+                            ],
+                        }
+                    },
+                    .columns = []usize[
+                        0,
+                        3,
+                    ],
+                }
+            },
+        },
+    ],
+}

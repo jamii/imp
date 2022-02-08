@@ -3,42 +3,6 @@ pub const util = @import("./imp/util.zig");
 const std = @import("std");
 const u = util;
 
-pub const ExprId = u.Id("e");
-
-const Program = struct {
-    rules: []const Rule,
-
-    pub const format = u.formatViaDump;
-};
-
-const Rule = struct {
-    head: Clause,
-    body: []const Clause,
-
-    pub const format = u.formatViaDump;
-};
-
-const Clause = struct {
-    set_name: Name,
-    args: []const Arg,
-
-    pub const format = u.formatViaDump;
-};
-
-const Arg = union(enum) {
-    Constant: Atom,
-    Variable: Name,
-
-    pub const format = u.formatViaDump;
-};
-
-const Atom = union(enum) {
-    Text: []const u8,
-    Number: f64,
-
-    pub const format = u.formatViaDump;
-};
-
 // ascii
 const Name = []const u8;
 
@@ -281,6 +245,42 @@ fn tokenize(arena: *u.ArenaAllocator, source: []const u8, error_info: *?Tokenize
     return tokens.toOwnedSlice();
 }
 
+// ---
+
+const Program = struct {
+    rules: []const Rule,
+
+    pub const format = u.formatViaDump;
+};
+
+const Rule = struct {
+    head: Clause,
+    body: []const Clause,
+
+    pub const format = u.formatViaDump;
+};
+
+const Clause = struct {
+    set_name: Name,
+    args: []const Arg,
+
+    pub const format = u.formatViaDump;
+};
+
+const Arg = union(enum) {
+    Constant: Atom,
+    Variable: Name,
+
+    pub const format = u.formatViaDump;
+};
+
+const Atom = union(enum) {
+    Text: []const u8,
+    Number: f64,
+
+    pub const format = u.formatViaDump;
+};
+
 const Parser = struct {
     arena: *u.ArenaAllocator,
     tokens: []const Token,
@@ -405,15 +405,191 @@ fn parse(arena: *u.ArenaAllocator, tokens: []const Token, error_info: *?Parser.E
     return parser.parseProgram();
 }
 
+// ---
+
+const ProgramPlan = struct {
+    rules: []const RulePlan,
+
+    pub const format = u.formatViaDump;
+};
+
+const RulePlan = struct {
+    set_name: Name,
+    body: PlanExpr,
+
+    pub const format = u.formatViaDump;
+};
+
+const PlanExpr = union(enum) {
+    Row: struct {
+        atoms: []const Atom,
+    },
+    Scan: struct {
+        set_name: Name,
+        num_columns: usize,
+    },
+    FilterConstant: struct {
+        in: *const PlanExpr,
+        column: usize,
+        constant: Atom,
+    },
+    FilterEqual: struct {
+        in: *const PlanExpr,
+        columns: [2]usize,
+    },
+    Product: struct {
+        in: [2]*const PlanExpr,
+    },
+    Project: struct {
+        in: *const PlanExpr,
+        columns: []const usize,
+    },
+
+    pub const format = u.formatViaDump;
+};
+
+const Planner = struct {
+    arena: *u.ArenaAllocator,
+    error_info: *?ErrorInfo,
+
+    pub const Error = error{
+        // sets error_info
+        PlannerError,
+
+        // does not set error_info
+        OutOfMemory,
+    };
+
+    pub const ErrorInfo = struct {
+        message: []const u8,
+    };
+
+    fn setError(self: *Planner, comptime fmt: []const u8, args: anytype) Error {
+        const message = try u.formatToString(self.arena.allocator(), fmt, args);
+        self.error_info.* = ErrorInfo{
+            .message = message,
+        };
+        return error.PlannerError;
+    }
+
+    fn planExpr(self: *Planner, plan_expr: PlanExpr) !*const PlanExpr {
+        const ptr = try self.arena.allocator().create(PlanExpr);
+        ptr.* = plan_expr;
+        return ptr;
+    }
+
+    fn planProgram(self: *Planner, program: Program) !ProgramPlan {
+        var rules = u.ArrayList(RulePlan).init(self.arena.allocator());
+        for (program.rules) |rule|
+            try rules.append(try self.planRule(rule));
+        return ProgramPlan{ .rules = rules.toOwnedSlice() };
+    }
+
+    fn planRule(self: *Planner, rule: Rule) !RulePlan {
+        var body = PlanExpr{ .Row = .{ .atoms = &.{} } };
+        var body_num_columns: usize = 0;
+        // maps each bound variable to a column
+        var body_variables = u.DeepHashMap(Name, usize).init(self.arena.allocator());
+        for (rule.body) |clause| {
+
+            // handle this clause with scan and filter
+            var clause_expr = PlanExpr{ .Scan = .{
+                .set_name = clause.set_name,
+                .num_columns = clause.args.len,
+            } };
+            for (clause.args) |arg, column| {
+                if (arg == .Constant) {
+                    const old_clause_expr = clause_expr;
+                    clause_expr = PlanExpr{ .FilterConstant = .{
+                        .in = try self.planExpr(old_clause_expr),
+                        .column = column,
+                        .constant = arg.Constant,
+                    } };
+                }
+            }
+
+            // join against body so far
+            {
+                const old_body = body;
+                body = PlanExpr{ .Product = .{
+                    .in = .{
+                        try self.planExpr(old_body),
+                        try self.planExpr(clause_expr),
+                    },
+                } };
+            }
+            for (clause.args) |arg, column| {
+                if (arg == .Variable) {
+                    if (body_variables.get(arg.Variable)) |join_column| {
+                        const old_body = body;
+                        body = PlanExpr{ .FilterEqual = .{
+                            .in = try self.planExpr(old_body),
+                            .columns = .{ join_column, body_num_columns + column },
+                        } };
+                    } else {
+                        try body_variables.put(arg.Variable, body_num_columns + column);
+                    }
+                }
+            }
+            body_num_columns += clause.args.len;
+        }
+
+        // project variables and constants used in head
+        var constants = u.ArrayList(Atom).init(self.arena.allocator());
+        var project_columns = u.ArrayList(usize).init(self.arena.allocator());
+        for (rule.head.args) |arg| {
+            switch (arg) {
+                .Variable => |variable| {
+                    if (body_variables.get(variable)) |project_column| {
+                        try project_columns.append(project_column);
+                    } else {
+                        return self.setError("Variable {s} is used in head but not bound in body", .{variable});
+                    }
+                },
+                .Constant => |atom| {
+                    try project_columns.append(body_num_columns + constants.items.len);
+                    try constants.append(atom);
+                },
+            }
+        }
+        const old_body = body;
+        return RulePlan{
+            .set_name = rule.head.set_name,
+            .body = PlanExpr{ .Project = .{
+                .in = try self.planExpr(.{ .Product = .{
+                    .in = .{
+                        try self.planExpr(old_body),
+                        try self.planExpr(.{ .Row = .{
+                            .atoms = constants.toOwnedSlice(),
+                        } }),
+                    },
+                } }),
+                .columns = project_columns.toOwnedSlice(),
+            } },
+        };
+    }
+};
+
+fn plan(arena: *u.ArenaAllocator, program: Program, error_info: *?Planner.ErrorInfo) Planner.Error!ProgramPlan {
+    var planner = Planner{
+        .arena = arena,
+        .error_info = error_info,
+    };
+    return planner.planProgram(program);
+}
+
+// ---
+
 comptime {
     std.testing.refAllDecls(@This());
 }
 
-fn testTokenizeAndParse(source: []const u8, expected: []const u8) !void {
+fn testEndToEnd(source: []const u8, expected: []const u8) !void {
     var arena = u.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var tokenizer_error_info: ?Tokenizer.ErrorInfo = null;
     var parser_error_info: ?Parser.ErrorInfo = null;
+    var planner_error_info: ?Planner.ErrorInfo = null;
     const found = found: {
         const tokens = tokenize(&arena, source, &tokenizer_error_info) catch |err|
             break :found try u.formatToString(
@@ -427,170 +603,24 @@ fn testTokenizeAndParse(source: []const u8, expected: []const u8) !void {
             "ParserError:\n{}\n{s}\nAt {}:{}",
             .{ err, parser_error_info.?.message, parser_error_info.?.start, parser_error_info.?.end },
         );
-        break :found try u.formatToString(arena.allocator(), "{}", .{program});
+        const program_plan = plan(&arena, program, &planner_error_info) catch |err| break :found try u.formatToString(
+            arena.allocator(),
+            "PlannerError:\n{}\n{s}",
+            .{ err, planner_error_info.?.message },
+        );
+        break :found try u.formatToString(arena.allocator(), "{}\n---\n{}", .{ program, program_plan });
     };
     try std.testing.expectEqualStrings(expected, found);
 }
 
 test {
-    try testTokenizeAndParse(
-        \\
-    ,
-        \\Program{
-        \\    .rules = []Rule[
-        \\    ],
-        \\}
-    );
-
-    try testTokenizeAndParse(
-        \\parent("Alice", "Bob").
-        \\parent("Bob", "Eve").
-        \\age("Eve", 101).
-        \\weight("Eve", 42.7).
-        \\ancestor(x,z) <- parent(x,y), ancestor(y,z).
-    ,
-        \\Program{
-        \\    .rules = []Rule[
-        \\        Rule{
-        \\            .head = Clause{
-        \\                .set_name = "parent",
-        \\                .args = []Arg[
-        \\                    Arg{
-        \\                        .Constant = Atom{
-        \\                            .Text = "Alice"
-        \\                        }
-        \\                    },
-        \\                    Arg{
-        \\                        .Constant = Atom{
-        \\                            .Text = "Bob"
-        \\                        }
-        \\                    },
-        \\                ],
-        \\            },
-        \\            .body = []Clause[
-        \\            ],
-        \\        },
-        \\        Rule{
-        \\            .head = Clause{
-        \\                .set_name = "parent",
-        \\                .args = []Arg[
-        \\                    Arg{
-        \\                        .Constant = Atom{
-        \\                            .Text = "Bob"
-        \\                        }
-        \\                    },
-        \\                    Arg{
-        \\                        .Constant = Atom{
-        \\                            .Text = "Eve"
-        \\                        }
-        \\                    },
-        \\                ],
-        \\            },
-        \\            .body = []Clause[
-        \\            ],
-        \\        },
-        \\        Rule{
-        \\            .head = Clause{
-        \\                .set_name = "age",
-        \\                .args = []Arg[
-        \\                    Arg{
-        \\                        .Constant = Atom{
-        \\                            .Text = "Eve"
-        \\                        }
-        \\                    },
-        \\                    Arg{
-        \\                        .Constant = Atom{
-        \\                            .Number = 1.01e+02
-        \\                        }
-        \\                    },
-        \\                ],
-        \\            },
-        \\            .body = []Clause[
-        \\            ],
-        \\        },
-        \\        Rule{
-        \\            .head = Clause{
-        \\                .set_name = "weight",
-        \\                .args = []Arg[
-        \\                    Arg{
-        \\                        .Constant = Atom{
-        \\                            .Text = "Eve"
-        \\                        }
-        \\                    },
-        \\                    Arg{
-        \\                        .Constant = Atom{
-        \\                            .Number = 4.27e+01
-        \\                        }
-        \\                    },
-        \\                ],
-        \\            },
-        \\            .body = []Clause[
-        \\            ],
-        \\        },
-        \\        Rule{
-        \\            .head = Clause{
-        \\                .set_name = "ancestor",
-        \\                .args = []Arg[
-        \\                    Arg{
-        \\                        .Variable = "x"
-        \\                    },
-        \\                    Arg{
-        \\                        .Variable = "z"
-        \\                    },
-        \\                ],
-        \\            },
-        \\            .body = []Clause[
-        \\                Clause{
-        \\                    .set_name = "parent",
-        \\                    .args = []Arg[
-        \\                        Arg{
-        \\                            .Variable = "x"
-        \\                        },
-        \\                        Arg{
-        \\                            .Variable = "y"
-        \\                        },
-        \\                    ],
-        \\                },
-        \\                Clause{
-        \\                    .set_name = "ancestor",
-        \\                    .args = []Arg[
-        \\                        Arg{
-        \\                            .Variable = "y"
-        \\                        },
-        \\                        Arg{
-        \\                            .Variable = "z"
-        \\                        },
-        \\                    ],
-        \\                },
-        \\            ],
-        \\        },
-        \\    ],
-        \\}
-    );
-
-    try testTokenizeAndParse(
-        \\parent("Alice", "Bob").
-        \\parent("Bob", "Eve").
-        \\age("Eve", 101).
-        \\weight("Eve", 42.7).
-        \\ancestor(x,z) <- .
-    ,
-        \\ParserError:
-        \\error.ParserError
-        \\Expected @typeInfo(Token).Union.tag_type.?.Name, found Token{ .Period = void }
-        \\At 45:46
-    );
-
-    try testTokenizeAndParse(
-        \\parent("Alice", "Bob").
-        \\parent("Bob", "Eve").
-        \\age("Eve", 101).
-        \\weight("Eve", 42.7).
-        \\ancestor(x,z) < parent(x,y), ancestor(y,z).
-    ,
-        \\TokenizerError:
-        \\error.TokenizerError
-        \\invalid token
-        \\At 98:100
-    );
+    const cases = @embedFile("../test/end_to_end.test");
+    var case_iter = std.mem.split(u8, cases, "\n\n===\n\n");
+    while (case_iter.next()) |case| {
+        const sep = "\n---\n";
+        const source_end = std.mem.indexOf(u8, case, sep).?;
+        const source = case[0..source_end];
+        const expected = case[source_end + sep.len ..];
+        try testEndToEnd(source, expected);
+    }
 }

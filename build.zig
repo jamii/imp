@@ -7,6 +7,7 @@ pub fn build(b: *std.build.Builder) !void {
     target.setGnuLibCVersion(2, 28, 0);
 
     const run = addBin(b, mode, target, "run", "Evaluate an imp file", "./bin/run.zig");
+    zt.link(run.bin);
     run.run.addArgs(b.args orelse &.{});
 
     const test_unit_bin = b.addTestExe("test_unit", "lib/imp.zig");
@@ -50,15 +51,14 @@ fn commonSetup(
     addDeps(bin);
     bin.setBuildMode(mode);
     bin.setTarget(target);
-    zt.link(bin);
 }
 
 pub fn addDeps(
     bin: *std.build.LibExeObjStep,
 ) void {
     bin.linkLibC();
-    bin.addIncludeDir(getRelativePath() ++ "deps/sqlite-amalgamation-3370000/");
-    bin.addCSourceFile(getRelativePath() ++ "deps/sqlite-amalgamation-3370000/sqlite3.c", &[_][]const u8{"-std=c99"});
+    //bin.addIncludeDir(getRelativePath() ++ "deps/sqlite-amalgamation-3370000/");
+    //bin.addCSourceFile(getRelativePath() ++ "deps/sqlite-amalgamation-3370000/sqlite3.c", &[_][]const u8{"-std=c99"});
 }
 
 fn getRelativePath() []const u8 {

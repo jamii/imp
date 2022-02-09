@@ -69,6 +69,16 @@ pub fn Id(comptime dump_tag: []const u8) type {
     };
 }
 
+pub fn ViaDump(comptime T: type) type {
+    return struct {
+        thing: T,
+        pub const format = formatViaDump;
+    };
+}
+pub fn viaDump(thing: anytype) ViaDump(@TypeOf(thing)) {
+    return ViaDump(@TypeOf(thing)){ .thing = thing };
+}
+
 // This is only for debugging
 pub fn dump(thing: anytype) void {
     const stderr_mutex = std.debug.getStderrMutex();
@@ -97,93 +107,114 @@ pub fn dumpInto(writer: anytype, indent: u32, thing: anytype) WriterError(@TypeO
         },
         else => {},
     }
-    switch (ti) {
-        .Pointer => |pti| {
-            switch (pti.size) {
-                .One => {
-                    try writer.writeAll("&");
-                    try dumpInto(writer, indent, thing.*);
-                },
-                .Many => {
-                    // bail
-                    try std.fmt.format(writer, "{any}", .{thing});
-                },
-                .Slice => {
-                    if (pti.child == u8) {
-                        try std.fmt.format(writer, "\"{s}\"", .{thing});
-                    } else {
-                        try std.fmt.format(writer, "[]{s}[\n", .{pti.child});
-                        for (thing) |elem| {
-                            try writer.writeByteNTimes(' ', indent + 4);
-                            try dumpInto(writer, indent + 4, elem);
-                            try writer.writeAll(",\n");
-                        }
-                        try writer.writeByteNTimes(' ', indent);
-                        try writer.writeAll("]");
-                    }
-                },
-                .C => {
-                    // bail
-                    try std.fmt.format(writer, "{any}", .{thing});
-                },
+    if (comptime std.mem.startsWith(u8, @typeName(T), "u.Allocator")) {
+        try writer.writeAll("u.Allocator{}");
+    } else if (comptime std.mem.startsWith(u8, @typeName(T), "std.array_list.ArrayList")) {
+        try dumpInto(writer, indent, thing.items);
+    } else if (comptime std.mem.startsWith(u8, @typeName(T), "std.hash_map.HashMap")) {
+        var iter = thing.iterator();
+        const is_set = @TypeOf(iter.next().?.value_ptr.*) == void;
+        try writer.writeAll(if (is_set) "HashSet(\n" else "HashMap(\n");
+        while (iter.next()) |entry| {
+            try writer.writeByteNTimes(' ', indent + 4);
+            try dumpInto(writer, indent + 4, entry.key_ptr.*);
+            if (!is_set) {
+                try writer.writeAll(" => ");
+                try dumpInto(writer, indent + 4, entry.value_ptr.*);
             }
-        },
-        .Array => |ati| {
-            if (ati.child == u8) {
-                try std.fmt.format(writer, "\"{s}\"", .{thing});
-            } else {
-                try std.fmt.format(writer, "[{}]{s}[\n", .{ ati.len, ati.child });
-                for (thing) |elem| {
+            try writer.writeAll(",\n");
+        }
+        try writer.writeByteNTimes(' ', indent);
+        try writer.writeAll(")");
+    } else {
+        switch (ti) {
+            .Pointer => |pti| {
+                switch (pti.size) {
+                    .One => {
+                        try writer.writeAll("&");
+                        try dumpInto(writer, indent, thing.*);
+                    },
+                    .Many => {
+                        // bail
+                        try std.fmt.format(writer, "{any}", .{thing});
+                    },
+                    .Slice => {
+                        if (pti.child == u8) {
+                            try std.fmt.format(writer, "\"{s}\"", .{thing});
+                        } else {
+                            try std.fmt.format(writer, "[]{s}[\n", .{pti.child});
+                            for (thing) |elem| {
+                                try writer.writeByteNTimes(' ', indent + 4);
+                                try dumpInto(writer, indent + 4, elem);
+                                try writer.writeAll(",\n");
+                            }
+                            try writer.writeByteNTimes(' ', indent);
+                            try writer.writeAll("]");
+                        }
+                    },
+                    .C => {
+                        // bail
+                        try std.fmt.format(writer, "{any}", .{thing});
+                    },
+                }
+            },
+            .Array => |ati| {
+                if (ati.child == u8) {
+                    try std.fmt.format(writer, "\"{s}\"", .{thing});
+                } else {
+                    try std.fmt.format(writer, "[{}]{s}[\n", .{ ati.len, ati.child });
+                    for (thing) |elem| {
+                        try writer.writeByteNTimes(' ', indent + 4);
+                        try dumpInto(writer, indent + 4, elem);
+                        try writer.writeAll(",\n");
+                    }
+                    try writer.writeByteNTimes(' ', indent);
+                    try writer.writeAll("]");
+                }
+            },
+            .Struct => |sti| {
+                try writer.writeAll(@typeName(@TypeOf(thing)));
+                try writer.writeAll("{\n");
+                inline for (sti.fields) |field| {
                     try writer.writeByteNTimes(' ', indent + 4);
-                    try dumpInto(writer, indent + 4, elem);
+                    try std.fmt.format(writer, ".{s} = ", .{field.name});
+                    try dumpInto(writer, indent + 4, @field(thing, field.name));
                     try writer.writeAll(",\n");
                 }
                 try writer.writeByteNTimes(' ', indent);
-                try writer.writeAll("]");
-            }
-        },
-        .Struct => |sti| {
-            try writer.writeAll(@typeName(@TypeOf(thing)));
-            try writer.writeAll("{\n");
-            inline for (sti.fields) |field| {
-                try writer.writeByteNTimes(' ', indent + 4);
-                try std.fmt.format(writer, ".{s} = ", .{field.name});
-                try dumpInto(writer, indent + 4, @field(thing, field.name));
-                try writer.writeAll(",\n");
-            }
-            try writer.writeByteNTimes(' ', indent);
-            try writer.writeAll("}");
-        },
-        .Union => |uti| {
-            if (uti.tag_type) |tag_type| {
-                try writer.writeAll(@typeName(@TypeOf(thing)));
-                try writer.writeAll("{\n");
-                inline for (@typeInfo(tag_type).Enum.fields) |fti| {
-                    if (@enumToInt(std.meta.activeTag(thing)) == fti.value) {
-                        try writer.writeByteNTimes(' ', indent + 4);
-                        try std.fmt.format(writer, ".{s} = ", .{fti.name});
-                        try dumpInto(writer, indent + 4, @field(thing, fti.name));
-                        try writer.writeAll("\n");
-                        try writer.writeByteNTimes(' ', indent);
-                        try writer.writeAll("}");
+                try writer.writeAll("}");
+            },
+            .Union => |uti| {
+                if (uti.tag_type) |tag_type| {
+                    try writer.writeAll(@typeName(@TypeOf(thing)));
+                    try writer.writeAll("{\n");
+                    inline for (@typeInfo(tag_type).Enum.fields) |fti| {
+                        if (@enumToInt(std.meta.activeTag(thing)) == fti.value) {
+                            try writer.writeByteNTimes(' ', indent + 4);
+                            try std.fmt.format(writer, ".{s} = ", .{fti.name});
+                            try dumpInto(writer, indent + 4, @field(thing, fti.name));
+                            try writer.writeAll("\n");
+                            try writer.writeByteNTimes(' ', indent);
+                            try writer.writeAll("}");
+                        }
                     }
+                } else {
+                    // bail
+                    try std.fmt.format(writer, "{any}", .{thing});
                 }
-            } else {
+            },
+            .Optional => {
+                if (thing == null) {
+                    try writer.writeAll("null");
+                } else {
+                    try dumpInto(writer, indent, thing.?);
+                }
+            },
+            else => {
                 // bail
                 try std.fmt.format(writer, "{any}", .{thing});
-            }
-        },
-        .Optional => {
-            if (thing == null) {
-                try writer.writeAll("null");
-            } else {
-                try dumpInto(writer, indent, thing.?);
-            }
-        },
-        else => {
-            // bail
-            try std.fmt.format(writer, "{any}", .{thing});
-        },
+            },
+        }
     }
 }
 
@@ -205,11 +236,11 @@ pub fn deepEqual(a: anytype, b: @TypeOf(a)) bool {
 
 // TODO This is needed for comparing/hashing DeepHashSet, but it's gross and slow.
 //      Would be better to use a sorted set instead of DeepHashSet
-const sorting_allocator = std.heap.c_allocator;
-fn sortHashMap(hash_map: anytype) []const @TypeOf(hash_map).Entry {
-    var elems = ArrayList(@TypeOf(hash_map).Entry).init(sorting_allocator);
+pub const sorting_allocator = std.heap.c_allocator;
+pub fn deepSortHashMap(hash_map: anytype) []const @TypeOf(hash_map).KV {
+    var elems = ArrayList(@TypeOf(hash_map).KV).init(sorting_allocator);
     var iter = hash_map.iterator();
-    while (iter.next()) |elem| elems.append(elem) catch panic("OOM", .{});
+    while (iter.next()) |elem| elems.append(.{ .key = elem.key_ptr.*, .value = elem.value_ptr.* }) catch panic("OOM", .{});
     deepSort(elems.items);
     return elems.toOwnedSlice();
 }
@@ -218,9 +249,9 @@ pub fn deepCompare(a: anytype, b: @TypeOf(a)) Ordering {
     const T = @TypeOf(a);
     const ti = @typeInfo(T);
     if (comptime std.mem.startsWith(u8, @typeName(@TypeOf(a)), "std.hash_map.HashMap")) {
-        const a_elems = sortHashMap(a);
+        const a_elems = deepSortHashMap(a);
         defer sorting_allocator.free(a_elems);
-        const b_elems = sortHashMap(b);
+        const b_elems = deepSortHashMap(b);
         defer sorting_allocator.free(b_elems);
         return deepCompare(a_elems, b_elems);
     }
@@ -256,17 +287,26 @@ pub fn deepCompare(a: anytype, b: @TypeOf(a)) Ordering {
                     return deepCompare(a.*, b.*);
                 },
                 .Slice => {
+                    // TODO this is nice internally, but not great for printing
+                    //if (a.len < b.len) {
+                    //    return .LessThan;
+                    //}
+                    //if (a.len > b.len) {
+                    //    return .GreaterThan;
+                    //}
+                    var i: usize = 0;
+                    const len = min(a.len, b.len);
+                    while (i < len) : (i += 1) {
+                        const ordering = deepCompare(a[i], b[i]);
+                        if (ordering != .Equal) {
+                            return ordering;
+                        }
+                    }
                     if (a.len < b.len) {
                         return .LessThan;
                     }
                     if (a.len > b.len) {
                         return .GreaterThan;
-                    }
-                    for (a) |a_elem, a_ix| {
-                        const ordering = deepCompare(a_elem, b[a_ix]);
-                        if (ordering != .Equal) {
-                            return ordering;
-                        }
                     }
                     return .Equal;
                 },
@@ -370,7 +410,7 @@ pub fn deepHashInto(hasher: anytype, key: anytype) void {
     const T = @TypeOf(key);
     const ti = @typeInfo(T);
     if (comptime std.mem.startsWith(u8, @typeName(T), "std.hash_map.HashMap")) {
-        const elems = sortHashMap(key);
+        const elems = deepSortHashMap(key);
         defer sorting_allocator.free(elems);
         deepHashInto(hasher, elems);
         return;

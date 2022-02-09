@@ -279,6 +279,14 @@ const Atom = union(enum) {
     Number: f64,
 
     pub const format = u.formatViaDump;
+
+    pub fn dumpInto(self: Atom, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
+        _ = indent;
+        switch (self) {
+            .Text => |text| try std.fmt.format(writer, "\"{}\"", .{std.zig.fmtEscapes(text)}),
+            .Number => |number| try std.fmt.format(writer, "{d}", .{number}),
+        }
+    }
 };
 
 const Parser = struct {
@@ -461,12 +469,14 @@ const Planner = struct {
     };
 
     pub const ErrorInfo = struct {
+        rule_ix: usize,
         message: []const u8,
     };
 
-    fn setError(self: *Planner, comptime fmt: []const u8, args: anytype) Error {
+    fn setError(self: *Planner, rule_ix: usize, comptime fmt: []const u8, args: anytype) Error {
         const message = try u.formatToString(self.arena.allocator(), fmt, args);
         self.error_info.* = ErrorInfo{
+            .rule_ix = rule_ix,
             .message = message,
         };
         return error.PlannerError;
@@ -480,12 +490,12 @@ const Planner = struct {
 
     fn planProgram(self: *Planner, program: Program) !ProgramPlan {
         var rules = u.ArrayList(RulePlan).init(self.arena.allocator());
-        for (program.rules) |rule|
-            try rules.append(try self.planRule(rule));
+        for (program.rules) |rule, rule_ix|
+            try rules.append(try self.planRule(rule, rule_ix));
         return ProgramPlan{ .rules = rules.toOwnedSlice() };
     }
 
-    fn planRule(self: *Planner, rule: Rule) !RulePlan {
+    fn planRule(self: *Planner, rule: Rule, rule_ix: usize) !RulePlan {
         var body = PlanExpr{ .Row = .{ .atoms = &.{} } };
         var body_num_columns: usize = 0;
         // maps each bound variable to a column
@@ -543,7 +553,7 @@ const Planner = struct {
                     if (body_variables.get(variable)) |project_column| {
                         try project_columns.append(project_column);
                     } else {
-                        return self.setError("Variable {s} is used in head but not bound in body", .{variable});
+                        return self.setError(rule_ix, "Variable {s} is used in head but not bound in body", .{variable});
                     }
                 },
                 .Constant => |atom| {
@@ -580,6 +590,191 @@ fn plan(arena: *u.ArenaAllocator, program: Program, error_info: *?Planner.ErrorI
 
 // ---
 
+const Database = struct {
+    sets: u.DeepHashMap(Name, Set),
+
+    pub const format = u.formatViaDump;
+
+    pub fn dumpInto(self: Database, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
+        const entries = u.deepSortHashMap(self.sets);
+        defer u.sorting_allocator.free(entries);
+        for (entries) |entry| {
+            try entry.value.dumpIntoWithName(writer, indent, entry.key);
+        }
+    }
+};
+
+const Set = struct {
+    rows: u.DeepHashSet(Row),
+
+    pub fn init(allocator: u.Allocator) Set {
+        return Set{ .rows = u.DeepHashSet(Row).init(allocator) };
+    }
+
+    pub fn insert(self: *Set, row: Row) !void {
+        try self.rows.put(row, {});
+    }
+
+    pub fn iterator(self: Set) Iterator {
+        return Iterator{ .iter = self.rows.iterator() };
+    }
+
+    pub const Iterator = struct {
+        iter: u.DeepHashSet(Row).Iterator,
+
+        pub fn next(self: *Iterator) ?Row {
+            if (self.iter.next()) |entry| {
+                return entry.key_ptr.*;
+            } else {
+                return null;
+            }
+        }
+    };
+
+    pub const format = u.formatViaDump;
+
+    pub fn dumpInto(self: Set, writer: anytype, indent: u32) u.WriterError(@TypeOf(writer))!void {
+        self.dumpIntoWithName(writer, indent, "");
+    }
+
+    pub fn dumpIntoWithName(self: Set, writer: anytype, indent: u32, name: []const u8) u.WriterError(@TypeOf(writer))!void {
+        _ = indent;
+        const entries = u.deepSortHashMap(self.rows);
+        defer u.sorting_allocator.free(entries);
+        for (entries) |entry| {
+            try std.fmt.format(writer, "{s}(", .{name});
+            for (entry.key) |atom, i| {
+                if (i != 0) try writer.writeAll(", ");
+                try std.fmt.format(writer, "{}", .{atom});
+            }
+            try writer.writeAll(").\n");
+        }
+    }
+};
+
+const Row = []const Atom;
+
+const Interpreter = struct {
+    arena: *u.ArenaAllocator,
+    sets: u.DeepHashMap(Name, Set),
+    error_info: *?ErrorInfo,
+
+    pub const Error = error{
+        // sets error_info
+        InterpreterError,
+
+        // does not set error_info
+        OutOfMemory,
+    };
+
+    pub const ErrorInfo = struct {
+        rule_ix: usize,
+        message: []const u8,
+    };
+
+    fn setError(self: *Planner, rule_ix: usize, comptime fmt: []const u8, args: anytype) Error {
+        const message = try u.formatToString(self.arena.allocator(), fmt, args);
+        self.error_info.* = ErrorInfo{
+            .rule_ix = rule_ix,
+            .message = message,
+        };
+        return error.PlannerError;
+    }
+
+    pub fn getSet(self: *Interpreter, set_name: Name) !*Set {
+        const set_entry = try self.sets.getOrPut(set_name);
+        if (!set_entry.found_existing)
+            set_entry.value_ptr.* = Set.init(self.arena.allocator());
+        return set_entry.value_ptr;
+    }
+
+    pub fn interpretProgramPlan(self: *Interpreter, program_plan: ProgramPlan) !void {
+        while (true) {
+            var changed = false;
+            for (program_plan.rules) |rule_plan, rule_ix| {
+                const old_set = try self.getSet(rule_plan.set_name);
+                const new_set = try self.interpretPlanExpr(rule_plan.body, rule_ix);
+                var new_set_iter = new_set.iterator();
+                while (new_set_iter.next()) |row| {
+                    const entry = try old_set.rows.getOrPut(row);
+                    if (!entry.found_existing)
+                        changed = true;
+                }
+            }
+            if (!changed) break;
+        }
+    }
+
+    pub fn interpretPlanExpr(self: *Interpreter, plan_expr: PlanExpr, rule_ix: usize) Error!Set {
+        var set = Set.init(self.arena.allocator());
+        switch (plan_expr) {
+            .Row => |row| {
+                try set.insert(row.atoms);
+            },
+            .Scan => |scan| {
+                const scan_set = try self.getSet(scan.set_name);
+                var scan_set_iter = scan_set.iterator();
+                while (scan_set_iter.next()) |in_row|
+                    if (in_row.len == scan.num_columns)
+                        try set.insert(in_row);
+            },
+            .FilterConstant => |filter_constant| {
+                const in = try self.interpretPlanExpr(filter_constant.in.*, rule_ix);
+                var in_iter = in.iterator();
+                while (in_iter.next()) |in_row|
+                    if (u.deepEqual(in_row[filter_constant.column], filter_constant.constant))
+                        try set.insert(in_row);
+            },
+            .FilterEqual => |filter_equal| {
+                const in = try self.interpretPlanExpr(filter_equal.in.*, rule_ix);
+                var in_iter = in.iterator();
+                while (in_iter.next()) |in_row|
+                    if (u.deepEqual(
+                        in_row[filter_equal.columns[0]],
+                        in_row[filter_equal.columns[1]],
+                    ))
+                        try set.insert(in_row);
+            },
+            .Product => |product| {
+                const in0 = try self.interpretPlanExpr(product.in[0].*, rule_ix);
+                const in1 = try self.interpretPlanExpr(product.in[1].*, rule_ix);
+                var in0_iter = in0.iterator();
+                while (in0_iter.next()) |in_row0| {
+                    var in1_iter = in1.iterator();
+                    while (in1_iter.next()) |in_row1| {
+                        const out_row = try std.mem.concat(self.arena.allocator(), Atom, &.{ in_row0, in_row1 });
+                        try set.insert(out_row);
+                    }
+                }
+            },
+            .Project => |project| {
+                const in = try self.interpretPlanExpr(project.in.*, rule_ix);
+                var in_iter = in.iterator();
+                while (in_iter.next()) |in_row| {
+                    const out_row = try self.arena.allocator().alloc(Atom, project.columns.len);
+                    for (project.columns) |column, i| {
+                        out_row[i] = in_row[column];
+                    }
+                    try set.insert(out_row);
+                }
+            },
+        }
+        return set;
+    }
+};
+
+fn interpret(arena: *u.ArenaAllocator, program_plan: ProgramPlan, error_info: *?Interpreter.ErrorInfo) Interpreter.Error!Database {
+    var interpreter = Interpreter{
+        .arena = arena,
+        .sets = u.DeepHashMap(Name, Set).init(arena.allocator()),
+        .error_info = error_info,
+    };
+    try interpreter.interpretProgramPlan(program_plan);
+    return Database{ .sets = interpreter.sets };
+}
+
+// ---
+
 comptime {
     std.testing.refAllDecls(@This());
 }
@@ -590,6 +785,7 @@ fn testEndToEnd(source: []const u8, expected: []const u8) !void {
     var tokenizer_error_info: ?Tokenizer.ErrorInfo = null;
     var parser_error_info: ?Parser.ErrorInfo = null;
     var planner_error_info: ?Planner.ErrorInfo = null;
+    var interpreter_error_info: ?Interpreter.ErrorInfo = null;
     const found = found: {
         const tokens = tokenize(&arena, source, &tokenizer_error_info) catch |err|
             break :found try u.formatToString(
@@ -608,19 +804,24 @@ fn testEndToEnd(source: []const u8, expected: []const u8) !void {
             "PlannerError:\n{}\n{s}",
             .{ err, planner_error_info.?.message },
         );
-        break :found try u.formatToString(arena.allocator(), "{}\n---\n{}", .{ program, program_plan });
+        const database = interpret(&arena, program_plan, &interpreter_error_info) catch |err| break :found try u.formatToString(
+            arena.allocator(),
+            "InterpreterError:\n{}\n{s}",
+            .{ err, interpreter_error_info.?.message },
+        );
+        break :found try u.formatToString(arena.allocator(), "{}", .{database});
     };
-    try std.testing.expectEqualStrings(expected, found);
+    try std.testing.expectEqualStrings(expected, std.mem.trim(u8, found, "\n "));
 }
 
 test {
     const cases = @embedFile("../test/end_to_end.test");
-    var case_iter = std.mem.split(u8, cases, "\n\n===\n\n");
+    var case_iter = std.mem.split(u8, cases, "\n\n");
     while (case_iter.next()) |case| {
-        const sep = "\n---\n";
+        const sep = "---";
         const source_end = std.mem.indexOf(u8, case, sep).?;
         const source = case[0..source_end];
-        const expected = case[source_end + sep.len ..];
+        const expected = std.mem.trim(u8, case[source_end + sep.len ..], "\n ");
         try testEndToEnd(source, expected);
     }
 }

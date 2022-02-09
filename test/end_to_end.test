@@ -327,3 +327,110 @@ ProgramPlan{
         },
     ],
 }
+
+===
+
+foo(1, x) <- bar(x, x, 2).
+---
+Program{
+    .rules = []Rule[
+        Rule{
+            .head = Clause{
+                .set_name = "foo",
+                .args = []Arg[
+                    Arg{
+                        .Constant = Atom{
+                            .Number = 1.0e+00
+                        }
+                    },
+                    Arg{
+                        .Variable = "x"
+                    },
+                ],
+            },
+            .body = []Clause[
+                Clause{
+                    .set_name = "bar",
+                    .args = []Arg[
+                        Arg{
+                            .Variable = "x"
+                        },
+                        Arg{
+                            .Variable = "x"
+                        },
+                        Arg{
+                            .Constant = Atom{
+                                .Number = 2.0e+00
+                            }
+                        },
+                    ],
+                },
+            ],
+        },
+    ],
+}
+---
+ProgramPlan{
+    .rules = []RulePlan[
+        RulePlan{
+            .set_name = "foo",
+            .body = PlanExpr{
+                .Project = struct:443:14{
+                    .in = &PlanExpr{
+                        .Product = struct:440:14{
+                            .in = [2]*const PlanExpr[
+                                &PlanExpr{
+                                    .FilterEqual = struct:436:18{
+                                        .in = &PlanExpr{
+                                            .Product = struct:440:14{
+                                                .in = [2]*const PlanExpr[
+                                                    &PlanExpr{
+                                                        .Row = struct:424:10{
+                                                            .atoms = []Atom[
+                                                            ],
+                                                        }
+                                                    },
+                                                    &PlanExpr{
+                                                        .FilterConstant = struct:431:21{
+                                                            .in = &PlanExpr{
+                                                                .Scan = struct:427:11{
+                                                                    .set_name = "bar",
+                                                                    .num_columns = 3,
+                                                                }
+                                                            },
+                                                            .column = 2,
+                                                            .constant = Atom{
+                                                                .Number = 2.0e+00
+                                                            },
+                                                        }
+                                                    },
+                                                ],
+                                            }
+                                        },
+                                        .columns = [2]usize[
+                                            0,
+                                            1,
+                                        ],
+                                    }
+                                },
+                                &PlanExpr{
+                                    .Row = struct:424:10{
+                                        .atoms = []Atom[
+                                            Atom{
+                                                .Number = 1.0e+00
+                                            },
+                                        ],
+                                    }
+                                },
+                            ],
+                        }
+                    },
+                    .columns = []usize[
+                        3,
+                        0,
+                    ],
+                }
+            },
+        },
+    ],
+}

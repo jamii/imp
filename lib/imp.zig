@@ -814,7 +814,7 @@ fn testEndToEnd(source: []const u8, expected: []const u8) !void {
     try std.testing.expectEqualStrings(expected, std.mem.trim(u8, found, "\n "));
 }
 
-test {
+test "end to end" {
     const cases = @embedFile("../test/end_to_end.test");
     var case_iter = std.mem.split(u8, cases, "\n\n");
     while (case_iter.next()) |case| {

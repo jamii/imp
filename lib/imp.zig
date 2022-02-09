@@ -1,4 +1,5 @@
 pub const util = @import("./imp/util.zig");
+pub const Storage = @import("./imp/Storage.zig");
 
 const std = @import("std");
 const u = util;
@@ -274,7 +275,7 @@ const Arg = union(enum) {
     pub const format = u.formatViaDump;
 };
 
-const Atom = union(enum) {
+pub const Atom = union(enum) {
     Text: []const u8,
     Number: f64,
 
@@ -652,7 +653,7 @@ const Set = struct {
     }
 };
 
-const Row = []const Atom;
+pub const Row = []const Atom;
 
 const Interpreter = struct {
     arena: *u.ArenaAllocator,

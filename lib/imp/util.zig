@@ -562,3 +562,9 @@ pub fn deepClone(thing: anytype, allocator: Allocator) error{OutOfMemory}!@TypeO
         else => compileError("Cannot deepClone {}", .{T}),
     }
 }
+
+pub fn expectDump(thing: anytype, expected: []const u8) !void {
+    const found = try formatToString(std.testing.allocator, "{}", .{viaDump(thing)});
+    defer std.testing.allocator.free(found);
+    try std.testing.expectEqualStrings(expected, found);
+}

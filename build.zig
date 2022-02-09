@@ -57,8 +57,8 @@ pub fn addDeps(
     bin: *std.build.LibExeObjStep,
 ) void {
     bin.linkLibC();
-    //bin.addIncludeDir(getRelativePath() ++ "deps/sqlite-amalgamation-3370000/");
-    //bin.addCSourceFile(getRelativePath() ++ "deps/sqlite-amalgamation-3370000/sqlite3.c", &[_][]const u8{"-std=c99"});
+    bin.addIncludeDir(getRelativePath() ++ "deps/sqlite-amalgamation-3370000/");
+    bin.addCSourceFile(getRelativePath() ++ "deps/sqlite-amalgamation-3370000/sqlite3.c", &[_][]const u8{"-std=c99"});
 }
 
 fn getRelativePath() []const u8 {

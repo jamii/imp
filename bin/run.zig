@@ -2,6 +2,10 @@ const std = @import("std");
 const imp = @import("../lib/imp.zig");
 const u = imp.util;
 
+comptime {
+    std.testing.refAllDecls(@This());
+}
+
 // Workflow looks like:
 // `imp run imp.db`
 //   runs all live rules in the db

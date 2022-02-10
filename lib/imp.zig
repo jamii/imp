@@ -4,6 +4,10 @@ pub const Storage = @import("./imp/Storage.zig");
 const std = @import("std");
 const u = util;
 
+comptime {
+    std.testing.refAllDecls(@This());
+}
+
 // ascii
 const Name = []const u8;
 
@@ -840,10 +844,6 @@ pub const Runner = struct {
 };
 
 // ---
-
-comptime {
-    std.testing.refAllDecls(@This());
-}
 
 fn testEndToEnd(source: []const u8, expected: []const u8) !void {
     var arena = u.ArenaAllocator.init(std.testing.allocator);

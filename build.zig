@@ -4,38 +4,41 @@ const zt = @import("deps/ZT/build.zig");
 pub fn build(b: *std.build.Builder) !void {
     const mode = b.standardReleaseOptions();
     var target = b.standardTargetOptions(.{});
+    // needed by sqlite
     target.setGnuLibCVersion(2, 28, 0);
 
-    const run = addBin(b, mode, target, "run", "Evaluate an imp file", "./bin/run.zig");
+    const run = addBin(
+        b,
+        b.addExecutable("run", "./bin/run.zig"),
+        "run",
+        "Evaluate an imp file",
+    );
+    commonSetup(run.bin, mode, target);
     zt.link(run.bin);
     run.run.addArgs(b.args orelse &.{});
 
-    const test_unit_bin = b.addTestExe("test_unit", "lib/imp.zig");
-    commonSetup(test_unit_bin, mode, target);
-    const test_unit_run = test_unit_bin.run();
-    const test_unit_step = b.step("test_unit", "Run unit tests");
-    test_unit_step.dependOn(&test_unit_run.step);
+    const test_unit = addBin(
+        b,
+        b.addTestExe("test_unit", "./bin/run.zig"),
+        "test_unit",
+        "Run unit tests",
+    );
+    commonSetup(test_unit.bin, mode, target);
 
     const test_step = b.step("test", "Run all tests");
-    test_step.dependOn(test_unit_step);
-    // Make sure that run.zig builds
-    test_step.dependOn(&run.bin.step);
+    test_step.dependOn(test_unit.step);
 }
 
 fn addBin(
     b: *std.build.Builder,
-    mode: std.builtin.Mode,
-    target: std.zig.CrossTarget,
+    bin: *std.build.LibExeObjStep,
     name: []const u8,
     description: []const u8,
-    exe_path: []const u8,
 ) struct {
     bin: *std.build.LibExeObjStep,
     run: *std.build.RunStep,
     step: *std.build.Step,
 } {
-    const bin = b.addExecutable(name, exe_path);
-    commonSetup(bin, mode, target);
     const run = bin.run();
     const step = b.step(name, description);
     step.dependOn(&run.step);

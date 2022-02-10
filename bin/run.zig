@@ -107,6 +107,7 @@ const Diff = struct {
 fn getDiff(storage: *imp.Storage, source_file: std.fs.File) !Diff {
     const old_inserts = try storage.getLiveInserts();
 
+    // parse program
     const old_source = try source_file.readToEndAlloc(arena.allocator(), std.math.maxInt(usize));
     var tokenizer = imp.Tokenizer{
         .arena = &arena,
@@ -125,25 +126,68 @@ fn getDiff(storage: *imp.Storage, source_file: std.fs.File) !Diff {
     };
     const program = try parser.parseProgram();
 
-    // TODO can't actually diff because no rule_ids in source yet
+    // assign rule ids
     var rng = try newRng();
+    for (parser.rules.items) |*new_rule| {
+        if (new_rule.id == null) {
+            new_rule.id = rng.random().int(imp.RuleId);
+        }
+    }
+
+    // build indexes
+    var old_inserts_by_rule_id = u.DeepHashMap(imp.RuleId, u.ArrayList(imp.Storage.Insert)).init(arena.allocator());
+    for (old_inserts) |old_insert| {
+        const entry = try old_inserts_by_rule_id.getOrPut(old_insert.rule_id);
+        if (!entry.found_existing)
+            entry.value_ptr.* = u.ArrayList(imp.Storage.Insert).init(arena.allocator());
+        try entry.value_ptr.append(old_insert);
+    }
+    var new_rules_by_rule_id = u.DeepHashMap(imp.RuleId, u.ArrayList(imp.Rule)).init(arena.allocator());
+    for (program.rules) |new_rule| {
+        const entry = try new_rules_by_rule_id.getOrPut(new_rule.id.?);
+        if (!entry.found_existing)
+            entry.value_ptr.* = u.ArrayList(imp.Rule).init(arena.allocator());
+        try entry.value_ptr.append(new_rule);
+    }
+
+    // diff
     const tx_id = rng.random().int(imp.Storage.TransactionId);
     var inserts = u.ArrayList(imp.Storage.Insert).init(arena.allocator());
     var deletes = u.ArrayList(imp.Storage.Delete).init(arena.allocator());
     for (old_inserts) |old_insert| {
-        try deletes.append(.{
-            .tx_id = tx_id,
-            .rule_id = old_insert.rule_id,
-        });
+        var still_exists = false;
+        if (new_rules_by_rule_id.get(old_insert.rule_id)) |matching_new_rules| {
+            for (matching_new_rules.items) |matching_new_rule| {
+                var rule_source = u.ArrayList(u8).init(arena.allocator());
+                try matching_new_rule.printInto(rule_source.writer());
+                if (std.mem.eql(u8, old_insert.rule, rule_source.items)) {
+                    still_exists = true;
+                }
+            }
+        }
+        if (!still_exists)
+            try deletes.append(.{
+                .tx_id = tx_id,
+                .rule_id = old_insert.rule_id,
+            });
     }
-    for (program.rules) |rule, rule_id| {
+    for (program.rules) |new_rule| {
         var rule_source = u.ArrayList(u8).init(arena.allocator());
-        try rule.printInto(rule_source.writer());
-        try inserts.append(.{
-            .tx_id = tx_id,
-            .rule_id = @intCast(imp.RuleId, rule_id),
-            .rule = rule_source.toOwnedSlice(),
-        });
+        try new_rule.printInto(rule_source.writer());
+        var existed_before = false;
+        if (old_inserts_by_rule_id.get(new_rule.id.?)) |matching_old_inserts| {
+            for (matching_old_inserts.items) |matching_old_insert| {
+                if (std.mem.eql(u8, matching_old_insert.rule, rule_source.items)) {
+                    existed_before = true;
+                }
+            }
+        }
+        if (!existed_before)
+            try inserts.append(.{
+                .tx_id = tx_id,
+                .rule_id = new_rule.id.?,
+                .rule = rule_source.toOwnedSlice(),
+            });
     }
 
     return Diff{

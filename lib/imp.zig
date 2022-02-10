@@ -29,7 +29,8 @@ const Tokenizer = struct {
     arena: *u.ArenaAllocator,
     source: []const u8,
     position: usize,
-    error_info: *?ErrorInfo,
+    tokens: u.ArrayList(Token),
+    error_info: ?ErrorInfo,
 
     pub const Error = error{
         // sets error_info
@@ -43,11 +44,12 @@ const Tokenizer = struct {
         start: usize,
         end: usize,
         message: []const u8,
+        pub const format = u.formatViaDump;
     };
 
     fn setError(self: *Tokenizer, start: usize, comptime fmt: []const u8, args: anytype) Error {
         const message = try u.formatToString(self.arena.allocator(), fmt, args);
-        self.error_info.* = ErrorInfo{
+        self.error_info = ErrorInfo{
             .start = start,
             .end = self.position,
             .message = message,
@@ -193,7 +195,7 @@ const Tokenizer = struct {
         }
     }
 
-    pub fn nextToken(self: *Tokenizer) !Token {
+    fn nextToken(self: *Tokenizer) !Token {
         const start = self.position;
         if (try self.nextUtf8Char()) |utf8_char1| {
             switch (utf8_char1) {
@@ -228,23 +230,16 @@ const Tokenizer = struct {
             return Token{ .EOF = {} };
         }
     }
-};
 
-fn tokenize(arena: *u.ArenaAllocator, source: []const u8, error_info: *?Tokenizer.ErrorInfo) Tokenizer.Error![]const Token {
-    var tokenizer = Tokenizer{
-        .arena = arena,
-        .source = source,
-        .position = 0,
-        .error_info = error_info,
-    };
-    var tokens = u.ArrayList(Token).init(arena.allocator());
-    while (true) {
-        const token = try tokenizer.nextToken();
-        try tokens.append(token);
-        if (token == .EOF) break;
+    pub fn tokenize(self: *Tokenizer) ![]const Token {
+        while (true) {
+            const token = try self.nextToken();
+            try self.tokens.append(token);
+            if (token == .EOF) break;
+        }
+        return self.tokens.items;
     }
-    return tokens.toOwnedSlice();
-}
+};
 
 // ---
 
@@ -294,7 +289,8 @@ const Parser = struct {
     arena: *u.ArenaAllocator,
     tokens: []const Token,
     position: usize,
-    error_info: *?ErrorInfo,
+    rules: u.ArrayList(Rule),
+    error_info: ?ErrorInfo,
 
     pub const Error = error{
         // sets error_info
@@ -308,11 +304,12 @@ const Parser = struct {
         start: usize,
         end: usize,
         message: []const u8,
+        pub const format = u.formatViaDump;
     };
 
     fn setError(self: *Parser, start: usize, comptime fmt: []const u8, args: anytype) Error {
         const message = try u.formatToString(self.arena.allocator(), fmt, args);
-        self.error_info.* = ErrorInfo{
+        self.error_info = ErrorInfo{
             .start = start,
             .end = self.position,
             .message = message,
@@ -345,17 +342,16 @@ const Parser = struct {
     }
 
     pub fn parseProgram(self: *Parser) !Program {
-        var rules = u.ArrayList(Rule).init(self.arena.allocator());
         while (true) {
             self.allowSpace();
             if (self.peekToken() == .EOF) break;
-            try rules.append(try self.parseRule());
+            try self.rules.append(try self.parseRule());
             self.allowSpace();
         }
-        return Program{ .rules = rules.toOwnedSlice() };
+        return Program{ .rules = self.rules.items };
     }
 
-    pub fn parseRule(self: *Parser) !Rule {
+    fn parseRule(self: *Parser) !Rule {
         const head = try self.parseClause();
         self.allowSpace();
         if (self.peekToken() == .Period) {
@@ -376,7 +372,7 @@ const Parser = struct {
         return Rule{ .head = head, .body = body.toOwnedSlice() };
     }
 
-    pub fn parseClause(self: *Parser) !Clause {
+    fn parseClause(self: *Parser) !Clause {
         const set_name = try self.expectToken(.Name);
         _ = try self.expectToken(.OpenParen);
         var args = u.ArrayList(Arg).init(self.arena.allocator());
@@ -392,7 +388,7 @@ const Parser = struct {
         return Clause{ .set_name = set_name.Name, .args = args.toOwnedSlice() };
     }
 
-    pub fn parseArg(self: *Parser) !Arg {
+    fn parseArg(self: *Parser) !Arg {
         const start = self.position;
         const token = self.nextToken();
         switch (token) {
@@ -403,16 +399,6 @@ const Parser = struct {
         }
     }
 };
-
-fn parse(arena: *u.ArenaAllocator, tokens: []const Token, error_info: *?Parser.ErrorInfo) Parser.Error!Program {
-    var parser = Parser{
-        .arena = arena,
-        .tokens = tokens,
-        .position = 0,
-        .error_info = error_info,
-    };
-    return parser.parseProgram();
-}
 
 // ---
 
@@ -459,7 +445,7 @@ const PlanExpr = union(enum) {
 
 const Planner = struct {
     arena: *u.ArenaAllocator,
-    error_info: *?ErrorInfo,
+    error_info: ?ErrorInfo,
 
     pub const Error = error{
         // sets error_info
@@ -472,11 +458,12 @@ const Planner = struct {
     pub const ErrorInfo = struct {
         rule_ix: usize,
         message: []const u8,
+        pub const format = u.formatViaDump;
     };
 
     fn setError(self: *Planner, rule_ix: usize, comptime fmt: []const u8, args: anytype) Error {
         const message = try u.formatToString(self.arena.allocator(), fmt, args);
-        self.error_info.* = ErrorInfo{
+        self.error_info = ErrorInfo{
             .rule_ix = rule_ix,
             .message = message,
         };
@@ -581,14 +568,6 @@ const Planner = struct {
     }
 };
 
-fn plan(arena: *u.ArenaAllocator, program: Program, error_info: *?Planner.ErrorInfo) Planner.Error!ProgramPlan {
-    var planner = Planner{
-        .arena = arena,
-        .error_info = error_info,
-    };
-    return planner.planProgram(program);
-}
-
 // ---
 
 const Database = struct {
@@ -658,7 +637,7 @@ pub const Row = []const Atom;
 const Interpreter = struct {
     arena: *u.ArenaAllocator,
     sets: u.DeepHashMap(Name, Set),
-    error_info: *?ErrorInfo,
+    error_info: ?ErrorInfo,
 
     pub const Error = error{
         // sets error_info
@@ -671,11 +650,12 @@ const Interpreter = struct {
     pub const ErrorInfo = struct {
         rule_ix: usize,
         message: []const u8,
+        pub const format = u.formatViaDump;
     };
 
     fn setError(self: *Planner, rule_ix: usize, comptime fmt: []const u8, args: anytype) Error {
         const message = try u.formatToString(self.arena.allocator(), fmt, args);
-        self.error_info.* = ErrorInfo{
+        self.error_info = ErrorInfo{
             .rule_ix = rule_ix,
             .message = message,
         };
@@ -689,7 +669,7 @@ const Interpreter = struct {
         return set_entry.value_ptr;
     }
 
-    pub fn interpretProgramPlan(self: *Interpreter, program_plan: ProgramPlan) !void {
+    pub fn interpretProgramPlan(self: *Interpreter, program_plan: ProgramPlan) !Database {
         while (true) {
             var changed = false;
             for (program_plan.rules) |rule_plan, rule_ix| {
@@ -704,6 +684,7 @@ const Interpreter = struct {
             }
             if (!changed) break;
         }
+        return Database{ .sets = self.sets };
     }
 
     pub fn interpretPlanExpr(self: *Interpreter, plan_expr: PlanExpr, rule_ix: usize) Error!Set {
@@ -764,15 +745,49 @@ const Interpreter = struct {
     }
 };
 
-fn interpret(arena: *u.ArenaAllocator, program_plan: ProgramPlan, error_info: *?Interpreter.ErrorInfo) Interpreter.Error!Database {
-    var interpreter = Interpreter{
-        .arena = arena,
-        .sets = u.DeepHashMap(Name, Set).init(arena.allocator()),
-        .error_info = error_info,
-    };
-    try interpreter.interpretProgramPlan(program_plan);
-    return Database{ .sets = interpreter.sets };
-}
+// ---
+
+pub const Runner = struct {
+    arena: *u.ArenaAllocator,
+
+    tokenizer: ?Tokenizer = null,
+    parser: ?Parser = null,
+    planner: ?Planner = null,
+    interpreter: ?Interpreter = null,
+
+    pub fn run(self: *Runner, source: []const u8) !void {
+        self.tokenizer = Tokenizer{
+            .arena = self.arena,
+            .source = source,
+            .position = 0,
+            .tokens = u.ArrayList(Token).init(self.arena.allocator()),
+            .error_info = null,
+        };
+        const tokens = try self.tokenizer.?.tokenize();
+
+        self.parser = Parser{
+            .arena = self.arena,
+            .tokens = tokens,
+            .position = 0,
+            .rules = u.ArrayList(Rule).init(self.arena.allocator()),
+            .error_info = null,
+        };
+        const program = try self.parser.?.parseProgram();
+
+        self.planner = Planner{
+            .arena = self.arena,
+            .error_info = null,
+        };
+        const program_plan = try self.planner.?.planProgram(program);
+
+        self.interpreter = Interpreter{
+            .arena = self.arena,
+            .sets = u.DeepHashMap(Name, Set).init(self.arena.allocator()),
+            .error_info = null,
+        };
+        _ = try self.interpreter.?.interpretProgramPlan(program_plan);
+    }
+};
 
 // ---
 
@@ -783,34 +798,18 @@ comptime {
 fn testEndToEnd(source: []const u8, expected: []const u8) !void {
     var arena = u.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    var tokenizer_error_info: ?Tokenizer.ErrorInfo = null;
-    var parser_error_info: ?Parser.ErrorInfo = null;
-    var planner_error_info: ?Planner.ErrorInfo = null;
-    var interpreter_error_info: ?Interpreter.ErrorInfo = null;
-    const found = found: {
-        const tokens = tokenize(&arena, source, &tokenizer_error_info) catch |err|
-            break :found try u.formatToString(
-            arena.allocator(),
-            "TokenizerError:\n{}\n{s}\nAt {}:{}",
-            .{ err, tokenizer_error_info.?.message, tokenizer_error_info.?.start, tokenizer_error_info.?.end },
-        );
-        const program = parse(&arena, tokens, &parser_error_info) catch |err|
-            break :found try u.formatToString(
-            arena.allocator(),
-            "ParserError:\n{}\n{s}\nAt {}:{}",
-            .{ err, parser_error_info.?.message, parser_error_info.?.start, parser_error_info.?.end },
-        );
-        const program_plan = plan(&arena, program, &planner_error_info) catch |err| break :found try u.formatToString(
-            arena.allocator(),
-            "PlannerError:\n{}\n{s}",
-            .{ err, planner_error_info.?.message },
-        );
-        const database = interpret(&arena, program_plan, &interpreter_error_info) catch |err| break :found try u.formatToString(
-            arena.allocator(),
-            "InterpreterError:\n{}\n{s}",
-            .{ err, interpreter_error_info.?.message },
-        );
-        break :found try u.formatToString(arena.allocator(), "{}", .{database});
+    var runner = Runner{ .arena = &arena };
+    const found = if (runner.run(source)) found: {
+        const database = Database{ .sets = runner.interpreter.?.sets };
+        break :found try u.formatToString(arena.allocator(), "{}", .{
+            database,
+        });
+    } else |err| switch (err) {
+        error.TokenizerError => try u.formatToString(arena.allocator(), "{}:\n{}", .{ err, runner.tokenizer.?.error_info.? }),
+        error.ParserError => try u.formatToString(arena.allocator(), "{}:\n{}", .{ err, runner.parser.?.error_info.? }),
+        error.PlannerError => try u.formatToString(arena.allocator(), "{}:\n{}", .{ err, runner.planner.?.error_info.? }),
+        error.InterpreterError => try u.formatToString(arena.allocator(), "{}:\n{}", .{ err, runner.interpreter.?.error_info.? }),
+        error.OutOfMemory => try u.formatToString(arena.allocator(), "{}", .{err}),
     };
     try std.testing.expectEqualStrings(expected, std.mem.trim(u8, found, "\n "));
 }

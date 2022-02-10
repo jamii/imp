@@ -30,8 +30,11 @@ parent("Alice", "Bob").
 parent("Bob", "Charlene").
 parent("Charlene", "Danny").
 
+ancestor(x,z) <- parent(x,y), ancestor(y,z).
 ancestor(x,z) <- parent(x,y).
 ---
-PlannerError:
-error.PlannerError
-Variable z is used in head but not bound in body
+error.PlannerError:
+ErrorInfo{
+    .rule_ix = 1,
+    .message = "Variable z is used in head but not bound in body",
+}

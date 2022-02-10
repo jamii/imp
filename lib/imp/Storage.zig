@@ -57,12 +57,18 @@ pub fn init(arena: *u.ArenaAllocator, db_path: [:0]const u8) !Self {
         .db = db.?,
     };
 
-    // Ensure that transactions table exists.
+    // Ensure that transactions table and indexes exists.
     _ = try self.query(
         \\ create table if not exists imp_inserts(tx_id integer, rule_id integer, rule text);
     , &.{});
     _ = try self.query(
+        \\ create unique index if not exists imp_inserts_all on imp_inserts(tx_id, rule_id, rule);
+    , &.{});
+    _ = try self.query(
         \\ create table if not exists imp_deletes(tx_id integer, rule_id integer, deleted_tx_id integer);
+    , &.{});
+    _ = try self.query(
+        \\ create unique index if not exists imp_deletes_all on imp_deletes(tx_id, rule_id, deleted_tx_id);
     , &.{});
 
     return self;
@@ -104,6 +110,33 @@ pub fn commit(self: *Self, inserts: []const Insert, deletes: []const Delete) !vo
             .{ .Number = @intToFloat(f64, insert.rule_id) },
             .{ .Text = insert.rule },
         });
+    _ = try self.query(
+        \\ commit transaction;
+    , &.{});
+}
+
+pub fn pullFrom(self: *Self, remote: *Self) !void {
+    const inserts = try remote.query(
+        \\ select * from imp_inserts;
+    , &.{});
+    const deletes = try remote.query(
+        \\ select * from imp_deletes;
+    , &.{});
+    _ = try self.query(
+        \\ begin transaction;
+    , &.{});
+    errdefer _ = self.query(
+        \\ rollback transaction;
+    , &.{}) catch {};
+    // TODO avoid duplicate rows
+    for (inserts) |insert|
+        _ = try self.query(
+            \\ insert or ignore into imp_inserts values (?1, ?2, ?3);
+        , insert);
+    for (deletes) |delete|
+        _ = try self.query(
+            \\ insert or ignore into imp_deletes values (?1, ?2, ?3);
+        , delete);
     _ = try self.query(
         \\ commit transaction;
     , &.{});

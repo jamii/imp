@@ -34,6 +34,9 @@ pub fn main() !void {
     } else if (std.mem.eql(u8, command, "checkin")) {
         const source_path = try args.next(arena.allocator()).?;
         try doCheckin(db_path, source_path);
+    } else if (std.mem.eql(u8, command, "pull")) {
+        const remote_db_path = try args.next(arena.allocator()).?;
+        try doPull(db_path, remote_db_path);
     } else {
         std.debug.print("Unknown command: {s}", .{command});
     }
@@ -49,7 +52,7 @@ pub fn doRun(db_path: [:0]const u8) !void {
 pub fn doCheckout(db_path: [:0]const u8, source_path: []const u8) !void {
     var storage = try imp.Storage.init(&arena, db_path);
     const source = try storage.getLiveSource();
-    const source_file = try openSourceFile(source_path);
+    const source_file = try createSourceFile(source_path);
     try source_file.writeAll(source);
 }
 
@@ -83,6 +86,13 @@ pub fn doCheckin(db_path: [:0]const u8, source_path: []const u8) !void {
     try source_file.seekTo(0);
     try source_file.setEndPos(0);
     try source_file.writeAll(new_source);
+}
+
+pub fn doPull(db_path: [:0]const u8, remote_db_path: [:0]const u8) !void {
+    var storage = try imp.Storage.init(&arena, db_path);
+    var remote_storage = try imp.Storage.init(&arena, remote_db_path);
+
+    try storage.pullFrom(&remote_storage);
 }
 
 const Diff = struct {
@@ -139,11 +149,11 @@ fn getDiff(storage: *imp.Storage, source_file: std.fs.File) !Diff {
 }
 
 fn openSourceFile(source_path: []const u8) !std.fs.File {
-    if (std.mem.eql(u8, source_path, "-")) {
-        return std.io.getStdIn();
-    } else {
-        return std.fs.cwd().openFile(source_path, .{ .write = true });
-    }
+    return std.fs.cwd().openFile(source_path, .{ .write = true });
+}
+
+fn createSourceFile(source_path: []const u8) !std.fs.File {
+    return std.fs.cwd().createFile(source_path, .{ .truncate = true });
 }
 
 fn newRng() !std.rand.DefaultCsprng {

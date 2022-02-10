@@ -50,7 +50,20 @@ pub fn doRun(db_path: [:0]const u8) !void {
     var storage = try imp.Storage.init(&arena, db_path);
     const source = try storage.getLiveSource();
     var runner = imp.Runner{ .arena = &arena };
-    std.debug.print("{s}", .{runner.printed(runner.run(source))});
+    const result = runner.run(source);
+    if (runner.parser) |parser| {
+        var rules_by_id = u.DeepHashMap(imp.RuleId, imp.Rule).init(arena.allocator());
+        for (parser.rules.items) |rule| {
+            if (try rules_by_id.fetchPut(rule.id.?, rule)) |kv| {
+                var rule_source = u.ArrayList(u8).init(arena.allocator());
+                try rule.printInto(rule_source.writer());
+                var conflicting_rule_source = u.ArrayList(u8).init(arena.allocator());
+                try kv.value.printInto(conflicting_rule_source.writer());
+                std.debug.print("WARNING: Conflicting definitions for id {}.\n\nFirst rule:\n{s}\n\nSecond rule:\n{s}\n\n", .{ rule.id.?, rule_source.items, conflicting_rule_source.items });
+            }
+        }
+    }
+    std.debug.print("{s}", .{runner.printed(result)});
 }
 
 pub fn doCheckout(db_path: [:0]const u8, source_path: []const u8) !void {

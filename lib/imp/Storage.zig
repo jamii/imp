@@ -161,16 +161,13 @@ pub fn getLiveInserts(self: *Self) ![]const Insert {
 
 pub fn getLiveSource(self: *Self) ![]const u8 {
     const inserts = try self.getLiveInserts();
-    var rules = u.DeepHashMap(imp.Storage.imp.RuleId, []const u8).init(self.arena.allocator());
-    for (inserts) |insert| {
-        if (try rules.fetchPut(insert.rule_id, insert.rule)) |kv| {
-            u.panic("Merge conflict on rule_id {}.\nFirst rule:\n{s}\n\nSecond rule:\n{s}", .{ insert.rule_id, insert.rule, kv.value });
-        }
-    }
     var source = u.ArrayList(u8).init(self.arena.allocator());
-    var rules_iter = rules.iterator();
-    while (rules_iter.next()) |entry| {
-        try source.appendSlice(entry.value_ptr.*);
+    var unique_rules = u.DeepHashSet(struct { rule_id: imp.RuleId, rule: []const u8 }).init(self.arena.allocator());
+    for (inserts) |insert|
+        try unique_rules.put(.{ .rule_id = insert.rule_id, .rule = insert.rule }, {});
+    var iter = unique_rules.iterator();
+    while (iter.next()) |entry| {
+        try source.appendSlice(entry.key_ptr.rule);
         try source.appendSlice("\n\n");
     }
     return source.toOwnedSlice();

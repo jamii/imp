@@ -24,43 +24,75 @@ pub fn main() !void {
     const command = try args.next(arena.allocator()).?;
     const db_path = try args.next(arena.allocator()).?;
     if (std.mem.eql(u8, command, "run")) {
-        try run(db_path);
+        try doRun(db_path);
     } else if (std.mem.eql(u8, command, "checkout")) {
         const source_path = try args.next(arena.allocator()).?;
-        try checkout(db_path, source_path);
+        try doCheckout(db_path, source_path);
+    } else if (std.mem.eql(u8, command, "diff")) {
+        const source_path = try args.next(arena.allocator()).?;
+        try doDiff(db_path, source_path);
     } else if (std.mem.eql(u8, command, "checkin")) {
         const source_path = try args.next(arena.allocator()).?;
-        try checkin(db_path, source_path);
+        try doCheckin(db_path, source_path);
     } else {
         std.debug.print("Unknown command: {s}", .{command});
     }
 }
 
-pub fn run(db_path: [:0]const u8) !void {
+pub fn doRun(db_path: [:0]const u8) !void {
     var storage = try imp.Storage.init(&arena, db_path);
     const source = try storage.getLiveSource();
     var runner = imp.Runner{ .arena = &arena };
     std.debug.print("{s}", .{runner.printed(runner.run(source))});
 }
 
-pub fn checkout(db_path: [:0]const u8, source_path: []const u8) !void {
+pub fn doCheckout(db_path: [:0]const u8, source_path: []const u8) !void {
     var storage = try imp.Storage.init(&arena, db_path);
     const source = try storage.getLiveSource();
-    var source_file = if (std.mem.eql(u8, source_path, "-"))
-        std.io.getStdOut()
-    else
-        try std.fs.cwd().createFile(source_path, .{ .truncate = true });
+    const source_file = try openSourceFile(source_path);
     try source_file.writeAll(source);
 }
 
-pub fn checkin(db_path: [:0]const u8, source_path: []const u8) !void {
+pub fn doDiff(db_path: [:0]const u8, source_path: []const u8) !void {
     var storage = try imp.Storage.init(&arena, db_path);
+    const source_file = try openSourceFile(source_path);
+
+    const diff = try getDiff(&storage, source_file);
+
+    const stdout = std.io.getStdOut();
+    const writer = stdout.writer();
+    // TODO want to print deleted_tx_id too, but we compute that inside sqlite
+    for (diff.deletes) |delete| {
+        try delete.printInto(writer);
+        try writer.writeAll("\n");
+    }
+    for (diff.inserts) |insert| {
+        try insert.printInto(writer);
+        try writer.writeAll("\n");
+    }
+}
+
+pub fn doCheckin(db_path: [:0]const u8, source_path: []const u8) !void {
+    var storage = try imp.Storage.init(&arena, db_path);
+    const source_file = try openSourceFile(source_path);
+
+    const diff = try getDiff(&storage, source_file);
+    try storage.commit(diff.inserts, diff.deletes);
+
+    const new_source = try storage.getLiveSource();
+    try source_file.seekTo(0);
+    try source_file.setEndPos(0);
+    try source_file.writeAll(new_source);
+}
+
+const Diff = struct {
+    inserts: []const imp.Storage.Insert,
+    deletes: []const imp.Storage.Delete,
+};
+
+fn getDiff(storage: *imp.Storage, source_file: std.fs.File) !Diff {
     const old_inserts = try storage.getLiveInserts();
 
-    var source_file = if (std.mem.eql(u8, source_path, "-"))
-        std.io.getStdIn()
-    else
-        try std.fs.cwd().openFile(source_path, .{ .write = true });
     const old_source = try source_file.readToEndAlloc(arena.allocator(), std.math.maxInt(usize));
     var tokenizer = imp.Tokenizer{
         .arena = &arena,
@@ -99,12 +131,19 @@ pub fn checkin(db_path: [:0]const u8, source_path: []const u8) !void {
             .rule = rule_source.toOwnedSlice(),
         });
     }
-    try storage.commit(inserts.items, deletes.items);
 
-    const new_source = try storage.getLiveSource();
-    try source_file.seekTo(0);
-    try source_file.setEndPos(0);
-    try source_file.writeAll(new_source);
+    return Diff{
+        .inserts = inserts.toOwnedSlice(),
+        .deletes = deletes.toOwnedSlice(),
+    };
+}
+
+fn openSourceFile(source_path: []const u8) !std.fs.File {
+    if (std.mem.eql(u8, source_path, "-")) {
+        return std.io.getStdIn();
+    } else {
+        return std.fs.cwd().openFile(source_path, .{ .write = true });
+    }
 }
 
 fn newRng() !std.rand.DefaultCsprng {

@@ -20,11 +20,19 @@ pub const Insert = struct {
     tx_id: TransactionId,
     rule_id: RuleId,
     rule: []const u8,
+
+    pub fn printInto(self: Insert, writer: anytype) !void {
+        try std.fmt.format(writer, "insert({}, {}, \"{}\").", .{ self.tx_id, self.rule_id, std.zig.fmtEscapes(self.rule) });
+    }
 };
 
 pub const Delete = struct {
     tx_id: TransactionId,
     rule_id: RuleId,
+
+    pub fn printInto(self: Delete, writer: anytype) !void {
+        try std.fmt.format(writer, "delete({}, {}).", .{ self.tx_id, self.rule_id });
+    }
 };
 
 pub fn init(arena: *u.ArenaAllocator, db_path: [:0]const u8) !Self {

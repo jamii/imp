@@ -9,7 +9,7 @@ const Name = []const u8;
 
 // ---
 
-const Token = union(enum) {
+pub const Token = union(enum) {
     Name: Name,
     OpenParen,
     CloseParen,
@@ -23,9 +23,9 @@ const Token = union(enum) {
     EOF,
 };
 
-const TokenTag = @typeInfo(Token).Union.tag_type.?;
+pub const TokenTag = @typeInfo(Token).Union.tag_type.?;
 
-const Tokenizer = struct {
+pub const Tokenizer = struct {
     arena: *u.ArenaAllocator,
     source: []const u8,
     position: usize,
@@ -243,31 +243,61 @@ const Tokenizer = struct {
 
 // ---
 
-const Program = struct {
+pub const Program = struct {
     rules: []const Rule,
 
     pub const format = u.formatViaDump;
 };
 
-const Rule = struct {
+pub const Rule = struct {
     head: Clause,
     body: []const Clause,
 
     pub const format = u.formatViaDump;
+
+    pub fn printInto(self: Rule, writer: anytype) !void {
+        try self.head.printInto(writer);
+        if (self.body.len > 0) {
+            try writer.writeAll(" <-\n");
+            for (self.body) |clause, i| {
+                if (i != 0) try writer.writeAll(",\n");
+                try writer.writeAll("  ");
+                try clause.printInto(writer);
+            }
+        }
+        try writer.writeAll(".");
+    }
 };
 
-const Clause = struct {
+pub const Clause = struct {
     set_name: Name,
     args: []const Arg,
 
     pub const format = u.formatViaDump;
+
+    pub fn printInto(self: Clause, writer: anytype) !void {
+        try writer.writeAll(self.set_name);
+        try writer.writeAll("(");
+        for (self.args) |arg, i| {
+            if (i != 0) try writer.writeAll(", ");
+            try arg.printInto(writer);
+        }
+        try writer.writeAll(")");
+    }
 };
 
-const Arg = union(enum) {
+pub const Arg = union(enum) {
     Constant: Atom,
     Variable: Name,
 
     pub const format = u.formatViaDump;
+
+    pub fn printInto(self: Arg, writer: anytype) !void {
+        switch (self) {
+            .Constant => |atom| try atom.printInto(writer),
+            .Variable => |name| try writer.writeAll(name),
+        }
+    }
 };
 
 pub const Atom = union(enum) {
@@ -283,9 +313,13 @@ pub const Atom = union(enum) {
             .Number => |number| try std.fmt.format(writer, "{d}", .{number}),
         }
     }
+
+    pub fn printInto(self: Atom, writer: anytype) !void {
+        try self.dumpInto(writer, 0);
+    }
 };
 
-const Parser = struct {
+pub const Parser = struct {
     arena: *u.ArenaAllocator,
     tokens: []const Token,
     position: usize,
@@ -787,6 +821,22 @@ pub const Runner = struct {
         };
         _ = try self.interpreter.?.interpretProgramPlan(program_plan);
     }
+
+    pub fn printed(self: *Runner, run_result: @typeInfo(@TypeOf(run)).Fn.return_type.?) ![]const u8 {
+        if (run_result) {
+            // TODO inlining this variable causes a surprising segfault
+            const database = Database{ .sets = self.interpreter.?.sets };
+            return u.formatToString(self.arena.allocator(), "{}", .{
+                database,
+            });
+        } else |err| switch (err) {
+            error.TokenizerError => return u.formatToString(self.arena.allocator(), "{}:\n{}", .{ err, self.tokenizer.?.error_info.? }),
+            error.ParserError => return u.formatToString(self.arena.allocator(), "{}:\n{}", .{ err, self.parser.?.error_info.? }),
+            error.PlannerError => return u.formatToString(self.arena.allocator(), "{}:\n{}", .{ err, self.planner.?.error_info.? }),
+            error.InterpreterError => return u.formatToString(self.arena.allocator(), "{}:\n{}", .{ err, self.interpreter.?.error_info.? }),
+            error.OutOfMemory => return u.formatToString(self.arena.allocator(), "{}", .{err}),
+        }
+    }
 };
 
 // ---
@@ -799,18 +849,7 @@ fn testEndToEnd(source: []const u8, expected: []const u8) !void {
     var arena = u.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var runner = Runner{ .arena = &arena };
-    const found = if (runner.run(source)) found: {
-        const database = Database{ .sets = runner.interpreter.?.sets };
-        break :found try u.formatToString(arena.allocator(), "{}", .{
-            database,
-        });
-    } else |err| switch (err) {
-        error.TokenizerError => try u.formatToString(arena.allocator(), "{}:\n{}", .{ err, runner.tokenizer.?.error_info.? }),
-        error.ParserError => try u.formatToString(arena.allocator(), "{}:\n{}", .{ err, runner.parser.?.error_info.? }),
-        error.PlannerError => try u.formatToString(arena.allocator(), "{}:\n{}", .{ err, runner.planner.?.error_info.? }),
-        error.InterpreterError => try u.formatToString(arena.allocator(), "{}:\n{}", .{ err, runner.interpreter.?.error_info.? }),
-        error.OutOfMemory => try u.formatToString(arena.allocator(), "{}", .{err}),
-    };
+    const found = try runner.printed(runner.run(source));
     try std.testing.expectEqualStrings(expected, std.mem.trim(u8, found, "\n "));
 }
 

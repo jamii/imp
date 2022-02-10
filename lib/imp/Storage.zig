@@ -119,6 +119,23 @@ pub fn getLiveInserts(self: *Self) ![]const Insert {
     return inserts.toOwnedSlice();
 }
 
+pub fn getLiveSource(self: *Self) ![]const u8 {
+    const inserts = try self.getLiveInserts();
+    var rules = u.DeepHashMap(imp.Storage.RuleId, []const u8).init(self.arena.allocator());
+    for (inserts) |insert| {
+        if (try rules.fetchPut(insert.rule_id, insert.rule)) |kv| {
+            u.panic("Merge conflict on rule_id {}.\nFirst rule:\n{s}\n\nSecond rule:\n{s}", .{ insert.rule_id, insert.rule, kv.value });
+        }
+    }
+    var source = u.ArrayList(u8).init(self.arena.allocator());
+    var rules_iter = rules.iterator();
+    while (rules_iter.next()) |entry| {
+        try source.appendSlice(entry.value_ptr.*);
+        try source.appendSlice("\n\n");
+    }
+    return source.toOwnedSlice();
+}
+
 // ---
 
 fn query(self: *Self, sql: [:0]const u8, sql_params: imp.Row) ![]const imp.Row {

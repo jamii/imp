@@ -14,11 +14,10 @@ db: *c.sqlite3,
 
 // Temporary - has to be u52 to fit into imp.Atom.Number
 pub const TransactionId = u52;
-pub const RuleId = u52;
 
 pub const Insert = struct {
     tx_id: TransactionId,
-    rule_id: RuleId,
+    rule_id: imp.RuleId,
     rule: []const u8,
 
     pub fn printInto(self: Insert, writer: anytype) !void {
@@ -28,7 +27,7 @@ pub const Insert = struct {
 
 pub const Delete = struct {
     tx_id: TransactionId,
-    rule_id: RuleId,
+    rule_id: imp.RuleId,
 
     pub fn printInto(self: Delete, writer: anytype) !void {
         try std.fmt.format(writer, "delete({}, {}).", .{ self.tx_id, self.rule_id });
@@ -153,8 +152,8 @@ pub fn getLiveInserts(self: *Self) ![]const Insert {
     var inserts = u.ArrayList(Insert).init(self.arena.allocator());
     for (rows) |row|
         try inserts.append(.{
-            .tx_id = @floatToInt(RuleId, row[0].Number),
-            .rule_id = @floatToInt(RuleId, row[1].Number),
+            .tx_id = @floatToInt(imp.RuleId, row[0].Number),
+            .rule_id = @floatToInt(imp.RuleId, row[1].Number),
             .rule = row[2].Text,
         });
     return inserts.toOwnedSlice();
@@ -162,7 +161,7 @@ pub fn getLiveInserts(self: *Self) ![]const Insert {
 
 pub fn getLiveSource(self: *Self) ![]const u8 {
     const inserts = try self.getLiveInserts();
-    var rules = u.DeepHashMap(imp.Storage.RuleId, []const u8).init(self.arena.allocator());
+    var rules = u.DeepHashMap(imp.Storage.imp.RuleId, []const u8).init(self.arena.allocator());
     for (inserts) |insert| {
         if (try rules.fetchPut(insert.rule_id, insert.rule)) |kv| {
             u.panic("Merge conflict on rule_id {}.\nFirst rule:\n{s}\n\nSecond rule:\n{s}", .{ insert.rule_id, insert.rule, kv.value });

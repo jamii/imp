@@ -23,6 +23,7 @@ pub const Token = union(enum) {
     Period,
     Space,
     Def,
+    Hash,
 
     EOF,
 };
@@ -215,6 +216,7 @@ pub const Tokenizer = struct {
                         return self.setError(start, "invalid token", .{});
                     }
                 },
+                '#' => return Token{ .Hash = {} },
                 else => {
                     const ascii_char1 = @intCast(u8, utf8_char1 & 0b0111_1111);
                     if (utf8_char1 != @as(u21, ascii_char1)) {
@@ -247,6 +249,8 @@ pub const Tokenizer = struct {
 
 // ---
 
+pub const RuleId = u52;
+
 pub const Program = struct {
     rules: []const Rule,
 
@@ -254,12 +258,15 @@ pub const Program = struct {
 };
 
 pub const Rule = struct {
+    id: ?RuleId,
     head: Clause,
     body: []const Clause,
 
     pub const format = u.formatViaDump;
 
     pub fn printInto(self: Rule, writer: anytype) !void {
+        if (self.id) |id|
+            try std.fmt.format(writer, "#{}\n", .{id});
         try self.head.printInto(writer);
         if (self.body.len > 0) {
             try writer.writeAll(" <-\n");
@@ -390,11 +397,19 @@ pub const Parser = struct {
     }
 
     fn parseRule(self: *Parser) !Rule {
+        var id: ?RuleId = null;
+        if (self.peekToken() == .Hash) {
+            _ = try self.expectToken(.Hash);
+            const number = (try self.expectToken(.Number)).Number;
+            // TODO check number is valid id
+            id = @floatToInt(RuleId, number);
+        }
+        self.allowSpace();
         const head = try self.parseClause();
         self.allowSpace();
         if (self.peekToken() == .Period) {
             _ = try self.expectToken(.Period);
-            return Rule{ .head = head, .body = &.{} };
+            return Rule{ .id = id, .head = head, .body = &.{} };
         }
         _ = try self.expectToken(.Def);
         self.allowSpace();
@@ -407,7 +422,7 @@ pub const Parser = struct {
             _ = try self.expectToken(.Comma);
         }
         _ = try self.expectToken(.Period);
-        return Rule{ .head = head, .body = body.toOwnedSlice() };
+        return Rule{ .id = id, .head = head, .body = body.toOwnedSlice() };
     }
 
     fn parseClause(self: *Parser) !Clause {

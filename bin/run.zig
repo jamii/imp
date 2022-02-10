@@ -141,7 +141,7 @@ fn getDiff(storage: *imp.Storage, source_file: std.fs.File) !Diff {
         try rule.printInto(rule_source.writer());
         try inserts.append(.{
             .tx_id = tx_id,
-            .rule_id = @intCast(imp.Storage.RuleId, rule_id),
+            .rule_id = @intCast(imp.RuleId, rule_id),
             .rule = rule_source.toOwnedSlice(),
         });
     }

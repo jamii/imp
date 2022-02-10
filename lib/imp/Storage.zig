@@ -165,9 +165,14 @@ pub fn getLiveSource(self: *Self) ![]const u8 {
     var unique_rules = u.DeepHashSet(struct { rule_id: imp.RuleId, rule: []const u8 }).init(self.arena.allocator());
     for (inserts) |insert|
         try unique_rules.put(.{ .rule_id = insert.rule_id, .rule = insert.rule }, {});
+    var sorted_unique_rules = u.ArrayList([]const u8).init(self.arena.allocator());
     var iter = unique_rules.iterator();
     while (iter.next()) |entry| {
-        try source.appendSlice(entry.key_ptr.rule);
+        try sorted_unique_rules.append(entry.key_ptr.rule);
+    }
+    u.deepSort(sorted_unique_rules.items);
+    for (sorted_unique_rules.items) |rule| {
+        try source.appendSlice(rule);
         try source.appendSlice("\n\n");
     }
     return source.toOwnedSlice();

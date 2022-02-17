@@ -38,7 +38,7 @@ pub fn run(storage: *imp.Storage) !void {
         )) {
             for (rules) |*rule, i| {
                 var num_newlines: usize = 0;
-                for (rule.*) |char| {
+                for (std.mem.sliceTo(rule.*, 0)) |char| {
                     if (char == '\n') {
                         num_newlines += 1;
                     }

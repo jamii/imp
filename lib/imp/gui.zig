@@ -7,10 +7,14 @@ const zt = @import("zt");
 const zg = zt.custom_components;
 
 pub fn run(storage: *imp.Storage) !void {
-    const inserts = try storage.getLiveInserts();
-    var rules = try storage.arena.allocator().alloc([]u8, inserts.len);
-    for (rules) |*rule, i|
-        rule.* = try storage.arena.allocator().dupeZ(u8, inserts[i].rule);
+    var inserts = u.ArrayList(imp.Storage.Insert).init(storage.arena.allocator());
+    try inserts.appendSlice(try storage.getLiveInserts());
+    var rules = u.ArrayList([]u8).init(storage.arena.allocator());
+    for (inserts.items) |insert|
+        try rules.append(try storage.arena.allocator().dupeZ(u8, insert.rule));
+
+    var rng = try @import("../../bin/run.zig").newRng();
+    var focus_rule_ix: ?usize = null;
 
     const Context = zt.App(void);
     // TODO this can't be called twice
@@ -36,7 +40,11 @@ pub fn run(storage: *imp.Storage) !void {
                 ig.ImGuiWindowFlags_NoFocusOnAppearing |
                 ig.ImGuiWindowFlags_NoNav,
         )) {
-            for (rules) |*rule, i| {
+            const Action = union(enum) {
+                Insert: usize,
+            };
+            var action: ?Action = null;
+            for (rules.items) |*rule, rule_ix| {
                 var num_newlines: usize = 0;
                 for (std.mem.sliceTo(rule.*, 0)) |char| {
                     if (char == '\n') {
@@ -44,34 +52,67 @@ pub fn run(storage: *imp.Storage) !void {
                     }
                 }
                 const UserData = struct {
+                    action: *?Action,
+                    rule_ix: usize,
                     rule: *[]u8,
                     storage: *imp.Storage,
                 };
                 var user_data = UserData{
+                    .action = &action,
+                    .rule_ix = rule_ix,
                     .rule = rule,
                     .storage = storage,
                 };
+                if (focus_rule_ix == rule_ix) {
+                    focus_rule_ix = null;
+                    ig.igSetKeyboardFocusHere(0);
+                }
                 _ = ig.igInputTextMultiline(
-                    zg.fmtTextForImgui("## {} {}", .{ inserts[i].tx_id, inserts[i].rule_id }),
+                    zg.fmtTextForImgui("## {} {}", .{ inserts.items[rule_ix].tx_id, inserts.items[rule_ix].rule_id }),
                     rule.ptr,
                     rule.len + 1,
                     .{
                         .x = 0,
                         .y = @intToFloat(f32, num_newlines + 1) * ig.igGetTextLineHeight() + 2 * style.*.FramePadding.y + 1,
                     },
-                    ig.ImGuiInputTextFlags_CallbackResize,
+                    ig.ImGuiInputTextFlags_CallbackResize |
+                        ig.ImGuiInputTextFlags_CallbackCharFilter,
                     struct {
                         export fn resize(data: [*c]ig.ImGuiInputTextCallbackData) c_int {
-                            if (data.*.EventFlag == ig.ImGuiInputTextFlags_CallbackResize) {
-                                const my_user_data = @ptrCast(*UserData, @alignCast(@alignOf(UserData), data.*.UserData));
-                                my_user_data.rule.* = my_user_data.storage.arena.allocator().realloc(my_user_data.rule.*, @intCast(usize, data.*.BufSize + 1)) catch unreachable;
-                                data.*.Buf = my_user_data.rule.ptr;
+                            const my_user_data = @ptrCast(*UserData, @alignCast(@alignOf(UserData), data.*.UserData));
+                            switch (data.*.EventFlag) {
+                                ig.ImGuiInputTextFlags_CallbackResize => {
+                                    my_user_data.rule.* = my_user_data.storage.arena.allocator().realloc(my_user_data.rule.*, @intCast(usize, data.*.BufSize + 1)) catch unreachable;
+                                    data.*.Buf = my_user_data.rule.ptr;
+                                    return 0;
+                                },
+                                ig.ImGuiInputTextFlags_CallbackCharFilter => {
+                                    if (data.*.EventChar == '\n' and ig.igGetIO().*.KeyShift) {
+                                        my_user_data.action.* = .{ .Insert = my_user_data.rule_ix };
+                                        return 1;
+                                    } else {
+                                        return 0;
+                                    }
+                                },
+                                else => unreachable,
                             }
-                            return 0;
                         }
                     }.resize,
                     @ptrCast(*anyopaque, &user_data),
                 );
+            }
+            if (action) |a| {
+                switch (a) {
+                    .Insert => |rule_ix| {
+                        try rules.insert(rule_ix + 1, "");
+                        try inserts.insert(rule_ix + 1, .{
+                            .tx_id = 0,
+                            .rule_id = rng.random().int(imp.RuleId),
+                            .rule = "",
+                        });
+                        focus_rule_ix = rule_ix + 1;
+                    },
+                }
             }
         }
         ig.igEnd();

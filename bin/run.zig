@@ -224,7 +224,7 @@ fn createSourceFile(source_path: []const u8) !std.fs.File {
     return std.fs.cwd().createFile(source_path, .{ .truncate = true });
 }
 
-fn newRng() !std.rand.DefaultCsprng {
+pub fn newRng() !std.rand.DefaultCsprng {
     var seed: [32]u8 = undefined;
     try std.os.getrandom(&seed);
     var rng = std.rand.DefaultCsprng.init(seed);

@@ -4,8 +4,8 @@ const zt = @import("deps/ZT/build.zig");
 pub fn build(b: *std.build.Builder) !void {
     const mode = b.standardReleaseOptions();
     var target = b.standardTargetOptions(.{});
-    // needed by sqlite
-    target.setGnuLibCVersion(2, 28, 0);
+    // needed by sqlite but breaks zt
+    //target.setGnuLibCVersion(2, 28, 0);
 
     const run = addBin(
         b,
@@ -14,7 +14,6 @@ pub fn build(b: *std.build.Builder) !void {
         "Evaluate an imp file",
     );
     commonSetup(run.bin, mode, target);
-    zt.link(run.bin);
     run.run.addArgs(b.args orelse &.{});
 
     const test_unit = addBin(
@@ -54,6 +53,7 @@ fn commonSetup(
     addDeps(bin);
     bin.setBuildMode(mode);
     bin.setTarget(target);
+    zt.link(bin);
 }
 
 pub fn addDeps(

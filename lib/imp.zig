@@ -1,5 +1,6 @@
 pub const util = @import("./imp/util.zig");
 pub const Storage = @import("./imp/Storage.zig");
+pub const gui = @import("./imp/gui.zig");
 
 const std = @import("std");
 const u = util;

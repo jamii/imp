@@ -27,7 +27,9 @@ pub fn main() !void {
     _ = try args.next(arena.allocator()).?;
     const command = try args.next(arena.allocator()).?;
     const db_path = try args.next(arena.allocator()).?;
-    if (std.mem.eql(u8, command, "run")) {
+    if (std.mem.eql(u8, command, "gui")) {
+        try doGui(db_path);
+    } else if (std.mem.eql(u8, command, "run")) {
         try doRun(db_path);
     } else if (std.mem.eql(u8, command, "checkout")) {
         const source_path = try args.next(arena.allocator()).?;
@@ -44,6 +46,11 @@ pub fn main() !void {
     } else {
         std.debug.print("Unknown command: {s}", .{command});
     }
+}
+
+pub fn doGui(db_path: [:0]const u8) !void {
+    var storage = try imp.Storage.init(&arena, db_path);
+    try imp.gui.run(&storage);
 }
 
 pub fn doRun(db_path: [:0]const u8) !void {

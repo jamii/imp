@@ -39,7 +39,7 @@ pkgs.mkShell rec {
     # gui stuff
     pkgs.pkg-config
     pkgs.libGL.all
-    pkgs.xorg.libX11.dev
+    pkgs.xorg.libX11.all
     pkgs.xorg.libXrandr.all
     pkgs.xorg.libXcursor
     pkgs.xorg.libXinerama

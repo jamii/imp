@@ -1,2 +1,4 @@
 zig-cache
 ./tmp
+.gdb_history
+tmp
